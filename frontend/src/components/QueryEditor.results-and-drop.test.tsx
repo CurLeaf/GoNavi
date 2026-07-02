@@ -151,6 +151,7 @@ const editorState = vi.hoisted(() => {
     decorationIds: [] as string[],
     contentHoverCalls: [] as any[],
     latestOnChange: null as null | ((value?: string) => void),
+    latestOptions: null as any,
   };
   const offsetAt = (position: { lineNumber: number; column: number }) => {
     const text = state.value;
@@ -295,10 +296,11 @@ vi.mock('../utils/autoFetchVisibility', () => ({
 }));
 
 vi.mock('@monaco-editor/react', () => ({
-  default: ({ defaultValue, onChange, onMount }: any) => {
+  default: ({ defaultValue, onChange, onMount, options }: any) => {
     React.useEffect(() => {
       editorState.value = String(defaultValue || '');
       editorState.latestOnChange = onChange;
+      editorState.latestOptions = options ?? null;
       onMount?.(editorState.editor, {
         editor: { setTheme: vi.fn() },
         KeyMod: { CtrlCmd: 2048, WinCtrl: 256, Alt: 512, Shift: 1024 },
@@ -706,6 +708,7 @@ describe('QueryEditor external SQL save', () => {
     editorState.decorationIds = [];
     editorState.contentHoverCalls = [];
     editorState.latestOnChange = null;
+    editorState.latestOptions = null;
     editorState.editor.getValue.mockClear();
     editorState.editor.getModel().getValue.mockClear();
     editorState.editor.getModel().getValueLength.mockClear();
@@ -837,6 +840,48 @@ describe('QueryEditor external SQL save', () => {
     expect(executedSql).toContain('p_msg_out := substr');
     expect(executedSql).not.toBe(plsql.split('\n').slice(tailLine - 1).join('\n'));
     expect(executedSql).not.toContain('/;');
+    renderer?.unmount();
+  });
+
+  it('disables sticky scroll for object-edit query tabs', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    const plsql = [
+      'CREATE OR REPLACE PROCEDURE cproc_demo AS',
+      'BEGIN',
+      '  NULL;',
+      'END cproc_demo;',
+      '/;',
+    ].join('\n');
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'ORCLPDB1', query: plsql, queryMode: 'object-edit' })} />);
+    });
+
+    expect(editorState.latestOptions?.stickyScroll?.enabled).toBe(false);
+    expect(editorState.latestOptions?.fontSize).toBe(14);
+    expect(editorState.latestOptions?.lineHeight).toBe(24);
+    expect(editorState.latestOptions?.lineNumbersMinChars).toBe(4);
+    expect(editorState.editor.updateOptions).toHaveBeenCalledWith(expect.objectContaining({
+      fontSize: 14,
+      lineHeight: 24,
+      lineNumbersMinChars: 4,
+      stickyScroll: { enabled: false },
+    }));
+    renderer?.unmount();
+  });
+
+  it('keeps standard query tabs on the default sticky scroll behavior', async () => {
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab()} />);
+    });
+
+    expect(editorState.latestOptions?.stickyScroll).toBeUndefined();
+    expect(editorState.latestOptions?.fontSize).toBeUndefined();
+    expect(editorState.latestOptions?.lineHeight).toBeUndefined();
+    expect(editorState.editor.updateOptions.mock.calls[0]?.[0]?.stickyScroll).toBeUndefined();
     renderer?.unmount();
   });
 

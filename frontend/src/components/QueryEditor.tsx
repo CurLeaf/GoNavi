@@ -154,6 +154,29 @@ const QUERY_EDITOR_MONACO_FIND_OPTIONS = {
 } as const;
 const QUERY_EDITOR_NATIVE_SELECT_CURRENT_LINE_EVENT = 'gonavi:native-select-current-line';
 
+const buildQueryEditorMonacoOptions = (isObjectEditQueryTab: boolean) => ({
+    minimap: { enabled: false },
+    automaticLayout: true,
+    fixedOverflowWidgets: true,
+    find: QUERY_EDITOR_MONACO_FIND_OPTIONS,
+    hover: {
+        enabled: true,
+        delay: QUERY_EDITOR_HOVER_DELAY_MS,
+        above: false,
+    },
+    scrollBeyondLastLine: false,
+    quickSuggestions: { other: true, comments: false, strings: false },
+    suggestOnTriggerCharacters: true,
+    ...(isObjectEditQueryTab
+        ? {
+            fontSize: 14,
+            lineHeight: 24,
+            lineNumbersMinChars: 4,
+            stickyScroll: { enabled: false },
+        }
+        : {}),
+});
+
 const QUERY_EDITOR_SQL_PROMPT_PLACEHOLDER = '{SQL}';
 
 const escapeQueryEditorObjectEditSqlLiteral = (value: unknown): string => (
@@ -815,6 +838,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   ));
   const isExternalSQLFileTab = Boolean(String(tab.filePath || '').trim());
   const isObjectEditQueryTab = tab.type === 'query' && tab.queryMode === 'object-edit';
+  const queryEditorMonacoOptions = useMemo(
+      () => buildQueryEditorMonacoOptions(isObjectEditQueryTab),
+      [isObjectEditQueryTab],
+  );
   
   type ResultSet = QueryEditorResultSet;
 
@@ -2616,15 +2643,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }
       lastEditorCursorPositionRef.current = normalizeEditorPosition(editor.getPosition?.());
 
-      editor.updateOptions?.({
-          fixedOverflowWidgets: true,
-          find: QUERY_EDITOR_MONACO_FIND_OPTIONS,
-          hover: {
-              enabled: true,
-              delay: QUERY_EDITOR_HOVER_DELAY_MS,
-              above: false,
-          },
-      });
+      editor.updateOptions?.(buildQueryEditorMonacoOptions(isObjectEditQueryTab));
 
       const applyNavigationHoverStateAtPosition = (targetPosition: { lineNumber: number; column: number } | null) => {
           if (!ctrlMetaPressedRef.current) {
@@ -6258,20 +6277,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 syncQueryDraft(nextValue);
             }}
             onMount={handleEditorDidMount}
-            options={{ 
-              minimap: { enabled: false }, 
-              automaticLayout: true,
-              fixedOverflowWidgets: true,
-              find: QUERY_EDITOR_MONACO_FIND_OPTIONS,
-              hover: {
-                enabled: true,
-                delay: QUERY_EDITOR_HOVER_DELAY_MS,
-                above: false,
-              },
-              scrollBeyondLastLine: false,
-              quickSuggestions: { other: true, comments: false, strings: false },
-              suggestOnTriggerCharacters: true,
-            }}
+            options={queryEditorMonacoOptions}
           />
         </div>
       </div>

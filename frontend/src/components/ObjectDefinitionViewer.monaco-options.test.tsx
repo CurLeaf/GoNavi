@@ -50,6 +50,9 @@ vi.mock('./MonacoEditor', () => ({
       data-editor="true"
       data-readonly={String(options?.readOnly)}
       data-sticky-scroll-enabled={String(options?.stickyScroll?.enabled)}
+      data-font-size={String(options?.fontSize)}
+      data-line-height={String(options?.lineHeight)}
+      data-line-numbers-min-chars={String(options?.lineNumbersMinChars)}
     >
       {value}
     </pre>
@@ -128,6 +131,9 @@ describe('Object definition viewers Monaco options', () => {
 
     const editor = renderer.root.findByProps({ 'data-editor': 'true' });
     expect(editor.props['data-sticky-scroll-enabled']).toBe('false');
+    expect(editor.props['data-font-size']).toBe('14');
+    expect(editor.props['data-line-height']).toBe('24');
+    expect(editor.props['data-line-numbers-min-chars']).toBe('4');
   });
 
   it('disables sticky scroll for read-only trigger definitions', async () => {
