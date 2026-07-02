@@ -68,6 +68,7 @@ import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredVa
 import { createPortal } from 'react-dom';
 import { Tree, message, Dropdown, MenuProps, Input, Button, Form, Popover, Tooltip } from 'antd';
 	import {
+	  CaretDownFilled,
 	  DatabaseOutlined,
 	  TableOutlined,
 	  ConsoleSqlOutlined,
@@ -208,6 +209,55 @@ export {
   sortSidebarTableEntries,
 };
 export type { V2CommandSearchItem, V2RailConnectionGroup } from './sidebarV2Utils';
+
+type SidebarTreeSwitcherNodeLike = {
+  key?: React.Key;
+  data?: TreeNode;
+  isLeaf?: boolean;
+  loading?: boolean;
+};
+
+export const resolveSidebarSwitcherLoadKey = (node: SidebarTreeSwitcherNodeLike | null | undefined): string | null => {
+  const treeNode = node?.data;
+  const dataRef = treeNode?.dataRef;
+  if (!treeNode) {
+    return null;
+  }
+
+  if (treeNode.type === 'connection') {
+    const connectionId = String(dataRef?.id || treeNode.key || node?.key || '').trim();
+    return connectionId ? `dbs-${connectionId}` : null;
+  }
+
+  if (treeNode.type === 'database') {
+    const connectionId = String(dataRef?.id || '').trim();
+    const dbName = String(dataRef?.dbName || '').trim();
+    return connectionId && dbName ? `tables-${connectionId}-${dbName}` : null;
+  }
+
+  if (treeNode.type === 'jvm-mode' || treeNode.type === 'jvm-resource') {
+    const connectionId = String(dataRef?.id || '').trim();
+    const providerMode = String(dataRef?.providerMode || '').trim().toLowerCase();
+    const parentPath = treeNode.type === 'jvm-resource' ? String(dataRef?.resourcePath || '').trim() : '';
+    return connectionId && providerMode ? `jvm-resources-${connectionId}-${providerMode}-${parentPath}` : null;
+  }
+
+  return null;
+};
+
+export const shouldKeepSidebarSwitcherCollapsedWhileLoading = (
+  node: SidebarTreeSwitcherNodeLike | null | undefined,
+  loadingKeys: ReadonlySet<string>,
+): boolean => {
+  if (!node || node.isLeaf) {
+    return false;
+  }
+  if (node.loading) {
+    return true;
+  }
+  const loadKey = resolveSidebarSwitcherLoadKey(node);
+  return !!loadKey && loadingKeys.has(loadKey);
+};
 
 const { Search } = Input;
 const SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS = 50;
@@ -1763,6 +1813,14 @@ const Sidebar: React.FC<{
           }
       }
   };
+
+  const renderSidebarSwitcherIcon = useCallback((node: SidebarTreeSwitcherNodeLike) => {
+      if (node.isLeaf) {
+          return null;
+      }
+      const keepCollapsed = shouldKeepSidebarSwitcherCollapsedWhileLoading(node, loadingNodesRef.current);
+      return <CaretDownFilled rotate={keepCollapsed ? -90 : undefined} />;
+  }, []);
   
 
   const buildRuntimeConfig = (conn: any, overrideDatabase?: string, clearDatabase: boolean = false) => {
@@ -2949,6 +3007,7 @@ const Sidebar: React.FC<{
                     onDoubleClick={onDoubleClick}
                     onSelect={onSelect}
                     titleRender={titleRender}
+                    switcherIcon={renderSidebarSwitcherIcon}
                     expandedKeys={expandedKeys}
                     onExpand={onExpand}
                     loadedKeys={loadedKeys}

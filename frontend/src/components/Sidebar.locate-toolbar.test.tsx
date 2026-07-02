@@ -24,11 +24,13 @@ import Sidebar, {
   resolveSidebarDropTargetMetricsFromDomEvent,
   resolveSidebarDropInsertBefore,
   resolveSidebarNodeConnectionId,
+  resolveSidebarSwitcherLoadKey,
   resolveV2ActiveConnectionId,
   resolveV2ObjectGroupTitle,
   isSidebarTablePinned,
   SQLFileExecutionProgressContent,
   resolveSidebarTableNameForCopy,
+  shouldKeepSidebarSwitcherCollapsedWhileLoading,
   shouldClearSidebarActiveContextOnEmptySelect,
   shouldSkipSidebarLoadOnExpandWhileDragging,
   shouldSkipSidebarSelectWhileDragging,
@@ -319,6 +321,45 @@ describe('Sidebar locate toolbar', () => {
     expect(shouldLoadSidebarNodeOnExpand({ type: 'object-group', children: [] })).toBe(false);
   });
 
+  it('keeps sidebar switchers collapsed while lazy loading is still pending', () => {
+    const connectionNode = {
+      key: 'conn-1',
+      data: {
+        key: 'conn-1',
+        title: '开发240',
+        type: 'connection' as const,
+        dataRef: { id: 'conn-1' },
+      },
+      expanded: true,
+    };
+    const databaseNode = {
+      key: 'conn-1-main',
+      data: {
+        key: 'conn-1-main',
+        title: 'main',
+        type: 'database' as const,
+        dataRef: { id: 'conn-1', dbName: 'main' },
+      },
+      expanded: true,
+    };
+
+    expect(resolveSidebarSwitcherLoadKey(connectionNode)).toBe('dbs-conn-1');
+    expect(resolveSidebarSwitcherLoadKey(databaseNode)).toBe('tables-conn-1-main');
+    expect(shouldKeepSidebarSwitcherCollapsedWhileLoading(connectionNode, new Set(['dbs-conn-1']))).toBe(true);
+    expect(shouldKeepSidebarSwitcherCollapsedWhileLoading(databaseNode, new Set(['tables-conn-1-main']))).toBe(true);
+    expect(shouldKeepSidebarSwitcherCollapsedWhileLoading({
+      key: 'table-users',
+      data: {
+        key: 'table-users',
+        title: 'users',
+        type: 'table' as const,
+        dataRef: { id: 'conn-1', dbName: 'main', tableName: 'users' },
+      },
+      loading: true,
+    }, new Set())).toBe(true);
+    expect(shouldKeepSidebarSwitcherCollapsedWhileLoading(databaseNode, new Set())).toBe(false);
+  });
+
   it('wires tree expand and double-click expansion to lazy loading', () => {
     const source = readSidebarSource();
 
@@ -328,6 +369,9 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('clearTreeNodeChildrenByKeys(keysToClear);');
     expect(source).toContain('if (!shouldSkipSidebarLoadOnExpandWhileDragging(isTreeDragging, info))');
     expect(source).toContain('if (shouldLoadSidebarNodeOnExpand(node))');
+    expect(source).toContain('const keepCollapsed = shouldKeepSidebarSwitcherCollapsedWhileLoading(node, loadingNodesRef.current);');
+    expect(source).toContain('return <CaretDownFilled rotate={keepCollapsed ? -90 : undefined} />;');
+    expect(source).toContain('switcherIcon={renderSidebarSwitcherIcon}');
   });
 
   it('uses the appearance preference to switch table double-click to the embedded object designer', () => {
@@ -1133,6 +1177,13 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain("export type SidebarConnectionState = 'loading' | 'success' | 'error';");
     expect(treeLoaderSource).toContain("setConnectionStates(prev => ({ ...prev, [conn.id]: 'loading' }));");
     expect(treeLoaderSource).toContain("setConnectionStates(prev => ({ ...prev, [key as string]: 'loading' }));");
+    expect(treeLoaderSource).toContain('let shouldMarkConnectionSuccess = false;');
+    expect(treeLoaderSource).toContain('let shouldMarkDatabaseSuccess = false;');
+    expect(treeLoaderSource).toContain('loadingNodesRef.current.delete(loadKey);');
+    expect(treeLoaderSource).toContain('if (shouldMarkConnectionSuccess) {');
+    expect(treeLoaderSource).toContain("setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));");
+    expect(treeLoaderSource).toContain('if (shouldMarkDatabaseSuccess) {');
+    expect(treeLoaderSource).toContain("setConnectionStates(prev => ({ ...prev, [key as string]: 'success' }));");
     expect(titleRenderSource).toContain("let status: 'loading' | 'success' | 'error' | 'default' = 'default';");
     expect(titleRenderSource).toContain("if (connectionStates[node.key] === 'loading') status = 'loading';");
     expect(v2ContextMenuSource).toContain("const statusMap = new Map<string, 'loading' | 'live' | 'error' | 'idle'>();");

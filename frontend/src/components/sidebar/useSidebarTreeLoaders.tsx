@@ -215,12 +215,13 @@ export const useSidebarTreeLoaders = ({
 	          console.warn('检查驱动代理更新状态失败', error);
 	      }
 	  };
-		  const loadDatabases = async (node: any) => {
+	  const loadDatabases = async (node: any) => {
 		      const conn = node.dataRef as SavedConnection;
 		      const loadKey = `dbs-${conn.id}`;
 	      if (loadingNodesRef.current.has(loadKey)) return;
 	      loadingNodesRef.current.add(loadKey);
           setConnectionStates(prev => ({ ...prev, [conn.id]: 'loading' }));
+          let shouldMarkConnectionSuccess = false;
 	      const config = {
 	          ...conn.config,
           port: Number(conn.config.port),
@@ -234,7 +235,6 @@ export const useSidebarTreeLoaders = ({
               try {
                   const res = await JVMProbeCapabilities(buildRuntimeConfig(conn) as any);
                   if (res.success) {
-                      setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
                       const capabilities: JVMCapability[] = Array.isArray(res.data) ? res.data as JVMCapability[] : [];
                       const modeNodes: TreeNode[] = capabilities.map((capability) => ({
                           title: capability.displayLabel || capability.mode,
@@ -264,6 +264,7 @@ export const useSidebarTreeLoaders = ({
                       }));
                       const diagnosticNode = buildJVMDiagnosticTreeNodes(conn);
                       replaceTreeNodeChildren(node.key, [...monitoringNodes, ...modeNodes, ...diagnosticNode]);
+                      shouldMarkConnectionSuccess = true;
                   } else {
                       const diagnosticNode = buildJVMDiagnosticTreeNodes(conn);
                       setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
@@ -300,6 +301,9 @@ export const useSidebarTreeLoaders = ({
                   }
               } finally {
                   loadingNodesRef.current.delete(loadKey);
+                  if (shouldMarkConnectionSuccess) {
+                      setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
+                  }
               }
               return;
           }
@@ -309,7 +313,6 @@ export const useSidebarTreeLoaders = ({
               try {
                   const res = await (window as any).go.app.App.RedisGetDatabases(buildRpcConnectionConfig(config));
                   if (res.success) {
-                      setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
                       const redisRows: any[] = Array.isArray(res.data) ? res.data : [];
                       const redisDbAliases = useStore.getState().appearance.redisDbAliases;
                       let dbs = redisRows.map((db: any) => {
@@ -333,6 +336,7 @@ export const useSidebarTreeLoaders = ({
                           dbs = dbs.filter(db => conn.includeRedisDatabases!.includes(db.dbIndex));
                       }
                       replaceTreeNodeChildren(node.key, dbs);
+                      shouldMarkConnectionSuccess = true;
                   } else {
                       setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
                       message.error({ content: res.message, key: `conn-${conn.id}-dbs` });
@@ -345,6 +349,9 @@ export const useSidebarTreeLoaders = ({
                   });
               } finally {
                   loadingNodesRef.current.delete(loadKey);
+                  if (shouldMarkConnectionSuccess) {
+                      setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
+                  }
               }
               return;
           }
@@ -352,7 +359,6 @@ export const useSidebarTreeLoaders = ({
 	      try {
 	          const res = await DBGetDatabases(buildRpcConnectionConfig(config) as any);
 	          if (res.success) {
-	            setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
                 const dbRows: any[] = Array.isArray(res.data) ? res.data : [];
 	            let dbs = dbRows.map((row: any) => ({
 	              title: row.Database || row.database,
@@ -375,6 +381,7 @@ export const useSidebarTreeLoaders = ({
                 setLoadedKeys(prev => prev.filter(k => k !== node.key));
                 message.warning({ content: t('sidebar.message.no_visible_databases'), key: `conn-${conn.id}-dbs` });
             }
+            shouldMarkConnectionSuccess = true;
 	          } else {
 	            setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
 	            setLoadedKeys(prev => prev.filter(k => k !== node.key));
@@ -389,6 +396,9 @@ export const useSidebarTreeLoaders = ({
             });
 	      } finally {
 	          loadingNodesRef.current.delete(loadKey);
+              if (shouldMarkConnectionSuccess) {
+                  setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
+              }
 	      }
   };
 
@@ -450,6 +460,7 @@ export const useSidebarTreeLoaders = ({
       if (loadingNodesRef.current.has(loadKey)) return;
       loadingNodesRef.current.add(loadKey);
       setConnectionStates(prev => ({ ...prev, [key as string]: 'loading' }));
+      let shouldMarkDatabaseSuccess = false;
       
       const dbQueries = savedQueries.filter(q => q.connectionId === conn.id && q.dbName === dbName);
       const queriesNode: TreeNode = {
@@ -479,8 +490,6 @@ export const useSidebarTreeLoaders = ({
 	      try {
 	          const res = await DBGetTables(buildRpcConnectionConfig(config) as any, conn.dbName);
 	          if (res.success) {
-	            setConnectionStates(prev => ({ ...prev, [key as string]: 'success' }));
-
                 const tableRows: any[] = Array.isArray(res.data) ? res.data : [];
                 const tableStatusSql = buildSidebarTableStatusSQL(conn as SavedConnection, conn.dbName);
                 const tableStatsResult = tableStatusSql
@@ -959,6 +968,7 @@ export const useSidebarTreeLoaders = ({
 	                replaceTreeNodeChildren(key, [queriesNode, ...groupedNodes]);
 	            }
                 onDatabaseTreeLoaded?.(String(key));
+                shouldMarkDatabaseSuccess = true;
 	          } else {
 	            setConnectionStates(prev => ({ ...prev, [key as string]: 'error' }));
 	            message.error({ content: res.message, key: `db-${key}-tables` });
@@ -971,6 +981,9 @@ export const useSidebarTreeLoaders = ({
 	          });
 	      } finally {
 	          loadingNodesRef.current.delete(loadKey);
+              if (shouldMarkDatabaseSuccess) {
+                  setConnectionStates(prev => ({ ...prev, [key as string]: 'success' }));
+              }
 	      }
   };
 
