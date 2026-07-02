@@ -10,6 +10,7 @@ import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 import { useI18n } from '../i18n/provider';
 import { splitQualifiedNameLast } from '../utils/qualifiedName';
 import { buildSqlServerObjectDefinitionQueries } from '../utils/sqlServerObjectDefinition';
+import { clearQueryTabDraft } from '../utils/sqlFileTabDrafts';
 
 interface DefinitionViewerProps {
     tab: TabData;
@@ -116,6 +117,46 @@ const buildEditableDefinitionSql = (
     }
 
     return `${header}${ensureSqlStatementTerminator(normalizedDefinition)}`;
+};
+
+const buildDisplayDefinitionSql = (
+    tab: TabData,
+    definition: string,
+    objectName: string,
+): string => {
+    const normalizedDefinition = String(definition || '').trim();
+    if (!normalizedDefinition || isCommentOnlyDefinition(normalizedDefinition)) {
+        return normalizedDefinition;
+    }
+
+    if (tab.type === 'view-def' && !/^\s*create\b/i.test(normalizedDefinition)) {
+        if (/^\s*view\b/i.test(normalizedDefinition)) {
+            return ensureSqlStatementTerminator(normalizedDefinition.replace(/^\s*view\b/i, 'CREATE OR REPLACE VIEW'));
+        }
+        return `CREATE OR REPLACE VIEW ${objectName} AS\n${ensureSqlStatementTerminator(normalizedDefinition)}`;
+    }
+
+    if (tab.type === 'sequence-def' && !/^\s*create\b/i.test(normalizedDefinition)) {
+        return ensureSqlStatementTerminator(`CREATE SEQUENCE ${objectName}\n${normalizedDefinition}`);
+    }
+
+    if (
+        tab.type === 'package-def'
+        && !/^\s*create\b/i.test(normalizedDefinition)
+        && /^\s*package\b/i.test(normalizedDefinition)
+    ) {
+        return withCreateOrReplacePackageHeaders(normalizedDefinition);
+    }
+
+    if (
+        tab.type === 'routine-def'
+        && !/^\s*create\b/i.test(normalizedDefinition)
+        && /^\s*(function|procedure)\b/i.test(normalizedDefinition)
+    ) {
+        return ensureSqlStatementTerminator(`CREATE OR REPLACE ${normalizedDefinition}`);
+    }
+
+    return ensureSqlStatementTerminator(normalizedDefinition);
 };
 
 const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
@@ -700,6 +741,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         let queries: string[];
         let extractFn: (dialect: string, data: any[]) => string;
         let resolvedObjectLabel: string;
+        let resolvedObjectName = '';
 
         if (tab.type === 'view-def') {
             const viewName = tab.viewName || '';
@@ -711,6 +753,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             resolvedObjectLabel = tab.viewKind === 'materialized'
                 ? t('definition_viewer.object.materialized_view')
                 : t('definition_viewer.object.view');
+            resolvedObjectName = viewName;
         } else if (tab.type === 'event-def') {
             const eventName = tab.eventName || '';
             if (!eventName) {
@@ -719,6 +762,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             queries = buildShowEventQueries(dialect, eventName, dbName);
             extractFn = extractEventDefinition;
             resolvedObjectLabel = t('definition_viewer.object.event');
+            resolvedObjectName = eventName;
         } else if (tab.type === 'sequence-def') {
             const sequenceName = tab.sequenceName || '';
             if (!sequenceName) {
@@ -727,6 +771,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             queries = buildShowSequenceQueries(dialect, sequenceName, dbName);
             extractFn = extractSequenceDefinition;
             resolvedObjectLabel = t('definition_viewer.object.sequence');
+            resolvedObjectName = sequenceName;
         } else if (tab.type === 'package-def') {
             const packageName = tab.packageName || '';
             if (!packageName) {
@@ -735,6 +780,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             queries = buildShowPackageQueries(dialect, packageName, dbName);
             extractFn = extractPackageDefinition;
             resolvedObjectLabel = t('definition_viewer.object.package');
+            resolvedObjectName = packageName;
         } else {
             const routineName = tab.routineName || '';
             const routineType = tab.routineType || 'FUNCTION';
@@ -744,6 +790,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             queries = buildShowRoutineQueries(dialect, routineName, routineType, dbName);
             extractFn = extractRoutineDefinition;
             resolvedObjectLabel = t('definition_viewer.object.routine');
+            resolvedObjectName = routineName;
         }
 
         if (!queries.length || String(queries[0] || '').startsWith('--')) {
@@ -770,7 +817,11 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 : await runQueryCandidates(config, dbName, queries);
 
             if (result.success && Array.isArray(result.data) && result.data.length > 0) {
-                return { success: true, definition: extractFn(dialect, result.data) };
+                const rawDefinition = extractFn(dialect, result.data);
+                return {
+                    success: true,
+                    definition: buildDisplayDefinitionSql(tab, rawDefinition, resolvedObjectName),
+                };
             }
 
             if (result.success) {
@@ -944,6 +995,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         setDefinition(latestDefinition);
         const query = buildEditableDefinitionSql(tab, latestDefinition, normalizedObjectName, editableDefinitionCopy);
         setActiveContext({ connectionId: tab.connectionId, dbName });
+        clearQueryTabDraft(tab.id);
         addTab({
             id: tab.id,
             title: editTabTitle,

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TabData } from '../types';
 import { I18nProvider } from '../i18n/provider';
+import { clearQueryTabDraft, hasQueryTabDraft, setQueryTabDraft } from '../utils/sqlFileTabDrafts';
 import DefinitionViewer from './DefinitionViewer';
 
 const storeState = vi.hoisted(() => ({
@@ -102,6 +103,7 @@ describe('DefinitionViewer object edit entry', () => {
     storeState.setActiveContext.mockReset();
     storeState.theme = 'light';
     storeState.connections[0].config.type = 'postgres';
+    clearQueryTabDraft('routine-def-conn-1-H2-H2.F_GET_BUSPRICE');
     backendApp.DBQuery.mockReset();
     backendApp.DBQuery.mockResolvedValue({
       success: true,
@@ -117,6 +119,9 @@ describe('DefinitionViewer object edit entry', () => {
     });
 
     const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
+    const editorText = String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''));
+    expect(editorText).toContain('CREATE OR REPLACE VIEW reporting.active_users AS');
+    expect(editorText).toContain('SELECT id, name FROM users;');
 
     await act(async () => {
       button.props.onClick();
@@ -367,6 +372,10 @@ describe('DefinitionViewer object edit entry', () => {
       await flushPromises();
     });
 
+    const editorText = String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''));
+    expect(editorText).toContain('CREATE OR REPLACE PROCEDURE proc_tally2accept(p_id IN NUMBER)');
+    expect(editorText).toContain('v_count PLS_INTEGER;');
+
     const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
@@ -377,6 +386,71 @@ describe('DefinitionViewer object edit entry', () => {
     expect(query).toContain('CREATE OR REPLACE PROCEDURE proc_tally2accept(p_id IN NUMBER)');
     expect(query).toContain('v_count PLS_INTEGER;');
     expect(query).toContain('SELECT COUNT(*) INTO v_count FROM dual;');
+  });
+
+  it('clears stale same-tab drafts before opening object edit so comments are not replaced', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    const tab = createTab({
+      id: 'routine-def-conn-1-H2-H2.F_GET_BUSPRICE',
+      title: '函数: H2.F_GET_BUSPRICE',
+      type: 'routine-def',
+      dbName: 'H2',
+      routineName: 'H2.F_GET_BUSPRICE',
+      routineType: 'FUNCTION',
+      viewName: undefined,
+      viewKind: undefined,
+    });
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [
+        { TEXT: 'FUNCTION "F_GET_BUSPRICE"(p_compid t_store_d.compid%TYPE,\n' },
+        { TEXT: '                            p_busno  t_store_d.busno%TYPE,\n' },
+        { TEXT: '                            p_wareid t_store_d.wareid%TYPE,\n' },
+        { TEXT: '                            p_type   INTEGER)\n' },
+        { TEXT: 'RETURN t_ware_saleprice.saleprice%TYPE IS\n\n' },
+        { TEXT: 'BEGIN\n' },
+        { TEXT: '  /*根据机构跟商品，返回对应的价格信息\n' },
+        { TEXT: '  1: p_compid 企业编码\n' },
+        { TEXT: '  2: p_busno 业务机构\n' },
+        { TEXT: '  3: p_wareid 商品编码\n' },
+        { TEXT: '  4: p_type 类型 1, 当前机构商品毛利率; 2, 当前机构商品毛利; 3, 当前机构商品最新进价; 4, 当前机构商品销售价\n' },
+        { TEXT: '  */\n' },
+        { TEXT: '  NULL; -- add by txy 1723 20171129 增加库存不等于0的条件\n' },
+        { TEXT: 'END;\n' },
+      ],
+    });
+
+    setQueryTabDraft(tab.id, [
+      '-- 修改函数/存储过程: H2.F_GET_BUSPRICE',
+      'CREATE OR REPLACE FUNCTION "F_GET_BUSPRICE" AS',
+      'BEGIN',
+      '  /*根据机构跟商品，返回对应的价格信息',
+      '  1: p_compid 企业编码',
+      '  */',
+      'END;',
+    ].join('\n'));
+    expect(hasQueryTabDraft(tab.id)).toBe(true);
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(renderWithI18n(tab));
+      await flushPromises();
+    });
+
+    const editorText = String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''));
+    expect(editorText).toContain('CREATE OR REPLACE FUNCTION "F_GET_BUSPRICE"');
+    expect(editorText).toContain('4: p_type 类型 1, 当前机构商品毛利率; 2, 当前机构商品毛利; 3, 当前机构商品最新进价; 4, 当前机构商品销售价');
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
+    await act(async () => {
+      await button.props.onClick();
+      await flushPromises();
+    });
+
+    const editQuery = String(storeState.addTab.mock.calls[0][0].query || '');
+    expect(editQuery).toContain('4: p_type 类型 1, 当前机构商品毛利率; 2, 当前机构商品毛利; 3, 当前机构商品最新进价; 4, 当前机构商品销售价');
+    expect(editQuery).toContain('NULL; -- add by txy 1723 20171129 增加库存不等于0的条件');
+    expect(hasQueryTabDraft(tab.id)).toBe(false);
   });
 
   it('opens an editable query tab for Oracle sequence definitions', async () => {
@@ -466,9 +540,9 @@ describe('DefinitionViewer object edit entry', () => {
     expect(String(backendApp.DBQuery.mock.calls[0][2] || '')).toContain("TYPE = 'PACKAGE'");
     expect(String(backendApp.DBQuery.mock.calls[1][2] || '')).toContain("TYPE = 'PACKAGE BODY'");
     const editorText = String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''));
-    expect(editorText).toContain('PACKAGE pkg_order AS');
+    expect(editorText).toContain('CREATE OR REPLACE PACKAGE pkg_order AS');
     expect(editorText).toContain('PROCEDURE sync_order(p_id IN NUMBER);');
-    expect(editorText).toContain('PACKAGE BODY pkg_order AS');
+    expect(editorText).toContain('CREATE OR REPLACE PACKAGE BODY pkg_order AS');
     expect(editorText).toContain('NULL;');
 
     const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
