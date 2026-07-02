@@ -147,6 +147,29 @@ describe('DataViewer safe editing locator', () => {
     renderer!.unmount();
   });
 
+  it('defers the initial table query when the table opens in embedded object design', async () => {
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'ID', key: 'PRI' }, { name: 'NAME', key: '' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<DataViewer tab={createTab({ initialViewMode: 'fields', initialViewModeRequestId: 'open-design-1' })} />);
+    });
+    await flushPromises();
+
+    expect(backendApp.DBQuery).not.toHaveBeenCalled();
+
+    await act(async () => {
+      dataGridState.latestProps?.onDataViewActivate?.();
+    });
+    await flushPromises();
+
+    expect(backendApp.DBQuery).toHaveBeenCalled();
+    renderer!.unmount();
+  });
+
   it('keeps DataViewer message wrappers and SQL log phase labels keyed', () => {
     const source = readFileSync(new URL('./DataViewer.tsx', import.meta.url), 'utf8');
 

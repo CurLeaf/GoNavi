@@ -1338,6 +1338,7 @@ interface DataGridProps {
     enableSqlLogEvent?: boolean;
     initialViewMode?: GridViewMode;
     initialViewModeRequestId?: string;
+    onDataViewActivate?: () => void;
 }
 
 type GridFilterCondition = FilterCondition & {

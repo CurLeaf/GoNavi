@@ -291,6 +291,9 @@ type ViewerScrollSnapshot = {
 const viewerFilterSnapshotsByTab = new Map<string, ViewerFilterSnapshot>();
 const MAX_VIEWER_FILTER_SNAPSHOTS = 64;
 const VIEWER_SCROLL_SNAPSHOT_PERSIST_DELAY_MS = 160;
+const shouldDeferInitialDataViewerFetch = (initialViewMode?: TabData['initialViewMode']): boolean => (
+  initialViewMode === 'fields'
+);
 
 const trimViewerFilterSnapshots = () => {
   while (viewerFilterSnapshotsByTab.size > MAX_VIEWER_FILTER_SNAPSHOTS) {
@@ -387,6 +390,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
   const scrollSnapshotPersistTimerRef = useRef<number | null>(null);
   const initialLoadRef = useRef(false);
   const skipNextAutoFetchRef = useRef(false);
+  const deferredInitialFetchRef = useRef(shouldDeferInitialDataViewerFetch(tab.initialViewMode));
 
   const [pagination, setPagination] = useState<ViewerPaginationState>({
       current: initialViewerSnapshot.currentPage,
@@ -474,6 +478,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
     latestCountKeyRef.current = '';
     scrollSnapshotRef.current = { top: snapshot.scrollTop, left: snapshot.scrollLeft };
     initialLoadRef.current = false;
+    deferredInitialFetchRef.current = shouldDeferInitialDataViewerFetch(tab.initialViewMode);
     skipNextAutoFetchRef.current = true;
     setPagination(prev => ({
       ...prev,
@@ -1129,6 +1134,12 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
   // 定位信息只会在表上下文变化后重新加载，避免循环查询。
 
   // Handlers memoized
+  const handleDataViewActivate = useCallback(() => {
+    if (!deferredInitialFetchRef.current || initialLoadRef.current) return;
+    deferredInitialFetchRef.current = false;
+    initialLoadRef.current = true;
+    void fetchData(pagination.current, pagination.pageSize);
+  }, [fetchData, pagination.current, pagination.pageSize]);
   const handleReload = useCallback(() => {
     fetchData(pagination.current, pagination.pageSize);
   }, [fetchData, pagination.current, pagination.pageSize]);
@@ -1200,6 +1211,9 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
   }, [tab.tableName, currentConnConfig?.type, currentConnConfig?.driver, filterConditions, quickWhereCondition, sortInfo, editLocator, pkColumns]);
 
   useEffect(() => {
+    if (deferredInitialFetchRef.current && !initialLoadRef.current) {
+      return;
+    }
     const action = resolveDataViewerAutoFetchAction({
       skipNextAutoFetch: skipNextAutoFetchRef.current,
       hasInitialLoad: initialLoadRef.current,
@@ -1251,6 +1265,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
           enableSqlLogEvent
           initialViewMode={tab.initialViewMode}
           initialViewModeRequestId={tab.initialViewModeRequestId}
+          onDataViewActivate={handleDataViewActivate}
       />
     </div>
   );

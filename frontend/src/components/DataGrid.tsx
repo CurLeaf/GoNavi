@@ -288,7 +288,8 @@ const DataGrid: React.FC<DataGridProps> = ({
     onApplyQuickWhereCondition,
     scrollSnapshot, onScrollSnapshotChange, toolbarExtraActions, showRowNumberColumn = false, isActive = true, enableSqlLogEvent = false,
     initialViewMode,
-    initialViewModeRequestId
+    initialViewModeRequestId,
+    onDataViewActivate,
 }) => {
   const connections = useStore(state => state.connections);
   const addTab = useStore(state => state.addTab);
@@ -1449,6 +1450,23 @@ const DataGrid: React.FC<DataGridProps> = ({
       window.addEventListener('gonavi:show-sql-execution-log', handleOpenSqlExecutionLog as EventListener);
       return () => window.removeEventListener('gonavi:show-sql-execution-log', handleOpenSqlExecutionLog as EventListener);
   }, [enableSqlLogEvent, handleViewModeChange, isActive, isV2Ui]);
+
+  const dataViewActiveRef = useRef(false);
+  useEffect(() => {
+      const requiresTableData = isActive && (
+          viewMode === 'table'
+          || viewMode === 'json'
+          || viewMode === 'text'
+          || (viewMode === 'ddl' && isTableSurfaceActive)
+      );
+      if (!requiresTableData) {
+          dataViewActiveRef.current = false;
+          return;
+      }
+      if (dataViewActiveRef.current) return;
+      dataViewActiveRef.current = true;
+      onDataViewActivate?.();
+  }, [isActive, isTableSurfaceActive, onDataViewActivate, viewMode]);
 
   useEffect(() => {
       if (!isTableSurfaceActive || !isV2Ui || !cellContextMenu.visible) return;
