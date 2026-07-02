@@ -89,6 +89,8 @@ import {
     appendCommentToDetail,
     areSqlStatementListsEqual,
     buildCompletionDocumentation,
+    buildColumnCompletionDetail,
+    buildColumnCompletionDocumentation,
     buildCompletionFunctionsMetadataQuerySpecs,
     buildCompletionMaterializedViewsMetadataQuerySpecs,
     buildCompletionPackagesMetadataQuerySpecs,
@@ -754,7 +756,6 @@ let sharedRoutinesData: CompletionRoutineMeta[] = [];
 let sharedSequencesData: CompletionSequenceMeta[] = [];
 let sharedPackagesData: CompletionPackageMeta[] = [];
 let sharedColumnsCacheData: Record<string, any[]> = {};
-const QUERY_EDITOR_LAZY_VISIBLE_DB_COMPLETION_LIMIT = 10;
 const sharedLazyTablesCache: Record<string, CompletionTableMeta[] | undefined> = {};
 const sharedLazyTablesInFlight: Record<string, Promise<CompletionTableMeta[]> | undefined> = {};
 const createEmptySqlCompletionResult = () => ({ suggestions: [] as any[] });
@@ -766,6 +767,75 @@ const clearRecord = (record: Record<string, unknown>) => {
     });
 };
 const QUERY_EDITOR_SQL_SNIPPET_SUGGEST_DETAIL_MIN_HEIGHT = 260;
+
+const getCompletionTableNameFromRow = (row: any): string => (
+    normalizeCommentText(
+        getCaseInsensitiveValue(row, ['table_name', 'TABLE_NAME', 'Table', 'table', 'name', 'Name'])
+            ?? Object.values(row || {})[0],
+    )
+);
+
+const getCompletionTableCommentFromRow = (row: any): string => (
+    normalizeCommentText(getCaseInsensitiveValue(row, [
+        'table_comment',
+        'TABLE_COMMENT',
+        'comment',
+        'comments',
+        'Comment',
+        'COMMENTS',
+        'description',
+        'Description',
+    ]))
+);
+
+const getCompletionTableComment = (
+    tableComments: Map<string, string>,
+    tableName: string,
+    rowComment = '',
+): string => {
+    const parsed = splitCompletionSchemaAndTable(String(tableName || ''));
+    return tableComments.get(String(tableName || '').toLowerCase())
+        || (parsed.table ? tableComments.get(parsed.table.toLowerCase()) : '')
+        || normalizeCommentText(rowComment);
+};
+
+const buildCompletionTableMeta = (
+    dbName: string,
+    row: any,
+    tableComments: Map<string, string>,
+): CompletionTableMeta | null => {
+    const tableName = getCompletionTableNameFromRow(row);
+    if (!tableName) return null;
+    return {
+        dbName,
+        tableName,
+        comment: getCompletionTableComment(tableComments, tableName, getCompletionTableCommentFromRow(row)) || undefined,
+    };
+};
+
+const fetchCompletionTableCommentMap = async (
+    config: any,
+    dbName: string,
+    metadataDialect: string,
+): Promise<Map<string, string>> => {
+    const tableComments = new Map<string, string>();
+    const tableCommentSQL = buildCompletionTableCommentSQL(metadataDialect, dbName);
+    if (!tableCommentSQL) return tableComments;
+
+    try {
+        const resTableComments = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, tableCommentSQL);
+        if (resTableComments.success && Array.isArray(resTableComments.data)) {
+            resTableComments.data.forEach((row: any) => {
+                const tableName = normalizeCommentText(getCaseInsensitiveValue(row, ['table_name', 'TABLE_NAME', 'name', 'Name']));
+                if (!tableName) return;
+                tableComments.set(tableName.toLowerCase(), getCompletionTableCommentFromRow(row));
+            });
+        }
+    } catch {
+        // 表备注只是补全增强，失败时保留原有表名补全。
+    }
+    return tableComments;
+};
 
 const buildSqlSnippetVariableMap = (now: Date): Record<string, string> => {
     const pad = (value: number) => String(value).padStart(2, '0');
@@ -1945,38 +2015,18 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
           for (const dbName of metadataDbNames) {
               if (cancelled) return;
-              const tableComments = new Map<string, string>();
-              const tableCommentSQL = buildCompletionTableCommentSQL(metadataDialect, dbName);
-              if (tableCommentSQL) {
-                  try {
-                      const resTableComments = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, tableCommentSQL);
-                      if (cancelled) return;
-                      if (resTableComments.success && Array.isArray(resTableComments.data)) {
-                          resTableComments.data.forEach((row: any) => {
-                              const tableName = normalizeCommentText(getCaseInsensitiveValue(row, ['table_name', 'TABLE_NAME', 'name', 'Name']));
-                              if (!tableName) return;
-                              tableComments.set(tableName.toLowerCase(), normalizeCommentText(getCaseInsensitiveValue(row, ['table_comment', 'TABLE_COMMENT', 'comment', 'comments', 'Comment', 'COMMENTS'])));
-                          });
-                      }
-                  } catch {
-                      // 表备注只是补全增强，失败时保留原有表名补全。
-                  }
-              }
+              const tableComments = await fetchCompletionTableCommentMap(config, dbName, metadataDialect);
+              if (cancelled) return;
 
               // 获取表
               const resTables = await DBGetTables(buildRpcConnectionConfig(config) as any, dbName);
               if (cancelled) return;
               if (resTables.success && Array.isArray(resTables.data)) {
-                  const tableNames = resTables.data.map((row: any) => Object.values(row)[0] as string);
-                  tableNames.forEach((tableName: string) => {
-                      const parsed = splitCompletionSchemaAndTable(String(tableName || ''));
-                      allTables.push({
-                          dbName,
-                          tableName,
-                          comment: tableComments.get(String(tableName || '').toLowerCase())
-                              || (parsed.table ? tableComments.get(parsed.table.toLowerCase()) : undefined)
-                              || undefined
-                      });
+                  resTables.data.forEach((row: any) => {
+                      const tableMeta = buildCompletionTableMeta(dbName, row, tableComments);
+                      if (tableMeta) {
+                          allTables.push(tableMeta);
+                      }
                   });
               }
               if (!syncMetadataSnapshot()) return;
@@ -3328,21 +3378,43 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
                   const config = buildConnConfig();
                   if (!config) return [] as CompletionTableMeta[];
+                  const conn = sharedConnections.find(c => c.id === connId);
 
-                  sharedLazyTablesInFlight[key] = DBGetTables(buildRpcConnectionConfig(config) as any, dbName)
-                      .then((res) => {
+                  sharedLazyTablesInFlight[key] = Promise.all([
+                      fetchCompletionTableCommentMap(config, dbName, normalizeMetadataDialect(conn)),
+                      DBGetTables(buildRpcConnectionConfig(config) as any, dbName),
+                  ])
+                      .then(([tableComments, res]) => {
                           const tables = res?.success && Array.isArray(res.data)
                               ? res.data
-                                  .map((row: any) => String(Object.values(row || {})[0] || '').trim())
-                                  .filter(Boolean)
-                                  .map((tableName: string) => ({ dbName, tableName }))
+                                  .map((row: any) => buildCompletionTableMeta(dbName, row, tableComments))
+                                  .filter((table): table is CompletionTableMeta => !!table)
                               : [];
                           sharedLazyTablesCache[key] = tables;
                           if (tables.length > 0) {
-                              const existingKeys = new Set(sharedTablesData.map((table) => `${table.dbName.toLowerCase()}.${table.tableName.toLowerCase()}`));
+                              const lazyTableByKey = new Map(tables.map((table) => [
+                                  `${table.dbName.toLowerCase()}.${table.tableName.toLowerCase()}`,
+                                  table,
+                              ]));
+                              const existingKeys = new Set<string>();
+                              let changed = false;
+                              const nextSharedTables = sharedTablesData.map((table) => {
+                                  const tableKey = `${table.dbName.toLowerCase()}.${table.tableName.toLowerCase()}`;
+                                  existingKeys.add(tableKey);
+                                  const lazyTable = lazyTableByKey.get(tableKey);
+                                  if (lazyTable?.comment && lazyTable.comment !== table.comment) {
+                                      changed = true;
+                                      return { ...table, comment: lazyTable.comment };
+                                  }
+                                  return table;
+                              });
                               const missingTables = tables.filter((table) => !existingKeys.has(`${table.dbName.toLowerCase()}.${table.tableName.toLowerCase()}`));
                               if (missingTables.length > 0) {
-                                  sharedTablesData = [...sharedTablesData, ...missingTables];
+                                  changed = true;
+                                  nextSharedTables.push(...missingTables);
+                              }
+                              if (changed) {
+                                  sharedTablesData = nextSharedTables;
                               }
                           }
                           return tables;
@@ -3471,8 +3543,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       label: c.name,
                       kind: monaco.languages.CompletionItemKind.Field,
                       insertText: quoteCompletionPart(c.name),
-                      detail: appendCommentToDetail(`${c.type} (${c.dbName}.${c.tableName})`, c.comment),
-                      documentation: buildCompletionDocumentation(c.comment),
+                      detail: buildColumnCompletionDetail(c),
+                      documentation: buildColumnCompletionDocumentation(c),
                       range,
                       sortText: '0' + c.name
                   }));
@@ -3604,11 +3676,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           label: c.name,
                           kind: monaco.languages.CompletionItemKind.Field,
                           insertText: quoteCompletionPart(c.name),
-                          detail: appendCommentToDetail(
-                              c.type ? `${c.type} (${c.dbName ? c.dbName + '.' : ''}${c.tableName})` : (c.tableName ? `(${c.tableName})` : ''),
-                              c.comment,
-                          ),
-                          documentation: buildCompletionDocumentation(c.comment),
+                          detail: buildColumnCompletionDetail(c),
+                          documentation: buildColumnCompletionDocumentation(c),
                           range,
                           sortText: '0' + c.name
                       }));
@@ -3629,6 +3698,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               }
 
               const currentDatabase = getActiveCompletionDbName();
+              const isCurrentCompletionDatabase = (dbName: string) =>
+                  String(dbName || '').toLowerCase() === currentDatabase.toLowerCase();
               const wordPrefix = (word.word || '').toLowerCase();
               const startsWithPrefix = (candidate: string) => !wordPrefix || candidate.toLowerCase().startsWith(wordPrefix);
               const includesWordPrefix = (candidate: string) => !wordPrefix || String(candidate || '').toLowerCase().includes(wordPrefix);
@@ -3669,7 +3740,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               if (
                   expectsTableName
                   && currentDatabase
-                  && !sharedTablesData.some((t) => (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase())
+                  && !sharedTablesData.some((t) => isCurrentCompletionDatabase(t.dbName || ''))
               ) {
                   const lazyTables = await getLazyTablesByDB(currentDatabase);
                   if (isSqlCompletionRequestCancelled(token)) {
@@ -3685,37 +3756,22 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       });
                   }
               }
-              if (expectsTableName && sharedVisibleDbs.length > 1) {
-                  const loadedDbKeys = new Set(
-                      completionTables
-                          .map((table) => String(table.dbName || '').toLowerCase())
-                          .filter(Boolean),
-                  );
-                  const missingVisibleDbs = sharedVisibleDbs.filter((dbName) => {
-                      const normalizedDbName = String(dbName || '').trim();
-                      const dbKey = normalizedDbName.toLowerCase();
-                      return normalizedDbName
-                          && dbKey !== currentDatabase.toLowerCase()
-                          && !loadedDbKeys.has(dbKey);
-                  });
-                  if (
-                      missingVisibleDbs.length > 0
-                      && missingVisibleDbs.length <= QUERY_EDITOR_LAZY_VISIBLE_DB_COMPLETION_LIMIT
-                  ) {
-                      const lazyTableGroups = await Promise.all(
-                          missingVisibleDbs.map((dbName) => getLazyTablesByDB(dbName)),
-                      );
-                      if (isSqlCompletionRequestCancelled(token)) {
-                          return createEmptySqlCompletionResult();
-                      }
-                      const seenTableKeys = new Set<string>();
-                      completionTables = [...completionTables, ...lazyTableGroups.flat()].filter((table) => {
-                          const key = `${String(table.dbName || '').toLowerCase()}.${String(table.tableName || '').toLowerCase()}`;
-                          if (seenTableKeys.has(key)) return false;
-                          seenTableKeys.add(key);
-                          return true;
-                      });
+              if (
+                  expectsTableName
+                  && currentDatabase
+                  && sharedTablesData.some((table) => isCurrentCompletionDatabase(table.dbName || ''))
+                  && sharedTablesData.some((table) => isCurrentCompletionDatabase(table.dbName || '') && !normalizeCommentText(table.comment))
+              ) {
+                  const enrichedTables = await getLazyTablesByDB(currentDatabase);
+                  if (isSqlCompletionRequestCancelled(token)) {
+                      return createEmptySqlCompletionResult();
                   }
+                  if (enrichedTables.length > 0) {
+                      completionTables = sharedTablesData;
+                  }
+              }
+              if (expectsTableName && currentDatabase) {
+                  completionTables = completionTables.filter((table) => isCurrentCompletionDatabase(table.dbName || ''));
               }
 
               const referencedColumns: CompletionColumnMeta[] = [];
@@ -3752,13 +3808,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   })
                   .map(c => {
                       // 当前库的表字段优先级更高
-                      const isCurrentDb = (c.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
+                      const isCurrentDb = isCurrentCompletionDatabase(c.dbName || '');
                       return {
                           label: c.name,
                           kind: monaco.languages.CompletionItemKind.Field,
                           insertText: quoteCompletionPart(c.name),
-                          detail: appendCommentToDetail(`${c.type} (${c.dbName}.${c.tableName})`, c.comment),
-                          documentation: buildCompletionDocumentation(c.comment),
+                          detail: buildColumnCompletionDetail(c),
+                          documentation: buildColumnCompletionDocumentation(c),
                           range,
                           sortText: isCurrentDb ? sortGroups.columnCurrent + c.name : sortGroups.columnOther + c.name,
                       };
@@ -3767,7 +3823,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               // 表提示：当前库智能处理 schema.table 格式
               // 1. 构建纯表名到 schema 列表的映射，检测同名表
               const currentDbTables = completionTables.filter(t =>
-                  (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase()
+                  isCurrentCompletionDatabase(t.dbName || '')
               );
               const tableNameToSchemas = new Map<string, string[]>();
               for (const t of currentDbTables) {
@@ -3780,7 +3836,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
               const tableSuggestions = completionTables
                 .filter(t => {
-                    const isCurrentDb = (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
+                    const isCurrentDb = isCurrentCompletionDatabase(t.dbName || '');
                     const parsed = splitSchemaAndTable(t.tableName || '');
                     const pureTable = parsed.table || t.tableName || '';
                   if (!isCurrentDb) {
@@ -3795,7 +3851,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                     return includesWordPrefix(t.tableName || '') || includesWordPrefix(pureTable);
                 })
                 .map(t => {
-                  const isCurrentDb = (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
+                  const isCurrentDb = isCurrentCompletionDatabase(t.dbName || '');
                   const parsed = splitSchemaAndTable(t.tableName || '');
                   const pureTable = parsed.table || t.tableName || '';
                   if (!isCurrentDb) {
@@ -3839,7 +3895,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           || includesWordPrefix(routine.routineName || '');
                   })
                   .map(({ routine, meta }) => {
-                      const isCurrentDb = (routine.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
+                      const isCurrentDb = isCurrentCompletionDatabase(routine.dbName || '');
                       const schemaInfo = meta.schemaName && meta.schemaName.toLowerCase() !== String(routine.dbName || '').toLowerCase()
                           ? `.${meta.schemaName}`
                           : '';

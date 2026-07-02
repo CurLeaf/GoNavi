@@ -639,6 +639,36 @@ export const appendCommentToDetail = (detail: string, comment?: string): string 
     return text ? `${detail} - ${text}` : detail;
 };
 
+const buildColumnCompletionTableLabel = (column: CompletionColumnMeta): string => {
+    return normalizeCommentText(column.tableName);
+};
+
+export const buildColumnCompletionDetail = (column: CompletionColumnMeta): string => {
+    const typeText = normalizeCommentText(column.type);
+    const tableLabel = buildColumnCompletionTableLabel(column);
+    const detail = [
+        tableLabel,
+        typeText ? `[${typeText}]` : '',
+    ].filter(Boolean).join(' ') || translate('query_editor.object_info.column');
+
+    return appendCommentToDetail(detail, column.comment);
+};
+
+export const buildColumnCompletionDocumentation = (column: CompletionColumnMeta): string | undefined => {
+    const typeText = normalizeCommentText(column.type);
+    const dbName = normalizeCommentText(column.dbName);
+    const tableName = normalizeCommentText(column.tableName);
+    const comment = normalizeCommentText(column.comment);
+    const lines = [
+        typeText ? `${translate('query_editor.object_info.label.type')}: ${typeText}` : '',
+        dbName ? `${translate('query_editor.object_info.label.database')}: ${dbName}` : '',
+        tableName ? `${translate('query_editor.object_info.label.table')}: ${tableName}` : '',
+        comment ? translate('query_editor.completion.documentation.comment', { comment }) : '',
+    ].filter(Boolean);
+
+    return lines.length > 0 ? lines.join('\n\n') : undefined;
+};
+
 export const stripCompletionIdentifierQuotes = (ident: string): string => {
     let raw = String(ident || '').trim();
     if (!raw) return raw;
