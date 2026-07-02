@@ -247,6 +247,27 @@ body[data-theme='light'] ::-webkit-scrollbar-thumb:hover {
     min-height: 260px;
 }
 
+.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main {
+    justify-content: flex-start;
+    gap: 6px;
+}
+
+.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .left {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .right {
+    flex: 1 1 auto;
+    max-width: none;
+    min-width: 0;
+}
+
+.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row.string-label > .contents > .main > .right > .details-label {
+    display: inline !important;
+    margin-left: 0;
+}
+
 /* Ensure body background matches theme to avoid white flashes, but kept transparent for window composition */
 body {
     transition: color 0.3s;

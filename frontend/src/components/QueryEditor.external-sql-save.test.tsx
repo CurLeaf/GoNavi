@@ -1490,12 +1490,66 @@ describe('QueryEditor external SQL save', () => {
     });
   });
 
+  it('does not suggest tables from other databases for unqualified FROM completion', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.database = 'mkefu_ai_dev';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({
+      success: true,
+      data: [{ Database: 'mkefu_ai_dev' }, { Database: 'mkefu_dev' }],
+    });
+    backendApp.DBGetTables.mockImplementation(async (_config: any, dbName: string) => {
+      if (dbName === 'mkefu_ai_dev') {
+        return { success: true, data: [{ Tables_in_mkefu_ai_dev: 'ai_conversation' }] };
+      }
+      if (dbName === 'mkefu_dev') {
+        return { success: true, data: [{ Tables_in_mkefu_dev: 'wechat_visitor_id_bak' }] };
+      }
+      return { success: true, data: [] };
+    });
+    backendApp.DBGetAllColumns.mockResolvedValue({ success: true, data: [] });
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '', dbName: 'mkefu_ai_dev' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const sqlProvider = editorState.providers.find((provider) => Array.isArray(provider.triggerCharacters) && provider.triggerCharacters.includes('.'));
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.value = 'SELECT * FROM wechat';
+    editorState.latestOnChange?.(editorState.value);
+    const result = await sqlProvider.provideCompletionItems(editorState.editor.getModel(), { lineNumber: 1, column: editorState.value.length + 1 });
+    const labels = result.suggestions.map((item: any) => item.label);
+
+    expect(labels).not.toContain('wechat_visitor_id_bak');
+    expect(labels).not.toContain('mkefu_dev.wechat_visitor_id_bak');
+    expect(backendApp.DBGetTables.mock.calls.map((call: any[]) => call[1])).toEqual(
+      expect.arrayContaining(['mkefu_ai_dev']),
+    );
+    expect(backendApp.DBGetTables.mock.calls.map((call: any[]) => call[1])).not.toContain('mkefu_dev');
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
   it('lazy loads current database tables for FROM completion when metadata is not preloaded', async () => {
     let renderer!: ReactTestRenderer;
     autoFetchState.visible = false;
     backendApp.DBGetTables.mockResolvedValueOnce({
       success: true,
       data: [{ Table: 'fs_org_auth_application' }],
+    });
+    backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+      if (/table_comment|information_schema\.tables/i.test(sql)) {
+        return { success: true, data: [{ table_name: 'fs_org_auth_application', table_comment: '认证申请表' }] };
+      }
+      return { success: true, data: [] };
     });
 
     await act(async () => {
@@ -1509,9 +1563,11 @@ describe('QueryEditor external SQL save', () => {
     editorState.latestOnChange?.(editorState.value);
     const result = await sqlProvider.provideCompletionItems(editorState.editor.getModel(), { lineNumber: 1, column: editorState.value.length + 1 });
     const labels = result.suggestions.map((item: any) => item.label);
+    const tableSuggestion = result.suggestions.find((item: any) => item.label === 'fs_org_auth_application');
 
     expect(backendApp.DBGetTables).toHaveBeenCalledWith(expect.any(Object), 'front_end_sys');
     expect(labels).toContain('fs_org_auth_application');
+    expect(tableSuggestion?.detail).toBe('表 - 认证申请表');
     await act(async () => {
       renderer.unmount();
     });
@@ -4520,13 +4576,26 @@ describe('QueryEditor external SQL save', () => {
         data: [{ Tables_in_main: 'users' }, { Tables_in_main: 'reporting.events' }],
       });
       backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+      backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+        if (/table_comment|information_schema\.tables/i.test(sql)) {
+          return {
+            success: true,
+            data: [
+              { table_name: 'users', table_comment: '用户表' },
+              { table_name: 'reporting.events', table_comment: '事件表' },
+            ],
+          };
+        }
+        return { success: true, data: [] };
+      });
 
       await act(async () => {
         create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
       });
       await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
+        for (let i = 0; i < 6; i += 1) {
+          await Promise.resolve();
+        }
       });
 
       const completionProvider = editorState.providers[0];
@@ -4543,7 +4612,7 @@ describe('QueryEditor external SQL save', () => {
       expect(tableSuggestion.detail).not.toContain('Table (main.reporting)');
     });
 
-    it('localizes global cross-db table completion detail in zh-CN while preserving the raw database name', async () => {
+    it('keeps database-qualified table completion from leaking into unqualified FROM suggestions', async () => {
       storeState.languagePreference = 'zh-CN';
       setCurrentLanguage('zh-CN');
       editorState.value = 'select * from ';
@@ -4568,10 +4637,15 @@ describe('QueryEditor external SQL save', () => {
       expect(completionProvider).toBeTruthy();
 
       editorState.value = 'select * from analytics.';
-      await completionProvider.provideCompletionItems(
+      const qualifiedCompletionItems = await completionProvider.provideCompletionItems(
         editorState.editor.getModel(),
         { lineNumber: 1, column: editorState.value.length + 1 },
       );
+      const qualifiedTableSuggestion = qualifiedCompletionItems?.suggestions?.find((item: any) => item?.label === 'events');
+
+      expect(qualifiedTableSuggestion).toBeTruthy();
+      expect(qualifiedTableSuggestion.detail).toContain('表 (analytics)');
+      expect(qualifiedTableSuggestion.detail).not.toContain('Table (analytics)');
 
       editorState.value = 'select * from ';
       const completionItems = await completionProvider.provideCompletionItems(
@@ -4580,9 +4654,7 @@ describe('QueryEditor external SQL save', () => {
       );
       const tableSuggestion = completionItems?.suggestions?.find((item: any) => item?.label === 'analytics.events');
 
-      expect(tableSuggestion).toBeTruthy();
-      expect(tableSuggestion.detail).toContain('表 (analytics)');
-      expect(tableSuggestion.detail).not.toContain('Table (analytics)');
+      expect(tableSuggestion).toBeFalsy();
     });
 
     it('localizes current-db table completion detail in zh-CN for plain and schema-qualified tables', async () => {
@@ -4596,6 +4668,18 @@ describe('QueryEditor external SQL save', () => {
         data: [{ Tables_in_main: 'users' }, { Tables_in_main: 'reporting.events' }],
       });
       backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+      backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+        if (/table_comment|information_schema\.tables/i.test(sql)) {
+          return {
+            success: true,
+            data: [
+              { table_name: 'users', table_comment: '用户表' },
+              { table_name: 'reporting.events', table_comment: '事件表' },
+            ],
+          };
+        }
+        return { success: true, data: [] };
+      });
 
       await act(async () => {
         create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
@@ -4616,11 +4700,11 @@ describe('QueryEditor external SQL save', () => {
       const schemaTableSuggestion = completionItems?.suggestions?.find((item: any) => item?.label === 'events');
 
       expect(plainTableSuggestion).toBeTruthy();
-      expect(plainTableSuggestion.detail).toBe('表');
+      expect(plainTableSuggestion.detail).toBe('表 - 用户表');
       expect(plainTableSuggestion.detail).not.toContain('Table');
 
       expect(schemaTableSuggestion).toBeTruthy();
-      expect(schemaTableSuggestion.detail).toContain('表 (reporting)');
+      expect(schemaTableSuggestion.detail).toBe('表 (reporting) - 事件表');
       expect(schemaTableSuggestion.detail).not.toContain('Table (reporting)');
     });
 
@@ -4689,8 +4773,43 @@ describe('QueryEditor external SQL save', () => {
       const idSuggestion = completionItems?.suggestions?.find((item: any) => item?.label === 'id');
 
       expect(idSuggestion).toBeTruthy();
-      expect(idSuggestion.documentation).toBe('Comment: 主键ID');
+      expect(idSuggestion.documentation).toContain('Comment: 主键ID');
       expect(idSuggestion.documentation).not.toBe('备注：主键ID');
+    });
+
+    it('shows column type table and comment in SQL completion metadata', async () => {
+      editorState.value = 'select * from users where u';
+      autoFetchState.visible = true;
+      backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+      backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'users' }] });
+      backendApp.DBGetAllColumns.mockResolvedValueOnce({
+        success: true,
+        data: [{ tableName: 'users', name: 'user_id', type: 'varchar(32)', comment: '用户ID' }],
+      });
+
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const completionProvider = editorState.providers[0];
+      expect(completionProvider).toBeTruthy();
+
+      const completionItems = await completionProvider.provideCompletionItems(
+        editorState.editor.getModel(),
+        { lineNumber: 1, column: editorState.value.length + 1 },
+      );
+      const columnSuggestion = completionItems?.suggestions?.find((item: any) => item?.label === 'user_id');
+
+      expect(columnSuggestion).toBeTruthy();
+      expect(columnSuggestion.detail).toBe('users [varchar(32)] - 用户ID');
+      expect(columnSuggestion.documentation).toContain('类型: varchar(32)');
+      expect(columnSuggestion.documentation).toContain('库: main');
+      expect(columnSuggestion.documentation).toContain('表: users');
+      expect(columnSuggestion.documentation).toContain('备注：用户ID');
     });
   });
 
@@ -8905,6 +9024,16 @@ describe('QueryEditor external SQL save', () => {
     expect(appCss).toContain('min-height: 260px;');
     expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-details {');
     expect(appCss).toContain('min-height: 260px;');
+    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main {');
+    expect(appCss).toContain('justify-content: flex-start;');
+    expect(appCss).toContain('gap: 6px;');
+    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .left {');
+    expect(appCss).toContain('flex: 0 1 auto;');
+    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .right {');
+    expect(appCss).toContain('flex: 1 1 auto;');
+    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row.string-label > .contents > .main > .right > .details-label {');
+    expect(appCss).toContain('display: inline !important;');
+    expect(appCss).toContain('margin-left: 0;');
     expect(appCss).not.toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget {');
     expect(appCss).not.toContain('width: 680px;');
     expect(appCss).not.toContain('min-width: 560px;');
