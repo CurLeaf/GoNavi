@@ -34,6 +34,8 @@ import {
   GatewayOutlined,
   SafetyCertificateOutlined,
   ThunderboltOutlined,
+  DownOutlined,
+  RightOutlined,
 } from "@ant-design/icons";
 import {
   getDbIcon,
@@ -693,14 +695,21 @@ const ConnectionModal: React.FC<{
     title: string,
     description: string,
     badge?: React.ReactNode,
+    options?: {
+      cursor?: React.CSSProperties["cursor"];
+      marginBottom?: number;
+      onClick?: () => void;
+    },
   ) => (
     <div
+      onClick={options?.onClick}
       style={{
         display: "flex",
         alignItems: "flex-start",
         justifyContent: "space-between",
         gap: 12,
-        marginBottom: 14,
+        marginBottom: options?.marginBottom ?? 14,
+        cursor: options?.cursor,
       }}
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
@@ -758,20 +767,65 @@ const ConnectionModal: React.FC<{
     icon,
     children,
     badge,
+    collapsible,
+    expanded = true,
+    onToggle,
   }: {
     sectionKey: ConnectionConfigSectionKey;
     icon: React.ReactNode;
     children: React.ReactNode;
     badge?: React.ReactNode;
+    collapsible?: boolean;
+    expanded?: boolean;
+    onToggle?: () => void;
   }) => {
     const copy = getConnectionConfigSectionCopy(sectionKey);
+    const showChildren = !collapsible || expanded;
+    const resolvedBadge = collapsible ? (
+      <Space size={8}>
+        {badge}
+        <Button
+          type="text"
+          size="small"
+          aria-label={copy.title}
+          aria-expanded={expanded}
+          data-connection-config-section-toggle={sectionKey}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggle?.();
+          }}
+          style={{
+            width: 26,
+            height: 26,
+            minWidth: 26,
+            padding: 0,
+            borderRadius: 8,
+            color: overlayTheme.mutedText,
+          }}
+        >
+          {expanded ? <DownOutlined /> : <RightOutlined />}
+        </Button>
+      </Space>
+    ) : badge;
     return (
       <div
         data-connection-config-section={sectionKey}
         style={configSectionCardStyle()}
       >
-        {renderJvmSectionHeader(icon, copy.title, copy.description, badge)}
-        {children}
+        {renderJvmSectionHeader(
+          icon,
+          copy.title,
+          copy.description,
+          resolvedBadge,
+          collapsible
+            ? {
+                cursor: "pointer",
+                marginBottom: showChildren ? 14 : 0,
+                onClick: onToggle,
+              }
+            : undefined,
+        )}
+        {showChildren ? children : null}
       </div>
     );
   };
