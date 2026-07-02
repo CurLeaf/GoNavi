@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SIDEBAR_RESIZE_MAX_WIDTH } from './utils/sidebarLayout';
 
 class MemoryStorage implements Storage {
   private data = new Map<string, string>();
@@ -358,6 +359,30 @@ describe('store appearance persistence', () => {
     expect(appearance.v2SidebarSearchMode).toBe('filter');
     expect(appearance.v2CommandSearchPersistentFilterEnabled).toBe(true);
     expect(appearance.v2SidebarPersistedFilter).toHaveLength(120);
+  });
+
+  it('persists wider sidebar widths and clamps oversized restored values', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setSidebarWidth(880);
+    expect(useStore.getState().sidebarWidth).toBe(880);
+
+    let persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.sidebarWidth).toBe(880);
+
+    useStore.getState().setSidebarWidth(1200);
+    expect(useStore.getState().sidebarWidth).toBe(SIDEBAR_RESIZE_MAX_WIDTH);
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        sidebarWidth: 1200,
+      },
+      version: 13,
+    }));
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().sidebarWidth).toBe(SIDEBAR_RESIZE_MAX_WIDTH);
   });
 
   it('persists tab display appearance settings and sanitizes invalid elements', async () => {

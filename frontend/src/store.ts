@@ -87,6 +87,7 @@ import {
   DEFAULT_QUERY_EDITOR_EDITOR_HEIGHT_RATIO,
   sanitizeQueryEditorEditorHeightRatio,
 } from "./utils/queryEditorSplitLayout";
+import { sanitizeSidebarWidth } from "./utils/sidebarLayout";
 import {
   DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS,
   applySidebarTableMetadataFieldOrder,
@@ -2330,12 +2331,6 @@ const sanitizeWindowState = (
   return "normal";
 };
 
-const sanitizeSidebarWidth = (value: unknown): number => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return 330;
-  return Math.max(200, Math.min(600, Math.trunc(parsed)));
-};
-
 const sanitizeWindowBounds = (
   value: unknown,
 ): { width: number; height: number; x: number; y: number } | null => {
@@ -3601,7 +3596,7 @@ export const useStore = create<AppState>()(
       setWindowState: (state) => set({ windowState: state }),
 
       setSidebarWidth: (width) =>
-        set({ sidebarWidth: Math.max(200, Math.min(600, Math.trunc(width))) }),
+        set({ sidebarWidth: sanitizeSidebarWidth(width) }),
 
       // AI actions
       toggleAIPanel: () =>

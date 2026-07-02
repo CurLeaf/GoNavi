@@ -1758,7 +1758,7 @@ body[data-ui-version="v2"] .gn-v2-sidebar-shell {
 
 body[data-ui-version="v2"] .gn-v2-app-sider {
   min-width: 232px !important;
-  max-width: 420px !important;
+  max-width: min(960px, calc(100vw - 360px)) !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-sidebar-redesign {

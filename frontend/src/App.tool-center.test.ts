@@ -26,6 +26,10 @@ const appSidebarResizeSource = readFileSync(
   fileURLToPath(new globalThis.URL('./hooks/useAppSidebarResize.ts', import.meta.url)),
   'utf8',
 );
+const sidebarLayoutSource = readFileSync(
+  fileURLToPath(new globalThis.URL('./utils/sidebarLayout.ts', import.meta.url)),
+  'utf8',
+);
 
 const getGlobalShortcutCaseBlock = (action: string) => {
   const caseToken = `case '${action}':`;
@@ -285,8 +289,12 @@ describe('tool center menu entries', () => {
     expect(appSidebarResizeSource).toContain('ghostRef.current.style.left = `${startGuideLeft + (newWidth - startWidth)}px`;');
   });
 
-  it('keeps legacy sidebar resize bounds aligned with the v2 sider CSS limits', () => {
-    expect(appCss).toMatch(/body\[data-ui-version="legacy"\]\s+\.ant-layout-sider\s*\{[^}]*min-width:\s*232px\s*!important;[^}]*max-width:\s*420px\s*!important;/s);
+  it('keeps sidebar resize bounds aligned across drag logic and sider CSS limits', () => {
+    expect(sidebarLayoutSource).toContain('export const SIDEBAR_RESIZE_MAX_WIDTH = 960;');
+    expect(sidebarLayoutSource).toContain('export const SIDEBAR_MIN_WORKBENCH_WIDTH = 360;');
+    expect(appSidebarResizeSource).toContain('resolveSidebarResizeMaxWidth(window.innerWidth, minWidth)');
+    expect(appCss).toMatch(/body\[data-ui-version="legacy"\]\s+\.ant-layout-sider\s*\{[^}]*min-width:\s*232px\s*!important;[^}]*max-width:\s*min\(960px,\s*calc\(100vw - 360px\)\)\s*!important;/s);
+    expect(v2ThemeCss).toMatch(/body\[data-ui-version="v2"\]\s+\.gn-v2-app-sider\s*\{[^}]*min-width:\s*232px\s*!important;[^}]*max-width:\s*min\(960px,\s*calc\(100vw - 360px\)\)\s*!important;/s);
   });
 
   it('keeps connection modal warm-mounted while leaving the other heavyweight modals conditional', () => {

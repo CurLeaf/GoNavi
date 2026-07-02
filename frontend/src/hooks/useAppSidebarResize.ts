@@ -1,7 +1,9 @@
 import React, { useRef } from 'react';
-
-const SIDEBAR_RESIZE_MIN_WIDTH = 200;
-const SIDEBAR_RESIZE_MAX_WIDTH = 600;
+import {
+  SIDEBAR_RESIZE_MAX_WIDTH,
+  SIDEBAR_RESIZE_MIN_WIDTH,
+  resolveSidebarResizeMaxWidth,
+} from '../utils/sidebarLayout';
 
 type SidebarResizeBounds = { minWidth: number; maxWidth: number };
 type SidebarResizeDragState = SidebarResizeBounds & {
@@ -23,7 +25,8 @@ const resolveSidebarResizeBounds = (siderElement: Element | null): SidebarResize
   const cssMinWidth = parseCssPixelValue(computed.minWidth);
   const cssMaxWidth = parseCssPixelValue(computed.maxWidth);
   const minWidth = Math.max(SIDEBAR_RESIZE_MIN_WIDTH, cssMinWidth && cssMinWidth > 0 ? cssMinWidth : SIDEBAR_RESIZE_MIN_WIDTH);
-  const maxWidth = Math.max(minWidth, Math.min(SIDEBAR_RESIZE_MAX_WIDTH, cssMaxWidth && cssMaxWidth > 0 ? cssMaxWidth : SIDEBAR_RESIZE_MAX_WIDTH));
+  const viewportMaxWidth = resolveSidebarResizeMaxWidth(window.innerWidth, minWidth);
+  const maxWidth = Math.max(minWidth, Math.min(viewportMaxWidth, cssMaxWidth && cssMaxWidth > 0 ? cssMaxWidth : viewportMaxWidth));
   return { minWidth, maxWidth };
 };
 
