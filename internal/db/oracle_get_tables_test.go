@@ -112,6 +112,39 @@ func TestOracleGetColumnsIncludesColumnComments(t *testing.T) {
 	}
 }
 
+func TestOracleColumnsQueryFiltersPrimaryKeyLookupByTargetTable(t *testing.T) {
+	t.Parallel()
+
+	query := buildOracleColumnsQuery("MYCIMLED", "EDC_LOG")
+	for _, want := range []string{
+		`AND cons.owner = 'MYCIMLED'`,
+		`AND cons.table_name = 'EDC_LOG'`,
+		`AND cols.owner = 'MYCIMLED'`,
+		`AND cols.table_name = 'EDC_LOG'`,
+		`WHERE c.owner = 'MYCIMLED' AND c.table_name = 'EDC_LOG'`,
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("expected Oracle columns query to contain %q, got: %s", want, query)
+		}
+	}
+}
+
+func TestOracleForeignKeysQueryPreFiltersLocalColumnsByTargetTable(t *testing.T) {
+	t.Parallel()
+
+	query := buildOracleForeignKeysQuery("MYCIMLED", "EDC_LOG")
+	for _, want := range []string{
+		`FROM (`,
+		`FROM all_cons_columns`,
+		`WHERE owner = 'MYCIMLED' AND table_name = 'EDC_LOG'`,
+		`WHERE c.constraint_type = 'R' AND c.owner = 'MYCIMLED' AND c.table_name = 'EDC_LOG'`,
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("expected Oracle foreign-key query to contain %q, got: %s", want, query)
+		}
+	}
+}
+
 func TestOracleGetColumnsPreservesMetadataNameCaseBeforeUppercaseFallback(t *testing.T) {
 	t.Parallel()
 

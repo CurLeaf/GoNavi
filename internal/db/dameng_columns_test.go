@@ -23,6 +23,16 @@ func TestBuildDamengColumnsQuery_IncludesPrimaryKeyMetadata(t *testing.T) {
 	if !strings.Contains(ownerQuery, "WHERE c.owner = 'BIZ' AND c.table_name = 'ORDERS'") {
 		t.Fatalf("owner query 应按 owner/table 过滤, got=%s", ownerQuery)
 	}
+	for _, want := range []string{
+		"AND cons.owner = 'BIZ'",
+		"AND cons.table_name = 'ORDERS'",
+		"AND cols.owner = 'BIZ'",
+		"AND cols.table_name = 'ORDERS'",
+	} {
+		if !strings.Contains(ownerQuery, want) {
+			t.Fatalf("owner query 主键子查询应按 owner/table 预过滤 %q, got=%s", want, ownerQuery)
+		}
+	}
 
 	userQuery := buildDamengColumnsQuery("", "orders")
 	if !strings.Contains(userQuery, "FROM user_tab_columns c") {
@@ -30,6 +40,41 @@ func TestBuildDamengColumnsQuery_IncludesPrimaryKeyMetadata(t *testing.T) {
 	}
 	if !strings.Contains(userQuery, "JOIN user_cons_columns cols") {
 		t.Fatalf("user query 应关联 user_cons_columns, got=%s", userQuery)
+	}
+	for _, want := range []string{
+		"AND cons.table_name = 'ORDERS'",
+		"AND cols.table_name = 'ORDERS'",
+	} {
+		if !strings.Contains(userQuery, want) {
+			t.Fatalf("user query 主键子查询应按 table 预过滤 %q, got=%s", want, userQuery)
+		}
+	}
+}
+
+func TestBuildDamengForeignKeysQuery_PreFiltersLocalColumnsByTargetTable(t *testing.T) {
+	t.Parallel()
+
+	ownerQuery := buildDamengForeignKeysQuery("biz", "orders")
+	for _, want := range []string{
+		"FROM (",
+		"FROM all_cons_columns",
+		"WHERE owner = 'BIZ' AND table_name = 'ORDERS'",
+		"WHERE c.constraint_type = 'R' AND c.owner = 'BIZ' AND c.table_name = 'ORDERS'",
+	} {
+		if !strings.Contains(ownerQuery, want) {
+			t.Fatalf("owner foreign-key query 应按 owner/table 预过滤 %q, got=%s", want, ownerQuery)
+		}
+	}
+
+	userQuery := buildDamengForeignKeysQuery("", "orders")
+	for _, want := range []string{
+		"FROM user_cons_columns",
+		"WHERE table_name = 'ORDERS'",
+		"WHERE c.constraint_type = 'R' AND c.table_name = 'ORDERS'",
+	} {
+		if !strings.Contains(userQuery, want) {
+			t.Fatalf("user foreign-key query 应按 table 预过滤 %q, got=%s", want, userQuery)
+		}
 	}
 }
 

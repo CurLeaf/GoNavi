@@ -733,9 +733,11 @@ func buildOracleColumnsQuery(schema string, table string) string {
 				FROM user_constraints cons
 				JOIN user_cons_columns cols USING (constraint_name)
 				WHERE cons.constraint_type = 'P'
+				  AND cons.table_name = '%s'
+				  AND cols.table_name = '%s'
 			) pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name
 			WHERE c.table_name = '%s'
-			ORDER BY c.column_id`, metadataTableName)
+			ORDER BY c.column_id`, metadataTableName, metadataTableName, metadataTableName)
 	}
 
 	return fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.data_length AS "DATA_LENGTH", c.char_length AS "CHAR_LENGTH", c.data_precision AS "DATA_PRECISION", c.data_scale AS "DATA_SCALE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
@@ -750,9 +752,13 @@ func buildOracleColumnsQuery(schema string, table string) string {
 			JOIN all_cons_columns cols
 			  ON cons.owner = cols.owner AND cons.constraint_name = cols.constraint_name
 			WHERE cons.constraint_type = 'P'
+			  AND cons.owner = '%s'
+			  AND cons.table_name = '%s'
+			  AND cols.owner = '%s'
+			  AND cols.table_name = '%s'
 		) pk ON c.owner = pk.owner AND c.table_name = pk.table_name AND c.column_name = pk.column_name
 		WHERE c.owner = '%s' AND c.table_name = '%s'
-		ORDER BY c.column_id`, metadataSchemaName, metadataTableName)
+		ORDER BY c.column_id`, metadataSchemaName, metadataTableName, metadataSchemaName, metadataTableName, metadataSchemaName, metadataTableName)
 }
 
 func parseOracleColumns(data []map[string]interface{}) []connection.ColumnDefinition {
@@ -884,19 +890,27 @@ func buildOracleForeignKeysQuery(schema string, table string) string {
 	metadataSchemaName := escapeOracleMetadataLiteralExact(schema)
 	if strings.TrimSpace(schema) == "" {
 		return fmt.Sprintf(`SELECT a.constraint_name, a.column_name, c_pk.table_name r_table_name, b.column_name r_column_name
-		FROM user_cons_columns a
+		FROM (
+			SELECT constraint_name, table_name, column_name, position
+			FROM user_cons_columns
+			WHERE table_name = '%s'
+		) a
 		JOIN user_constraints c ON a.constraint_name = c.constraint_name
 		JOIN user_constraints c_pk ON c.r_constraint_name = c_pk.constraint_name
 		JOIN user_cons_columns b ON c_pk.constraint_name = b.constraint_name AND a.position = b.position
-		WHERE c.constraint_type = 'R' AND a.table_name = '%s'`, metadataTableName)
+		WHERE c.constraint_type = 'R' AND c.table_name = '%s'`, metadataTableName, metadataTableName)
 	}
 	return fmt.Sprintf(`SELECT a.constraint_name, a.column_name, c_pk.table_name r_table_name, b.column_name r_column_name
-		FROM all_cons_columns a
+		FROM (
+			SELECT owner, constraint_name, table_name, column_name, position
+			FROM all_cons_columns
+			WHERE owner = '%s' AND table_name = '%s'
+		) a
 		JOIN all_constraints c ON a.owner = c.owner AND a.constraint_name = c.constraint_name
 		JOIN all_constraints c_pk ON c.r_owner = c_pk.owner AND c.r_constraint_name = c_pk.constraint_name
 		JOIN all_cons_columns b ON c_pk.owner = b.owner AND c_pk.constraint_name = b.constraint_name AND a.position = b.position
-		WHERE c.constraint_type = 'R' AND a.owner = '%s' AND a.table_name = '%s'`,
-		metadataSchemaName, metadataTableName)
+		WHERE c.constraint_type = 'R' AND c.owner = '%s' AND c.table_name = '%s'`,
+		metadataSchemaName, metadataTableName, metadataSchemaName, metadataTableName)
 }
 
 func parseOracleForeignKeys(data []map[string]interface{}) []connection.ForeignKeyDefinition {
