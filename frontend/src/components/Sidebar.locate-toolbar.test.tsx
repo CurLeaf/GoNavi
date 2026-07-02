@@ -3079,6 +3079,17 @@ describe('Sidebar locate toolbar', () => {
     expect(visibleSuffixMarkup).toContain(t('sidebar.v2_table_group_menu.metadata_value.created_at', { time: '2026-07-02 10:11' }));
     expect(visibleSuffixMarkup).toContain(t('sidebar.v2_table_group_menu.metadata_value.updated_at', { time: '2026-07-03 11:12' }));
 
+    const sortedSuffixMarkup = renderToStaticMarkup(renderSidebarV2TreeTitle({
+      ...baseOptions,
+      sidebarTableMetadataFields: ['updatedAt', 'size', 'rows', 'comment', 'createdAt'],
+    }));
+    expect(sortedSuffixMarkup.indexOf(t('sidebar.v2_table_group_menu.metadata_value.updated_at', { time: '2026-07-03 11:12' })))
+      .toBeLessThan(sortedSuffixMarkup.indexOf('4 KB'));
+    expect(sortedSuffixMarkup.indexOf('4 KB'))
+      .toBeLessThan(sortedSuffixMarkup.indexOf(t('sidebar.v2_table_group_menu.metadata_value.rows', { count: '7' })));
+    expect(sortedSuffixMarkup.indexOf(t('sidebar.v2_table_group_menu.metadata_value.rows', { count: '7' })))
+      .toBeLessThan(sortedSuffixMarkup.indexOf('用户表'));
+
     const treeTitleSource = readSourceFile('./sidebar/SidebarTreeTitle.tsx');
     const sidebarHelpersSource = readSourceFile('./sidebar/sidebarHelpers.ts');
     expect(treeTitleSource).toContain('data-sidebar-table-hover-info="true"');

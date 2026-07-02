@@ -486,8 +486,9 @@ const Sidebar: React.FC<{
       () => resolveSidebarTableMetadataFields(
           queryOptions?.sidebarTableMetadataFields,
           queryOptions?.showSidebarTableComment === true,
+          queryOptions?.sidebarTableMetadataFieldOrder,
       ),
-      [queryOptions?.showSidebarTableComment, queryOptions?.sidebarTableMetadataFields],
+      [queryOptions?.showSidebarTableComment, queryOptions?.sidebarTableMetadataFieldOrder, queryOptions?.sidebarTableMetadataFields],
   );
   const { exportProgressModal, runExportWithProgress } = useExportProgressDialog();
   const disableLocalBackdropFilter = isMacLikePlatform();

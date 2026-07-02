@@ -29,11 +29,32 @@ const isSidebarTableMetadataField = (
     value as SidebarTableMetadataField,
   );
 
-const orderSidebarTableMetadataFields = (
-  fields: Iterable<SidebarTableMetadataField>,
+const uniqueSidebarTableMetadataFieldsInInputOrder = (
+  fields: Iterable<unknown>,
 ): SidebarTableMetadataField[] => {
-  const selected = new Set(fields);
-  return SIDEBAR_TABLE_METADATA_FIELDS.filter((field) => selected.has(field));
+  const seen = new Set<SidebarTableMetadataField>();
+  const result: SidebarTableMetadataField[] = [];
+  Array.from(fields).forEach((field) => {
+    if (!isSidebarTableMetadataField(field) || seen.has(field)) {
+      return;
+    }
+    seen.add(field);
+    result.push(field);
+  });
+  return result;
+};
+
+const completeSidebarTableMetadataFieldOrder = (
+  fields: Iterable<unknown>,
+): SidebarTableMetadataField[] => {
+  const ordered = uniqueSidebarTableMetadataFieldsInInputOrder(fields);
+  const seen = new Set(ordered);
+  SIDEBAR_TABLE_METADATA_FIELDS.forEach((field) => {
+    if (!seen.has(field)) {
+      ordered.push(field);
+    }
+  });
+  return ordered;
 };
 
 export const sanitizeSidebarTableMetadataFields = (
@@ -41,39 +62,58 @@ export const sanitizeSidebarTableMetadataFields = (
   fallback: SidebarTableMetadataField[] = DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS,
 ): SidebarTableMetadataField[] => {
   if (!Array.isArray(value)) {
-    return orderSidebarTableMetadataFields(fallback);
+    return uniqueSidebarTableMetadataFieldsInInputOrder(fallback);
   }
-  const normalized = orderSidebarTableMetadataFields(
-    value.filter(isSidebarTableMetadataField),
-  );
+  const normalized = uniqueSidebarTableMetadataFieldsInInputOrder(value);
   if (normalized.length === 0) {
-    return orderSidebarTableMetadataFields(fallback);
+    return uniqueSidebarTableMetadataFieldsInInputOrder(fallback);
   }
   return normalized;
+};
+
+export const resolveSidebarTableMetadataFieldOrder = (
+  value: unknown,
+): SidebarTableMetadataField[] => {
+  if (!Array.isArray(value)) {
+    return [...SIDEBAR_TABLE_METADATA_FIELDS];
+  }
+  return completeSidebarTableMetadataFieldOrder(value);
+};
+
+export const applySidebarTableMetadataFieldOrder = (
+  fields: SidebarTableMetadataField[],
+  order: unknown,
+): SidebarTableMetadataField[] => {
+  const selected = new Set(sanitizeSidebarTableMetadataFields(fields, []));
+  return resolveSidebarTableMetadataFieldOrder(order)
+    .filter((field) => selected.has(field));
 };
 
 export const resolveSidebarTableMetadataFields = (
   value: unknown,
   legacyShowSidebarTableComment = false,
+  order?: unknown,
 ): SidebarTableMetadataField[] => {
+  let resolved: SidebarTableMetadataField[];
   if (Array.isArray(value)) {
-    return orderSidebarTableMetadataFields(
-      value.filter(isSidebarTableMetadataField),
-    );
+    resolved = uniqueSidebarTableMetadataFieldsInInputOrder(value);
+  } else {
+    resolved = uniqueSidebarTableMetadataFieldsInInputOrder([
+      ...(legacyShowSidebarTableComment ? ['comment'] : []),
+      ...DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS,
+    ]);
   }
-  const defaults = new Set<SidebarTableMetadataField>(
-    DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS,
-  );
-  if (legacyShowSidebarTableComment) {
-    defaults.add('comment');
+  if (order !== undefined) {
+    return applySidebarTableMetadataFieldOrder(resolved, order);
   }
-  return orderSidebarTableMetadataFields(defaults);
+  return resolved;
 };
 
 export const setSidebarTableMetadataFieldSelected = (
   fields: SidebarTableMetadataField[],
   target: SidebarTableMetadataField,
   selected: boolean,
+  order?: SidebarTableMetadataField[],
 ): SidebarTableMetadataField[] => {
   const next = new Set(resolveSidebarTableMetadataFields(fields));
   if (selected) {
@@ -81,6 +121,8 @@ export const setSidebarTableMetadataFieldSelected = (
   } else {
     next.delete(target);
   }
-  return orderSidebarTableMetadataFields(next);
+  const nextFields = Array.from(next);
+  return order
+    ? applySidebarTableMetadataFieldOrder(nextFields, order)
+    : uniqueSidebarTableMetadataFieldsInInputOrder(nextFields);
 };
-

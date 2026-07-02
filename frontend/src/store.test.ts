@@ -132,10 +132,18 @@ describe('store appearance persistence', () => {
 
     useStore.getState().setQueryOptions({
       sidebarTableMetadataFields: ['size', 'updatedAt'],
+      sidebarTableMetadataFieldOrder: ['updatedAt', 'size', 'rows', 'comment', 'createdAt'],
     });
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
-    expect(persisted.state.queryOptions.sidebarTableMetadataFields).toEqual(['size', 'updatedAt']);
+    expect(persisted.state.queryOptions.sidebarTableMetadataFields).toEqual(['updatedAt', 'size']);
+    expect(persisted.state.queryOptions.sidebarTableMetadataFieldOrder).toEqual([
+      'updatedAt',
+      'size',
+      'rows',
+      'comment',
+      'createdAt',
+    ]);
     expect(persisted.state.queryOptions.showSidebarTableComment).toBe(false);
   });
 

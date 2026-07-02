@@ -106,53 +106,59 @@ export const buildSidebarTableMetadataDisplayItems = (
   snapshot: SidebarTableMetadataSnapshot,
 ): SidebarTableMetadataDisplayItem[] => {
   const items: SidebarTableMetadataDisplayItem[] = [];
-  if (metadataFields.includes('comment') && snapshot.tableComment) {
-    items.push({
-      key: 'comment',
-      text: snapshot.tableComment,
-      className: 'gn-v2-tree-table-comment',
-    });
-  }
-  if (metadataFields.includes('rows') && snapshot.rowCount !== undefined) {
-    const count = formatSidebarRowCount(snapshot.rowCount);
-    if (count) {
+  metadataFields.forEach((field) => {
+    if (field === 'comment' && snapshot.tableComment) {
       items.push({
-        key: 'rows',
-        text: t('sidebar.v2_table_group_menu.metadata_value.rows', { count }),
-        className: 'gn-v2-tree-count',
+        key: 'comment',
+        text: snapshot.tableComment,
+        className: 'gn-v2-tree-table-comment',
       });
+      return;
     }
-  }
-  if (metadataFields.includes('size') && snapshot.tableSize !== undefined) {
-    const size = formatSidebarTableSize(snapshot.tableSize);
-    if (size) {
-      items.push({
-        key: 'size',
-        text: t('sidebar.v2_table_group_menu.metadata_value.size', { size }),
-        className: 'gn-v2-tree-count',
-      });
+    if (field === 'rows' && snapshot.rowCount !== undefined) {
+      const count = formatSidebarRowCount(snapshot.rowCount);
+      if (count) {
+        items.push({
+          key: 'rows',
+          text: t('sidebar.v2_table_group_menu.metadata_value.rows', { count }),
+          className: 'gn-v2-tree-count',
+        });
+      }
+      return;
     }
-  }
-  if (metadataFields.includes('createdAt') && snapshot.createdAt) {
-    const time = formatSidebarTableTimestamp(snapshot.createdAt);
-    if (time) {
-      items.push({
-        key: 'createdAt',
-        text: t('sidebar.v2_table_group_menu.metadata_value.created_at', { time }),
-        className: 'gn-v2-tree-count',
-      });
+    if (field === 'size' && snapshot.tableSize !== undefined) {
+      const size = formatSidebarTableSize(snapshot.tableSize);
+      if (size) {
+        items.push({
+          key: 'size',
+          text: t('sidebar.v2_table_group_menu.metadata_value.size', { size }),
+          className: 'gn-v2-tree-count',
+        });
+      }
+      return;
     }
-  }
-  if (metadataFields.includes('updatedAt') && snapshot.updatedAt) {
-    const time = formatSidebarTableTimestamp(snapshot.updatedAt);
-    if (time) {
-      items.push({
-        key: 'updatedAt',
-        text: t('sidebar.v2_table_group_menu.metadata_value.updated_at', { time }),
-        className: 'gn-v2-tree-count',
-      });
+    if (field === 'createdAt' && snapshot.createdAt) {
+      const time = formatSidebarTableTimestamp(snapshot.createdAt);
+      if (time) {
+        items.push({
+          key: 'createdAt',
+          text: t('sidebar.v2_table_group_menu.metadata_value.created_at', { time }),
+          className: 'gn-v2-tree-count',
+        });
+      }
+      return;
     }
-  }
+    if (field === 'updatedAt' && snapshot.updatedAt) {
+      const time = formatSidebarTableTimestamp(snapshot.updatedAt);
+      if (time) {
+        items.push({
+          key: 'updatedAt',
+          text: t('sidebar.v2_table_group_menu.metadata_value.updated_at', { time }),
+          className: 'gn-v2-tree-count',
+        });
+      }
+    }
+  });
   return items;
 };
 

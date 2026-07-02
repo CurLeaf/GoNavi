@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applySidebarTableMetadataFieldOrder,
+  resolveSidebarTableMetadataFieldOrder,
   resolveSidebarTableMetadataFields,
   sanitizeSidebarTableMetadataFields,
   setSidebarTableMetadataFieldSelected,
@@ -17,11 +19,31 @@ describe('sidebarTableMetadata', () => {
 
   it('preserves an explicit empty metadata selection while filtering unknown fields', () => {
     expect(sanitizeSidebarTableMetadataFields([], [])).toEqual([]);
-    expect(sanitizeSidebarTableMetadataFields(['updatedAt', 'unknown', 'rows'], [])).toEqual(['rows', 'updatedAt']);
+    expect(sanitizeSidebarTableMetadataFields(['updatedAt', 'unknown', 'rows'], [])).toEqual(['updatedAt', 'rows']);
   });
 
-  it('toggles metadata fields in a canonical display order', () => {
+  it('toggles metadata fields while preserving the configured order', () => {
     expect(setSidebarTableMetadataFieldSelected(['rows'], 'size', true)).toEqual(['rows', 'size']);
     expect(setSidebarTableMetadataFieldSelected(['comment', 'rows', 'size'], 'comment', false)).toEqual(['rows', 'size']);
+    expect(setSidebarTableMetadataFieldSelected(
+      ['rows'],
+      'size',
+      true,
+      ['size', 'comment', 'rows', 'createdAt', 'updatedAt'],
+    )).toEqual(['size', 'rows']);
+  });
+
+  it('resolves a complete metadata field order and applies it to selected fields', () => {
+    expect(resolveSidebarTableMetadataFieldOrder(['updatedAt', 'rows', 'unknown', 'rows'])).toEqual([
+      'updatedAt',
+      'rows',
+      'comment',
+      'size',
+      'createdAt',
+    ]);
+    expect(applySidebarTableMetadataFieldOrder(
+      ['comment', 'rows', 'updatedAt'],
+      ['updatedAt', 'rows', 'comment', 'size', 'createdAt'],
+    )).toEqual(['updatedAt', 'rows', 'comment']);
   });
 });

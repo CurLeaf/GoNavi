@@ -31,6 +31,11 @@ describe('settings center layout', () => {
     expect(appSource).toContain("description: t('app.settings.sidebar_metadata.description')");
     expect(appSource).toContain("handleOpenSettingsCenterPane('preferences', 'sidebar-metadata')");
     expect(appSource).toContain("setSidebarTableMetadataFieldSelected(");
+    expect(appSource).toContain('DndContext');
+    expect(appSource).toContain('SortableContext');
+    expect(appSource).toContain('handleSidebarMetadataDragEnd');
+    expect(appSource).toContain('sidebarTableMetadataFieldOrder');
+    expect(appSource).toContain('data-sidebar-metadata-field={field}');
     expect(appSource).toContain("sidebarTableMetadataFields: DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS");
     expect(appSource).toContain("t('sidebar.v2_table_group_menu.display_table_rows')");
     expect(appSource).not.toContain("setIsLanguageModalOpen(true)");

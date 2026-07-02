@@ -88,6 +88,9 @@ import {
   sanitizeQueryEditorEditorHeightRatio,
 } from "./utils/queryEditorSplitLayout";
 import {
+  DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS,
+  applySidebarTableMetadataFieldOrder,
+  resolveSidebarTableMetadataFieldOrder,
   resolveSidebarTableMetadataFields,
   sanitizeSidebarTableMetadataFields,
   type SidebarTableMetadataField,
@@ -1281,6 +1284,7 @@ export interface QueryOptions {
   showColumnComment: boolean;
   showSidebarTableComment?: boolean;
   sidebarTableMetadataFields?: SidebarTableMetadataField[];
+  sidebarTableMetadataFieldOrder?: SidebarTableMetadataField[];
   showColumnType: boolean;
   showQueryResultsPanel: boolean;
   queryEditorEditorHeightRatio: number;
@@ -2059,7 +2063,14 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
   const sidebarTableMetadataFields = Array.isArray(raw.sidebarTableMetadataFields)
     ? sanitizeSidebarTableMetadataFields(raw.sidebarTableMetadataFields, [])
     : resolveSidebarTableMetadataFields(undefined, showSidebarTableComment);
-  const derivedShowSidebarTableComment = sidebarTableMetadataFields.includes("comment");
+  const sidebarTableMetadataFieldOrder = resolveSidebarTableMetadataFieldOrder(
+    raw.sidebarTableMetadataFieldOrder,
+  );
+  const orderedSidebarTableMetadataFields = applySidebarTableMetadataFieldOrder(
+    sidebarTableMetadataFields,
+    sidebarTableMetadataFieldOrder,
+  );
+  const derivedShowSidebarTableComment = orderedSidebarTableMetadataFields.includes("comment");
   const showColumnType =
     typeof raw.showColumnType === "boolean" ? raw.showColumnType : true;
   const showQueryResultsPanel =
@@ -2072,7 +2083,8 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
       maxRows: 5000,
       showColumnComment,
       showSidebarTableComment: derivedShowSidebarTableComment,
-      sidebarTableMetadataFields,
+      sidebarTableMetadataFields: orderedSidebarTableMetadataFields,
+      sidebarTableMetadataFieldOrder,
       showColumnType,
       showQueryResultsPanel,
       queryEditorEditorHeightRatio,
@@ -2082,7 +2094,8 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
     maxRows: Math.min(50000, Math.trunc(maxRows)),
     showColumnComment,
     showSidebarTableComment: derivedShowSidebarTableComment,
-    sidebarTableMetadataFields,
+    sidebarTableMetadataFields: orderedSidebarTableMetadataFields,
+    sidebarTableMetadataFieldOrder,
     showColumnType,
     showQueryResultsPanel,
     queryEditorEditorHeightRatio,
@@ -2520,6 +2533,7 @@ export const useStore = create<AppState>()(
         showColumnComment: true,
         showSidebarTableComment: false,
         sidebarTableMetadataFields: ["rows"],
+        sidebarTableMetadataFieldOrder: [...DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS],
         showColumnType: true,
         showQueryResultsPanel: false,
         queryEditorEditorHeightRatio: DEFAULT_QUERY_EDITOR_EDITOR_HEIGHT_RATIO,

@@ -1,7 +1,10 @@
 ﻿import Modal from './components/common/ResizableDraggableModal';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined } from '@ant-design/icons';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined } from '@ant-design/icons';
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { BrowserOpenURL, Environment, EventsOn, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetDarkTheme, WindowSetLightTheme, WindowSetPosition, WindowSetSize, WindowSetSystemDefaultTheme, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
@@ -74,6 +77,9 @@ import {
 import { DEFAULT_QUERY_TEMPLATE } from './components/queryEditor/QueryEditorHelpers';
 import {
   DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS,
+  SIDEBAR_TABLE_METADATA_FIELDS,
+  applySidebarTableMetadataFieldOrder,
+  resolveSidebarTableMetadataFieldOrder,
   resolveSidebarTableMetadataFields,
   setSidebarTableMetadataFieldSelected,
   type SidebarTableMetadataField,
@@ -239,6 +245,85 @@ const createClosedConnectionPackageDialogState = (): ConnectionPackageDialogStat
   confirmLoading: false,
 });
 
+type SidebarMetadataSortableRowProps = {
+  field: SidebarTableMetadataField;
+  label: string;
+  checked: boolean;
+  dividerColor: string;
+  titleColor: string;
+  mutedColor: string;
+  onToggle: (selected: boolean) => void;
+};
+
+const SidebarMetadataSortableRow: React.FC<SidebarMetadataSortableRowProps> = ({
+  field,
+  label,
+  checked,
+  dividerColor,
+  titleColor,
+  mutedColor,
+  onToggle,
+}) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: field });
+
+  return (
+    <div
+      ref={setNodeRef}
+      data-sidebar-metadata-field={field}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        paddingBottom: 12,
+        borderBottom: `1px solid ${dividerColor}`,
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.72 : 1,
+        position: 'relative',
+        zIndex: isDragging ? 2 : undefined,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+        <button
+          type="button"
+          aria-label={`Drag ${label}`}
+          {...attributes}
+          {...listeners}
+          style={{
+            width: 24,
+            height: 24,
+            border: 'none',
+            borderRadius: 8,
+            background: 'transparent',
+            color: mutedColor,
+            cursor: isDragging ? 'grabbing' : 'grab',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 0,
+            touchAction: 'none',
+          }}
+        >
+          <MenuOutlined />
+        </button>
+        <span style={{ fontWeight: 500, color: titleColor, minWidth: 0 }}>{label}</span>
+      </div>
+      <Switch
+        checked={checked}
+        onChange={(selected) => onToggle(selected)}
+      />
+    </div>
+  );
+};
+
 function App() {
   const { language, t } = useI18n();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -296,12 +381,22 @@ function App() {
   const effectiveSidebarRailScale = sanitizeV2SidebarRailScale(appearance.v2SidebarRailScale);
   const tableDoubleClickAction = appearance.tableDoubleClickAction === 'open-design' ? 'open-design' : 'open-data';
   const newQuerySqlTemplate = appearance.newQuerySqlTemplate ?? DEFAULT_QUERY_TEMPLATE;
+  const sidebarTableMetadataFieldOrder = useMemo(
+      () => resolveSidebarTableMetadataFieldOrder(queryOptions?.sidebarTableMetadataFieldOrder),
+      [queryOptions?.sidebarTableMetadataFieldOrder],
+  );
   const sidebarTableMetadataFields = useMemo(
       () => resolveSidebarTableMetadataFields(
           queryOptions?.sidebarTableMetadataFields,
           queryOptions?.showSidebarTableComment === true,
+          sidebarTableMetadataFieldOrder,
       ),
-      [queryOptions?.showSidebarTableComment, queryOptions?.sidebarTableMetadataFields],
+      [queryOptions?.showSidebarTableComment, queryOptions?.sidebarTableMetadataFields, sidebarTableMetadataFieldOrder],
+  );
+  const sidebarMetadataDragSensors = useSensors(
+      useSensor(PointerSensor, {
+          activationConstraint: { distance: 4 },
+      }),
   );
   const tabDisplaySettings = useMemo(
       () => sanitizeTabDisplaySettings(appearance.tabDisplay),
@@ -3119,22 +3214,50 @@ function App() {
       !fontFamiliesLoadError &&
       !isLinuxCJKFontBannerDismissed,
   );
-  const sidebarMetadataFieldItems: Array<{ field: SidebarTableMetadataField; label: string }> = [
-      { field: 'comment', label: t('sidebar.v2_table_group_menu.show_table_comments') },
-      { field: 'rows', label: t('sidebar.v2_table_group_menu.display_table_rows') },
-      { field: 'size', label: t('sidebar.v2_table_group_menu.display_table_size') },
-      { field: 'createdAt', label: t('sidebar.v2_table_group_menu.display_create_time') },
-      { field: 'updatedAt', label: t('sidebar.v2_table_group_menu.display_update_time') },
-  ];
+  const sidebarMetadataFieldItems = useMemo(() => {
+      const labelByField: Record<SidebarTableMetadataField, string> = {
+          comment: t('sidebar.v2_table_group_menu.show_table_comments'),
+          rows: t('sidebar.v2_table_group_menu.display_table_rows'),
+          size: t('sidebar.v2_table_group_menu.display_table_size'),
+          createdAt: t('sidebar.v2_table_group_menu.display_create_time'),
+          updatedAt: t('sidebar.v2_table_group_menu.display_update_time'),
+      };
+      return sidebarTableMetadataFieldOrder.map((field) => ({
+          field,
+          label: labelByField[field],
+      }));
+  }, [sidebarTableMetadataFieldOrder, t]);
   const toggleSidebarMetadataFieldFromSettings = useCallback((field: SidebarTableMetadataField, selected: boolean) => {
       setQueryOptions({
           sidebarTableMetadataFields: setSidebarTableMetadataFieldSelected(
               sidebarTableMetadataFields,
               field,
               selected,
+              sidebarTableMetadataFieldOrder,
           ),
       });
-  }, [setQueryOptions, sidebarTableMetadataFields]);
+  }, [setQueryOptions, sidebarTableMetadataFieldOrder, sidebarTableMetadataFields]);
+  const handleSidebarMetadataDragEnd = useCallback((event: DragEndEvent) => {
+      const activeField = String(event.active.id || '') as SidebarTableMetadataField;
+      const overField = String(event.over?.id || '') as SidebarTableMetadataField;
+      if (!overField || activeField === overField) {
+          return;
+      }
+      const currentOrder = sidebarMetadataFieldItems.map((item) => item.field);
+      const activeIndex = currentOrder.indexOf(activeField);
+      const overIndex = currentOrder.indexOf(overField);
+      if (activeIndex < 0 || overIndex < 0) {
+          return;
+      }
+      const nextOrder = arrayMove(currentOrder, activeIndex, overIndex);
+      setQueryOptions({
+          sidebarTableMetadataFieldOrder: nextOrder,
+          sidebarTableMetadataFields: applySidebarTableMetadataFieldOrder(
+              sidebarTableMetadataFields,
+              nextOrder,
+          ),
+      });
+  }, [setQueryOptions, sidebarMetadataFieldItems, sidebarTableMetadataFields]);
   const renderProxySettingsContent = useCallback(() => (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
           <div style={utilityPanelStyle}>
@@ -3210,36 +3333,41 @@ function App() {
               <div style={{ ...utilityMutedTextStyle, marginBottom: 14 }}>
                   {t('app.settings.sidebar_metadata.description')}
               </div>
-              <div style={{ display: 'grid', gap: 14 }}>
-                  {sidebarMetadataFieldItems.map((item) => {
-                      const checked = sidebarTableMetadataFields.includes(item.field);
-                      return (
-                          <div
-                              key={item.field}
-                              style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'space-between',
-                                  gap: 12,
-                                  paddingBottom: 12,
-                                  borderBottom: `1px solid ${overlayTheme.divider}`,
-                              }}
-                          >
-                              <span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{item.label}</span>
-                              <Switch
-                                  checked={checked}
-                                  onChange={(selected) => toggleSidebarMetadataFieldFromSettings(item.field, selected)}
-                              />
-                          </div>
-                      );
-                  })}
-              </div>
+              <DndContext
+                  sensors={sidebarMetadataDragSensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleSidebarMetadataDragEnd}
+              >
+                  <SortableContext
+                      items={sidebarMetadataFieldItems.map((item) => item.field)}
+                      strategy={verticalListSortingStrategy}
+                  >
+                      <div style={{ display: 'grid', gap: 14 }}>
+                          {sidebarMetadataFieldItems.map((item) => {
+                              const checked = sidebarTableMetadataFields.includes(item.field);
+                              return (
+                                  <SidebarMetadataSortableRow
+                                      key={item.field}
+                                      field={item.field}
+                                      label={item.label}
+                                      checked={checked}
+                                      dividerColor={overlayTheme.divider}
+                                      titleColor={overlayTheme.titleText}
+                                      mutedColor={utilityMutedTextStyle.color as string}
+                                      onToggle={(selected) => toggleSidebarMetadataFieldFromSettings(item.field, selected)}
+                                  />
+                              );
+                          })}
+                      </div>
+                  </SortableContext>
+              </DndContext>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <Button
                   onClick={() => {
                       setQueryOptions({
                           sidebarTableMetadataFields: DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS,
+                          sidebarTableMetadataFieldOrder: [...SIDEBAR_TABLE_METADATA_FIELDS],
                       });
                   }}
               >
@@ -3252,6 +3380,8 @@ function App() {
       overlayTheme.titleText,
       setQueryOptions,
       sidebarMetadataFieldItems,
+      sidebarMetadataDragSensors,
+      handleSidebarMetadataDragEnd,
       sidebarTableMetadataFields,
       t,
       toggleSidebarMetadataFieldFromSettings,
