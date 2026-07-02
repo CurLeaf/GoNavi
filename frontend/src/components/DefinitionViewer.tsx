@@ -898,6 +898,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         }),
     };
     const editorModelPath = `gonavi-definition://${encodeURIComponent(objectIdentityKey)}`;
+    const currentDefinition = loadedDefinitionKeyRef.current === objectIdentityKey ? String(definition || '') : '';
 
     const refreshEditorLayout = useCallback(() => {
         const editor = editorRef.current;
@@ -936,9 +937,52 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         editorRef.current = null;
     }, []);
 
+    const openObjectEditTab = useCallback((sourceDefinition: string) => {
+        const dbName = String(tab.dbName || '').trim();
+        const latestDefinition = String(sourceDefinition || '');
+        loadedDefinitionKeyRef.current = objectIdentityKey;
+        setDefinition(latestDefinition);
+        const query = buildEditableDefinitionSql(tab, latestDefinition, normalizedObjectName, editableDefinitionCopy);
+        setActiveContext({ connectionId: tab.connectionId, dbName });
+        addTab({
+            id: tab.id,
+            title: editTabTitle,
+            type: 'query',
+            connectionId: tab.connectionId,
+            dbName,
+            query,
+            queryMode: 'object-edit',
+            returnToTabId: undefined,
+            viewName: undefined,
+            viewKind: undefined,
+            eventName: undefined,
+            routineName: undefined,
+            routineType: undefined,
+            sequenceName: undefined,
+            packageName: undefined,
+            triggerName: undefined,
+            triggerTableName: undefined,
+            schemaName: undefined,
+            objectType: undefined,
+            tableName: undefined,
+            sidebarLocateKey: undefined,
+        });
+    }, [
+        addTab,
+        editTabTitle,
+        editableDefinitionCopy,
+        normalizedObjectName,
+        objectIdentityKey,
+        setActiveContext,
+        tab,
+    ]);
+
     const openObjectEditQuery = async () => {
         if (!normalizedObjectName || openingObjectEdit) return;
-        const dbName = String(tab.dbName || '').trim();
+        if (String(currentDefinition || '').trim()) {
+            openObjectEditTab(currentDefinition);
+            return;
+        }
         setOpeningObjectEdit(true);
         setError(null);
         try {
@@ -950,20 +994,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 setError(result.error || t('definition_viewer.error.query_failed'));
                 return;
             }
-            const latestDefinition = String(result.definition || '');
-            loadedDefinitionKeyRef.current = objectIdentityKey;
-            setDefinition(latestDefinition);
-            const query = buildEditableDefinitionSql(tab, latestDefinition, normalizedObjectName, editableDefinitionCopy);
-            setActiveContext({ connectionId: tab.connectionId, dbName });
-            addTab({
-                id: `query-edit-object-${tab.connectionId}-${dbName}-${Date.now()}`,
-                title: editTabTitle,
-                type: 'query',
-                connectionId: tab.connectionId,
-                dbName,
-                query,
-                queryMode: 'object-edit',
-            });
+            openObjectEditTab(String(result.definition || ''));
         } finally {
             if (isMountedRef.current) {
                 setOpeningObjectEdit(false);

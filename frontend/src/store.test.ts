@@ -1518,6 +1518,41 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().activeTabId).toBe('query-other');
   });
 
+  it('reuses the current tab when the same id is reopened as an object-edit query', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'routine-def-conn-1-main-reporting.refresh_stats',
+      title: '函数: reporting.refresh_stats',
+      type: 'routine-def',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      routineName: 'reporting.refresh_stats',
+      routineType: 'FUNCTION',
+    });
+
+    useStore.getState().addTab({
+      id: 'routine-def-conn-1-main-reporting.refresh_stats',
+      title: '修改函数/存储过程: reporting.refresh_stats',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      query: 'CREATE OR REPLACE FUNCTION reporting.refresh_stats() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql;',
+      queryMode: 'object-edit',
+    });
+
+    const { tabs, activeTabId } = useStore.getState();
+    expect(tabs).toHaveLength(1);
+    expect(activeTabId).toBe('routine-def-conn-1-main-reporting.refresh_stats');
+    expect(tabs[0]).toEqual(expect.objectContaining({
+      id: 'routine-def-conn-1-main-reporting.refresh_stats',
+      type: 'query',
+      queryMode: 'object-edit',
+      title: '修改函数/存储过程: reporting.refresh_stats',
+      query: expect.stringContaining('CREATE OR REPLACE FUNCTION reporting.refresh_stats()'),
+    }));
+  });
+
   it('reuses the same table-export tab for the same connection and table identity', async () => {
     const { useStore } = await importStore();
 

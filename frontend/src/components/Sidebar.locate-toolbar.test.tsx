@@ -753,6 +753,23 @@ describe('Sidebar locate toolbar', () => {
     expect(actionsSource).toContain('SHOW CREATE EVENT ${eventRef}');
   });
 
+  it('marks sidebar view and routine edits as object-edit query tabs', () => {
+    const actionsSource = readSourceFile('./sidebar/useSidebarObjectActions.tsx');
+    const viewEditSource = actionsSource.slice(
+      actionsSource.indexOf('const openEditView = async (node: any) => {'),
+      actionsSource.indexOf('const openCreateView = (node: any) => {'),
+    );
+    const routineEditSource = actionsSource.slice(
+      actionsSource.indexOf('const openEditRoutine = async (node: any) => {'),
+      actionsSource.indexOf('const openCreateRoutine = (node: any, type: \'FUNCTION\' | \'PROCEDURE\') => {'),
+    );
+
+    expect(viewEditSource).toContain("id: `query-edit-view-${Date.now()}`");
+    expect(viewEditSource).toContain("queryMode: 'object-edit'");
+    expect(routineEditSource).toContain("id: `query-edit-routine-${Date.now()}`");
+    expect(routineEditSource).toContain("queryMode: 'object-edit'");
+  });
+
   it('wires external SQL directory file actions to dedicated Wails APIs', () => {
     const source = readSidebarSource();
     const loadTablesSource = source.slice(

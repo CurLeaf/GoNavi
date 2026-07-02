@@ -124,6 +124,7 @@ describe('DefinitionViewer object edit entry', () => {
 
     expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'main' });
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'view-def-conn-1-main-reporting.active_users',
       title: 'Edit View: reporting.active_users',
       type: 'query',
       connectionId: 'conn-1',
@@ -187,6 +188,47 @@ describe('DefinitionViewer object edit entry', () => {
     });
 
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'routine-def-conn-1-main-reporting.refresh_stats',
+      title: 'Edit Function/procedure: reporting.refresh_stats',
+      type: 'query',
+      queryMode: 'object-edit',
+      query: expect.stringContaining('CREATE OR REPLACE FUNCTION reporting.refresh_stats()'),
+    }));
+  });
+
+  it('reuses the displayed routine definition when opening object edit without refetching', async () => {
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [{ routine_definition: 'CREATE OR REPLACE FUNCTION reporting.refresh_stats() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql;' }],
+    });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(renderWithI18n(createTab({
+        id: 'routine-def-conn-1-main-reporting.refresh_stats',
+        title: '函数: reporting.refresh_stats',
+        type: 'routine-def',
+        routineName: 'reporting.refresh_stats',
+        routineType: 'FUNCTION',
+        viewName: undefined,
+        viewKind: undefined,
+      })));
+      await flushPromises();
+    });
+
+    backendApp.DBQuery.mockClear();
+    backendApp.DBQuery.mockImplementation(() => new Promise(() => undefined));
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
+
+    await act(async () => {
+      button.props.onClick();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQuery).not.toHaveBeenCalled();
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'routine-def-conn-1-main-reporting.refresh_stats',
       title: 'Edit Function/procedure: reporting.refresh_stats',
       type: 'query',
       queryMode: 'object-edit',
@@ -225,6 +267,7 @@ describe('DefinitionViewer object edit entry', () => {
 
     const query = storeState.addTab.mock.calls[0][0].query;
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'event-def-conn-1-main-daily_cleanup',
       title: 'Edit Event: daily_cleanup',
       type: 'query',
       queryMode: 'object-edit',
@@ -377,6 +420,7 @@ describe('DefinitionViewer object edit entry', () => {
     });
 
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'sequence-def-conn-1-H2-H2.HWMS_PACK_SEQNO',
       type: 'query',
       queryMode: 'object-edit',
       query: expect.stringContaining('CREATE SEQUENCE H2.HWMS_PACK_SEQNO'),
@@ -427,27 +471,6 @@ describe('DefinitionViewer object edit entry', () => {
     expect(editorText).toContain('PACKAGE BODY pkg_order AS');
     expect(editorText).toContain('NULL;');
 
-    backendApp.DBQuery
-      .mockResolvedValueOnce({
-        success: true,
-        data: [
-          { TEXT: 'PACKAGE pkg_order AS\n' },
-          { TEXT: '  PROCEDURE sync_order(p_id IN NUMBER);\n' },
-          { TEXT: 'END pkg_order;\n' },
-        ],
-      })
-      .mockResolvedValueOnce({
-        success: true,
-        data: [
-          { TEXT: 'PACKAGE BODY pkg_order AS\n' },
-          { TEXT: '  PROCEDURE sync_order(p_id IN NUMBER) IS\n' },
-          { TEXT: '  BEGIN\n' },
-          { TEXT: '    NULL;\n' },
-          { TEXT: '  END sync_order;\n' },
-          { TEXT: 'END pkg_order;\n' },
-        ],
-      });
-
     const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
     await act(async () => {
       await button.props.onClick();
@@ -457,7 +480,7 @@ describe('DefinitionViewer object edit entry', () => {
     const editQuery = String(storeState.addTab.mock.calls[0][0].query || '');
     expect(editQuery).toContain('CREATE OR REPLACE PACKAGE pkg_order AS');
     expect(editQuery).toContain('/\nCREATE OR REPLACE PACKAGE BODY pkg_order AS');
-    expect(editQuery).toContain('END sync_order;');
+    expect(editQuery).toContain('END pkg_order;');
   });
 
   it('keeps Oracle routine SQLPlus slash delimiters executable when opening object edit', async () => {
@@ -509,7 +532,7 @@ describe('DefinitionViewer object edit entry', () => {
     expect(editQuery).not.toContain('/;');
   });
 
-  it('reloads the latest object definition before opening object edit', async () => {
+  it('uses the currently displayed object definition before opening object edit', async () => {
     backendApp.DBQuery
       .mockResolvedValueOnce({
         success: true,
@@ -533,16 +556,16 @@ describe('DefinitionViewer object edit entry', () => {
       await flushPromises();
     });
 
-    expect(backendApp.DBQuery).toHaveBeenCalledTimes(2);
+    expect(backendApp.DBQuery).toHaveBeenCalledTimes(1);
     const query = storeState.addTab.mock.calls[0][0].query;
-    expect(query).toContain('SELECT id, name, updated_at FROM users;');
-    expect(query).not.toContain('SELECT id FROM users;');
+    expect(query).toContain('SELECT id FROM users;');
+    expect(query).not.toContain('SELECT id, name, updated_at FROM users;');
 
     const editor = renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0];
-    expect(String(editor.children.join(''))).toContain('SELECT id, name, updated_at FROM users');
+    expect(String(editor.children.join(''))).toContain('SELECT id FROM users');
   });
 
-  it('keeps the current definition visible when refresh for object edit fails', async () => {
+  it('opens object edit from the current definition even if a later refresh would fail', async () => {
     backendApp.DBQuery
       .mockResolvedValueOnce({
         success: true,
@@ -567,10 +590,15 @@ describe('DefinitionViewer object edit entry', () => {
       await flushPromises();
     });
 
-    expect(storeState.addTab).not.toHaveBeenCalled();
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'view-def-conn-1-main-reporting.active_users',
+      type: 'query',
+      queryMode: 'object-edit',
+      query: expect.stringContaining('SELECT id, name FROM users;'),
+    }));
     expect(String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''))).toContain('SELECT id, name FROM users');
-    expect(findButtonText(renderer.root)).toContain('Failed to refresh the latest definition');
-    expect(findButtonText(renderer.root)).toContain('network down');
+    expect(findButtonText(renderer.root)).not.toContain('Failed to refresh the latest definition');
+    expect(findButtonText(renderer.root)).not.toContain('network down');
   });
 
   it('does not keep the previous object definition when switching objects and the new load fails', async () => {
