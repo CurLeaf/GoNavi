@@ -2244,8 +2244,8 @@ describe("i18n catalog", () => {
       ),
       sliceBetween(
         source,
-        "  useEffect(() => {\n      if (insertSqlSnippetActionRef.current) {",
-        "  useEffect(() => {\n      if (runQueryActionRef.current) {",
+        "  const registerInsertSqlSnippetContextMenuAction = useCallback((editor: any) => {",
+        "  // SQL 诊断 / 慢 SQL 历史的快捷键监听（必须在 binding 声明之后）",
       ),
       sliceBetween(
         source,

@@ -178,7 +178,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
   const aiMenuItems: MenuProps["items"] = [
     {
       key: "ai-generate",
-      label: t("query_editor.action.ai_generate_sql_menu"),
+      label: t("query_editor.action.ai_text_to_sql_menu"),
       icon: <RobotOutlined />,
       onClick: () => onAIAction("generate"),
     },

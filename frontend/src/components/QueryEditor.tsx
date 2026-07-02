@@ -1,7 +1,7 @@
 import Modal from './common/ResizableDraggableModal';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Editor, { type OnMount } from './MonacoEditor';
-import { message, Input, Form, MenuProps, Button } from 'antd';
+import { message, Input, Form, MenuProps, Button, Segmented } from 'antd';
 import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition, type SqlSnippet } from '../types';
@@ -142,6 +142,15 @@ import {
     splitQueryIdentifierPathSegments,
     stripCompletionIdentifierQuotes,
 } from './queryEditor/QueryEditorHelpers';
+import {
+    getQueryEditorAiService,
+    requestQueryEditorInlineCompletion,
+    requestQueryEditorTextToSql,
+    shouldRequestQueryEditorInlineCompletion,
+    type QueryEditorAiApplyMode,
+    type QueryEditorAiContext,
+    type QueryEditorAiEditorSnapshot,
+} from './queryEditor/QueryEditorAiAssist';
 export {
     collectQueryEditorObjectDecorationCandidates,
     resolveQueryEditorNavigationDecorations,
@@ -169,6 +178,13 @@ const buildQueryEditorMonacoOptions = (isObjectEditQueryTab: boolean) => ({
     scrollBeyondLastLine: false,
     quickSuggestions: { other: true, comments: false, strings: false },
     suggestOnTriggerCharacters: true,
+    inlineSuggest: {
+        enabled: true,
+        mode: 'prefix' as const,
+        showToolbar: 'onHover' as const,
+        suppressSuggestions: false,
+        minShowDelay: 160,
+    },
     ...(isObjectEditQueryTab
         ? {
             fontSize: 14,
@@ -731,7 +747,7 @@ const buildQueryEditorAiContextPrompt = (connection: any, database: string): str
 
 // HMR 重载时释放旧注册避免补全和 hover 内容重复
 const _g = globalThis as any;
-const SQL_COMPLETION_PROVIDER_VERSION = '20260612-cursor-stable-completion-v1';
+const SQL_COMPLETION_PROVIDER_VERSION = '20260702-ai-inline-sql-v1';
 if (!_g.__gonaviSqlCompletionState) {
     _g.__gonaviSqlCompletionState = { registered: false, version: '', disposables: [] as any[] };
 }
@@ -756,6 +772,8 @@ let sharedRoutinesData: CompletionRoutineMeta[] = [];
 let sharedSequencesData: CompletionSequenceMeta[] = [];
 let sharedPackagesData: CompletionPackageMeta[] = [];
 let sharedColumnsCacheData: Record<string, any[]> = {};
+let sharedActiveEditorModelUri = '';
+let sharedAiInlineCompletionRequestSeq = 0;
 const sharedLazyTablesCache: Record<string, CompletionTableMeta[] | undefined> = {};
 const sharedLazyTablesInFlight: Record<string, Promise<CompletionTableMeta[]> | undefined> = {};
 const createEmptySqlCompletionResult = () => ({ suggestions: [] as any[] });
@@ -895,6 +913,7 @@ const resetSharedQueryEditorMetadata = () => {
     sharedSequencesData = [];
     sharedPackagesData = [];
     sharedColumnsCacheData = {};
+    sharedActiveEditorModelUri = '';
     clearRecord(sharedLazyTablesCache);
     clearRecord(sharedLazyTablesInFlight);
 };
@@ -933,6 +952,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const [currentConnectionId, setCurrentConnectionId] = useState<string>(tab.connectionId);
   const [currentDb, setCurrentDb] = useState<string>(tab.dbName || '');
   const [dbList, setDbList] = useState<string[]>([]);
+  const [isTextToSqlModalOpen, setIsTextToSqlModalOpen] = useState(false);
+  const [textToSqlInstruction, setTextToSqlInstruction] = useState('');
+  const [textToSqlApplyMode, setTextToSqlApplyMode] = useState<QueryEditorAiApplyMode>('insert');
+  const [textToSqlGenerating, setTextToSqlGenerating] = useState(false);
 
   // Resizing state
   const [editorHeight, setEditorHeight] = useState(300);
@@ -1412,6 +1435,46 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return query || '';
   }, [query]);
 
+  const buildQueryEditorAiEditorSnapshot = useCallback((): QueryEditorAiEditorSnapshot => {
+      const editor = editorRef.current;
+      const model = editor?.getModel?.();
+      const position = normalizeEditorPosition(editor?.getPosition?.());
+      const value = String(model?.getValue?.() ?? getCurrentQuery() ?? '');
+      if (!model || !position || typeof model.getOffsetAt !== 'function') {
+          return {
+              prefix: value,
+              suffix: '',
+              currentLineBeforeCursor: value.split(/\r?\n/).pop() || '',
+              currentLineAfterCursor: '',
+          };
+      }
+
+      const offset = Number(model.getOffsetAt(position));
+      const safeOffset = Number.isFinite(offset)
+          ? Math.max(0, Math.min(offset, value.length))
+          : value.length;
+      const lineContent = String(model.getLineContent?.(position.lineNumber) || '');
+      const lineColumnIndex = Math.max(0, Math.min(position.column - 1, lineContent.length));
+      return {
+          prefix: value.slice(0, safeOffset),
+          suffix: value.slice(safeOffset),
+          currentLineBeforeCursor: lineContent.slice(0, lineColumnIndex),
+          currentLineAfterCursor: lineContent.slice(lineColumnIndex),
+      };
+  }, [getCurrentQuery]);
+
+  const buildQueryEditorAiContext = useCallback((): QueryEditorAiContext => {
+      const conn = connectionsRef.current.find(c => c.id === currentConnectionIdRef.current);
+      return {
+          connectionName: conn?.name,
+          sourceType: conn?.config?.type,
+          currentDb: currentDbRef.current,
+          visibleDbs: visibleDbsRef.current,
+          tables: tablesRef.current,
+          columns: allColumnsRef.current,
+      };
+  }, []);
+
   useEffect(() => {
       if (!isExternalSQLFileTab) return;
       persistQueryTabDraftSnapshot(draftSnapshotTab, getCurrentQuery(), {
@@ -1443,6 +1506,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       sharedSequencesData = sequencesRef.current;
       sharedPackagesData = packagesRef.current;
       sharedColumnsCacheData = columnsCacheRef.current;
+      sharedActiveEditorModelUri = String(editorRef.current?.getModel?.()?.uri?.toString?.() || '');
   }, [isActive, currentDb, currentConnectionId, connections]);
 
   useEffect(() => {
@@ -1867,6 +1931,119 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           editor.setValue(next);
       }
   };
+
+  const openTextToSqlModal = useCallback(() => {
+      const editor = editorRef.current;
+      const selection = editor?.getSelection?.();
+      const selectedText = selection ? String(editor?.getModel?.()?.getValueInRange?.(selection) || '') : '';
+      setTextToSqlApplyMode(selectedText.trim() ? 'replaceSelection' : 'insert');
+      setIsTextToSqlModalOpen(true);
+  }, []);
+
+  const applyTextToSqlResult = useCallback((sql: string, applyMode: QueryEditorAiApplyMode) => {
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      const model = editor?.getModel?.();
+      const nextSql = String(sql || '').trim();
+      if (!nextSql) {
+          return false;
+      }
+      if (!editor || !monaco?.Range || !model) {
+          syncQueryToEditor(nextSql);
+          refreshObjectDecorations();
+          return true;
+      }
+
+      const selection = editor.getSelection?.();
+      const hasSelection = !!selection && !(typeof selection.isEmpty === 'function'
+          ? selection.isEmpty()
+          : selection.startLineNumber === selection.endLineNumber && selection.startColumn === selection.endColumn);
+      const lineCount = Number(model.getLineCount?.() || 1);
+      const range = applyMode === 'replaceAll'
+          ? (
+              model.getFullModelRange?.()
+              || new monaco.Range(1, 1, lineCount, Number(model.getLineMaxColumn?.(lineCount) || 1))
+          )
+          : applyMode === 'replaceSelection' && hasSelection
+              ? selection
+              : (() => {
+                  const position = normalizeEditorPosition(editor.getPosition?.())
+                      || normalizeEditorPosition(lastEditorCursorPositionRef.current)
+                      || { lineNumber: lineCount, column: Number(model.getLineMaxColumn?.(lineCount) || 1) };
+                  return new monaco.Range(
+                      position.lineNumber,
+                      position.column,
+                      position.lineNumber,
+                      position.column,
+                  );
+              })();
+
+      editor.focus?.();
+      editor.pushUndoStop?.();
+      editor.executeEdits?.('gonavi-text-to-sql', [{
+          range,
+          text: nextSql,
+          forceMoveMarkers: true,
+      }]);
+      editor.pushUndoStop?.();
+      const nextValue = String(editor.getValue?.() || nextSql);
+      applyQueryState(nextValue);
+      refreshObjectDecorations();
+      return true;
+  }, [applyQueryState, refreshObjectDecorations]);
+
+  const showTextToSqlReadinessWarning = useCallback((reason?: string) => {
+      const key = reason === 'service_unavailable'
+          ? 'query_editor.message.ai_service_unavailable'
+          : reason === 'model_missing'
+              ? 'query_editor.message.ai_model_missing'
+              : 'query_editor.message.ai_provider_missing';
+      void message.warning(translate(key));
+  }, []);
+
+  const handleGenerateTextToSql = useCallback(async () => {
+      const instruction = textToSqlInstruction.trim();
+      if (!instruction) {
+          void message.warning(translate('query_editor.message.text_to_sql_empty_instruction'));
+          return;
+      }
+
+      setTextToSqlGenerating(true);
+      try {
+          const { sql, readiness } = await requestQueryEditorTextToSql({
+              service: getQueryEditorAiService(),
+              aiContext: buildQueryEditorAiContext(),
+              editorSnapshot: buildQueryEditorAiEditorSnapshot(),
+              instruction,
+          });
+          if (!readiness.ready) {
+              showTextToSqlReadinessWarning(readiness.reason);
+              return;
+          }
+          if (!sql.trim()) {
+              void message.warning(translate('query_editor.message.text_to_sql_empty_result'));
+              return;
+          }
+          if (applyTextToSqlResult(sql, textToSqlApplyMode)) {
+              setIsTextToSqlModalOpen(false);
+              setTextToSqlInstruction('');
+              void message.success(translate('query_editor.message.text_to_sql_success'));
+          }
+      } catch (error: any) {
+          void message.error(translate('query_editor.message.text_to_sql_failed', {
+              error: error?.message || String(error || ''),
+          }));
+      } finally {
+          setTextToSqlGenerating(false);
+      }
+  }, [
+      applyTextToSqlResult,
+      buildQueryEditorAiContext,
+      buildQueryEditorAiEditorSnapshot,
+      showTextToSqlReadinessWarning,
+      textToSqlApplyMode,
+      textToSqlInstruction,
+  ]);
 
   // If opening a saved query, load its SQL
   useEffect(() => {
@@ -2692,8 +2869,20 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           };
       }
       lastEditorCursorPositionRef.current = normalizeEditorPosition(editor.getPosition?.());
+      if (isActive) {
+          sharedActiveEditorModelUri = String(editor.getModel?.()?.uri?.toString?.() || '');
+      }
 
       editor.updateOptions?.(buildQueryEditorMonacoOptions(isObjectEditQueryTab));
+      if (monaco?.KeyCode?.RightArrow) {
+          editor.addCommand?.(
+              monaco.KeyCode.RightArrow,
+              () => {
+                  void editor.getAction?.('editor.action.inlineSuggest.commit')?.run?.();
+              },
+              'inlineSuggestionVisible',
+          );
+      }
 
       const applyNavigationHoverStateAtPosition = (targetPosition: { lineNumber: number; column: number } | null) => {
           if (!ctrlMetaPressedRef.current) {
@@ -3074,6 +3263,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           setQueryEditorMouseCursor(editor, '');
           objectHoverActionRef.current?.dispose?.();
           objectHoverActionRef.current = null;
+          const disposedModelUri = String(editor.getModel?.()?.uri?.toString?.() || '');
+          if (disposedModelUri && sharedActiveEditorModelUri === disposedModelUri) {
+              sharedActiveEditorModelUri = '';
+          }
           disposeQueryEditorAiContextMenuActions();
           window.removeEventListener('keydown', syncModifierState);
           window.removeEventListener('keyup', syncModifierState);
@@ -4033,6 +4226,87 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           },
       }));
 
+      if (typeof monaco.languages.registerInlineCompletionsProvider === 'function') {
+          sqlCompletionDisposables.push(monaco.languages.registerInlineCompletionsProvider('sql', {
+              groupId: 'gonavi-query-editor-ai',
+              displayName: 'GoNavi AI SQL',
+              debounceDelayMs: 650,
+              provideInlineCompletions: async (model: any, position: any, context: any, token: any) => {
+                  if (context?.includeInlineCompletions === false || token?.isCancellationRequested) {
+                      return { items: [] };
+                  }
+
+                  const modelUri = String(model?.uri?.toString?.() || '');
+                  if (!modelUri || modelUri !== sharedActiveEditorModelUri) {
+                      return { items: [] };
+                  }
+
+                  const lineContent = String(model.getLineContent?.(position.lineNumber) || '');
+                  const lineColumnIndex = Math.max(0, Math.min(Number(position.column || 1) - 1, lineContent.length));
+                  const lineCount = Number(model.getLineCount?.() || position.lineNumber || 1);
+                  const prefixRange = new monaco.Range(1, 1, position.lineNumber, position.column);
+                  const suffixRange = new monaco.Range(
+                      position.lineNumber,
+                      position.column,
+                      lineCount,
+                      Number(model.getLineMaxColumn?.(lineCount) || position.column),
+                  );
+                  const editorSnapshot = {
+                      prefix: String(model.getValueInRange?.(prefixRange) || ''),
+                      suffix: String(model.getValueInRange?.(suffixRange) || ''),
+                      currentLineBeforeCursor: lineContent.slice(0, lineColumnIndex),
+                      currentLineAfterCursor: lineContent.slice(lineColumnIndex),
+                  };
+                  if (!shouldRequestQueryEditorInlineCompletion(editorSnapshot)) {
+                      return { items: [] };
+                  }
+
+                  const versionId = Number(model.getVersionId?.() || 0);
+                  const requestId = ++sharedAiInlineCompletionRequestSeq;
+                  try {
+                      const insertText = await requestQueryEditorInlineCompletion({
+                          service: getQueryEditorAiService(),
+                          aiContext: {
+                              connectionName: sharedConnections.find(c => c.id === sharedCurrentConnectionId)?.name,
+                              sourceType: sharedConnections.find(c => c.id === sharedCurrentConnectionId)?.config?.type,
+                              currentDb: sharedCurrentDb,
+                              visibleDbs: sharedVisibleDbs,
+                              tables: sharedTablesData,
+                              columns: sharedAllColumnsData,
+                          },
+                          editorSnapshot,
+                      });
+                      if (
+                          token?.isCancellationRequested
+                          || requestId !== sharedAiInlineCompletionRequestSeq
+                          || (versionId && Number(model.getVersionId?.() || 0) !== versionId)
+                          || !insertText.trim()
+                      ) {
+                          return { items: [] };
+                      }
+
+                      return {
+                          items: [{
+                              insertText,
+                              range: new monaco.Range(
+                                  position.lineNumber,
+                                  position.column,
+                                  position.lineNumber,
+                                  position.column,
+                              ),
+                          }],
+                          suppressSuggestions: false,
+                          enableForwardStability: true,
+                      };
+                  } catch (error) {
+                      console.warn('GoNavi AI inline SQL completion failed', error);
+                      return { items: [] };
+                  }
+              },
+              disposeInlineCompletions: () => {},
+          }));
+      }
+
       } // end sqlCompletionRegistered guard
 
       // 每个编辑器实例都注册内容变化监听（检测斜杠命令标记）
@@ -4164,6 +4438,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   };
 
   const handleAIAction = (action: 'generate' | 'explain' | 'optimize' | 'schema') => {
+      if (action === 'generate') {
+          openTextToSqlModal();
+          return;
+      }
+
       const editor = editorRef.current;
       const selection = editor?.getModel()?.getValueInRange(editor.getSelection()) || '';
       const fullSQL = getCurrentQuery();
@@ -6378,6 +6657,77 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           onDiagnoseExecutionError={handleDiagnoseExecutionError}
         />
       )}
+
+      <Modal
+        title={translate('query_editor.text_to_sql.title')}
+        open={isTextToSqlModalOpen}
+        centered
+        mask={false}
+        maskClosable={!textToSqlGenerating}
+        width={640}
+        draggable
+        resizable
+        minResizableWidth={480}
+        minResizableHeight={320}
+        onCancel={() => {
+          if (!textToSqlGenerating) {
+            setIsTextToSqlModalOpen(false);
+          }
+        }}
+        footer={[
+          <Button key="cancel" disabled={textToSqlGenerating} onClick={() => setIsTextToSqlModalOpen(false)}>
+            {translate('common.cancel')}
+          </Button>,
+          <Button key="generate" type="primary" loading={textToSqlGenerating} onClick={handleGenerateTextToSql}>
+            {translate('query_editor.text_to_sql.generate')}
+          </Button>,
+        ]}
+        styles={{
+          content: {
+            borderRadius: 16,
+            border: darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(15,23,42,0.12)',
+            background: darkMode ? 'rgba(18,18,20,0.98)' : 'rgba(255,255,255,0.98)',
+            boxShadow: darkMode ? '0 24px 60px rgba(0,0,0,0.45)' : '0 24px 60px rgba(15,23,42,0.16)',
+            backdropFilter: 'blur(12px)',
+          },
+          header: {
+            background: 'transparent',
+            borderBottom: 'none',
+            paddingBottom: 8,
+          },
+          body: {
+            paddingTop: 8,
+            paddingBottom: 16,
+          },
+        }}
+      >
+        <div
+          data-query-editor-text-to-sql-modal="true"
+          style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
+        >
+          <div style={{ fontSize: 12, lineHeight: 1.6, color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(16,24,40,0.6)' }}>
+            {translate('query_editor.text_to_sql.description')}
+          </div>
+          <Input.TextArea
+            autoFocus
+            value={textToSqlInstruction}
+            onChange={(event) => setTextToSqlInstruction(event.target.value)}
+            placeholder={translate('query_editor.text_to_sql.placeholder')}
+            autoSize={{ minRows: 5, maxRows: 10 }}
+            disabled={textToSqlGenerating}
+          />
+          <Segmented
+            value={textToSqlApplyMode}
+            onChange={(value) => setTextToSqlApplyMode(value as QueryEditorAiApplyMode)}
+            disabled={textToSqlGenerating}
+            options={[
+              { label: translate('query_editor.text_to_sql.mode.insert'), value: 'insert' },
+              { label: translate('query_editor.text_to_sql.mode.replace_selection'), value: 'replaceSelection' },
+              { label: translate('query_editor.text_to_sql.mode.replace_all'), value: 'replaceAll' },
+            ]}
+          />
+        </div>
+      </Modal>
 
       <Modal
         title={translate('query_editor.snippet_picker.title')}
