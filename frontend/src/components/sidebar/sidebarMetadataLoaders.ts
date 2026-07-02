@@ -315,13 +315,11 @@ const buildSidebarTableStatusSQL = (
       const owner = escapeSQLLiteral(dbName).toUpperCase();
       return [
         "SELECT c.owner AS schema_name, c.table_name, c.comments AS table_comment, t.num_rows AS table_rows,",
-        "COALESCE(SUM(s.bytes), 0) AS table_size, o.created AS create_time, o.last_ddl_time AS update_time",
+        "COALESCE(t.blocks, 0) * 8192 AS table_size, o.created AS create_time, o.last_ddl_time AS update_time",
         "FROM all_tab_comments c",
         "JOIN all_tables t ON t.owner = c.owner AND t.table_name = c.table_name",
         "LEFT JOIN all_objects o ON o.owner = t.owner AND o.object_name = t.table_name AND o.object_type = 'TABLE'",
-        "LEFT JOIN all_segments s ON s.owner = t.owner AND s.segment_name = t.table_name AND s.segment_type = 'TABLE'",
         `WHERE c.owner = '${owner}'`,
-        "GROUP BY c.owner, c.table_name, c.comments, t.num_rows, o.created, o.last_ddl_time",
         "ORDER BY c.table_name",
       ].join("\n");
     }

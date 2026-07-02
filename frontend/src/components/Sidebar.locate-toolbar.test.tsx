@@ -3131,7 +3131,9 @@ describe('Sidebar locate toolbar', () => {
     expect(sqlServerSql).toContain('ep.value AS table_comment');
     expect(sqlServerSql).toContain('t.create_date AS create_time');
     expect(oracleSql).toContain('comments AS table_comment');
+    expect(oracleSql).toContain('COALESCE(t.blocks, 0) * 8192 AS table_size');
     expect(oracleSql).toContain('o.last_ddl_time AS update_time');
+    expect(oracleSql).not.toContain('all_segments');
 
     const loaderSource = readSourceFile('./sidebar/useSidebarTreeLoaders.tsx');
     expect(loaderSource).toContain('tableMetadataMap');
