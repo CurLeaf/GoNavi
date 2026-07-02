@@ -116,6 +116,29 @@ describe('store appearance persistence', () => {
     expect(appearance.v2SidebarRailScale).toBe(1.55);
   });
 
+  it('migrates legacy sidebar table comment settings into metadata fields and persists explicit selections', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        queryOptions: {
+          showSidebarTableComment: true,
+        },
+      },
+      version: 13,
+    }));
+
+    const { useStore } = await importStore();
+    expect(useStore.getState().queryOptions.sidebarTableMetadataFields).toEqual(['comment', 'rows']);
+    expect(useStore.getState().queryOptions.showSidebarTableComment).toBe(true);
+
+    useStore.getState().setQueryOptions({
+      sidebarTableMetadataFields: ['size', 'updatedAt'],
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.queryOptions.sidebarTableMetadataFields).toEqual(['size', 'updatedAt']);
+    expect(persisted.state.queryOptions.showSidebarTableComment).toBe(false);
+  });
+
   it('restores query tabs from crash-recovery snapshots even when persisted tabs are missing', async () => {
     storage.setItem('gonavi-query-tab-drafts-v1', JSON.stringify([
       {

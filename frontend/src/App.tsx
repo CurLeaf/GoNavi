@@ -1,7 +1,7 @@
 ﻿import Modal from './components/common/ResizableDraggableModal';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined } from '@ant-design/icons';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined } from '@ant-design/icons';
 import { BrowserOpenURL, Environment, EventsOn, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetDarkTheme, WindowSetLightTheme, WindowSetPosition, WindowSetSize, WindowSetSystemDefaultTheme, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
@@ -72,6 +72,12 @@ import {
   stripLegacyPersistedConnectionById,
 } from './utils/legacyConnectionStorage';
 import { DEFAULT_QUERY_TEMPLATE } from './components/queryEditor/QueryEditorHelpers';
+import {
+  DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS,
+  resolveSidebarTableMetadataFields,
+  setSidebarTableMetadataFieldSelected,
+  type SidebarTableMetadataField,
+} from './utils/sidebarTableMetadata';
 import {
   getSecurityUpdateStatusMeta,
   resolveSecurityUpdateEntryVisibility,
@@ -206,6 +212,13 @@ type ToolCenterPaneState = {
   group: ToolCenterGroupKey;
 };
 
+type SettingsCenterGroupKey = 'preferences' | 'services' | 'about';
+type SettingsCenterPaneKey = 'language' | 'sidebar-metadata' | 'proxy';
+type SettingsCenterPaneState = {
+  key: SettingsCenterPaneKey;
+  group: SettingsCenterGroupKey;
+};
+
 type ConnectionPackageDialogState = {
   open: boolean;
   mode: ConnectionPackageDialogMode;
@@ -253,6 +266,8 @@ function App() {
   const replaceConnections = useStore(state => state.replaceConnections);
   const replaceGlobalProxy = useStore(state => state.replaceGlobalProxy);
   const replaceSavedQueries = useStore(state => state.replaceSavedQueries);
+  const queryOptions = useStore(state => state.queryOptions);
+  const setQueryOptions = useStore(state => state.setQueryOptions);
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const updateShortcut = useStore(state => state.updateShortcut);
   const resetShortcutOptions = useStore(state => state.resetShortcutOptions);
@@ -281,6 +296,13 @@ function App() {
   const effectiveSidebarRailScale = sanitizeV2SidebarRailScale(appearance.v2SidebarRailScale);
   const tableDoubleClickAction = appearance.tableDoubleClickAction === 'open-design' ? 'open-design' : 'open-data';
   const newQuerySqlTemplate = appearance.newQuerySqlTemplate ?? DEFAULT_QUERY_TEMPLATE;
+  const sidebarTableMetadataFields = useMemo(
+      () => resolveSidebarTableMetadataFields(
+          queryOptions?.sidebarTableMetadataFields,
+          queryOptions?.showSidebarTableComment === true,
+      ),
+      [queryOptions?.showSidebarTableComment, queryOptions?.sidebarTableMetadataFields],
+  );
   const tabDisplaySettings = useMemo(
       () => sanitizeTabDisplaySettings(appearance.tabDisplay),
       [appearance.tabDisplay],
@@ -1303,7 +1325,7 @@ function App() {
       toolCenterContentPanelStyle, toolCenterDetailBodyStyle, toolCenterDetailPanelStyle,
       toolCenterModalContentStyle, toolCenterModalSplitStyle, toolCenterModalWorkspaceStyle,
       toolCenterNavPanelStyle, toolCenterNavScrollStyle, toolCenterRowDescriptionStyle, toolCenterRowStyle,
-      toolCenterScrollableListStyle, utilityActionCardStyle, utilityActionHintStyle, utilityButtonStyle,
+      toolCenterScrollableListStyle, utilityButtonStyle,
       utilityModalShellStyle, utilityMutedTextStyle, utilityPanelStyle,
   } = useAppUtilityStyles({
       blurFilter,
@@ -2128,7 +2150,8 @@ function App() {
   const [toolCenterBackGroupKey, setToolCenterBackGroupKey] = useState<ToolCenterGroupKey | null>(null);
   const [activeToolCenterPane, setActiveToolCenterPane] = useState<ToolCenterPaneState | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [isLanguageModalOpen, setIsLanguageModalOpen] = useState(false);
+  const [activeSettingsCenterGroupKey, setActiveSettingsCenterGroupKey] = useState<SettingsCenterGroupKey>('preferences');
+  const [activeSettingsCenterPane, setActiveSettingsCenterPane] = useState<SettingsCenterPaneState | null>(null);
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [themeModalSection, setThemeModalSection] = useState<'theme' | 'appearance'>('theme');
   const [isLinuxCJKFontBannerDismissed, setIsLinuxCJKFontBannerDismissed] = useState(false);
@@ -2256,7 +2279,14 @@ function App() {
       setActiveToolCenterGroupKey(group);
       setIsToolsModalOpen(true);
   }, []);
-  const handleOpenSettingsModal = useCallback(() => {
+  const handleOpenSettingsModal = useCallback((group: SettingsCenterGroupKey = 'preferences') => {
+      setActiveSettingsCenterGroupKey(group);
+      setActiveSettingsCenterPane(null);
+      setIsSettingsModalOpen(true);
+  }, []);
+  const handleOpenSettingsCenterPane = useCallback((group: SettingsCenterGroupKey, key: SettingsCenterPaneKey) => {
+      setActiveSettingsCenterGroupKey(group);
+      setActiveSettingsCenterPane({ key, group });
       setIsSettingsModalOpen(true);
   }, []);
   const handleOpenToolCenterPane = useCallback((group: ToolCenterGroupKey, key: ToolCenterPaneKey) => {
@@ -3089,6 +3119,250 @@ function App() {
       !fontFamiliesLoadError &&
       !isLinuxCJKFontBannerDismissed,
   );
+  const sidebarMetadataFieldItems: Array<{ field: SidebarTableMetadataField; label: string }> = [
+      { field: 'comment', label: t('sidebar.v2_table_group_menu.show_table_comments') },
+      { field: 'rows', label: t('sidebar.v2_table_group_menu.display_table_rows') },
+      { field: 'size', label: t('sidebar.v2_table_group_menu.display_table_size') },
+      { field: 'createdAt', label: t('sidebar.v2_table_group_menu.display_create_time') },
+      { field: 'updatedAt', label: t('sidebar.v2_table_group_menu.display_update_time') },
+  ];
+  const toggleSidebarMetadataFieldFromSettings = useCallback((field: SidebarTableMetadataField, selected: boolean) => {
+      setQueryOptions({
+          sidebarTableMetadataFields: setSidebarTableMetadataFieldSelected(
+              sidebarTableMetadataFields,
+              field,
+              selected,
+          ),
+      });
+  }, [setQueryOptions, sidebarTableMetadataFields]);
+  const renderProxySettingsContent = useCallback(() => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
+          <div style={utilityPanelStyle}>
+              <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.proxy.section_title')}</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <span>{t('app.proxy.enable')}</span>
+                  <Switch checked={globalProxy.enabled} onChange={(checked) => setGlobalProxy({ enabled: checked })} />
+              </div>
+              <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, opacity: globalProxy.enabled ? 1 : 0.7 }}>
+                  <div>
+                      <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.type')}</div>
+                      <Select
+                          value={globalProxy.type}
+                          disabled={!globalProxy.enabled}
+                          options={[
+                              { value: 'socks5', label: 'SOCKS5' },
+                              { value: 'http', label: 'HTTP' },
+                          ]}
+                          onChange={(value) => setGlobalProxy({ type: value as 'socks5' | 'http' })}
+                      />
+                  </div>
+                  <div>
+                      <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.port')}</div>
+                      <InputNumber
+                          min={1}
+                          max={65535}
+                          style={{ width: '100%' }}
+                          value={globalProxy.port}
+                          disabled={!globalProxy.enabled}
+                          onChange={(value) => setGlobalProxy({
+                              port: typeof value === 'number' ? value : (globalProxy.type === 'http' ? 8080 : 1080),
+                          })}
+                      />
+                  </div>
+                  <div style={{ gridColumn: '1 / span 2' }}>
+                      <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.host')}</div>
+                      <Input
+                          placeholder={t('app.proxy.host_placeholder')}
+                          value={globalProxy.host}
+                          disabled={!globalProxy.enabled}
+                          onChange={(e) => setGlobalProxy({ host: e.target.value })}
+                      />
+                  </div>
+                  <div>
+                      <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.username_optional')}</div>
+                      <Input
+                          placeholder="proxy-user"
+                          value={globalProxy.user}
+                          disabled={!globalProxy.enabled}
+                          onChange={(e) => setGlobalProxy({ user: e.target.value })}
+                      />
+                  </div>
+                  <div>
+                      <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.password_optional')}</div>
+                      <Input.Password
+                          placeholder="proxy-password"
+                          value={globalProxy.password}
+                          disabled={!globalProxy.enabled}
+                          onChange={(e) => setGlobalProxy({ password: e.target.value })}
+                      />
+                  </div>
+              </div>
+              <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 6 }}>
+                  {t('app.proxy.scope_hint')}
+              </div>
+          </div>
+      </div>
+  ), [darkMode, globalProxy.enabled, globalProxy.host, globalProxy.password, globalProxy.port, globalProxy.type, globalProxy.user, setGlobalProxy, t, utilityPanelStyle]);
+  const renderSidebarMetadataSettingsPane = useCallback(() => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
+          <div style={utilityPanelStyle}>
+              <div style={{ marginBottom: 8, fontWeight: 600 }}>{t('app.settings.sidebar_metadata.title')}</div>
+              <div style={{ ...utilityMutedTextStyle, marginBottom: 14 }}>
+                  {t('app.settings.sidebar_metadata.description')}
+              </div>
+              <div style={{ display: 'grid', gap: 14 }}>
+                  {sidebarMetadataFieldItems.map((item) => {
+                      const checked = sidebarTableMetadataFields.includes(item.field);
+                      return (
+                          <div
+                              key={item.field}
+                              style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  gap: 12,
+                                  paddingBottom: 12,
+                                  borderBottom: `1px solid ${overlayTheme.divider}`,
+                              }}
+                          >
+                              <span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{item.label}</span>
+                              <Switch
+                                  checked={checked}
+                                  onChange={(selected) => toggleSidebarMetadataFieldFromSettings(item.field, selected)}
+                              />
+                          </div>
+                      );
+                  })}
+              </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button
+                  onClick={() => {
+                      setQueryOptions({
+                          sidebarTableMetadataFields: DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS,
+                      });
+                  }}
+              >
+                  {t('app.theme.action.restore_defaults')}
+              </Button>
+          </div>
+      </div>
+  ), [
+      overlayTheme.divider,
+      overlayTheme.titleText,
+      setQueryOptions,
+      sidebarMetadataFieldItems,
+      sidebarTableMetadataFields,
+      t,
+      toggleSidebarMetadataFieldFromSettings,
+      utilityMutedTextStyle,
+      utilityPanelStyle,
+  ]);
+  const settingsCenterGroups = [
+      {
+          key: 'preferences' as const,
+          icon: <SettingOutlined />,
+          title: t('app.settings.group.preferences.title'),
+          description: t('app.settings.group.preferences.description'),
+          items: [
+              {
+                  key: 'language',
+                  icon: <GlobalOutlined />,
+                  title: t('settings.language.title'),
+                  description: t('settings.language.description'),
+                  onClick: () => handleOpenSettingsCenterPane('preferences', 'language'),
+              },
+              {
+                  key: 'theme',
+                  icon: <SkinOutlined />,
+                  title: t('app.settings.entry.theme.title'),
+                  description: t('app.settings.entry.theme.description'),
+                  onClick: () => {
+                      setIsSettingsModalOpen(false);
+                      setThemeModalSection('theme');
+                      setIsThemeModalOpen(true);
+                  },
+              },
+              {
+                  key: 'sidebar-metadata',
+                  icon: <TableOutlined />,
+                  title: t('app.settings.sidebar_metadata.title'),
+                  description: t('app.settings.sidebar_metadata.description'),
+                  onClick: () => handleOpenSettingsCenterPane('preferences', 'sidebar-metadata'),
+              },
+          ],
+      },
+      {
+          key: 'services' as const,
+          icon: <GlobalOutlined />,
+          title: t('app.settings.group.services.title'),
+          description: t('app.settings.group.services.description'),
+          items: [
+              {
+                  key: 'proxy',
+                  icon: <GlobalOutlined />,
+                  title: t('app.settings.entry.proxy.title'),
+                  description: t('app.settings.entry.proxy.description'),
+                  onClick: () => handleOpenSettingsCenterPane('services', 'proxy'),
+              },
+              {
+                  key: 'ai',
+                  icon: <RobotOutlined />,
+                  title: t('app.settings.entry.ai.title'),
+                  description: t('app.settings.entry.ai.description'),
+                  onClick: () => {
+                      setIsSettingsModalOpen(false);
+                      handleOpenAISettings();
+                  },
+              },
+          ],
+      },
+      {
+          key: 'about' as const,
+          icon: <InfoCircleOutlined />,
+          title: t('app.settings.group.about.title'),
+          description: t('app.settings.group.about.description'),
+          items: [
+              {
+                  key: 'about-go-navi',
+                  icon: <InfoCircleOutlined />,
+                  title: t('app.settings.entry.about.title'),
+                  description: t('app.settings.entry.about.description'),
+                  onClick: () => {
+                      setIsSettingsModalOpen(false);
+                      setIsAboutOpen(true);
+                  },
+              },
+          ],
+      },
+  ];
+  const activeSettingsCenterGroup = settingsCenterGroups.find((group) => group.key === activeSettingsCenterGroupKey) ?? settingsCenterGroups[0];
+  const activeSettingsCenterPaneItem = activeSettingsCenterPane
+      ? settingsCenterGroups
+          .find((group) => group.key === activeSettingsCenterPane.group)
+          ?.items.find((item) => item.key === activeSettingsCenterPane.key)
+      : null;
+  const renderSettingsCenterPane = () => {
+      if (!activeSettingsCenterPane) {
+          return null;
+      }
+      if (activeSettingsCenterPane.key === 'language') {
+          return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
+                  <div style={utilityPanelStyle}>
+                      <LanguageSettingsPanel />
+                  </div>
+              </div>
+          );
+      }
+      if (activeSettingsCenterPane.key === 'sidebar-metadata') {
+          return renderSidebarMetadataSettingsPane();
+      }
+      if (activeSettingsCenterPane.key === 'proxy') {
+          return renderProxySettingsContent();
+      }
+      return null;
+  };
 
   return (
     <ConfigProvider
@@ -4123,89 +4397,172 @@ function App() {
           <Modal
             title={renderUtilityModalTitle(<SettingOutlined />, t('app.settings.title'), t('app.settings.description'))}
             open={isSettingsModalOpen}
-            onCancel={() => setIsSettingsModalOpen(false)}
+            onCancel={() => {
+                setActiveSettingsCenterPane(null);
+                setIsSettingsModalOpen(false);
+            }}
             footer={null}
-            width={560}
-            styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
+            centered
+            width={1080}
+            styles={{
+                content: toolCenterModalContentStyle,
+                header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
+                body: { paddingTop: 8, paddingBottom: 8, overflow: 'hidden', flex: 1, minHeight: 0 },
+                footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 },
+            }}
           >
-            <div style={{ display: 'grid', gap: 12, padding: '12px 0' }}>
-              {[
-                {
-                  key: 'language',
-                  icon: <GlobalOutlined />,
-                  title: t('settings.language.title'),
-                  description: t('settings.language.description'),
-                  onClick: () => {
-                    setIsSettingsModalOpen(false);
-                    setIsLanguageModalOpen(true);
-                  },
-                },
-                {
-                  key: 'theme',
-                  icon: <SkinOutlined />,
-                  title: t('app.settings.entry.theme.title'),
-                  description: t('app.settings.entry.theme.description'),
-                  onClick: () => {
-                    setIsSettingsModalOpen(false);
-                    setThemeModalSection('theme');
-                    setIsThemeModalOpen(true);
-                  },
-                },
-                {
-                  key: 'proxy',
-                  icon: <GlobalOutlined />,
-                  title: t('app.settings.entry.proxy.title'),
-                  description: t('app.settings.entry.proxy.description'),
-                  onClick: () => {
-                    setIsSettingsModalOpen(false);
-                    setSecurityUpdateRepairSource(null);
-                    setIsProxyModalOpen(true);
-                  },
-                },
-                {
-                  key: 'ai',
-                  icon: <RobotOutlined />,
-                  title: t('app.settings.entry.ai.title'),
-                  description: t('app.settings.entry.ai.description'),
-                  onClick: () => {
-                    setIsSettingsModalOpen(false);
-                    handleOpenAISettings();
-                  },
-                },
-                {
-                  key: 'about',
-                  icon: <InfoCircleOutlined />,
-                  title: t('app.settings.entry.about.title'),
-                  description: t('app.settings.entry.about.description'),
-                  onClick: () => {
-                    setIsSettingsModalOpen(false);
-                    setIsAboutOpen(true);
-                  },
-                },
-              ].map((item) => (
-                <Button key={item.key} type="text" style={utilityActionCardStyle} onClick={item.onClick}>
-                  <span style={{ width: 36, height: 36, borderRadius: 12, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
-                    {item.icon}
-                  </span>
-                  <span style={{ display: 'grid', gap: 4, textAlign: 'left', minWidth: 0 }}>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: overlayTheme.titleText }}>{item.title}</span>
-                    <span style={{ fontSize: 12, color: overlayTheme.mutedText, whiteSpace: 'normal' }}>{item.description}</span>
-                  </span>
-                </Button>
-              ))}
+            <div style={toolCenterModalWorkspaceStyle}>
+              <div style={toolCenterModalSplitStyle}>
+                <div style={toolCenterNavPanelStyle}>
+                  <div style={toolCenterNavScrollStyle} role="tablist" aria-orientation="vertical">
+                    {settingsCenterGroups.map((group) => {
+                      const active = group.key === activeSettingsCenterGroup.key;
+                      return (
+                        <button
+                          key={group.key}
+                          type="button"
+                          role="tab"
+                          aria-selected={active}
+                          title={`${group.title} - ${group.description}`}
+                          onClick={() => {
+                            setActiveSettingsCenterGroupKey(group.key);
+                            setActiveSettingsCenterPane(null);
+                          }}
+                          style={{
+                            position: 'relative',
+                            textAlign: 'left',
+                            width: '100%',
+                            padding: '11px 10px 11px 14px',
+                            borderRadius: 8,
+                            border: 'none',
+                            background: active ? overlayTheme.selectedBg : 'transparent',
+                            color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              position: 'absolute',
+                              left: 0,
+                              top: 10,
+                              bottom: 10,
+                              width: 3,
+                              borderRadius: 999,
+                              background: active ? overlayTheme.selectedText : 'transparent',
+                            }}
+                          />
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, minWidth: 0 }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                              <span
+                                style={{
+                                  width: 28,
+                                  height: 28,
+                                  borderRadius: 8,
+                                  display: 'grid',
+                                  placeItems: 'center',
+                                  fontSize: 15,
+                                  flexShrink: 0,
+                                  background: active
+                                    ? overlayTheme.iconBg
+                                    : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)'),
+                                  color: active ? overlayTheme.iconColor : overlayTheme.mutedText,
+                                }}
+                              >
+                                {group.icon}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: 13,
+                                  fontWeight: active ? 700 : 600,
+                                  minWidth: 0,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {group.title}
+                              </span>
+                            </span>
+                            <span
+                              style={{
+                                minWidth: 20,
+                                height: 20,
+                                paddingInline: 6,
+                                borderRadius: 999,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: active
+                                  ? overlayTheme.selectedBg
+                                  : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)'),
+                                color: active ? (darkMode ? '#f8fafc' : '#0f172a') : overlayTheme.mutedText,
+                                fontSize: 10,
+                                fontWeight: 700,
+                                flexShrink: 0,
+                              }}
+                            >
+                              {group.items.length}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div style={toolCenterContentPanelStyle}>
+                  {activeSettingsCenterPane ? (
+                    <div style={toolCenterDetailPanelStyle}>
+                      <div style={{ paddingBottom: 10, borderBottom: `1px solid ${overlayTheme.divider}` }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>
+                            {activeSettingsCenterPaneItem?.title ?? activeSettingsCenterGroup.title}
+                          </div>
+                          <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
+                            {activeSettingsCenterPaneItem?.description ?? activeSettingsCenterGroup.description}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={toolCenterDetailBodyStyle}>
+                        {renderSettingsCenterPane()}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: 'grid', gap: 4 }}>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>{activeSettingsCenterGroup.title}</div>
+                        <div style={utilityMutedTextStyle}>{activeSettingsCenterGroup.description}</div>
+                      </div>
+                      <div style={toolCenterScrollableListStyle}>
+                        {activeSettingsCenterGroup.items.map((item, index) => (
+                          <Button
+                            key={item.key}
+                            type="text"
+                            style={{
+                              ...toolCenterRowStyle,
+                              borderTop: index === 0 ? `1px solid ${overlayTheme.divider}` : 'none',
+                              borderBottom: `1px solid ${overlayTheme.divider}`,
+                            }}
+                            onClick={item.onClick}
+                          >
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                              <span style={{ width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
+                                {item.icon}
+                              </span>
+                              <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
+                                <span>{item.title}</span>
+                                <span style={toolCenterRowDescriptionStyle}>{item.description}</span>
+                              </span>
+                            </span>
+                            <RightOutlined style={{ color: overlayTheme.mutedText, fontSize: 12, flexShrink: 0 }} />
+                          </Button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
-          </Modal>
-          )}
-          {isLanguageModalOpen && (
-          <Modal
-            title={renderUtilityModalTitle(<GlobalOutlined />, t('settings.language.title'), t('settings.language.description'))}
-            open={isLanguageModalOpen}
-            onCancel={() => setIsLanguageModalOpen(false)}
-            footer={null}
-            width={520}
-            styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
-          >
-            <LanguageSettingsPanel />
           </Modal>
           )}
           {isDataRootModalOpen && (
@@ -5413,72 +5770,7 @@ function App() {
               width={520}
               styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
           >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
-                  <div style={utilityPanelStyle}>
-                      <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.proxy.section_title')}</div>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                          <span>{t('app.proxy.enable')}</span>
-                          <Switch checked={globalProxy.enabled} onChange={(checked) => setGlobalProxy({ enabled: checked })} />
-                      </div>
-                      <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, opacity: globalProxy.enabled ? 1 : 0.7 }}>
-                          <div>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.type')}</div>
-                              <Select
-                                  value={globalProxy.type}
-                                  disabled={!globalProxy.enabled}
-                                  options={[
-                                      { value: 'socks5', label: 'SOCKS5' },
-                                      { value: 'http', label: 'HTTP' },
-                                  ]}
-                                  onChange={(value) => setGlobalProxy({ type: value as 'socks5' | 'http' })}
-                              />
-                          </div>
-                          <div>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.port')}</div>
-                              <InputNumber
-                                  min={1}
-                                  max={65535}
-                                  style={{ width: '100%' }}
-                                  value={globalProxy.port}
-                                  disabled={!globalProxy.enabled}
-                                  onChange={(value) => setGlobalProxy({
-                                      port: typeof value === 'number' ? value : (globalProxy.type === 'http' ? 8080 : 1080),
-                                  })}
-                              />
-                          </div>
-                          <div style={{ gridColumn: '1 / span 2' }}>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.host')}</div>
-                              <Input
-                                  placeholder={t('app.proxy.host_placeholder')}
-                                  value={globalProxy.host}
-                                  disabled={!globalProxy.enabled}
-                                  onChange={(e) => setGlobalProxy({ host: e.target.value })}
-                              />
-                          </div>
-                          <div>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.username_optional')}</div>
-                              <Input
-                                  placeholder="proxy-user"
-                                  value={globalProxy.user}
-                                  disabled={!globalProxy.enabled}
-                                  onChange={(e) => setGlobalProxy({ user: e.target.value })}
-                              />
-                          </div>
-                          <div>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.password_optional')}</div>
-                              <Input.Password
-                                  placeholder="proxy-password"
-                                  value={globalProxy.password}
-                                  disabled={!globalProxy.enabled}
-                                  onChange={(e) => setGlobalProxy({ password: e.target.value })}
-                              />
-                          </div>
-                      </div>
-                      <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 6 }}>
-                          {t('app.proxy.scope_hint')}
-                      </div>
-                  </div>
-              </div>
+              {renderProxySettingsContent()}
           </Modal>
           )}
 

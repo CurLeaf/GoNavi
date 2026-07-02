@@ -1306,6 +1306,34 @@ describe('Sidebar locate toolbar', () => {
     expect(wideWidth).toBeUndefined();
   });
 
+  it('includes table metadata suffixes when estimating v2 tree horizontal scroll width', () => {
+    setCurrentLanguage('zh-CN');
+
+    const tableNode = [{
+      title: 'orders',
+      key: 'table-orders',
+      type: 'table',
+      dataRef: {
+        tableComment: '订单归档明细按月分区',
+        rowCount: 2_450_000,
+        tableSize: 157_286_400,
+        createdAt: '2026-07-01 08:30:00',
+        updatedAt: '2026-07-02 09:45:00',
+      },
+    }];
+    const viewportWidth = 360;
+    const titleOnlyWidth = estimateV2TreeHorizontalScrollWidth(tableNode as any, viewportWidth, []);
+    const metadataWidth = estimateV2TreeHorizontalScrollWidth(
+      tableNode as any,
+      viewportWidth,
+      ['comment', 'rows', 'size', 'createdAt', 'updatedAt'],
+    );
+
+    expect(titleOnlyWidth).toBeUndefined();
+    expect(metadataWidth).toBeGreaterThan(viewportWidth);
+    expect(metadataWidth).toBeGreaterThan(titleOnlyWidth ?? viewportWidth);
+  });
+
   it('does not repeat the active connection as an object-tree root in v2', () => {
     mocks.state.connections = [{
       id: 'conn-local',
@@ -2926,7 +2954,6 @@ describe('Sidebar locate toolbar', () => {
         dbName="mkefu_ai_dev"
         count={15}
         currentSort="frequency"
-        showTableComments
       />,
     );
 
@@ -2938,8 +2965,6 @@ describe('Sidebar locate toolbar', () => {
       sort: t('sidebar.v2_table_group_menu.sort_frequency'),
     }));
     expect(markup).toContain(t('sidebar.menu.create_table'));
-    expect(markup).toContain(t('sidebar.v2_table_group_menu.display_section'));
-    expect(markup).toContain(t('sidebar.v2_table_group_menu.show_table_comments'));
     expect(markup).toContain(t('data_grid.context_menu.sort_section'));
     expect(markup).toContain(t('sidebar.menu.sort_by_name'));
     expect(markup).toContain(t('sidebar.menu.sort_by_frequency'));
@@ -2955,7 +2980,6 @@ describe('Sidebar locate toolbar', () => {
     expect(end).toBeGreaterThan(start);
     const tableGroupCallSource = sidebarSource.slice(start, end);
     expect(tableGroupCallSource).toContain('<V2TableGroupContextMenuView');
-    expect(tableGroupCallSource).toContain('showTableComments={showSidebarTableComment}');
     expect(tableGroupCallSource).not.toContain('title=');
     ['? ? tables', '表 · tables'].forEach((rawSnippet) => {
       expect(tableGroupCallSource).not.toContain(rawSnippet);
@@ -3020,6 +3044,10 @@ describe('Sidebar locate toolbar', () => {
         dbName: 'main',
         tableName: 'users',
         tableComment: '用户表',
+        rowCount: 7,
+        tableSize: 4096,
+        createdAt: '2026-07-02 10:11:12',
+        updatedAt: '2026-07-03 11:12:13',
       },
     };
     const baseOptions = {
@@ -3036,18 +3064,23 @@ describe('Sidebar locate toolbar', () => {
 
     const hiddenSuffixMarkup = renderToStaticMarkup(renderSidebarV2TreeTitle({
       ...baseOptions,
-      showSidebarTableComment: false,
+      sidebarTableMetadataFields: ['rows'],
     }));
     expect(hiddenSuffixMarkup).not.toContain('gn-v2-tree-table-comment');
 
     const visibleSuffixMarkup = renderToStaticMarkup(renderSidebarV2TreeTitle({
       ...baseOptions,
-      showSidebarTableComment: true,
+      sidebarTableMetadataFields: ['comment', 'rows', 'size', 'createdAt', 'updatedAt'],
     }));
     expect(visibleSuffixMarkup).toContain('gn-v2-tree-table-comment');
     expect(visibleSuffixMarkup).toContain('用户表');
+    expect(visibleSuffixMarkup).toContain(t('sidebar.v2_table_group_menu.metadata_value.rows', { count: '7' }));
+    expect(visibleSuffixMarkup).toContain('4 KB');
+    expect(visibleSuffixMarkup).toContain(t('sidebar.v2_table_group_menu.metadata_value.created_at', { time: '2026-07-02 10:11' }));
+    expect(visibleSuffixMarkup).toContain(t('sidebar.v2_table_group_menu.metadata_value.updated_at', { time: '2026-07-03 11:12' }));
 
     const treeTitleSource = readSourceFile('./sidebar/SidebarTreeTitle.tsx');
+    const sidebarHelpersSource = readSourceFile('./sidebar/sidebarHelpers.ts');
     expect(treeTitleSource).toContain('data-sidebar-table-hover-info="true"');
     expect(treeTitleSource).toContain('rootClassName="gn-v2-tab-hover-tooltip gn-v2-sidebar-table-hover-tooltip"');
     expect(treeTitleSource).toContain('title={tableHoverInfo ? undefined : effectiveHoverTitle}');
@@ -3059,6 +3092,10 @@ describe('Sidebar locate toolbar', () => {
     expect(treeTitleSource).toContain("t('tab_manager.kind_badge.table')");
     expect(treeTitleSource).toContain("t('tab_manager.hover.kind.table')");
     expect(treeTitleSource).toContain("t('table_designer.action.table_comment')");
+    expect(sidebarHelpersSource).toContain("t('sidebar.v2_table_group_menu.metadata_value.rows'");
+    expect(treeTitleSource).toContain("t('sidebar.v2_table_group_menu.display_table_size')");
+    expect(treeTitleSource).toContain("t('sidebar.v2_table_group_menu.display_create_time')");
+    expect(treeTitleSource).toContain("t('sidebar.v2_table_group_menu.display_update_time')");
     expect(treeTitleSource).toContain('mouseEnterDelay={1.2}');
 
     const css = readV2ThemeCss();
@@ -3076,13 +3113,24 @@ describe('Sidebar locate toolbar', () => {
     const oracleSql = buildSidebarTableStatusSQL({ config: { type: 'oracle' } } as any, 'APP');
 
     expect(mysqlSql).toContain('TABLE_COMMENT AS table_comment');
+    expect(mysqlSql).toContain('AS table_size');
+    expect(mysqlSql).toContain('CREATE_TIME AS create_time');
     expect(pgSql).toContain("obj_description(c.oid, 'pg_class') AS table_comment");
+    expect(pgSql).toContain('pg_total_relation_size(c.oid) AS table_size');
     expect(sqlServerSql).toContain('ep.value AS table_comment');
+    expect(sqlServerSql).toContain('t.create_date AS create_time');
     expect(oracleSql).toContain('comments AS table_comment');
+    expect(oracleSql).toContain('o.last_ddl_time AS update_time');
 
     const loaderSource = readSourceFile('./sidebar/useSidebarTreeLoaders.tsx');
-    expect(loaderSource).toContain('tableCommentMap');
-    expect(loaderSource).toContain('tableComment: entry.tableComment');
+    expect(loaderSource).toContain('tableMetadataMap');
+    expect(loaderSource).toContain('resolvedMetadata?.tableComment');
+    expect(loaderSource).toContain('tableSize: resolvedMetadata?.tableSize');
+    expect(loaderSource).toContain('createdAt: resolvedMetadata?.createdAt');
+    expect(loaderSource).toContain('updatedAt: resolvedMetadata?.updatedAt');
+    expect(loaderSource).toContain('tableSize: entry.tableSize');
+    expect(loaderSource).toContain('createdAt: entry.createdAt');
+    expect(loaderSource).toContain('updatedAt: entry.updatedAt');
   });
 
   it('listens for table overview pin changes to refresh the matching sidebar database node', () => {

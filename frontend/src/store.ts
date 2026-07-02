@@ -87,6 +87,11 @@ import {
   DEFAULT_QUERY_EDITOR_EDITOR_HEIGHT_RATIO,
   sanitizeQueryEditorEditorHeightRatio,
 } from "./utils/queryEditorSplitLayout";
+import {
+  resolveSidebarTableMetadataFields,
+  sanitizeSidebarTableMetadataFields,
+  type SidebarTableMetadataField,
+} from "./utils/sidebarTableMetadata";
 
 export type TableDoubleClickAction = "open-data" | "open-design";
 export type ThemeMode = "light" | "dark";
@@ -1275,6 +1280,7 @@ export interface QueryOptions {
   maxRows: number;
   showColumnComment: boolean;
   showSidebarTableComment?: boolean;
+  sidebarTableMetadataFields?: SidebarTableMetadataField[];
   showColumnType: boolean;
   showQueryResultsPanel: boolean;
   queryEditorEditorHeightRatio: number;
@@ -2050,6 +2056,10 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
     typeof raw.showSidebarTableComment === "boolean"
       ? raw.showSidebarTableComment
       : false;
+  const sidebarTableMetadataFields = Array.isArray(raw.sidebarTableMetadataFields)
+    ? sanitizeSidebarTableMetadataFields(raw.sidebarTableMetadataFields, [])
+    : resolveSidebarTableMetadataFields(undefined, showSidebarTableComment);
+  const derivedShowSidebarTableComment = sidebarTableMetadataFields.includes("comment");
   const showColumnType =
     typeof raw.showColumnType === "boolean" ? raw.showColumnType : true;
   const showQueryResultsPanel =
@@ -2061,7 +2071,8 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
     return {
       maxRows: 5000,
       showColumnComment,
-      showSidebarTableComment,
+      showSidebarTableComment: derivedShowSidebarTableComment,
+      sidebarTableMetadataFields,
       showColumnType,
       showQueryResultsPanel,
       queryEditorEditorHeightRatio,
@@ -2070,7 +2081,8 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
   return {
     maxRows: Math.min(50000, Math.trunc(maxRows)),
     showColumnComment,
-    showSidebarTableComment,
+    showSidebarTableComment: derivedShowSidebarTableComment,
+    sidebarTableMetadataFields,
     showColumnType,
     showQueryResultsPanel,
     queryEditorEditorHeightRatio,
@@ -2507,6 +2519,7 @@ export const useStore = create<AppState>()(
         maxRows: 5000,
         showColumnComment: true,
         showSidebarTableComment: false,
+        sidebarTableMetadataFields: ["rows"],
         showColumnType: true,
         showQueryResultsPanel: false,
         queryEditorEditorHeightRatio: DEFAULT_QUERY_EDITOR_EDITOR_HEIGHT_RATIO,
@@ -3356,7 +3369,10 @@ export const useStore = create<AppState>()(
       setSqlFormatOptions: (options) => set({ sqlFormatOptions: options }),
       setQueryOptions: (options) =>
         set((state) => ({
-          queryOptions: { ...state.queryOptions, ...options },
+          queryOptions: sanitizeQueryOptions({
+            ...state.queryOptions,
+            ...options,
+          }),
         })),
       setDataEditTransactionOptions: (options) =>
         set((state) => ({

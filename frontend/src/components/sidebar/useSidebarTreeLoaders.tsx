@@ -51,6 +51,7 @@ import {
   type SidebarTreeNode as TreeNode,
 } from '../sidebarV2Utils';
 import { DBGetDatabases, DBGetTables, DBQuery, GetDriverStatusList, JVMProbeCapabilities } from '../../../wailsjs/go/app/App';
+import type { SidebarTableMetadataSnapshot } from '../../utils/sidebarTableMetadata';
 
 type DriverStatusSnapshot = {
   type: string;
@@ -495,9 +496,7 @@ export const useSidebarTreeLoaders = ({
                 const tableStatsResult = tableStatusSql
                     ? await DBQuery(buildRpcConnectionConfig(config) as any, conn.dbName, tableStatusSql).catch(() => ({ success: false, data: [] as any[] }))
                     : { success: false, data: [] as any[] };
-                const tableRowCountMap = new Map<string, number>();
-                const tableCommentMap = new Map<string, string>();
-                const tableSchemaMap = new Map<string, string>();
+                const tableMetadataMap = new Map<string, SidebarTableMetadataSnapshot & { schemaName?: string }>();
                 const buildTableMetadataKeys = (rawTableName: string, rawSchemaName = ''): string[] => {
                     const tableName = String(rawTableName || '').trim();
                     if (!tableName) return [];
@@ -510,11 +509,33 @@ export const useSidebarTreeLoaders = ({
                     if (qualifiedName) keys.add(qualifiedName.toLowerCase());
                     return Array.from(keys);
                 };
-                const putTableComment = (rawTableName: string, rawComment: string, rawSchemaName = '') => {
-                    const comment = String(rawComment || '').trim();
-                    if (!comment) return;
+                const readNumericMetadataValue = (row: Record<string, any>, keys: string[]): number | undefined => {
+                    const rawValue = getCaseInsensitiveValue(row, keys);
+                    if (rawValue === undefined || rawValue === null || rawValue === '') return undefined;
+                    const numericValue = Number(String(rawValue).replace(/,/g, ''));
+                    return Number.isFinite(numericValue) ? numericValue : undefined;
+                };
+                const normalizeMetadataTimestamp = (rawValue: unknown): string | undefined => {
+                    if (rawValue === undefined || rawValue === null) return undefined;
+                    const normalized = String(rawValue).trim();
+                    return normalized ? normalized : undefined;
+                };
+                const mergeTableMetadata = (
+                    rawTableName: string,
+                    patch: SidebarTableMetadataSnapshot & { schemaName?: string },
+                    rawSchemaName = '',
+                ) => {
                     buildTableMetadataKeys(rawTableName, rawSchemaName).forEach((metadataKey) => {
-                        tableCommentMap.set(metadataKey, comment);
+                        const current = tableMetadataMap.get(metadataKey) || {};
+                        tableMetadataMap.set(metadataKey, {
+                            ...current,
+                            ...(patch.schemaName ? { schemaName: patch.schemaName } : {}),
+                            ...(patch.tableComment ? { tableComment: patch.tableComment } : {}),
+                            ...(patch.rowCount !== undefined ? { rowCount: patch.rowCount } : {}),
+                            ...(patch.tableSize !== undefined ? { tableSize: patch.tableSize } : {}),
+                            ...(patch.createdAt ? { createdAt: patch.createdAt } : {}),
+                            ...(patch.updatedAt ? { updatedAt: patch.updatedAt } : {}),
+                        });
                     });
                 };
                 if (tableStatsResult?.success && Array.isArray(tableStatsResult.data)) {
@@ -526,12 +547,7 @@ export const useSidebarTreeLoaders = ({
                         ).trim();
                         if (!rawTableName) return;
                         const rawSchemaName = getCaseInsensitiveValue(row, ['schema_name', 'SCHEMA_NAME', 'owner', 'OWNER']);
-                        buildTableMetadataKeys(rawTableName, rawSchemaName).forEach((metadataKey) => {
-                            if (rawSchemaName) {
-                                tableSchemaMap.set(metadataKey, rawSchemaName);
-                            }
-                        });
-                        putTableComment(rawTableName, getCaseInsensitiveValue(row, [
+                        const tableComment = String(getCaseInsensitiveValue(row, [
                             'table_comment',
                             'TABLE_COMMENT',
                             'comment',
@@ -539,21 +555,54 @@ export const useSidebarTreeLoaders = ({
                             'comments',
                             'COMMENTS',
                             'MS_Description',
-                        ]), rawSchemaName);
+                        ]) || '').trim();
                         const rowCount = parseMetadataRowCount(row);
-                        if (rowCount === undefined) return;
-                        buildTableMetadataKeys(rawTableName, rawSchemaName).forEach((metadataKey) => {
-                            tableRowCountMap.set(metadataKey, rowCount);
-                        });
+                        const tableSize = readNumericMetadataValue(row, [
+                            'table_size',
+                            'TABLE_SIZE',
+                            'data_length',
+                            'DATA_LENGTH',
+                            'total_bytes',
+                            'TOTAL_BYTES',
+                        ]);
+                        const createdAt = normalizeMetadataTimestamp(getCaseInsensitiveValue(row, [
+                            'create_time',
+                            'CREATE_TIME',
+                            'created_at',
+                            'CREATED_AT',
+                            'create_date',
+                            'CREATE_DATE',
+                        ]));
+                        const updatedAt = normalizeMetadataTimestamp(getCaseInsensitiveValue(row, [
+                            'update_time',
+                            'UPDATE_TIME',
+                            'updated_at',
+                            'UPDATED_AT',
+                            'modify_date',
+                            'MODIFY_DATE',
+                            'last_ddl_time',
+                            'LAST_DDL_TIME',
+                        ]));
+                        mergeTableMetadata(rawTableName, {
+                            schemaName: rawSchemaName ? String(rawSchemaName).trim() : undefined,
+                            ...(tableComment ? { tableComment } : {}),
+                            ...(rowCount !== undefined ? { rowCount } : {}),
+                            ...(tableSize !== undefined ? { tableSize } : {}),
+                            ...(createdAt ? { createdAt } : {}),
+                            ...(updatedAt ? { updatedAt } : {}),
+                        }, rawSchemaName);
                     });
                 }
 	            const tableEntries = tableRows.map((row: any) => {
 	                const tableName = Object.values(row)[0] as string;
 	                const parsed = splitQualifiedName(tableName);
                     const metadataKeys = buildTableMetadataKeys(tableName);
+                    const resolvedMetadata = metadataKeys
+                        .map((metadataKey) => tableMetadataMap.get(metadataKey))
+                        .find((value): value is SidebarTableMetadataSnapshot & { schemaName?: string } => !!value);
                     const rowSchemaName = getCaseInsensitiveValue(row, ['schema_name', 'SCHEMA_NAME', 'owner', 'OWNER']);
                     const mappedSchemaName = rowSchemaName
-                        || metadataKeys.map((metadataKey) => tableSchemaMap.get(metadataKey)).find((value): value is string => !!value)
+                        || resolvedMetadata?.schemaName
                         || parsed.schemaName;
                     const rowComment = getCaseInsensitiveValue(row, [
                         'table_comment',
@@ -567,13 +616,12 @@ export const useSidebarTreeLoaders = ({
 	                    tableName,
 	                    schemaName: mappedSchemaName,
 	                    displayName: getSidebarTableDisplayName(conn, tableName),
-                        rowCount: metadataKeys
-                            .map((metadataKey) => tableRowCountMap.get(metadataKey))
-                            .find((value) => value !== undefined),
+                        rowCount: resolvedMetadata?.rowCount,
+                        tableSize: resolvedMetadata?.tableSize,
+                        createdAt: resolvedMetadata?.createdAt,
+                        updatedAt: resolvedMetadata?.updatedAt,
                         tableComment: rowComment
-                            || metadataKeys
-                                .map((metadataKey) => tableCommentMap.get(metadataKey))
-                                .find((value) => !!value)
+                            || resolvedMetadata?.tableComment
                             || '',
 	                };
 	            });
@@ -740,7 +788,16 @@ export const useSidebarTreeLoaders = ({
 
 	            eventEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
 
-	            const buildTableNode = (entry: { tableName: string; schemaName: string; displayName: string; rowCount?: number; tableComment?: string }): TreeNode => {
+	            const buildTableNode = (entry: {
+	                tableName: string;
+	                schemaName: string;
+	                displayName: string;
+	                rowCount?: number;
+	                tableSize?: number;
+	                createdAt?: string;
+	                updatedAt?: string;
+	                tableComment?: string;
+	            }): TreeNode => {
 	                const isPinned = isV2Ui && isSidebarTablePinned(
 	                    currentPinnedSidebarTables,
 	                    conn.id,
@@ -758,6 +815,9 @@ export const useSidebarTreeLoaders = ({
 	                        tableName: entry.tableName,
 	                        schemaName: entry.schemaName,
 	                        rowCount: entry.rowCount,
+                            tableSize: entry.tableSize,
+                            createdAt: entry.createdAt,
+                            updatedAt: entry.updatedAt,
                             tableComment: entry.tableComment,
 	                        ...(isPinned ? { pinnedSidebarTable: true } : {}),
 	                    },

@@ -9,6 +9,10 @@
 //   - 共享常量和类型集中管理，便于跨文件复用
 
 import { t } from '../../i18n';
+import type {
+  SidebarTableMetadataField,
+  SidebarTableMetadataSnapshot,
+} from '../../utils/sidebarTableMetadata';
 
 // === 共享常量 ===
 
@@ -34,6 +38,122 @@ export const formatSidebarRowCount = (count: number): string => {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
   if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
   return String(Math.round(count));
+};
+
+/**
+ * formatSidebarTableSize 把字节数格式化为适合侧栏展示的短文本。
+ */
+export const formatSidebarTableSize = (bytes: number): string => {
+  if (!Number.isFinite(bytes) || bytes < 0) return '';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+};
+
+const padSidebarTimestampPart = (value: number): string => String(value).padStart(2, '0');
+
+/**
+ * formatSidebarTableTimestamp 把数据库返回的时间值统一压缩成 `YYYY-MM-DD HH:mm`。
+ * 若值无法被 Date 可靠解析，则尽量保留原始文本的可读部分。
+ */
+export const formatSidebarTableTimestamp = (value: unknown): string => {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  const normalizedText = text.replace('T', ' ').replace(/\.\d+$/, '');
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) {
+    return normalizedText.length > 16 ? normalizedText.slice(0, 16) : normalizedText;
+  }
+  return [
+    parsed.getFullYear(),
+    '-',
+    padSidebarTimestampPart(parsed.getMonth() + 1),
+    '-',
+    padSidebarTimestampPart(parsed.getDate()),
+    ' ',
+    padSidebarTimestampPart(parsed.getHours()),
+    ':',
+    padSidebarTimestampPart(parsed.getMinutes()),
+  ].join('');
+};
+
+export interface SidebarTableMetadataDisplayItem {
+  key: SidebarTableMetadataField;
+  text: string;
+  className: string;
+}
+
+export const buildSidebarTableMetadataSnapshot = (
+  value: Partial<SidebarTableMetadataSnapshot> | null | undefined,
+): SidebarTableMetadataSnapshot => {
+  const rowCount = Number(value?.rowCount);
+  const tableSize = Number(value?.tableSize);
+  const tableComment = String(value?.tableComment || '').trim();
+  const createdAt = String(value?.createdAt || '').trim();
+  const updatedAt = String(value?.updatedAt || '').trim();
+  return {
+    ...(tableComment ? { tableComment } : {}),
+    ...(Number.isFinite(rowCount) && rowCount >= 0 ? { rowCount } : {}),
+    ...(Number.isFinite(tableSize) && tableSize >= 0 ? { tableSize } : {}),
+    ...(createdAt ? { createdAt } : {}),
+    ...(updatedAt ? { updatedAt } : {}),
+  };
+};
+
+export const buildSidebarTableMetadataDisplayItems = (
+  metadataFields: SidebarTableMetadataField[],
+  snapshot: SidebarTableMetadataSnapshot,
+): SidebarTableMetadataDisplayItem[] => {
+  const items: SidebarTableMetadataDisplayItem[] = [];
+  if (metadataFields.includes('comment') && snapshot.tableComment) {
+    items.push({
+      key: 'comment',
+      text: snapshot.tableComment,
+      className: 'gn-v2-tree-table-comment',
+    });
+  }
+  if (metadataFields.includes('rows') && snapshot.rowCount !== undefined) {
+    const count = formatSidebarRowCount(snapshot.rowCount);
+    if (count) {
+      items.push({
+        key: 'rows',
+        text: t('sidebar.v2_table_group_menu.metadata_value.rows', { count }),
+        className: 'gn-v2-tree-count',
+      });
+    }
+  }
+  if (metadataFields.includes('size') && snapshot.tableSize !== undefined) {
+    const size = formatSidebarTableSize(snapshot.tableSize);
+    if (size) {
+      items.push({
+        key: 'size',
+        text: t('sidebar.v2_table_group_menu.metadata_value.size', { size }),
+        className: 'gn-v2-tree-count',
+      });
+    }
+  }
+  if (metadataFields.includes('createdAt') && snapshot.createdAt) {
+    const time = formatSidebarTableTimestamp(snapshot.createdAt);
+    if (time) {
+      items.push({
+        key: 'createdAt',
+        text: t('sidebar.v2_table_group_menu.metadata_value.created_at', { time }),
+        className: 'gn-v2-tree-count',
+      });
+    }
+  }
+  if (metadataFields.includes('updatedAt') && snapshot.updatedAt) {
+    const time = formatSidebarTableTimestamp(snapshot.updatedAt);
+    if (time) {
+      items.push({
+        key: 'updatedAt',
+        text: t('sidebar.v2_table_group_menu.metadata_value.updated_at', { time }),
+        className: 'gn-v2-tree-count',
+      });
+    }
+  }
+  return items;
 };
 
 /**

@@ -142,6 +142,7 @@ import {
 import { useExportProgressDialog } from './ExportProgressModal';
 import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLRootNode, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
+import { resolveSidebarTableMetadataFields } from '../utils/sidebarTableMetadata';
 import { t } from '../i18n';
 import MessagePublishModal from './MessagePublishModal';
 import {
@@ -481,7 +482,13 @@ const Sidebar: React.FC<{
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
-  const showSidebarTableComment = queryOptions?.showSidebarTableComment === true;
+  const sidebarTableMetadataFields = useMemo(
+      () => resolveSidebarTableMetadataFields(
+          queryOptions?.sidebarTableMetadataFields,
+          queryOptions?.showSidebarTableComment === true,
+      ),
+      [queryOptions?.showSidebarTableComment, queryOptions?.sidebarTableMetadataFields],
+  );
   const { exportProgressModal, runExportWithProgress } = useExportProgressDialog();
   const disableLocalBackdropFilter = isMacLikePlatform();
   const autoFetchVisible = useAutoFetchVisibility();
@@ -2102,8 +2109,6 @@ const Sidebar: React.FC<{
       moveConnectionToTag,
       setSidebarTablePinned,
       setTableSortPreference,
-      setQueryOptions,
-      showSidebarTableComment,
       replaceTreeNodeChildren,
       loadDatabases,
       loadTables,
@@ -2166,6 +2171,7 @@ const Sidebar: React.FC<{
       v2CommandSearchValue,
       setV2CommandActiveIndex,
       v2ExplorerFilter,
+      sidebarTableMetadataFields,
       treeData,
       treeViewportWidth,
       treeHeight,
@@ -2231,7 +2237,6 @@ const Sidebar: React.FC<{
       v2TreeMetrics,
       tableSortPreference,
       pinnedSidebarTables,
-      showSidebarTableComment,
       getConnectionNodeForAction,
       buildRuntimeConfig,
       extractObjectName,
@@ -2256,7 +2261,7 @@ const Sidebar: React.FC<{
       hoverTitle,
       statusBadge,
       getV2TreeMetaText,
-      showSidebarTableComment,
+      sidebarTableMetadataFields,
       toggleSidebarTablePinned,
       snapshotTreeSelectionBeforeDrag,
       restoreTreeSelectionAfterDrag,
