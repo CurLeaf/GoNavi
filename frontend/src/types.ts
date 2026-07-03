@@ -620,6 +620,7 @@ export interface AIProviderConfig {
   hasSecret?: boolean;
   baseUrl: string;
   model: string;
+  inlineCompletionModel?: string;
   models?: string[];
   apiFormat?: string; // custom 专用: openai | anthropic | gemini | cursor-agent | claude-cli | codebuddy-cli
   headers?: Record<string, string>;

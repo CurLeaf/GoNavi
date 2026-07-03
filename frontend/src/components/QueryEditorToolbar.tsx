@@ -1,6 +1,7 @@
 import React from "react";
 import { Button, Dropdown, Select, Tooltip, type MenuProps } from "antd";
 import {
+  DownOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
   FormatPainterOutlined,
@@ -37,6 +38,7 @@ type QueryEditorToolbarProps = {
   runQueryShortcutBinding: ShortcutPlatformBinding;
   saveQueryShortcutBinding: ShortcutPlatformBinding;
   formatSqlShortcutBinding: ShortcutPlatformBinding;
+  triggerSqlAiCompletionShortcutBinding: ShortcutPlatformBinding;
   toggleQueryResultsPanelShortcutBinding: ShortcutPlatformBinding;
   activeShortcutPlatform: ShortcutPlatform;
   isResultPanelVisible: boolean;
@@ -54,6 +56,7 @@ type QueryEditorToolbarProps = {
   onQuickSave: () => void;
   onFindInEditor: () => void;
   onFormat: () => void;
+  onTriggerSqlAiCompletion: () => void;
   onToggleResultPanelVisibility: () => void;
   onAIAction: (action: "generate" | "explain" | "optimize" | "schema") => void;
 };
@@ -99,6 +102,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
   runQueryShortcutBinding,
   saveQueryShortcutBinding,
   formatSqlShortcutBinding,
+  triggerSqlAiCompletionShortcutBinding,
   toggleQueryResultsPanelShortcutBinding,
   activeShortcutPlatform,
   isResultPanelVisible,
@@ -116,6 +120,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
   onQuickSave,
   onFindInEditor,
   onFormat,
+  onTriggerSqlAiCompletion,
   onToggleResultPanelVisibility,
   onAIAction,
 }) => {
@@ -175,7 +180,22 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
       ),
     },
   );
+  const triggerSqlAiCompletionLabel =
+    triggerSqlAiCompletionShortcutBinding.enabled &&
+    triggerSqlAiCompletionShortcutBinding.combo
+      ? `${t("app.shortcuts.action.triggerSqlAiCompletion.label")} · ${getShortcutDisplayLabel(
+          triggerSqlAiCompletionShortcutBinding.combo,
+          activeShortcutPlatform,
+        )}`
+      : t("app.shortcuts.action.triggerSqlAiCompletion.label");
   const aiMenuItems: MenuProps["items"] = [
+    {
+      key: "ai-inline-completion",
+      label: triggerSqlAiCompletionLabel,
+      icon: <RobotOutlined />,
+      onClick: onTriggerSqlAiCompletion,
+    },
+    { type: "divider" as const },
     {
       key: "ai-generate",
       label: t("query_editor.action.ai_text_to_sql_menu"),
@@ -359,19 +379,30 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
             {t("query_editor.action.save")}
           </Button>
         </Tooltip>
-        <Dropdown
-          menu={{ items: aiMenuItems }}
-          placement="bottomRight"
-          trigger={["click"]}
-        >
-          <Button
-            className={isV2Ui ? "gn-v2-query-toolbar-ai-action" : undefined}
-            icon={<RobotOutlined />}
-            style={{ color: "#818cf8" }}
+        <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+          <Tooltip title={triggerSqlAiCompletionLabel}>
+            <Button
+              className={isV2Ui ? "gn-v2-query-toolbar-ai-action" : undefined}
+              icon={<RobotOutlined />}
+              style={{ color: "#818cf8" }}
+              onMouseDown={onCaptureEditorCursorPosition}
+              onClick={onTriggerSqlAiCompletion}
+            >
+              AI
+            </Button>
+          </Tooltip>
+          <Dropdown
+            menu={{ items: aiMenuItems }}
+            placement="bottomRight"
+            trigger={["click"]}
           >
-            AI
-          </Button>
-        </Dropdown>
+            <Button
+              className={isV2Ui ? "gn-v2-query-toolbar-icon-action" : undefined}
+              icon={<DownOutlined />}
+              aria-label="AI more actions"
+            />
+          </Dropdown>
+        </div>
         <Dropdown
           menu={{ items: moreMenuItems }}
           placement="bottomRight"

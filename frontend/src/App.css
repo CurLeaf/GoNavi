@@ -715,6 +715,29 @@ body[data-theme='dark'] .gonavi-query-editor-db-token {
   color: #c4b5fd;
 }
 
+.gonavi-query-editor-ai-inline-ghost {
+  color: rgba(100, 116, 139, 0.7);
+  font-style: italic;
+  pointer-events: none;
+}
+
+.gonavi-query-editor-ai-inline-ghost-overlay {
+  color: rgba(100, 116, 139, 0.7);
+  font-style: italic;
+  pointer-events: none;
+  position: absolute;
+  white-space: pre;
+  z-index: 6;
+}
+
+body[data-theme='dark'] .gonavi-query-editor-ai-inline-ghost {
+  color: rgba(203, 213, 225, 0.56);
+}
+
+body[data-theme='dark'] .gonavi-query-editor-ai-inline-ghost-overlay {
+  color: rgba(203, 213, 225, 0.56);
+}
+
 /* Legacy sidebar resize bounds — mirror v2 .gn-v2-app-sider so Ant Design inline width locks do not collapse drag range. */
 body[data-ui-version="legacy"] .ant-layout-sider {
   min-width: 232px !important;

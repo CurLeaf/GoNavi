@@ -4,8 +4,8 @@ import Editor, { type OnMount } from './MonacoEditor';
 import { message, Input, Form, MenuProps, Button, Segmented } from 'antd';
 import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
-import { TabData, ColumnDefinition, type SqlSnippet } from '../types';
-import { useStore } from '../store';
+import { TabData, ColumnDefinition, type SavedQuery, type SqlSnippet } from '../types';
+import { type SqlLog, useStore } from '../store';
 import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBQueryMultiInTransaction, DBQueryMultiTransactional, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID, WriteSQLFile, ExportSQLFile } from '../../wailsjs/go/app/App';
 import { GONAVI_ROW_KEY } from './DataGrid';
 import { EventsOn } from '../../wailsjs/runtime';
@@ -143,9 +143,14 @@ import {
     stripCompletionIdentifierQuotes,
 } from './queryEditor/QueryEditorHelpers';
 import {
+    buildQueryEditorAiInlineSuggestOptions,
     getQueryEditorAiService,
     requestQueryEditorInlineCompletion,
     requestQueryEditorTextToSql,
+    resolveInlineSqlGhostPreviewText,
+    resolveQueryEditorInlineMemoryInsertText,
+    resolveQueryEditorInlineCompletionIntentDetails,
+    shouldTriggerQueryEditorInlineObjectSuggestFallback,
     shouldRequestQueryEditorInlineCompletion,
     type QueryEditorAiApplyMode,
     type QueryEditorAiContext,
@@ -164,6 +169,88 @@ const QUERY_EDITOR_MONACO_FIND_OPTIONS = {
     addExtraSpaceOnTop: true,
 } as const;
 const QUERY_EDITOR_NATIVE_SELECT_CURRENT_LINE_EVENT = 'gonavi:native-select-current-line';
+const QUERY_EDITOR_AI_INLINE_DEBOUNCE_MS = 90;
+const QUERY_EDITOR_AI_INLINE_CONTEXT_KEY = 'gonaviAiInlineSuggestionVisible';
+
+const normalizeQueryEditorInlineMemorySqlKey = (sql: string): string => (
+    String(sql || '')
+        .replace(/\r\n?/g, '\n')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase()
+);
+
+const matchesQueryEditorInlineMemoryDb = (currentDb: string, candidateDb?: string): boolean => {
+    const normalizedCurrentDb = String(currentDb || '').trim().toLowerCase();
+    const normalizedCandidateDb = String(candidateDb || '').trim().toLowerCase();
+    if (!normalizedCurrentDb || !normalizedCandidateDb) {
+        return true;
+    }
+    return normalizedCurrentDb === normalizedCandidateDb;
+};
+
+const buildQueryEditorInlineMemoryEntries = ({
+    currentConnectionId,
+    currentDb,
+    savedQueries,
+    sqlLogs,
+}: {
+    currentConnectionId: string;
+    currentDb: string;
+    savedQueries: SavedQuery[];
+    sqlLogs: SqlLog[];
+}): Array<{ sql: string }> => {
+    const ranked = new Map<string, { sql: string; score: number; latestAt: number }>();
+    const addCandidate = (sql: string, score: number, latestAt: number) => {
+        const text = String(sql || '').trim();
+        if (!text) {
+            return;
+        }
+        const key = normalizeQueryEditorInlineMemorySqlKey(text);
+        if (!key) {
+            return;
+        }
+        const existing = ranked.get(key);
+        if (!existing) {
+            ranked.set(key, { sql: text, score, latestAt });
+            return;
+        }
+        existing.score += score;
+        if (latestAt >= existing.latestAt) {
+            existing.latestAt = latestAt;
+            existing.sql = text;
+        }
+    };
+
+    savedQueries.forEach((query) => {
+        if (currentConnectionId && String(query.connectionId || '').trim() !== currentConnectionId) {
+            return;
+        }
+        if (!matchesQueryEditorInlineMemoryDb(currentDb, query.dbName)) {
+            return;
+        }
+        addCandidate(query.sql, 600, Number(query.createdAt || 0));
+    });
+
+    sqlLogs.forEach((log) => {
+        if (log.status !== 'success') {
+            return;
+        }
+        if (!matchesQueryEditorInlineMemoryDb(currentDb, log.dbName)) {
+            return;
+        }
+        addCandidate(log.sql, 80, Number(log.timestamp || 0));
+    });
+
+    return [...ranked.values()]
+        .sort((left, right) => (
+            right.score - left.score
+            || right.latestAt - left.latestAt
+            || left.sql.length - right.sql.length
+        ))
+        .slice(0, 16)
+        .map((entry) => ({ sql: entry.sql }));
+};
 
 const buildQueryEditorMonacoOptions = (isObjectEditQueryTab: boolean) => ({
     minimap: { enabled: false },
@@ -178,13 +265,7 @@ const buildQueryEditorMonacoOptions = (isObjectEditQueryTab: boolean) => ({
     scrollBeyondLastLine: false,
     quickSuggestions: { other: true, comments: false, strings: false },
     suggestOnTriggerCharacters: true,
-    inlineSuggest: {
-        enabled: true,
-        mode: 'prefix' as const,
-        showToolbar: 'onHover' as const,
-        suppressSuggestions: false,
-        minShowDelay: 160,
-    },
+    inlineSuggest: buildQueryEditorAiInlineSuggestOptions(),
     ...(isObjectEditQueryTab
         ? {
             fontSize: 14,
@@ -745,6 +826,19 @@ const buildQueryEditorAiContextPrompt = (connection: any, database: string): str
     });
 };
 
+const resolveQueryEditorAiConnectionHost = (connection: any): string => {
+    const config = connection?.config || {};
+    if (Array.isArray(config.hosts)) {
+        const hosts = config.hosts
+            .map((item: any) => String(typeof item === 'string' ? item : item?.host || item?.hostname || item?.address || '').trim())
+            .filter(Boolean);
+        if (hosts.length > 0) {
+            return hosts.join(', ');
+        }
+    }
+    return String(config.host || config.hostname || config.server || config.address || '').trim();
+};
+
 // HMR 重载时释放旧注册避免补全和 hover 内容重复
 const _g = globalThis as any;
 const SQL_COMPLETION_PROVIDER_VERSION = '20260702-ai-inline-sql-v1';
@@ -773,7 +867,6 @@ let sharedSequencesData: CompletionSequenceMeta[] = [];
 let sharedPackagesData: CompletionPackageMeta[] = [];
 let sharedColumnsCacheData: Record<string, any[]> = {};
 let sharedActiveEditorModelUri = '';
-let sharedAiInlineCompletionRequestSeq = 0;
 const sharedLazyTablesCache: Record<string, CompletionTableMeta[] | undefined> = {};
 const sharedLazyTablesInFlight: Record<string, Promise<CompletionTableMeta[]> | undefined> = {};
 const createEmptySqlCompletionResult = () => ({ suggestions: [] as any[] });
@@ -969,6 +1062,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const saveQueryActionRef = useRef<any>(null);
   const findInEditorActionRef = useRef<any>(null);
   const formatSqlActionRef = useRef<any>(null);
+  const triggerSqlAiCompletionActionRef = useRef<any>(null);
+  const triggerSqlAiCompletionKeydownDisposableRef = useRef<any>(null);
   const insertSqlSnippetActionRef = useRef<any>(null);
   const aiContextMenuActionDisposablesRef = useRef<any[]>([]);
   const toggleQueryResultsPanelActionRef = useRef<any>(null);
@@ -988,6 +1083,24 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const linkDecorationIdsRef = useRef<string[]>([]);
   const ctrlMetaPressedRef = useRef(false);
   const objectDecorationIdsRef = useRef<string[]>([]);
+  const aiInlineGhostDecorationIdsRef = useRef<string[]>([]);
+  const aiInlineGhostOverlayRef = useRef<HTMLSpanElement | null>(null);
+  const aiInlineGhostVisibleContextKeyRef = useRef<any>(null);
+  const aiInlineGhostTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const aiInlineGhostRequestSeqRef = useRef(0);
+  const triggerAiInlineCompletionRef = useRef<(() => void) | null>(null);
+  const aiContextMetadataWarmupRef = useRef<Record<string, Promise<void> | undefined>>({});
+  const triggerSqlAiCompletionAltPressedRef = useRef(false);
+  const triggerSqlAiCompletionAltGestureAtRef = useRef(0);
+  const triggerSqlAiCompletionFallbackRef = useRef<{ observedAt: number } | null>(null);
+  const triggerSqlAiCompletionFallbackApplyingRef = useRef(false);
+  const aiInlineGhostRef = useRef<{
+      insertText: string;
+      modelUri: string;
+      position: { lineNumber: number; column: number };
+      snapshot: QueryEditorAiEditorSnapshot;
+  } | null>(null);
+  const aiInlineGhostAcceptingRef = useRef(false);
   const objectHoverActionRef = useRef<any>(null);
   const dragRef = useRef<{ startY: number, startHeight: number, currentHeight: number } | null>(null);
   const pendingEditorHeightRef = useRef(editorHeight);
@@ -1014,6 +1127,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   const addSqlLog = useStore(state => state.addSqlLog);
   const sqlLogCount = useStore(state => state.sqlLogs.length);
+  const sqlLogs = useStore(state => state.sqlLogs);
   const addTab = useStore(state => state.addTab);
   const setActiveContext = useStore(state => state.setActiveContext);
   const updateQueryTabDraft = useStore(state => state.updateQueryTabDraft);
@@ -1022,6 +1136,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const sqlSnippets = useStore(state => state.sqlSnippets);
   const currentConnectionIdRef = useRef(currentConnectionId);
   const currentDbRef = useRef(currentDb);
+  const inlineSqlMemoryEntries = useMemo(() => buildQueryEditorInlineMemoryEntries({
+      currentConnectionId,
+      currentDb,
+      savedQueries,
+      sqlLogs,
+  }), [currentConnectionId, currentDb, savedQueries, sqlLogs]);
   const draftSnapshotTab = useMemo(() => ({
       id: tab.id,
       title: tab.title,
@@ -1180,6 +1300,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       () => resolveShortcutBinding(shortcutOptions, 'formatSql', activeShortcutPlatform),
       [activeShortcutPlatform, shortcutOptions],
   );
+  const triggerSqlAiCompletionShortcutBinding = useMemo(
+      () => resolveShortcutBinding(shortcutOptions, 'triggerSqlAiCompletion', activeShortcutPlatform),
+      [activeShortcutPlatform, shortcutOptions],
+  );
   const toggleQueryResultsPanelShortcutBinding = useMemo(
       () => resolveShortcutBinding(shortcutOptions, 'toggleQueryResultsPanel', activeShortcutPlatform),
       [activeShortcutPlatform, shortcutOptions],
@@ -1192,6 +1316,111 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       () => getShortcutPrimaryModifierDisplayLabel(activeShortcutPlatform),
       [activeShortcutPlatform],
   );
+  const isTriggerSqlAiCompletionShortcutEvent = useCallback((event: any): boolean => {
+      const binding = triggerSqlAiCompletionShortcutBinding;
+      if (!binding?.enabled || !binding.combo) {
+          return false;
+      }
+      if (isShortcutMatch(event, binding.combo)) {
+          return true;
+      }
+      if (normalizeShortcutCombo(binding.combo) !== 'Alt+\\') {
+          return false;
+      }
+
+      const key = String(
+          event?.key
+          || event?.nativeEvent?.key
+          || event?.browserEvent?.key
+          || '',
+      ).trim();
+      const code = String(
+          event?.code
+          || event?.nativeEvent?.code
+          || event?.browserEvent?.code
+          || '',
+      ).trim();
+      const keyCode = Number(
+          event?.keyCode
+          ?? event?.which
+          ?? event?.nativeEvent?.keyCode
+          ?? event?.nativeEvent?.which
+          ?? event?.browserEvent?.keyCode
+          ?? event?.browserEvent?.which
+          ?? 0,
+      );
+      const isBackslashKey = key === '\\'
+          || code === 'Backslash'
+          || code === 'IntlBackslash'
+          || keyCode === 220
+          || keyCode === 226;
+      return isBackslashKey && triggerSqlAiCompletionAltPressedRef.current;
+  }, [triggerSqlAiCompletionShortcutBinding]);
+  const isPossibleTriggerSqlAiCompletionFallbackEvent = useCallback((event: any): boolean => {
+      const binding = triggerSqlAiCompletionShortcutBinding;
+      if (!binding?.enabled || normalizeShortcutCombo(binding.combo) !== 'Alt+\\') {
+          return false;
+      }
+
+      const key = String(
+          event?.key
+          || event?.nativeEvent?.key
+          || event?.browserEvent?.key
+          || '',
+      ).trim();
+      const code = String(
+          event?.code
+          || event?.nativeEvent?.code
+          || event?.browserEvent?.code
+          || '',
+      ).trim();
+      const keyCode = Number(
+          event?.keyCode
+          ?? event?.which
+          ?? event?.nativeEvent?.keyCode
+          ?? event?.nativeEvent?.which
+          ?? event?.browserEvent?.keyCode
+          ?? event?.browserEvent?.which
+          ?? 0,
+      );
+      const isLikelyBackslashKey = key === '\\'
+          || key === 'Process'
+          || code === 'Backslash'
+          || code === 'IntlBackslash'
+          || keyCode === 220
+          || keyCode === 226;
+      const hasAltIntent = Boolean(
+          event?.altKey
+          || event?.nativeEvent?.altKey
+          || event?.browserEvent?.altKey
+          || triggerSqlAiCompletionAltPressedRef.current
+      );
+      return isLikelyBackslashKey && hasAltIntent;
+  }, [triggerSqlAiCompletionShortcutBinding]);
+  const registerTriggerSqlAiCompletionAction = useCallback((editor: any, monaco: any) => {
+      if (triggerSqlAiCompletionActionRef.current) {
+          triggerSqlAiCompletionActionRef.current.dispose();
+          triggerSqlAiCompletionActionRef.current = null;
+      }
+      if (!editor || !monaco) {
+          return;
+      }
+
+      const binding = triggerSqlAiCompletionShortcutBinding;
+      const keyBinding = binding?.enabled && binding.combo
+          ? comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode)
+          : null;
+      triggerSqlAiCompletionActionRef.current = editor.addAction({
+          id: 'gonavi.triggerSqlAiCompletion',
+          label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.triggerSqlAiCompletion.label'),
+          keybindings: keyBinding ? [keyBinding.keyMod | keyBinding.keyCode] : [],
+          contextMenuGroupId: '7_ai',
+          contextMenuOrder: 0,
+          run: () => {
+              triggerAiInlineCompletionRef.current?.();
+          },
+      });
+  }, [triggerSqlAiCompletionShortcutBinding]);
   useEffect(() => {
       setIsResultPanelVisible(tab.resultPanelVisible === true);
   }, [tab.id, tab.resultPanelVisible]);
@@ -1464,16 +1693,174 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [getCurrentQuery]);
 
   const buildQueryEditorAiContext = useCallback((): QueryEditorAiContext => {
-      const conn = connectionsRef.current.find(c => c.id === currentConnectionIdRef.current);
+      const resolvedConnectionId = String(
+          currentConnectionIdRef.current
+          || currentConnectionId
+          || tab.connectionId
+          || '',
+      ).trim();
+      const conn = connectionsRef.current.find(c => c.id === resolvedConnectionId);
+      const currentDbName = String(
+          currentDbRef.current
+          || currentDb
+          || tab.dbName
+          || '',
+      ).trim();
+      const lazyTables = sharedLazyTablesCache[`${resolvedConnectionId}|${currentDbName}`] || [];
+      const mergedTablesByKey = new Map<string, CompletionTableMeta>();
+      [...sharedTablesData, ...tablesRef.current, ...lazyTables].forEach((table) => {
+          const tableKey = `${String(table?.dbName || '').trim().toLowerCase()}\u0000${String(table?.tableName || '').trim().toLowerCase()}`;
+          if (!tableKey.trim()) {
+              return;
+          }
+          mergedTablesByKey.set(tableKey, table);
+      });
+      const mergedColumnsByKey = new Map<string, CompletionColumnMeta>();
+      [...sharedAllColumnsData, ...allColumnsRef.current].forEach((column) => {
+          const columnKey = `${String(column?.dbName || '').trim().toLowerCase()}\u0000${String(column?.tableName || '').trim().toLowerCase()}\u0000${String(column?.name || '').trim().toLowerCase()}`;
+          if (!columnKey.trim()) {
+              return;
+          }
+          mergedColumnsByKey.set(columnKey, column);
+      });
       return {
           connectionName: conn?.name,
+          host: resolveQueryEditorAiConnectionHost(conn),
+          port: conn?.config?.port,
           sourceType: conn?.config?.type,
-          currentDb: currentDbRef.current,
+          currentDb: currentDbName,
           visibleDbs: visibleDbsRef.current,
-          tables: tablesRef.current,
-          columns: allColumnsRef.current,
+          tables: [...mergedTablesByKey.values()],
+          columns: [...mergedColumnsByKey.values()],
       };
-  }, []);
+  }, [currentConnectionId, currentDb, tab.connectionId, tab.dbName]);
+
+  const ensureQueryEditorAiContextMetadata = useCallback(async (
+      editorSnapshot: QueryEditorAiEditorSnapshot,
+  ): Promise<void> => {
+      const connectionId = String(
+          currentConnectionIdRef.current
+          || currentConnectionId
+          || tab.connectionId
+          || '',
+      ).trim();
+      const dbName = String(
+          currentDbRef.current
+          || currentDb
+          || tab.dbName
+          || '',
+      ).trim();
+      if (!connectionId || !dbName) {
+          return;
+      }
+
+      const intent = resolveQueryEditorInlineCompletionIntentDetails(editorSnapshot);
+      const normalizedDbName = dbName.toLowerCase();
+      const needsTables = intent.intent === 'table_name'
+          || !tablesRef.current.some((table) => String(table.dbName || '').trim().toLowerCase() === normalizedDbName);
+      const needsColumns = intent.intent === 'column_name'
+          && !allColumnsRef.current.some((column) => String(column.dbName || '').trim().toLowerCase() === normalizedDbName);
+      if (!needsTables && !needsColumns) {
+          return;
+      }
+
+      const warmupKey = `${connectionId}\u0000${normalizedDbName}\u0000${needsTables ? 'tables' : ''}\u0000${needsColumns ? 'columns' : ''}`;
+      const existingWarmup = aiContextMetadataWarmupRef.current[warmupKey];
+      if (existingWarmup) {
+          await existingWarmup;
+          return;
+      }
+
+      const warmupPromise = (async () => {
+          const conn = connectionsRef.current.find((item) => item.id === connectionId);
+          if (!conn) {
+              return;
+          }
+
+          const config = {
+              ...conn.config,
+              port: Number(conn.config.port),
+              password: conn.config.password || '',
+              database: conn.config.database || '',
+              useSSH: conn.config.useSSH || false,
+              ssh: conn.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' },
+          };
+
+          if (needsTables) {
+              try {
+                  const metadataDialect = normalizeMetadataDialect(conn);
+                  const [tableComments, resTables] = await Promise.all([
+                      fetchCompletionTableCommentMap(config, dbName, metadataDialect).catch(() => new Map<string, string>()),
+                      DBGetTables(buildRpcConnectionConfig(config) as any, dbName),
+                  ]);
+                  if (resTables?.success && Array.isArray(resTables.data)) {
+                      const fetchedTables = resTables.data
+                          .map((row: any) => buildCompletionTableMeta(dbName, row, tableComments))
+                          .filter((table): table is CompletionTableMeta => !!table);
+                      if (fetchedTables.length > 0) {
+                          const nextTableByKey = new Map(
+                              tablesRef.current.map((table) => [
+                                  `${String(table.dbName || '').trim().toLowerCase()}\u0000${String(table.tableName || '').trim().toLowerCase()}`,
+                                  table,
+                              ]),
+                          );
+                          fetchedTables.forEach((table) => {
+                              nextTableByKey.set(
+                                  `${String(table.dbName || '').trim().toLowerCase()}\u0000${String(table.tableName || '').trim().toLowerCase()}`,
+                                  table,
+                              );
+                          });
+                          tablesRef.current = [...nextTableByKey.values()];
+                          sharedTablesData = tablesRef.current;
+                          sharedLazyTablesCache[`${connectionId}|${dbName}`] = fetchedTables;
+                      }
+                  }
+              } catch (error) {
+                  console.warn('GoNavi AI inline table metadata warmup failed', error);
+              }
+          }
+
+          if (needsColumns) {
+              try {
+                  const resCols = await DBGetAllColumns(buildRpcConnectionConfig(config) as any, dbName);
+                  if (resCols?.success && Array.isArray(resCols.data)) {
+                      const fetchedColumns = resCols.data.map((col: any) => ({
+                          dbName,
+                          tableName: col.tableName,
+                          name: col.name,
+                          type: col.type,
+                          comment: normalizeCommentText(col.comment ?? col.Comment ?? col.COLUMN_COMMENT ?? col.column_comment ?? ''),
+                      }));
+                      if (fetchedColumns.length > 0) {
+                          const nextColumnByKey = new Map(
+                              allColumnsRef.current.map((column) => [
+                                  `${String(column.dbName || '').trim().toLowerCase()}\u0000${String(column.tableName || '').trim().toLowerCase()}\u0000${String(column.name || '').trim().toLowerCase()}`,
+                                  column,
+                              ]),
+                          );
+                          fetchedColumns.forEach((column) => {
+                              nextColumnByKey.set(
+                                  `${String(column.dbName || '').trim().toLowerCase()}\u0000${String(column.tableName || '').trim().toLowerCase()}\u0000${String(column.name || '').trim().toLowerCase()}`,
+                                  column,
+                              );
+                          });
+                          allColumnsRef.current = [...nextColumnByKey.values()];
+                          sharedAllColumnsData = allColumnsRef.current;
+                      }
+                  }
+              } catch (error) {
+                  console.warn('GoNavi AI inline column metadata warmup failed', error);
+              }
+          }
+      })();
+
+      aiContextMetadataWarmupRef.current[warmupKey] = warmupPromise;
+      try {
+          await warmupPromise;
+      } finally {
+          delete aiContextMetadataWarmupRef.current[warmupKey];
+      }
+  }, [currentConnectionId, currentDb, tab.connectionId, tab.dbName]);
 
   useEffect(() => {
       if (!isExternalSQLFileTab) return;
@@ -2873,8 +3260,389 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           sharedActiveEditorModelUri = String(editor.getModel?.()?.uri?.toString?.() || '');
       }
 
+      const mountedModel = editor.getModel?.();
+      if (mountedModel && typeof monaco?.editor?.setModelLanguage === 'function') {
+          monaco.editor.setModelLanguage(mountedModel, 'sql');
+      }
       editor.updateOptions?.(buildQueryEditorMonacoOptions(isObjectEditQueryTab));
+
+      aiInlineGhostVisibleContextKeyRef.current = editor.createContextKey?.(
+          QUERY_EDITOR_AI_INLINE_CONTEXT_KEY,
+          false,
+      ) || null;
+
+      const clearAiInlineGhostTimer = () => {
+          if (aiInlineGhostTimerRef.current !== null) {
+              clearTimeout(aiInlineGhostTimerRef.current);
+              aiInlineGhostTimerRef.current = null;
+          }
+      };
+
+      const clearAiInlineGhostDecorations = () => {
+          if (aiInlineGhostDecorationIdsRef.current.length === 0) {
+              return;
+          }
+          const nextDecorationIds = editor.deltaDecorations?.(
+              aiInlineGhostDecorationIdsRef.current,
+              [],
+          );
+          aiInlineGhostDecorationIdsRef.current = Array.isArray(nextDecorationIds) ? nextDecorationIds : [];
+      };
+
+      const clearAiInlineGhost = (cancelRequest = true) => {
+          clearAiInlineGhostTimer();
+          if (cancelRequest) {
+              aiInlineGhostRequestSeqRef.current += 1;
+          }
+          aiInlineGhostRef.current = null;
+          aiInlineGhostVisibleContextKeyRef.current?.set?.(false);
+          if (aiInlineGhostOverlayRef.current) {
+              aiInlineGhostOverlayRef.current.remove();
+              aiInlineGhostOverlayRef.current = null;
+          }
+          clearAiInlineGhostDecorations();
+      };
+
+      const triggerStructuredSqlSuggest = (source: string, defer = false) => {
+          const run = () => {
+              if (editorRef.current !== editor) {
+                  return;
+              }
+              editor.trigger?.(source, 'editor.action.triggerSuggest', undefined);
+          };
+          if (defer) {
+              window.setTimeout(run, 0);
+              return;
+          }
+          run();
+      };
+
+      const didModelContentAcceptCurrentAiInlineGhost = (event: any): boolean => {
+          const ghost = aiInlineGhostRef.current;
+          if (!ghost?.insertText) {
+              return false;
+          }
+          const changes = Array.isArray(event?.changes) ? event.changes : [];
+          return changes.some((change: any) => String(change?.text ?? '') === ghost.insertText);
+      };
+
+      const buildInlineGhostEditorSnapshot = (model: any, position: { lineNumber: number; column: number }): QueryEditorAiEditorSnapshot => {
+          const lineContent = String(model.getLineContent?.(position.lineNumber) || '');
+          const lineColumnIndex = Math.max(0, Math.min(Number(position.column || 1) - 1, lineContent.length));
+          const lineCount = Number(model.getLineCount?.() || position.lineNumber || 1);
+          return {
+              prefix: String(model.getValueInRange?.(new monaco.Range(1, 1, position.lineNumber, position.column)) || ''),
+              suffix: String(model.getValueInRange?.(new monaco.Range(
+                  position.lineNumber,
+                  position.column,
+                  lineCount,
+                  Number(model.getLineMaxColumn?.(lineCount) || position.column),
+              )) || ''),
+              currentLineBeforeCursor: lineContent.slice(0, lineColumnIndex),
+              currentLineAfterCursor: lineContent.slice(lineColumnIndex),
+          };
+      };
+
+      const buildInlineGhostEditorSnapshotFromInsertedTextRemoval = (
+          modelText: string,
+          rangeOffset: number,
+          removedTextLength: number,
+      ): QueryEditorAiEditorSnapshot | null => {
+          if (!Number.isFinite(rangeOffset)) {
+              return null;
+          }
+          const safeStart = Math.max(0, Math.min(Math.trunc(rangeOffset), modelText.length));
+          const safeEnd = Math.max(safeStart, Math.min(safeStart + Math.max(0, removedTextLength), modelText.length));
+          const textBeforeInsertion = `${modelText.slice(0, safeStart)}${modelText.slice(safeEnd)}`;
+          const prefix = textBeforeInsertion.slice(0, safeStart);
+          const suffix = textBeforeInsertion.slice(safeStart);
+          const lineStart = Math.max(0, prefix.lastIndexOf('\n') + 1);
+          const nextLineBreak = textBeforeInsertion.indexOf('\n', safeStart);
+          const lineEnd = nextLineBreak === -1 ? textBeforeInsertion.length : nextLineBreak;
+          return {
+              prefix,
+              suffix,
+              currentLineBeforeCursor: prefix.slice(lineStart).replace(/\r/g, ''),
+              currentLineAfterCursor: textBeforeInsertion.slice(safeStart, lineEnd).replace(/\r/g, ''),
+          };
+      };
+
+      const recoverStrayManualSqlCompletionMarker = (
+          model: any,
+          position: { lineNumber: number; column: number },
+          snapshot: QueryEditorAiEditorSnapshot,
+      ): {
+          position: { lineNumber: number; column: number };
+          snapshot: QueryEditorAiEditorSnapshot;
+          recovered: boolean;
+      } => {
+          const prefix = String(snapshot.prefix || '');
+          const lineBeforeCursor = String(snapshot.currentLineBeforeCursor || '');
+          if (!prefix.endsWith('\\') || !lineBeforeCursor.endsWith('\\')) {
+              return { position, snapshot, recovered: false };
+          }
+
+          const sanitizedSnapshot: QueryEditorAiEditorSnapshot = {
+              prefix: prefix.slice(0, -1),
+              suffix: String(snapshot.suffix || ''),
+              currentLineBeforeCursor: lineBeforeCursor.slice(0, -1),
+              currentLineAfterCursor: String(snapshot.currentLineAfterCursor || ''),
+          };
+          const intent = resolveQueryEditorInlineCompletionIntentDetails(sanitizedSnapshot);
+          if (intent.intent !== 'table_name' && intent.intent !== 'column_name') {
+              return { position, snapshot, recovered: false };
+          }
+
+          const startColumn = Math.max(1, position.column - 1);
+          const startPosition = { lineNumber: position.lineNumber, column: startColumn };
+          editor.executeEdits?.('gonavi-manual-sql-ai-strip-marker', [{
+              range: new monaco.Range(
+                  position.lineNumber,
+                  startColumn,
+                  position.lineNumber,
+                  position.column,
+              ),
+              text: '',
+              forceMoveMarkers: true,
+          }]);
+          editor.setPosition?.(startPosition);
+          syncQueryDraft(getEditorText());
+
+          return {
+              position: startPosition,
+              snapshot: buildInlineGhostEditorSnapshot(model, startPosition),
+              recovered: true,
+          };
+      };
+
+      const isInlineGhostSnapshotCurrent = (
+          model: any,
+          position: { lineNumber: number; column: number },
+          snapshot: QueryEditorAiEditorSnapshot,
+      ): boolean => {
+          const currentSnapshot = buildInlineGhostEditorSnapshot(model, position);
+          return currentSnapshot.prefix === snapshot.prefix
+              && currentSnapshot.suffix === snapshot.suffix
+              && currentSnapshot.currentLineBeforeCursor === snapshot.currentLineBeforeCursor
+              && currentSnapshot.currentLineAfterCursor === snapshot.currentLineAfterCursor;
+      };
+
+      const renderAiInlineGhost = (
+          model: any,
+          position: { lineNumber: number; column: number },
+          insertText: string,
+          snapshot: QueryEditorAiEditorSnapshot,
+      ) => {
+          const previewText = resolveInlineSqlGhostPreviewText(insertText);
+          if (!previewText) {
+              clearAiInlineGhost(false);
+              return;
+          }
+
+          const modelUri = String(model?.uri?.toString?.() || '');
+          aiInlineGhostRef.current = {
+              insertText,
+              modelUri,
+              position,
+              snapshot,
+          };
+          clearAiInlineGhostDecorations();
+          const visiblePosition = editor.getScrolledVisiblePosition?.(position);
+          const editorDomNode = editor.getDomNode?.();
+          if (!visiblePosition || !editorDomNode) {
+              clearAiInlineGhost(false);
+              return;
+          }
+
+          const overlay = aiInlineGhostOverlayRef.current || document.createElement('span');
+          if (!aiInlineGhostOverlayRef.current) {
+              overlay.className = 'gonavi-query-editor-ai-inline-ghost-overlay';
+              editorDomNode.appendChild(overlay);
+              aiInlineGhostOverlayRef.current = overlay;
+          }
+
+          const fontInfoOption = monaco.editor?.EditorOption?.fontInfo;
+          const fontInfo = fontInfoOption !== undefined ? editor.getOption?.(fontInfoOption) : null;
+          overlay.textContent = previewText;
+          overlay.style.left = `${Math.max(0, visiblePosition.left)}px`;
+          overlay.style.top = `${Math.max(0, visiblePosition.top)}px`;
+          overlay.style.height = `${Math.max(1, visiblePosition.height || fontInfo?.lineHeight || 20)}px`;
+          overlay.style.lineHeight = `${Math.max(1, visiblePosition.height || fontInfo?.lineHeight || 20)}px`;
+          if (fontInfo) {
+              overlay.style.fontFamily = String(fontInfo.fontFamily || '');
+              overlay.style.fontSize = `${Number(fontInfo.fontSize || 14)}px`;
+              overlay.style.fontWeight = String(fontInfo.fontWeight || 'normal');
+          }
+          aiInlineGhostVisibleContextKeyRef.current?.set?.(true);
+      };
+
+      const acceptAiInlineGhost = (): boolean => {
+          const ghost = aiInlineGhostRef.current;
+          const model = editor.getModel?.();
+          const position = normalizeEditorPosition(editor.getPosition?.());
+          if (!ghost || !model || !position) {
+              return false;
+          }
+          const modelUri = String(model?.uri?.toString?.() || '');
+          if (
+              ghost.modelUri !== modelUri
+              || ghost.position.lineNumber !== position.lineNumber
+              || ghost.position.column !== position.column
+              || !isInlineGhostSnapshotCurrent(model, position, ghost.snapshot)
+          ) {
+              clearAiInlineGhost();
+              return false;
+          }
+
+          aiInlineGhostAcceptingRef.current = true;
+          try {
+              editor.pushUndoStop?.();
+              const startOffset = typeof model.getOffsetAt === 'function'
+                  ? Number(model.getOffsetAt(position))
+                  : Number.NaN;
+              editor.executeEdits?.('gonavi-ai-inline-sql-completion', [{
+                  range: new monaco.Range(
+                      position.lineNumber,
+                      position.column,
+                      position.lineNumber,
+                      position.column,
+                  ),
+                  text: ghost.insertText,
+                  forceMoveMarkers: true,
+              }]);
+              editor.pushUndoStop?.();
+              syncQueryDraft(String(editor.getValue?.() ?? model.getValue?.() ?? ''));
+              if (Number.isFinite(startOffset) && typeof model.getPositionAt === 'function') {
+                  const nextPosition = normalizeEditorPosition(model.getPositionAt(startOffset + ghost.insertText.length));
+                  if (nextPosition) {
+                      editor.setPosition?.(nextPosition);
+                  }
+              }
+          } finally {
+              aiInlineGhostAcceptingRef.current = false;
+              clearAiInlineGhost();
+          }
+          requestAiInlineGhost(0);
+          return true;
+      };
+
+      const requestAiInlineGhost = (delayMs: number, focusEditor = false, manualTrigger = false) => {
+          clearAiInlineGhost();
+          if (aiInlineGhostAcceptingRef.current || editorRef.current !== editor) {
+              return;
+          }
+          if (focusEditor) {
+              editor.focus?.();
+          }
+
+          const model = editor.getModel?.();
+          let position = normalizeEditorPosition(editor.getPosition?.());
+          if (!model || !position) {
+              return;
+          }
+
+          const modelUri = String(model?.uri?.toString?.() || '');
+          if (modelUri && sharedActiveEditorModelUri && modelUri !== sharedActiveEditorModelUri) {
+              return;
+          }
+
+          let editorSnapshot = buildInlineGhostEditorSnapshot(model, position);
+          if (manualTrigger) {
+              const normalizedState = recoverStrayManualSqlCompletionMarker(model, position, editorSnapshot);
+              position = normalizedState.position;
+              editorSnapshot = normalizedState.snapshot;
+          }
+          const intent = resolveQueryEditorInlineCompletionIntentDetails(editorSnapshot);
+          const shouldUseInlineMemory = manualTrigger || intent.intent !== 'general_sql';
+          if (shouldUseInlineMemory) {
+              const memoryInsertText = resolveQueryEditorInlineMemoryInsertText({
+                  editorSnapshot,
+                  memoryEntries: inlineSqlMemoryEntries,
+              });
+              if (memoryInsertText.trim()) {
+                  renderAiInlineGhost(model, position, memoryInsertText, editorSnapshot);
+                  return;
+              }
+          }
+          if (!shouldRequestQueryEditorInlineCompletion(editorSnapshot)) {
+              return;
+          }
+
+          const requestId = ++aiInlineGhostRequestSeqRef.current;
+          const runRequest = () => {
+              if (aiInlineGhostTimerRef.current !== null) {
+                  aiInlineGhostTimerRef.current = null;
+              }
+          void (async () => {
+                  if (
+                      requestId !== aiInlineGhostRequestSeqRef.current
+                      || editorRef.current !== editor
+                  ) {
+                      return;
+                  }
+                  try {
+                      await ensureQueryEditorAiContextMetadata(editorSnapshot);
+                      const insertText = await requestQueryEditorInlineCompletion({
+                          service: getQueryEditorAiService(),
+                          aiContext: buildQueryEditorAiContext(),
+                          editorSnapshot,
+                      });
+                      const currentPosition = normalizeEditorPosition(editor.getPosition?.());
+                      if (
+                          requestId !== aiInlineGhostRequestSeqRef.current
+                          || !currentPosition
+                          || currentPosition.lineNumber !== position.lineNumber
+                          || currentPosition.column !== position.column
+                          || !isInlineGhostSnapshotCurrent(model, currentPosition, editorSnapshot)
+                          ) {
+                          return;
+                      }
+                      if (!insertText.trim()) {
+                          if (intent.intent === 'table_name' || intent.intent === 'column_name') {
+                              const shouldTriggerStructuredSuggest = manualTrigger
+                                  || shouldTriggerQueryEditorInlineObjectSuggestFallback({
+                                      aiContext: buildQueryEditorAiContext(),
+                                      editorSnapshot,
+                                  });
+                              if (shouldTriggerStructuredSuggest) {
+                                  triggerStructuredSqlSuggest(
+                                      manualTrigger ? 'gonavi-ai-inline-manual' : 'gonavi-ai-inline-auto',
+                                      !manualTrigger,
+                                  );
+                              }
+                          }
+                          return;
+                      }
+                      renderAiInlineGhost(model, position, insertText, editorSnapshot);
+                  } catch (error) {
+                      console.warn('GoNavi AI inline SQL ghost failed', error);
+                  }
+              })();
+          };
+
+          if (delayMs > 0) {
+              aiInlineGhostTimerRef.current = setTimeout(runRequest, delayMs);
+              return;
+          }
+          runRequest();
+      };
+
+      const scheduleAiInlineGhost = () => {
+          requestAiInlineGhost(QUERY_EDITOR_AI_INLINE_DEBOUNCE_MS);
+      };
+
+      triggerAiInlineCompletionRef.current = () => {
+          requestAiInlineGhost(0, true, true);
+      };
+
       if (monaco?.KeyCode?.RightArrow) {
+          editor.addCommand?.(
+              monaco.KeyCode.RightArrow,
+              () => {
+                  acceptAiInlineGhost();
+              },
+              QUERY_EDITOR_AI_INLINE_CONTEXT_KEY,
+          );
           editor.addCommand?.(
               monaco.KeyCode.RightArrow,
               () => {
@@ -2883,6 +3651,20 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               'inlineSuggestionVisible',
           );
       }
+
+      const repositionAiInlineGhost = () => {
+          const ghost = aiInlineGhostRef.current;
+          const model = editor.getModel?.();
+          if (!ghost || !model) {
+              return;
+          }
+          const modelUri = String(model?.uri?.toString?.() || '');
+          if (ghost.modelUri !== modelUri) {
+              clearAiInlineGhost();
+              return;
+          }
+          renderAiInlineGhost(model, ghost.position, ghost.insertText, ghost.snapshot);
+      };
 
       const applyNavigationHoverStateAtPosition = (targetPosition: { lineNumber: number; column: number } | null) => {
           if (!ctrlMetaPressedRef.current) {
@@ -3131,13 +3913,152 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (position) {
               lastEditorCursorPositionRef.current = position;
           }
+          const ghost = aiInlineGhostRef.current;
+          if (
+              ghost
+              && (!position
+                  || ghost.position.lineNumber !== position.lineNumber
+                  || ghost.position.column !== position.column)
+          ) {
+              clearAiInlineGhost();
+          }
       });
 
+      const recoverTriggerSqlAiCompletionFallback = (event: any): boolean => {
+          if (triggerSqlAiCompletionFallbackApplyingRef.current) {
+              return true;
+          }
+
+          const pending = triggerSqlAiCompletionFallbackRef.current;
+          const altGestureAge = Date.now() - Number(triggerSqlAiCompletionAltGestureAtRef.current || 0);
+          const hasRecentAltGesture = altGestureAge >= 0 && altGestureAge <= 1200;
+          const changes = Array.isArray(event?.changes) ? event.changes : [];
+          const backslashChange = changes.find((change: any) => String(change?.text ?? '') === '\\');
+          if (!backslashChange) {
+              if (pending && (Date.now() - pending.observedAt) > 1200) {
+                  triggerSqlAiCompletionFallbackRef.current = null;
+              }
+              return false;
+          }
+
+          const model = editor.getModel?.();
+          if (!model || typeof model.getOffsetAt !== 'function' || typeof model.getValue !== 'function') {
+              return false;
+          }
+
+          let markerOffset = Number.NaN;
+          let startPosition = normalizeEditorPosition(backslashChange?.range
+              ? {
+                  lineNumber: Number(backslashChange.range.startLineNumber || 1),
+                  column: Number(backslashChange.range.startColumn || 1),
+              }
+              : null);
+          let endPosition = normalizeEditorPosition(backslashChange?.range
+              ? {
+                  lineNumber: Number(backslashChange.range.endLineNumber || 1),
+                  column: Number(backslashChange.range.endColumn || 1),
+              }
+              : null);
+
+          const rangeOffset = Number(backslashChange?.rangeOffset);
+          if (Number.isFinite(rangeOffset)) {
+              markerOffset = rangeOffset;
+          } else if (startPosition) {
+              markerOffset = Number(model.getOffsetAt(startPosition));
+          } else {
+              const currentPosition = normalizeEditorPosition(editor.getPosition?.());
+              const currentOffset = currentPosition ? Number(model.getOffsetAt(currentPosition)) : Number.NaN;
+              if (Number.isFinite(currentOffset) && currentOffset > 0) {
+                  markerOffset = currentOffset - 1;
+              }
+          }
+
+          if (!Number.isFinite(markerOffset) || markerOffset < 0) {
+              return false;
+          }
+          const currentModelText = String(model?.getValue?.() ?? '');
+          if (currentModelText.slice(markerOffset, markerOffset + 1) !== '\\') {
+              return false;
+          }
+          startPosition = normalizeEditorPosition(model?.getPositionAt?.(markerOffset));
+          endPosition = normalizeEditorPosition(model?.getPositionAt?.(markerOffset + 1));
+          const fallbackSnapshot = buildInlineGhostEditorSnapshotFromInsertedTextRemoval(
+              currentModelText,
+              markerOffset,
+              1,
+          );
+          const fallbackIntent = fallbackSnapshot
+              ? resolveQueryEditorInlineCompletionIntentDetails(fallbackSnapshot)
+              : null;
+          const hasStructuredSqlCompletionContext = fallbackIntent?.intent === 'table_name'
+              || fallbackIntent?.intent === 'column_name';
+          if (!pending && !hasRecentAltGesture && !hasStructuredSqlCompletionContext) {
+              return false;
+          }
+          if (pending && (Date.now() - pending.observedAt) > 1200) {
+              triggerSqlAiCompletionFallbackRef.current = null;
+              if (!hasRecentAltGesture && !hasStructuredSqlCompletionContext) {
+                  return false;
+              }
+          }
+
+          if (!startPosition || !endPosition) {
+              return false;
+          }
+
+          triggerSqlAiCompletionFallbackRef.current = null;
+          triggerSqlAiCompletionFallbackApplyingRef.current = true;
+          try {
+              editor.executeEdits?.('gonavi-trigger-sql-ai-completion-fallback', [{
+                  range: new monaco.Range(
+                      startPosition.lineNumber,
+                      startPosition.column,
+                      endPosition.lineNumber,
+                      endPosition.column,
+                  ),
+                  text: '',
+                  forceMoveMarkers: true,
+              }]);
+              editor.setPosition?.(startPosition);
+              syncQueryDraft(getEditorText());
+          } finally {
+              triggerSqlAiCompletionFallbackApplyingRef.current = false;
+          }
+          triggerAiInlineCompletionRef.current?.();
+          return true;
+      };
+
       editor.onDidChangeModelContent?.((event: any) => {
+          if (recoverTriggerSqlAiCompletionFallback(event)) {
+              return;
+          }
           const hasSlashCommandMarker = Array.isArray(event?.changes)
               && event.changes.some((change: any) => /__AI_\w+__/.test(String(change?.text || '')));
-          if (!hasSlashCommandMarker) return;
-          refreshObjectDecorations(QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH);
+          if (hasSlashCommandMarker) {
+              refreshObjectDecorations(QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH);
+          }
+          const acceptedCurrentAiGhost = !aiInlineGhostAcceptingRef.current
+              && didModelContentAcceptCurrentAiInlineGhost(event);
+          if (acceptedCurrentAiGhost) {
+              clearAiInlineGhost(false);
+              window.setTimeout(() => {
+                  if (editorRef.current !== editor) {
+                      return;
+                  }
+                  requestAiInlineGhost(0);
+              }, 0);
+              return;
+          }
+          if (!aiInlineGhostAcceptingRef.current) {
+              scheduleAiInlineGhost();
+          }
+      });
+
+      editor.onDidScrollChange?.(() => {
+          repositionAiInlineGhost();
+      });
+      editor.onDidLayoutChange?.(() => {
+          repositionAiInlineGhost();
       });
 
       editor.onMouseMove?.((event: any) => {
@@ -3263,6 +4184,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           setQueryEditorMouseCursor(editor, '');
           objectHoverActionRef.current?.dispose?.();
           objectHoverActionRef.current = null;
+          triggerSqlAiCompletionActionRef.current?.dispose?.();
+          triggerSqlAiCompletionActionRef.current = null;
+          triggerSqlAiCompletionKeydownDisposableRef.current?.dispose?.();
+          triggerSqlAiCompletionKeydownDisposableRef.current = null;
+          triggerAiInlineCompletionRef.current = null;
           const disposedModelUri = String(editor.getModel?.()?.uri?.toString?.() || '');
           if (disposedModelUri && sharedActiveEditorModelUri === disposedModelUri) {
               sharedActiveEditorModelUri = '';
@@ -3284,6 +4210,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       // 注册 AI 右键菜单操作
       registerQueryEditorAiContextMenuActions(editor);
       registerInsertSqlSnippetContextMenuAction(editor);
+      registerTriggerSqlAiCompletionAction(editor, monaco);
 
       // Register runQuery shortcut inside Monaco so it overrides Monaco's default keybinding
       const runBinding = runQueryShortcutBinding;
@@ -4225,87 +5152,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               };
           },
       }));
-
-      if (typeof monaco.languages.registerInlineCompletionsProvider === 'function') {
-          sqlCompletionDisposables.push(monaco.languages.registerInlineCompletionsProvider('sql', {
-              groupId: 'gonavi-query-editor-ai',
-              displayName: 'GoNavi AI SQL',
-              debounceDelayMs: 650,
-              provideInlineCompletions: async (model: any, position: any, context: any, token: any) => {
-                  if (context?.includeInlineCompletions === false || token?.isCancellationRequested) {
-                      return { items: [] };
-                  }
-
-                  const modelUri = String(model?.uri?.toString?.() || '');
-                  if (!modelUri || modelUri !== sharedActiveEditorModelUri) {
-                      return { items: [] };
-                  }
-
-                  const lineContent = String(model.getLineContent?.(position.lineNumber) || '');
-                  const lineColumnIndex = Math.max(0, Math.min(Number(position.column || 1) - 1, lineContent.length));
-                  const lineCount = Number(model.getLineCount?.() || position.lineNumber || 1);
-                  const prefixRange = new monaco.Range(1, 1, position.lineNumber, position.column);
-                  const suffixRange = new monaco.Range(
-                      position.lineNumber,
-                      position.column,
-                      lineCount,
-                      Number(model.getLineMaxColumn?.(lineCount) || position.column),
-                  );
-                  const editorSnapshot = {
-                      prefix: String(model.getValueInRange?.(prefixRange) || ''),
-                      suffix: String(model.getValueInRange?.(suffixRange) || ''),
-                      currentLineBeforeCursor: lineContent.slice(0, lineColumnIndex),
-                      currentLineAfterCursor: lineContent.slice(lineColumnIndex),
-                  };
-                  if (!shouldRequestQueryEditorInlineCompletion(editorSnapshot)) {
-                      return { items: [] };
-                  }
-
-                  const versionId = Number(model.getVersionId?.() || 0);
-                  const requestId = ++sharedAiInlineCompletionRequestSeq;
-                  try {
-                      const insertText = await requestQueryEditorInlineCompletion({
-                          service: getQueryEditorAiService(),
-                          aiContext: {
-                              connectionName: sharedConnections.find(c => c.id === sharedCurrentConnectionId)?.name,
-                              sourceType: sharedConnections.find(c => c.id === sharedCurrentConnectionId)?.config?.type,
-                              currentDb: sharedCurrentDb,
-                              visibleDbs: sharedVisibleDbs,
-                              tables: sharedTablesData,
-                              columns: sharedAllColumnsData,
-                          },
-                          editorSnapshot,
-                      });
-                      if (
-                          token?.isCancellationRequested
-                          || requestId !== sharedAiInlineCompletionRequestSeq
-                          || (versionId && Number(model.getVersionId?.() || 0) !== versionId)
-                          || !insertText.trim()
-                      ) {
-                          return { items: [] };
-                      }
-
-                      return {
-                          items: [{
-                              insertText,
-                              range: new monaco.Range(
-                                  position.lineNumber,
-                                  position.column,
-                                  position.lineNumber,
-                                  position.column,
-                              ),
-                          }],
-                          suppressSuggestions: false,
-                          enableForwardStability: true,
-                      };
-                  } catch (error) {
-                      console.warn('GoNavi AI inline SQL completion failed', error);
-                      return { items: [] };
-                  }
-              },
-              disposeInlineCompletions: () => {},
-          }));
-      }
 
       } // end sqlCompletionRegistered guard
 
@@ -5667,6 +6513,61 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [languagePreference, registerInsertSqlSnippetContextMenuAction]);
 
   useEffect(() => {
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco) return;
+
+      registerTriggerSqlAiCompletionAction(editor, monaco);
+
+      return () => {
+          if (triggerSqlAiCompletionActionRef.current) {
+              triggerSqlAiCompletionActionRef.current.dispose();
+              triggerSqlAiCompletionActionRef.current = null;
+          }
+      };
+  }, [languagePreference, registerTriggerSqlAiCompletionAction]);
+
+  useEffect(() => {
+      triggerSqlAiCompletionKeydownDisposableRef.current?.dispose?.();
+      triggerSqlAiCompletionKeydownDisposableRef.current = null;
+
+      const editor = editorRef.current;
+      const binding = triggerSqlAiCompletionShortcutBinding;
+      if (!editor?.onKeyDown || !binding?.enabled || !binding.combo) {
+          return;
+      }
+
+      triggerSqlAiCompletionKeydownDisposableRef.current = editor.onKeyDown((event: any) => {
+          if (!isActive) {
+              return;
+          }
+
+          const browserEvent = event?.browserEvent || event?.event || event;
+          if (!browserEvent) {
+              return;
+          }
+          if (!isTriggerSqlAiCompletionShortcutEvent(browserEvent)) {
+              if (isPossibleTriggerSqlAiCompletionFallbackEvent(browserEvent)) {
+                  triggerSqlAiCompletionFallbackRef.current = { observedAt: Date.now() };
+              }
+              return;
+          }
+
+          triggerSqlAiCompletionFallbackRef.current = null;
+          event?.preventDefault?.();
+          event?.stopPropagation?.();
+          browserEvent.preventDefault?.();
+          browserEvent.stopPropagation?.();
+          triggerAiInlineCompletionRef.current?.();
+      });
+
+      return () => {
+          triggerSqlAiCompletionKeydownDisposableRef.current?.dispose?.();
+          triggerSqlAiCompletionKeydownDisposableRef.current = null;
+      };
+  }, [isActive, isPossibleTriggerSqlAiCompletionFallbackEvent, isTriggerSqlAiCompletionShortcutEvent, triggerSqlAiCompletionShortcutBinding]);
+
+  useEffect(() => {
       if (runQueryActionRef.current) {
           runQueryActionRef.current.dispose();
           runQueryActionRef.current = null;
@@ -6372,6 +7273,74 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [isActive, formatSqlShortcutBinding]);
 
   useEffect(() => {
+      const updateAltState = (event: KeyboardEvent) => {
+          const key = String(event.key || '').trim().toLowerCase();
+          const code = String(event.code || '').trim().toLowerCase();
+          const isAltKey = key === 'alt'
+              || code === 'altleft'
+              || code === 'altright';
+          if (isAltKey) {
+              if (event.type === 'keydown') {
+                  triggerSqlAiCompletionAltGestureAtRef.current = Date.now();
+              }
+              triggerSqlAiCompletionAltPressedRef.current = event.type !== 'keyup';
+          } else if (event.type === 'keyup' && !event.altKey) {
+              triggerSqlAiCompletionAltPressedRef.current = false;
+          }
+      };
+      const clearAltState = () => {
+          triggerSqlAiCompletionAltPressedRef.current = false;
+          triggerSqlAiCompletionAltGestureAtRef.current = 0;
+          triggerSqlAiCompletionFallbackRef.current = null;
+      };
+
+      window.addEventListener('keydown', updateAltState, true);
+      window.addEventListener('keyup', updateAltState, true);
+      window.addEventListener('blur', clearAltState);
+      return () => {
+          window.removeEventListener('keydown', updateAltState, true);
+          window.removeEventListener('keyup', updateAltState, true);
+          window.removeEventListener('blur', clearAltState);
+      };
+  }, []);
+
+  useEffect(() => {
+      const binding = triggerSqlAiCompletionShortcutBinding;
+      if (!binding?.enabled || !binding.combo) {
+          return;
+      }
+
+      const handleTriggerSqlAiCompletionShortcut = (event: KeyboardEvent) => {
+          if (!isActive) {
+              return;
+          }
+          const editor = editorRef.current;
+          const targetNode = resolveEventTargetNode(event.target);
+          const editorHasFocus = !!editor?.hasTextFocus?.();
+          const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
+          if (!editorHasFocus && !inQueryEditor && !isDocumentLevelShortcutTarget(targetNode)) {
+              return;
+          }
+          if (!isTriggerSqlAiCompletionShortcutEvent(event)) {
+              if (isPossibleTriggerSqlAiCompletionFallbackEvent(event)) {
+                  triggerSqlAiCompletionFallbackRef.current = { observedAt: Date.now() };
+              }
+              return;
+          }
+
+          triggerSqlAiCompletionFallbackRef.current = null;
+          event.preventDefault();
+          event.stopPropagation();
+          triggerAiInlineCompletionRef.current?.();
+      };
+
+      window.addEventListener('keydown', handleTriggerSqlAiCompletionShortcut, true);
+      return () => {
+          window.removeEventListener('keydown', handleTriggerSqlAiCompletionShortcut, true);
+      };
+  }, [isActive, isPossibleTriggerSqlAiCompletionFallbackEvent, isTriggerSqlAiCompletionShortcutEvent, triggerSqlAiCompletionShortcutBinding]);
+
+  useEffect(() => {
       const binding = toggleQueryResultsPanelShortcutBinding;
       if (!binding?.enabled || !binding.combo) {
           return;
@@ -6563,6 +7532,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         runQueryShortcutBinding={runQueryShortcutBinding}
         saveQueryShortcutBinding={saveQueryShortcutBinding}
         formatSqlShortcutBinding={formatSqlShortcutBinding}
+        triggerSqlAiCompletionShortcutBinding={triggerSqlAiCompletionShortcutBinding}
         toggleQueryResultsPanelShortcutBinding={toggleQueryResultsPanelShortcutBinding}
         activeShortcutPlatform={activeShortcutPlatform}
         isResultPanelVisible={isResultPanelVisible}
@@ -6587,6 +7557,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         onQuickSave={handleQuickSave}
         onFindInEditor={handleOpenEditorFind}
         onFormat={handleFormat}
+        onTriggerSqlAiCompletion={() => triggerAiInlineCompletionRef.current?.()}
         onToggleResultPanelVisibility={toggleResultPanelVisibility}
         onAIAction={handleAIAction}
       />

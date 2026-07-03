@@ -38,6 +38,10 @@ const REQUIRED_PROVIDER_FORM_KEYS = [
   'ai_settings.form.model_list_placeholder',
   'ai_settings.form.model_list_placeholder.codebuddy',
   'ai_settings.form.model_list_placeholder.cursor',
+  'ai_settings.form.section.inline_completion',
+  'ai_settings.form.inline_completion_model',
+  'ai_settings.form.inline_completion_model_hint',
+  'ai_settings.form.inline_completion_model_placeholder',
   'ai_settings.form.api_key',
   'ai_settings.form.api_key.codebuddy_optional',
   'ai_settings.form.api_key.codebuddy_hint',
@@ -158,6 +162,8 @@ describe('AISettingsProvidersSection', () => {
     const markup = renderToStaticMarkup(<Wrap />);
     expect(markup).toContain('Edit model provider');
     expect(markup).toContain('Provider name');
+    expect(markup).toContain('SQL auto-completion');
+    expect(markup).toContain('Auto-completion model');
     expect(markup).toContain('API Endpoint (URL)');
     expect(markup).toContain('Test connection');
   });

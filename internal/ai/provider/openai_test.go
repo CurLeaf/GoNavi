@@ -173,6 +173,52 @@ func TestOpenAIProvider_DefaultMaxTokens(t *testing.T) {
 	}
 }
 
+func TestOpenAIProviderChatUsesRequestMaxTokens(t *testing.T) {
+	var received openAIChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode request body failed: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	providerInstance, err := NewOpenAIProvider(ai.ProviderConfig{
+		Type:        "openai",
+		APIKey:      "sk-test",
+		BaseURL:     server.URL,
+		Model:       "gpt-chat",
+		MaxTokens:   4096,
+		Temperature: 0.7,
+	})
+	if err != nil {
+		t.Fatalf("create provider failed: %v", err)
+	}
+
+	_, err = providerInstance.Chat(context.Background(), ai.ChatRequest{
+		Messages: []ai.Message{{
+			Role:    "user",
+			Content: "ping",
+		}},
+		MaxTokens:   192,
+		Temperature: 0.1,
+	})
+	if err != nil {
+		t.Fatalf("chat failed: %v", err)
+	}
+	if received.MaxTokens != 192 {
+		t.Fatalf("expected request max_tokens 192, got %d", received.MaxTokens)
+	}
+	if received.Temperature != 0.1 {
+		t.Fatalf("expected request temperature 0.1, got %f", received.Temperature)
+	}
+	if received.Model != "gpt-chat" {
+		t.Fatalf("expected configured model, got %q", received.Model)
+	}
+}
+
 func TestOpenAIProviderChatRetriesWithoutImagesOnHTTP400(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

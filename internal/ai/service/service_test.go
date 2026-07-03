@@ -99,6 +99,45 @@ func TestDefaultStaticModelsForProvider_DoesNotReturnDashScopeBailianStaticModel
 	}
 }
 
+func TestApplyChatSendOptionsToProviderConfig_OverridesModelForSingleRequest(t *testing.T) {
+	config := applyChatSendOptionsToProviderConfig(ai.ProviderConfig{
+		Model: "chat-model",
+	}, ai.ChatSendOptions{
+		Model: "inline-model",
+	})
+	if config.Model != "inline-model" {
+		t.Fatalf("expected inline model override, got %q", config.Model)
+	}
+}
+
+func TestApplyChatSendOptionsToProviderConfig_KeepsConfiguredModelWhenOverrideEmpty(t *testing.T) {
+	config := applyChatSendOptionsToProviderConfig(ai.ProviderConfig{
+		Model: "chat-model",
+	}, ai.ChatSendOptions{
+		Model: "  ",
+	})
+	if config.Model != "chat-model" {
+		t.Fatalf("expected configured model to be kept, got %q", config.Model)
+	}
+}
+
+func TestNormalizeChatSendOptions_TrimsModelAndClampsNegativeNumbers(t *testing.T) {
+	options := normalizeChatSendOptions(ai.ChatSendOptions{
+		Model:       " inline-model ",
+		MaxTokens:   -1,
+		Temperature: -0.5,
+	})
+	if options.Model != "inline-model" {
+		t.Fatalf("expected trimmed model, got %q", options.Model)
+	}
+	if options.MaxTokens != 0 {
+		t.Fatalf("expected negative max tokens to be clamped, got %d", options.MaxTokens)
+	}
+	if options.Temperature != 0 {
+		t.Fatalf("expected negative temperature to be clamped, got %f", options.Temperature)
+	}
+}
+
 func TestNewProviderHealthCheckRequest_UsesMessagesEndpointForMiniMaxAnthropic(t *testing.T) {
 	req, err := newProviderHealthCheckRequest(ai.ProviderConfig{
 		Type:    "anthropic",

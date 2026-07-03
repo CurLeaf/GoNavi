@@ -154,6 +154,7 @@ describe('shortcut localization', () => {
       expect(SHORTCUT_ACTION_META.runQuery.label).toBe('Run SQL');
       expect(SHORTCUT_ACTION_META.saveQuery.description).toBe('Save the current query tab; unnamed queries open the save dialog');
       expect(SHORTCUT_ACTION_META.formatSql.label).toBe('Format SQL');
+      expect(SHORTCUT_ACTION_META.triggerSqlAiCompletion.label).toBe('Trigger SQL AI Completion');
       expect(SHORTCUT_ACTION_META.toggleQueryResultsPanel.label).toBe('Toggle Results Panel');
       expect(SHORTCUT_ACTION_META.toggleQueryResultsPanel.description).toBe('Show or hide the results area below the query editor');
       expect(SHORTCUT_ACTION_META.sendAIChatMessage.description).toContain('Shift+Enter');
@@ -168,6 +169,7 @@ describe('shortcut localization', () => {
       setCurrentLanguage('zh-CN');
       expect(SHORTCUT_ACTION_META.runQuery.label).toBe('执行 SQL');
       expect(SHORTCUT_ACTION_META.formatSql.label).toBe('美化 SQL');
+      expect(SHORTCUT_ACTION_META.triggerSqlAiCompletion.label).toBe('触发 SQL AI 自动补全');
       expect(findReservedConflict('Ctrl+S')?.label).toBe('浏览器保存');
     } finally {
       setCurrentLanguage('zh-CN');
@@ -263,6 +265,54 @@ describe('IME shortcut guards', () => {
     expect(isImeComposingKeyEvent(event)).toBe(true);
     expect(eventToShortcut(event)).toBe('');
     expect(isShortcutMatch(event, 'Ctrl+Enter')).toBe(false);
+  });
+
+  it('matches modifier shortcuts from KeyboardEvent.code when WebView reports Process', () => {
+    const event = {
+      key: 'Process',
+      code: 'Backslash',
+      keyCode: 220,
+      which: 220,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      isComposing: false,
+      nativeEvent: {
+        code: 'Backslash',
+        keyCode: 220,
+        which: 220,
+        isComposing: false,
+      },
+    } as unknown as KeyboardEvent;
+
+    expect(isImeComposingKeyEvent(event)).toBe(false);
+    expect(eventToShortcut(event)).toBe('Alt+\\');
+    expect(isShortcutMatch(event, 'Alt+\\')).toBe(true);
+  });
+
+  it('matches modifier shortcuts from IntlBackslash layout events when WebView reports Process', () => {
+    const event = {
+      key: 'Process',
+      code: 'IntlBackslash',
+      keyCode: 226,
+      which: 226,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      isComposing: false,
+      nativeEvent: {
+        code: 'IntlBackslash',
+        keyCode: 226,
+        which: 226,
+        isComposing: false,
+      },
+    } as unknown as KeyboardEvent;
+
+    expect(isImeComposingKeyEvent(event)).toBe(false);
+    expect(eventToShortcut(event)).toBe('Alt+\\');
+    expect(isShortcutMatch(event, 'Alt+\\')).toBe(true);
   });
 
   it('treats number keys as non-shortcuts while a composition session is active', () => {
@@ -361,6 +411,18 @@ describe('shortcut defaults', () => {
     });
     expect(SHORTCUT_ACTION_META.formatSql).toMatchObject({
       label: '美化 SQL',
+      scope: 'queryEditor',
+      allowInEditable: true,
+    });
+  });
+
+  it('registers manual SQL AI completion as a query editor shortcut', () => {
+    expect(DEFAULT_SHORTCUT_OPTIONS.triggerSqlAiCompletion).toEqual({
+      mac: { combo: 'Alt+\\', enabled: true },
+      windows: { combo: 'Alt+\\', enabled: true },
+    });
+    expect(SHORTCUT_ACTION_META.triggerSqlAiCompletion).toMatchObject({
+      label: '触发 SQL AI 自动补全',
       scope: 'queryEditor',
       allowInEditable: true,
     });
@@ -578,6 +640,13 @@ describe('comboToMonacoKeyBinding', () => {
     expect(comboToMonacoKeyBinding('Ctrl+,', mockKeyMod, mockKeyCode)).toEqual({
       keyMod: mockKeyMod.WinCtrl,
       keyCode: mockKeyCode.OemComma,
+    });
+  });
+
+  it('maps Alt+\\ (manual AI completion)', () => {
+    expect(comboToMonacoKeyBinding('Alt+\\', mockKeyMod, mockKeyCode)).toEqual({
+      keyMod: mockKeyMod.Alt,
+      keyCode: mockKeyCode.Oem5,
     });
   });
 

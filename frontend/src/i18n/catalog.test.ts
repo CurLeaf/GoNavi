@@ -249,6 +249,8 @@ describe("i18n catalog", () => {
       "app.shortcuts.action.selectCurrentStatement.label",
       "app.shortcuts.action.sendAIChatMessage.description",
       "app.shortcuts.action.sendAIChatMessage.label",
+      "app.shortcuts.action.triggerSqlAiCompletion.description",
+      "app.shortcuts.action.triggerSqlAiCompletion.label",
       "app.shortcuts.action.switchToNextTab.description",
       "app.shortcuts.action.switchToNextTab.label",
       "app.shortcuts.action.switchToPreviousTab.description",

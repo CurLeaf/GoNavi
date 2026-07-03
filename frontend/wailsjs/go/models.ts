@@ -1,5 +1,21 @@
 export namespace ai {
-
+	
+	export class ChatSendOptions {
+	    model?: string;
+	    temperature?: number;
+	    maxTokens?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatSendOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.model = source["model"];
+	        this.temperature = source["temperature"];
+	        this.maxTokens = source["maxTokens"];
+	    }
+	}
 	export class MCPClientInstallResult {
 	    success: boolean;
 	    client?: string;
@@ -7,11 +23,11 @@ export namespace ai {
 	    configPath?: string;
 	    command?: string;
 	    args?: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new MCPClientInstallResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.success = source["success"];
@@ -275,6 +291,7 @@ export namespace ai {
 	    hasSecret?: boolean;
 	    baseUrl: string;
 	    model: string;
+	    inlineCompletionModel?: string;
 	    models?: string[];
 	    apiFormat?: string;
 	    headers?: Record<string, string>;
@@ -295,6 +312,7 @@ export namespace ai {
 	        this.hasSecret = source["hasSecret"];
 	        this.baseUrl = source["baseUrl"];
 	        this.model = source["model"];
+	        this.inlineCompletionModel = source["inlineCompletionModel"];
 	        this.models = source["models"];
 	        this.apiFormat = source["apiFormat"];
 	        this.headers = source["headers"];
@@ -450,6 +468,40 @@ export namespace app {
 	        this.jobId = source["jobId"];
 	        this.totalRowsHint = source["totalRowsHint"];
 	        this.totalRowsKnown = source["totalRowsKnown"];
+	    }
+	}
+	export class RedisExportKeysOptions {
+	    scope?: string;
+	    keys?: string[];
+	    pattern?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RedisExportKeysOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.scope = source["scope"];
+	        this.keys = source["keys"];
+	        this.pattern = source["pattern"];
+	    }
+	}
+	export class RedisImportKeysOptions {
+	    conflictMode?: string;
+	    scope?: string;
+	    keys?: string[];
+	    file?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RedisImportKeysOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.conflictMode = source["conflictMode"];
+	        this.scope = source["scope"];
+	        this.keys = source["keys"];
+	        this.file = source["file"];
 	    }
 	}
 	export class SecurityUpdateOptions {
@@ -908,11 +960,11 @@ export namespace connection {
 	    restrictStructureEdit?: boolean;
 	    restrictScriptExecution?: boolean;
 	    restrictDataImport?: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ConnectionProtectionConfig(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.restrictDataEdit = source["restrictDataEdit"];
@@ -1039,9 +1091,9 @@ export namespace connection {
 		        return new classs(a);
 		    }
 		    return a;
-	    }
+		}
 	}
-
+	
 	export class GlobalProxyView {
 	    enabled: boolean;
 	    type: string;

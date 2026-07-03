@@ -18,6 +18,10 @@ export function AIChatSendInSession(arg1, arg2, arg3) {
   return window['go']['aiservice']['Service']['AIChatSendInSession'](arg1, arg2, arg3);
 }
 
+export function AIChatSendWithOptions(arg1, arg2, arg3) {
+  return window['go']['aiservice']['Service']['AIChatSendWithOptions'](arg1, arg2, arg3);
+}
+
 export function AIChatStream(arg1, arg2, arg3) {
   return window['go']['aiservice']['Service']['AIChatStream'](arg1, arg2, arg3);
 }

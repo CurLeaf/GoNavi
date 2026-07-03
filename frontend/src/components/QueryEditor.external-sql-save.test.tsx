@@ -186,7 +186,13 @@ const editorState = vi.hoisted(() => {
   const state = {
     value: '',
     editor: null as any,
-    domNode: { style: { cursor: '' }, addEventListener: vi.fn(), removeEventListener: vi.fn() },
+    domNode: {
+      style: { cursor: '' },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      appendChild: vi.fn(),
+      removeChild: vi.fn(),
+    },
     position: { lineNumber: 1, column: 1 },
     selection: null as any,
     providers: [] as any[],
@@ -194,6 +200,7 @@ const editorState = vi.hoisted(() => {
     contentChangeListeners: [] as Array<() => void>,
     cursorPositionListeners: [] as Array<(event: any) => void>,
     modelContentListeners: [] as Array<(event: any) => void>,
+    keyDownListeners: [] as Array<(event: any) => void>,
     mouseMoveListeners: [] as Array<(event: any) => void>,
     mouseDownListeners: [] as Array<(event: any) => void>,
     mouseLeaveListeners: [] as Array<() => void>,
@@ -277,6 +284,7 @@ const editorState = vi.hoisted(() => {
       });
     }),
     addAction: vi.fn(),
+    addCommand: vi.fn(),
     onDidChangeModelContent: vi.fn((listener: (event?: any) => void) => {
       state.contentChangeListeners.push(listener);
       state.modelContentListeners.push(listener);
@@ -284,6 +292,10 @@ const editorState = vi.hoisted(() => {
     }),
     onDidChangeCursorPosition: vi.fn((listener: (event: any) => void) => {
       state.cursorPositionListeners.push(listener);
+      return { dispose: vi.fn() };
+    }),
+    onKeyDown: vi.fn((listener: (event: any) => void) => {
+      state.keyDownListeners.push(listener);
       return { dispose: vi.fn() };
     }),
     onMouseMove: vi.fn((listener: (event: any) => void) => {
@@ -298,6 +310,8 @@ const editorState = vi.hoisted(() => {
       state.mouseLeaveListeners.push(listener);
       return { dispose: vi.fn() };
     }),
+    onDidScrollChange: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidLayoutChange: vi.fn(() => ({ dispose: vi.fn() })),
     deltaDecorations: vi.fn((oldDecorations: string[], newDecorations: any[]) => {
       state.decorationIds = newDecorations.map((_: any, index: number) => `decoration-${index + 1}`);
       return state.decorationIds;
@@ -311,6 +325,13 @@ const editorState = vi.hoisted(() => {
     layout: vi.fn(),
     focus: vi.fn(),
     trigger: vi.fn(),
+    createContextKey: vi.fn((_key: string, initialValue: boolean) => ({
+      set: vi.fn(),
+      get: vi.fn(() => initialValue),
+      reset: vi.fn(),
+    })),
+    getScrolledVisiblePosition: vi.fn(() => ({ left: 0, top: 0, height: 20 })),
+    getOption: vi.fn(() => null),
   };
   return state;
 });
@@ -348,7 +369,7 @@ vi.mock('@monaco-editor/react', () => ({
       const mountEditor = () => onMount?.(editorState.editor, {
         editor: { setTheme: vi.fn() },
         KeyMod: { CtrlCmd: 2048, WinCtrl: 256, Alt: 512, Shift: 1024 },
-        KeyCode: { KeyD: 68, KeyE: 69, KeyF: 70, KeyM: 77, KeyQ: 81, KeyS: 83 },
+        KeyCode: { KeyD: 68, KeyE: 69, KeyF: 70, KeyM: 77, KeyQ: 81, KeyS: 83, RightArrow: 39 },
         languages: {
           CompletionItemKind: { Keyword: 1, Function: 2, Field: 3 },
           CompletionItemInsertTextRule: { InsertAsSnippet: 1 },
@@ -443,6 +464,7 @@ vi.mock('@ant-design/icons', () => {
     RobotOutlined: Icon,
     SearchOutlined: Icon,
     DatabaseOutlined: Icon,
+    DownOutlined: Icon,
     EyeOutlined: Icon,
     EyeInvisibleOutlined: Icon,
   };
@@ -478,6 +500,10 @@ vi.mock('antd', () => {
   );
   const Empty = ({ description }: { description?: React.ReactNode }) => <div>{description}</div>;
   (Empty as any).PRESENTED_IMAGE_SIMPLE = 'simple';
+  const Input: any = ({ value, onChange, placeholder }: any) => <input value={value} onChange={onChange} placeholder={placeholder} />;
+  Input.TextArea = ({ value, onChange, placeholder, disabled }: any) => (
+    <textarea value={value} onChange={onChange} placeholder={placeholder} disabled={disabled} />
+  );
 
   return {
     Button,
@@ -492,7 +518,7 @@ vi.mock('antd', () => {
         <button type="button" onClick={onOk}>{okText}</button>
       </section>
     ) : null),
-    Input: ({ value, onChange, placeholder }: any) => <input value={value} onChange={onChange} placeholder={placeholder} />,
+    Input,
     Form,
     Dropdown: ({ children, menu }: any) => (
       <>
@@ -506,6 +532,24 @@ vi.mock('antd', () => {
     ),
     Tooltip: ({ children }: any) => <>{children}</>,
     Select: () => null,
+    Segmented: ({ value, onChange, options }: any) => (
+      <div>
+        {(options || []).map((option: any) => {
+          const optionValue = typeof option === 'object' ? option.value : option;
+          const label = typeof option === 'object' ? option.label : option;
+          return (
+            <button
+              key={String(optionValue)}
+              type="button"
+              aria-pressed={value === optionValue}
+              onClick={() => onChange?.(optionValue)}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    ),
     Tabs: ({ activeKey, items, onChange, tabBarExtraContent }: any) => {
       const resolvedActiveKey = tabsState.activeKey ?? activeKey ?? items?.[0]?.key;
       const activeItem = items?.find((item: any) => item.key === resolvedActiveKey) || items?.[0];
@@ -694,13 +738,12 @@ describe('QueryEditor external SQL save', () => {
         remove: vi.fn(),
       })),
     });
-    const currentNavigator = globalThis.navigator as any;
     vi.stubGlobal('navigator', {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
       },
-      platform: currentNavigator?.platform || 'MacIntel',
-      userAgent: currentNavigator?.userAgent || 'Vitest',
+      platform: 'MacIntel',
+      userAgent: 'Vitest',
     });
     setCurrentLanguage('zh-CN');
     storeState.languagePreference = 'zh-CN';
@@ -813,6 +856,7 @@ describe('QueryEditor external SQL save', () => {
     editorState.contentChangeListeners = [];
     editorState.cursorPositionListeners = [];
     editorState.modelContentListeners = [];
+    editorState.keyDownListeners = [];
     editorState.mouseMoveListeners = [];
     editorState.mouseDownListeners = [];
     editorState.mouseLeaveListeners = [];
@@ -829,6 +873,7 @@ describe('QueryEditor external SQL save', () => {
     editorState.editor.updateOptions.mockClear();
     editorState.editor.pushUndoStop.mockClear();
     editorState.editor.addAction.mockClear();
+    editorState.editor.onKeyDown.mockClear();
     editorState.editor.getContribution.mockReset();
     editorState.editor.getContribution.mockImplementation(defaultEditorContributionResolver(editorState));
     storeState.updateQueryTabDraft.mockReset();
@@ -1059,6 +1104,920 @@ describe('QueryEditor external SQL save', () => {
     expect(secondEvent.preventDefault).toHaveBeenCalled();
     expect(secondEvent.stopPropagation).toHaveBeenCalled();
     expect(textContent(renderer.toJSON())).not.toContain('等待执行 SQL');
+  });
+
+  it('captures the manual SQL AI completion shortcut before Monaco inserts a backslash', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ' })} />);
+    });
+
+    editorState.editor.focus.mockClear();
+    const shortcutEvent = {
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      key: 'Process',
+      code: 'Backslash',
+      keyCode: 220,
+      which: 220,
+      isComposing: false,
+      nativeEvent: {
+        code: 'Backslash',
+        keyCode: 220,
+        which: 220,
+        isComposing: false,
+      },
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const monacoShortcutEvent = {
+      browserEvent: shortcutEvent,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      editorState.keyDownListeners.forEach((listener) => listener(monacoShortcutEvent));
+    });
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(shortcutEvent));
+    });
+
+    expect(monacoShortcutEvent.preventDefault).toHaveBeenCalled();
+    expect(monacoShortcutEvent.stopPropagation).toHaveBeenCalled();
+    expect(shortcutEvent.preventDefault).toHaveBeenCalled();
+    expect(shortcutEvent.stopPropagation).toHaveBeenCalled();
+    expect(editorState.editor.focus).toHaveBeenCalled();
+    expect(editorState.value).toBe('SELECT * FROM ');
+  });
+
+  it('treats a sticky Alt modifier plus Backslash as the manual SQL AI completion shortcut', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ' })} />);
+    });
+
+    const altDownEvent = {
+      type: 'keydown',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      key: 'Alt',
+      code: 'AltLeft',
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const backslashEvent = {
+      type: 'keydown',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      key: '\\',
+      code: 'Backslash',
+      keyCode: 220,
+      which: 220,
+      nativeEvent: {
+        code: 'Backslash',
+        keyCode: 220,
+        which: 220,
+      },
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(altDownEvent));
+      windowListeners.keydown?.forEach((listener) => listener(backslashEvent));
+    });
+
+    expect(backslashEvent.preventDefault).toHaveBeenCalled();
+    expect(backslashEvent.stopPropagation).toHaveBeenCalled();
+    expect(editorState.value).toBe('SELECT * FROM ');
+  });
+
+  it('treats a sticky Alt modifier plus IntlBackslash layout event as the manual SQL AI completion shortcut', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ' })} />);
+    });
+
+    const altDownEvent = {
+      type: 'keydown',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      key: 'Alt',
+      code: 'AltLeft',
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const backslashEvent = {
+      type: 'keydown',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      key: 'Process',
+      code: 'IntlBackslash',
+      keyCode: 226,
+      which: 226,
+      nativeEvent: {
+        code: 'IntlBackslash',
+        keyCode: 226,
+        which: 226,
+      },
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(altDownEvent));
+      windowListeners.keydown?.forEach((listener) => listener(backslashEvent));
+    });
+
+    expect(backslashEvent.preventDefault).toHaveBeenCalled();
+    expect(backslashEvent.stopPropagation).toHaveBeenCalled();
+    expect(editorState.value).toBe('SELECT * FROM ');
+  });
+
+  it('recovers a missed manual SQL AI completion keystroke by removing the inserted backslash', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ' })} />);
+    });
+
+    editorState.editor.focus.mockClear();
+    editorState.editor.executeEdits.mockClear();
+
+    const altDownEvent = {
+      type: 'keydown',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      key: 'Alt',
+      code: 'AltLeft',
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const unmatchedMonacoShortcutEvent = {
+      browserEvent: {
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        key: 'Process',
+        code: '',
+        keyCode: 0,
+        which: 0,
+        isComposing: false,
+        nativeEvent: {
+          code: '',
+          keyCode: 0,
+          which: 0,
+          isComposing: false,
+        },
+        target: null,
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      },
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(altDownEvent));
+      editorState.keyDownListeners.forEach((listener) => listener(unmatchedMonacoShortcutEvent));
+    });
+
+    editorState.value = 'SELECT * FROM \\';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM \\'.length + 1 };
+
+    await act(async () => {
+      editorState.modelContentListeners.forEach((listener) => listener({
+        changes: [{
+          text: '\\',
+        }],
+      }));
+      for (let i = 0; i < 4; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+      'gonavi-trigger-sql-ai-completion-fallback',
+      [expect.objectContaining({
+        text: '',
+      })],
+    );
+    expect(editorState.value).toBe('SELECT * FROM ');
+    expect(editorState.editor.focus).toHaveBeenCalled();
+  });
+
+  it('recovers a stray backslash in table completion context even when the desktop keydown is not observable', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ' })} />);
+    });
+
+    editorState.editor.executeEdits.mockClear();
+    editorState.editor.focus.mockClear();
+
+    editorState.value = 'SELECT * FROM \\';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM \\'.length + 1 };
+
+    await act(async () => {
+      editorState.modelContentListeners.forEach((listener) => listener({
+        changes: [{
+          text: '\\',
+          rangeOffset: 'SELECT * FROM '.length,
+          rangeLength: 0,
+        }],
+      }));
+      for (let i = 0; i < 4; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+      'gonavi-trigger-sql-ai-completion-fallback',
+      [expect.objectContaining({
+        text: '',
+      })],
+    );
+    expect(editorState.value).toBe('SELECT * FROM ');
+    expect(editorState.editor.focus).toHaveBeenCalled();
+  });
+
+  it('recovers a stray backslash from content-change range data even when the cursor is still stale', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ' })} />);
+    });
+
+    editorState.editor.executeEdits.mockClear();
+    editorState.editor.focus.mockClear();
+
+    editorState.value = 'SELECT * FROM \\';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM '.length + 1 };
+
+    await act(async () => {
+      editorState.modelContentListeners.forEach((listener) => listener({
+        changes: [{
+          text: '\\',
+          range: {
+            startLineNumber: 1,
+            startColumn: 'SELECT * FROM '.length + 1,
+            endLineNumber: 1,
+            endColumn: 'SELECT * FROM '.length + 1,
+          },
+        }],
+      }));
+      for (let i = 0; i < 4; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+      'gonavi-trigger-sql-ai-completion-fallback',
+      [expect.objectContaining({
+        text: '',
+      })],
+    );
+    expect(editorState.value).toBe('SELECT * FROM ');
+  });
+
+  it('uses structured SQL suggestions instead of freeform AI when manual completion is triggered in table-name context', async () => {
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { TABLE_NAME: 'videos' },
+        { TABLE_NAME: 'visits' },
+      ],
+    });
+
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ', dbName: 'main' })} />);
+    });
+
+    editorState.value = 'SELECT * FROM ';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM '.length + 1 };
+    editorState.editor.trigger.mockClear();
+
+    const shortcutEvent = {
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      key: 'Process',
+      code: 'Backslash',
+      keyCode: 220,
+      which: 220,
+      isComposing: false,
+      nativeEvent: {
+        code: 'Backslash',
+        keyCode: 220,
+        which: 220,
+        isComposing: false,
+      },
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const monacoShortcutEvent = {
+      browserEvent: shortcutEvent,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      editorState.keyDownListeners.forEach((listener) => listener(monacoShortcutEvent));
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(editorState.editor.trigger).toHaveBeenCalledWith(
+      'gonavi-ai-inline-manual',
+      'editor.action.triggerSuggest',
+      undefined,
+    );
+  });
+
+  it('uses grounded AI inline ghost when manual completion is triggered in table-name context and inline AI is available', async () => {
+    const inlineAiService = {
+      AIGetProviders: vi.fn(async () => [{
+        id: 'openai-main',
+        type: 'openai',
+        name: 'OpenAI',
+        apiKey: '',
+        hasSecret: true,
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-5-mini',
+        maxTokens: 2048,
+        temperature: 0.2,
+      }]),
+      AIGetActiveProvider: vi.fn(async () => 'openai-main'),
+      AIGetUserPromptSettings: vi.fn(async () => ({
+        global: '',
+        database: '',
+        jvm: '',
+        jvmDiagnostic: '',
+      })),
+      AIChatSend: vi.fn(async () => ({ success: true, content: 'videos' })),
+    };
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { TABLE_NAME: 'videos' },
+        { TABLE_NAME: 'visits' },
+      ],
+    });
+
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+      go: {
+        aiservice: {
+          Service: inlineAiService,
+        },
+      },
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ', dbName: 'main' })} />);
+    });
+
+    editorState.value = 'SELECT * FROM ';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM '.length + 1 };
+    editorState.editor.trigger.mockClear();
+    editorState.domNode.appendChild.mockClear();
+
+    const shortcutEvent = {
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      key: 'Process',
+      code: 'Backslash',
+      keyCode: 220,
+      which: 220,
+      isComposing: false,
+      nativeEvent: {
+        code: 'Backslash',
+        keyCode: 220,
+        which: 220,
+        isComposing: false,
+      },
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const monacoShortcutEvent = {
+      browserEvent: shortcutEvent,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      editorState.keyDownListeners.forEach((listener) => listener(monacoShortcutEvent));
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(inlineAiService.AIChatSend).toHaveBeenCalledTimes(1);
+    expect(editorState.domNode.appendChild).toHaveBeenCalled();
+    const ghostOverlay = editorState.domNode.appendChild.mock.calls[
+      editorState.domNode.appendChild.mock.calls.length - 1
+    ]?.[0];
+    expect(ghostOverlay?.className).toBe('gonavi-query-editor-ai-inline-ghost-overlay');
+    expect(ghostOverlay?.textContent).toBe('videos');
+    expect(editorState.editor.trigger).not.toHaveBeenCalledWith(
+      'gonavi-ai-inline-manual',
+      'editor.action.triggerSuggest',
+      undefined,
+    );
+  });
+
+  it('uses local SQL memory for manual inline completion in an empty editor', async () => {
+    storeState.sqlLogs = [{
+      id: 'sql-log-1',
+      timestamp: Date.now(),
+      sql: 'SELECT * FROM videos WHERE code = ?;',
+      status: 'success',
+      duration: 12,
+      dbName: 'main',
+    } as any];
+
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: '', dbName: 'main' })} />);
+    });
+
+    editorState.value = '';
+    editorState.position = { lineNumber: 1, column: 1 };
+    editorState.editor.trigger.mockClear();
+    editorState.domNode.appendChild.mockClear();
+
+    const shortcutEvent = {
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      key: 'Process',
+      code: 'Backslash',
+      keyCode: 220,
+      which: 220,
+      isComposing: false,
+      nativeEvent: {
+        code: 'Backslash',
+        keyCode: 220,
+        which: 220,
+        isComposing: false,
+      },
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const monacoShortcutEvent = {
+      browserEvent: shortcutEvent,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      editorState.keyDownListeners.forEach((listener) => listener(monacoShortcutEvent));
+      for (let i = 0; i < 4; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(editorState.value).toBe('');
+    expect(editorState.domNode.appendChild).toHaveBeenCalled();
+    const ghostOverlay = editorState.domNode.appendChild.mock.calls[
+      editorState.domNode.appendChild.mock.calls.length - 1
+    ]?.[0];
+    expect(ghostOverlay?.className).toBe('gonavi-query-editor-ai-inline-ghost-overlay');
+    expect(ghostOverlay?.textContent).toBe('SELECT * FROM videos WHERE code = ?;');
+    expect(editorState.editor.trigger).not.toHaveBeenCalledWith(
+      'gonavi-ai-inline-manual',
+      'editor.action.triggerSuggest',
+      undefined,
+    );
+  });
+
+  it('uses local SQL memory for automatic inline completion in update table context', async () => {
+    vi.useFakeTimers();
+    try {
+      storeState.sqlLogs = [{
+        id: 'sql-log-2',
+        timestamp: Date.now(),
+        sql: 'UPDATE videos SET status = 1 WHERE id = ?;',
+        status: 'success',
+        duration: 9,
+        dbName: 'main',
+      } as any];
+
+      const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+      vi.stubGlobal('window', {
+        addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+          windowListeners[type] ||= [];
+          windowListeners[type].push(listener);
+        }),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        setTimeout,
+        clearTimeout,
+        requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+          callback(0);
+          return 1;
+        }),
+        cancelAnimationFrame: vi.fn(),
+        innerHeight: 900,
+      });
+
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: 'UPDAT', dbName: 'main' })} />);
+      });
+
+      editorState.value = 'UPDATE';
+      editorState.position = { lineNumber: 1, column: 'UPDATE'.length + 1 };
+      editorState.editor.trigger.mockClear();
+      editorState.domNode.appendChild.mockClear();
+
+      await act(async () => {
+        editorState.latestOnChange?.('UPDATE');
+        editorState.modelContentListeners.forEach((listener) => listener({
+          changes: [{ text: 'E' }],
+        }));
+        vi.advanceTimersByTime(120);
+        for (let i = 0; i < 8; i += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(editorState.domNode.appendChild).toHaveBeenCalled();
+      const ghostOverlay = editorState.domNode.appendChild.mock.calls[
+        editorState.domNode.appendChild.mock.calls.length - 1
+      ]?.[0];
+      expect(ghostOverlay?.className).toBe('gonavi-query-editor-ai-inline-ghost-overlay');
+      expect(ghostOverlay?.textContent).toBe(' videos SET status = 1 WHERE id = ?;');
+      expect(editorState.editor.trigger).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('continues accepted inline SQL ghost with grounded table AI completion', async () => {
+    vi.useFakeTimers();
+    try {
+      const inlineAiService = {
+        AIGetProviders: vi.fn(async () => [{
+          id: 'openai-main',
+          type: 'openai',
+          name: 'OpenAI',
+          apiKey: '',
+          hasSecret: true,
+          baseUrl: 'https://api.openai.com/v1',
+          model: 'gpt-5-mini',
+          maxTokens: 2048,
+          temperature: 0.2,
+        }]),
+        AIGetActiveProvider: vi.fn(async () => 'openai-main'),
+        AIGetUserPromptSettings: vi.fn(async () => ({
+          global: '',
+          database: '',
+          jvm: '',
+          jvmDiagnostic: '',
+        })),
+        AIChatSend: vi.fn(async () => ({ success: true, content: 'videos' })),
+      };
+      backendApp.DBGetTables.mockResolvedValueOnce({
+        success: true,
+        data: [
+          { TABLE_NAME: 'videos' },
+          { TABLE_NAME: 'visits' },
+        ],
+      });
+
+      const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+      vi.stubGlobal('window', {
+        addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+          windowListeners[type] ||= [];
+          windowListeners[type].push(listener);
+        }),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        setTimeout,
+        clearTimeout,
+        requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+          callback(0);
+          return 1;
+        }),
+        cancelAnimationFrame: vi.fn(),
+        innerHeight: 900,
+        go: {
+          aiservice: {
+            Service: inlineAiService,
+          },
+        },
+      });
+
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: 'SELECT', dbName: 'main' })} />);
+      });
+
+      editorState.value = 'SELECT';
+      editorState.position = { lineNumber: 1, column: 'SELECT'.length + 1 };
+      editorState.editor.executeEdits.mockClear();
+      editorState.editor.trigger.mockClear();
+      editorState.domNode.appendChild.mockClear();
+
+      await act(async () => {
+        editorState.latestOnChange?.('SELECT');
+        editorState.modelContentListeners.forEach((listener) => listener({
+          changes: [{ text: 'T' }],
+        }));
+        vi.advanceTimersByTime(120);
+        for (let i = 0; i < 8; i += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      const acceptInlineGhostCall = editorState.editor.addCommand.mock.calls.find(
+        (call: any[]) => call[2] === 'gonaviAiInlineSuggestionVisible',
+      );
+      expect(acceptInlineGhostCall).toBeTruthy();
+
+      await act(async () => {
+        acceptInlineGhostCall?.[1]?.();
+        vi.advanceTimersByTime(1);
+        for (let i = 0; i < 8; i += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+        'gonavi-ai-inline-sql-completion',
+        [expect.objectContaining({
+          text: ' * FROM ',
+        })],
+      );
+      expect(editorState.value).toBe('SELECT * FROM ');
+      expect(inlineAiService.AIChatSend).toHaveBeenCalledTimes(1);
+      expect(editorState.domNode.appendChild).toHaveBeenCalled();
+      const ghostOverlay = editorState.domNode.appendChild.mock.calls[
+        editorState.domNode.appendChild.mock.calls.length - 1
+      ]?.[0];
+      expect(ghostOverlay?.className).toBe('gonavi-query-editor-ai-inline-ghost-overlay');
+      expect(ghostOverlay?.textContent).toBe('videos');
+      expect(editorState.editor.trigger).not.toHaveBeenCalledWith(
+        'gonavi-ai-inline-auto',
+        'editor.action.triggerSuggest',
+        undefined,
+      );
+
+      editorState.editor.executeEdits.mockClear();
+      editorState.editor.trigger.mockClear();
+
+      await act(async () => {
+        acceptInlineGhostCall?.[1]?.();
+        vi.advanceTimersByTime(1);
+        for (let i = 0; i < 8; i += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+        'gonavi-ai-inline-sql-completion',
+        [expect.objectContaining({
+          text: 'videos',
+        })],
+      );
+      expect(editorState.value).toBe('SELECT * FROM videos');
+      expect(inlineAiService.AIChatSend).toHaveBeenCalledTimes(1);
+      expect(editorState.editor.trigger).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('strips a stray backslash before opening manual table suggestions from the toolbar AI button', async () => {
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { TABLE_NAME: 'videos' },
+        { TABLE_NAME: 'visits' },
+      ],
+    });
+
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'SELECT * FROM \\', dbName: 'main' })} />);
+    });
+
+    editorState.value = 'SELECT * FROM \\';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM \\'.length + 1 };
+    editorState.editor.executeEdits.mockClear();
+    editorState.editor.trigger.mockClear();
+
+    await act(async () => {
+      findButton(renderer!, 'AI').props.onClick();
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+      'gonavi-manual-sql-ai-strip-marker',
+      [expect.objectContaining({
+        text: '',
+      })],
+    );
+    expect(editorState.value).toBe('SELECT * FROM ');
+    expect(editorState.editor.trigger).toHaveBeenCalledWith(
+      'gonavi-ai-inline-manual',
+      'editor.action.triggerSuggest',
+      undefined,
+    );
   });
 
   it('shows the query results panel with the shortcut after manually hiding it', async () => {
@@ -3173,6 +4132,8 @@ describe('QueryEditor external SQL save', () => {
 
     await act(async () => {
       create(<QueryEditor tab={createTab()} />);
+    });
+    await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 

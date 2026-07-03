@@ -20,9 +20,41 @@ const resolveDevHarnessMode = (): string => {
     }
 };
 
-if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window as any).go?.aiservice?.Service)) {
+if (
+    typeof window !== 'undefined'
+    && (
+        typeof (window as any).go?.app?.App?.GetSavedConnections !== 'function'
+        || typeof (window as any).go?.aiservice?.Service?.AIGetProviders !== 'function'
+    )
+) {
+    const existingRuntime = (window as any).runtime || {};
+    const existingEventsOnMultiple = existingRuntime.EventsOnMultiple;
+    (window as any).runtime = {
+        ...existingRuntime,
+        EventsOnMultiple: (...args: any[]) => {
+            const off = typeof existingEventsOnMultiple === 'function'
+                ? existingEventsOnMultiple(...args)
+                : undefined;
+            return typeof off === 'function' ? off : () => {};
+        },
+        EventsOff: typeof existingRuntime.EventsOff === 'function' ? existingRuntime.EventsOff : () => {},
+        EventsOffAll: typeof existingRuntime.EventsOffAll === 'function' ? existingRuntime.EventsOffAll : () => {},
+        EventsEmit: typeof existingRuntime.EventsEmit === 'function' ? existingRuntime.EventsEmit : () => {},
+    };
+
     const mockConnections: any[] = [];
     const mockSavedQueries: any[] = [];
+    const mockQueryTables = [
+        { table_name: 'videos', table_comment: 'sample video records' },
+        { table_name: 'users', table_comment: 'sample users' },
+    ];
+    const mockQueryColumns = [
+        { tableName: 'videos', name: 'id', type: 'bigint', comment: 'primary key' },
+        { tableName: 'videos', name: 'code', type: 'varchar', comment: 'video code' },
+        { tableName: 'videos', name: 'title', type: 'varchar', comment: 'video title' },
+        { tableName: 'users', name: 'id', type: 'bigint', comment: 'primary key' },
+        { tableName: 'users', name: 'name', type: 'varchar', comment: 'display name' },
+    ];
     const mockConnectionSecrets = new Map<string, any>();
     const mockProviders: any[] = [];
     const mockProviderSecrets = new Map<string, string>();
@@ -274,6 +306,18 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                 GetTables: async () => [],
                 GetTableData: async () => ({ columns: [], rows: [], total: 0 }),
                 GetTableColumns: async () => [],
+                DBGetDatabases: async () => ({ success: true, data: ['missav_bot'] }),
+                DBGetTables: async () => ({ success: true, data: cloneBrowserMockValue(mockQueryTables) }),
+                DBGetAllColumns: async () => ({ success: true, data: cloneBrowserMockValue(mockQueryColumns) }),
+                DBGetColumns: async (_config: any, _dbName: string, tableName: string) => ({
+                    success: true,
+                    data: cloneBrowserMockValue(
+                        mockQueryColumns
+                            .filter((column) => String(column.tableName || '').toLowerCase() === String(tableName || '').toLowerCase())
+                            .map(({ tableName: _tableName, ...column }) => column),
+                    ),
+                }),
+                DBQuery: async () => ({ success: true, data: [], columns: [] }),
                 ExecuteQuery: async () => ({ columns: [], rows: [], time: 0 }),
                 GetSavedQueries: async () => cloneBrowserMockValue(mockSavedQueries),
                 SaveQuery: async (input: any) => saveMockQuery(input),
@@ -413,6 +457,21 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                 AIGetContextLevel: async () => mockAIContextLevel,
                 AIGetBuiltinPrompts: async () => ({}),
                 AIGetUserPromptSettings: async () => cloneBrowserMockValue(mockAIUserPromptSettings),
+                AIChatSend: async () => ({
+                    success: true,
+                    content: 'SELECT * FROM `videos` LIMIT 100;',
+                }),
+                AIChatSendWithOptions: async (messages: any[], tools: any[], options: any) => {
+                    (window as any).__gonaviLastAIChatSendWithOptions = {
+                        messages: cloneBrowserMockValue(messages),
+                        tools: cloneBrowserMockValue(tools),
+                        options: cloneBrowserMockValue(options),
+                    };
+                    return {
+                        success: true,
+                        content: 'SELECT * FROM `videos` LIMIT 100;',
+                    };
+                },
                 AISaveUserPromptSettings: async (input: any) => {
                     mockAIUserPromptSettings = {
                         global: String(input?.global || ''),

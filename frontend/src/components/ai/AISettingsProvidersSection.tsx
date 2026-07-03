@@ -21,6 +21,8 @@ export interface AISettingsProviderPresetOption {
   icon: React.ReactNode;
   desc: string;
   defaultBaseUrl: string;
+  defaultModel?: string;
+  models?: string[];
 }
 
 interface MatchedProviderPreset {
@@ -116,6 +118,31 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
   const sectionLabelColor = darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)';
   const currentFieldGroupStyle = fieldGroupStyle(cardBorder, cardBg);
   const currentFieldLabelStyle = fieldLabelStyle(sectionLabelColor);
+  const watchedModel = Form.useWatch('model', form);
+  const watchedModels = Form.useWatch('models', form);
+  const watchedInlineCompletionModel = Form.useWatch('inlineCompletionModel', form);
+  const presetFromForm = providerPresets.find((preset) => preset.key === presetKeyFromForm);
+  const inlineCompletionModelOptions = React.useMemo(() => {
+    const values = [
+      watchedModel,
+      presetFromForm?.defaultModel,
+      ...(Array.isArray(presetFromForm?.models) ? presetFromForm.models : []),
+      ...(Array.isArray(watchedModels) ? watchedModels : []),
+      editingProvider?.inlineCompletionModel,
+      watchedInlineCompletionModel,
+    ];
+    const deduped = new Set<string>();
+    values.forEach((value) => {
+      const normalized = String(value || '').trim();
+      if (normalized) {
+        deduped.add(normalized);
+      }
+    });
+    return Array.from(deduped).map((value) => ({
+      label: value,
+      value,
+    }));
+  }, [editingProvider?.inlineCompletionModel, presetFromForm?.defaultModel, presetFromForm?.models, watchedInlineCompletionModel, watchedModel, watchedModels]);
 
   if (!isEditing) {
     return (
@@ -342,6 +369,28 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
         )}
         <Form.Item name="model" hidden><Input /></Form.Item>
         <Form.Item name="name" hidden><Input /></Form.Item>
+
+        <div style={{ ...currentFieldGroupStyle, marginTop: 16 }}>
+          <div style={currentFieldLabelStyle}>
+            <RobotOutlined style={{ fontSize: 14 }} /> {copy('ai_settings.form.section.inline_completion')}
+          </div>
+          <Form.Item
+            label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.inline_completion_model')}</span>}
+            name="inlineCompletionModel"
+            extra={copy('ai_settings.form.inline_completion_model_hint')}
+            style={{ marginBottom: 0 }}
+          >
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              size="middle"
+              placeholder={copy('ai_settings.form.inline_completion_model_placeholder')}
+              options={inlineCompletionModelOptions}
+              style={{ width: '100%' }}
+            />
+          </Form.Item>
+        </div>
 
         <div style={{ ...currentFieldGroupStyle, marginTop: 16 }}>
           <div style={currentFieldLabelStyle}>

@@ -3,6 +3,7 @@ package aiservice
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -220,12 +221,17 @@ func (s *Service) serviceText(key string, params map[string]any) string {
 }
 
 type localizedAIServiceError struct {
+	key     string
 	message string
 	cause   error
 }
 
 func (e localizedAIServiceError) Error() string {
 	return e.message
+}
+
+func (e localizedAIServiceError) Key() string {
+	return e.key
 }
 
 func (e localizedAIServiceError) Unwrap() error {
@@ -250,7 +256,7 @@ func serviceErrorFromText(key string, text string, cause error) error {
 	if text == key {
 		text = fmt.Sprintf("%s: %s", key, cause.Error())
 	}
-	return localizedAIServiceError{message: text, cause: cause}
+	return localizedAIServiceError{key: key, message: text, cause: cause}
 }
 
 func serviceTextFromLocalizer(localizer *i18n.Localizer, key string, params map[string]any) string {
@@ -275,6 +281,14 @@ func (s *Service) serviceError(key string, params map[string]any, cause error) e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.serviceErrorLocked(key, params, cause)
+}
+
+func localizedAIServiceErrorKey(err error) string {
+	var localizedErr localizedAIServiceError
+	if errors.As(err, &localizedErr) {
+		return localizedErr.key
+	}
+	return ""
 }
 
 func (s *Service) providerTestFailedMessage(detail string) string {
@@ -766,6 +780,24 @@ func normalizeProviderConfig(config ai.ProviderConfig) ai.ProviderConfig {
 	return config
 }
 
+func applyChatSendOptionsToProviderConfig(config ai.ProviderConfig, options ai.ChatSendOptions) ai.ProviderConfig {
+	if model := strings.TrimSpace(options.Model); model != "" {
+		config.Model = model
+	}
+	return config
+}
+
+func normalizeChatSendOptions(options ai.ChatSendOptions) ai.ChatSendOptions {
+	options.Model = strings.TrimSpace(options.Model)
+	if options.MaxTokens < 0 {
+		options.MaxTokens = 0
+	}
+	if options.Temperature < 0 {
+		options.Temperature = 0
+	}
+	return options
+}
+
 func applyExistingRuntimeProviderSecrets(meta ai.ProviderConfig, existing ai.ProviderConfig) (ai.ProviderConfig, providerSecretBundle) {
 	existingMeta, existingBundle := splitProviderSecrets(normalizeProviderConfig(existing))
 	if strings.TrimSpace(meta.SecretRef) == "" {
@@ -1208,16 +1240,22 @@ func (s *Service) AISetContextLevel(level string) {
 
 // AIChatSend 非流式发送 AI 对话
 func (s *Service) AIChatSend(messages []ai.Message, tools []ai.Tool) map[string]interface{} {
-	return s.aiChatSend("", messages, tools, false)
+	return s.aiChatSend("", messages, tools, false, ai.ChatSendOptions{})
+}
+
+// AIChatSendWithOptions 非流式发送 AI 对话，并允许本次调用临时覆盖模型与生成参数。
+func (s *Service) AIChatSendWithOptions(messages []ai.Message, tools []ai.Tool, options ai.ChatSendOptions) map[string]interface{} {
+	return s.aiChatSend("", messages, tools, false, options)
 }
 
 // AIChatSendInSession 非流式发送 AI 对话，并在支持的 Provider 上复用会话态。
 func (s *Service) AIChatSendInSession(sessionID string, messages []ai.Message, tools []ai.Tool) map[string]interface{} {
-	return s.aiChatSend(sessionID, messages, tools, true)
+	return s.aiChatSend(sessionID, messages, tools, true, ai.ChatSendOptions{})
 }
 
-func (s *Service) aiChatSend(sessionID string, messages []ai.Message, tools []ai.Tool, allowSessionReuse bool) map[string]interface{} {
-	p, config, err := s.getActiveProviderRuntime()
+func (s *Service) aiChatSend(sessionID string, messages []ai.Message, tools []ai.Tool, allowSessionReuse bool, options ai.ChatSendOptions) map[string]interface{} {
+	options = normalizeChatSendOptions(options)
+	p, config, err := s.getActiveProviderRuntimeWithOptions(options)
 	if err != nil {
 		logger.Error(err, "AIChatSend 获取 Provider 失败：messages=%d tools=%d", len(messages), len(tools))
 		return map[string]interface{}{"success": false, "error": err.Error()}
@@ -1237,6 +1275,8 @@ func (s *Service) aiChatSend(sessionID string, messages []ai.Message, tools []ai
 			requestMessages = deltaMessages
 			resp, updatedState, err := sessionAwareProvider.ChatWithState(context.Background(), providerState, ai.ChatRequest{
 				Messages:            requestMessages,
+				Temperature:         options.Temperature,
+				MaxTokens:           options.MaxTokens,
 				Tools:               tools,
 				ImageFallbackPrompt: imageFallbackPrompt,
 				ImageOmittedNotice:  imageOmittedNotice,
@@ -1282,6 +1322,8 @@ func (s *Service) aiChatSend(sessionID string, messages []ai.Message, tools []ai
 
 	resp, err := p.Chat(context.Background(), ai.ChatRequest{
 		Messages:            requestMessages,
+		Temperature:         options.Temperature,
+		MaxTokens:           options.MaxTokens,
 		Tools:               tools,
 		ImageFallbackPrompt: imageFallbackPrompt,
 		ImageOmittedNotice:  imageOmittedNotice,
@@ -1493,10 +1535,17 @@ func (s *Service) AICheckSQL(sql string) ai.SafetyResult {
 
 func (s *Service) getActiveProvider() (provider.Provider, error) {
 	p, _, err := s.getActiveProviderRuntime()
+	if err != nil && localizedAIServiceErrorKey(err) == "ai_service.backend.error.provider_not_configured" {
+		return nil, err
+	}
 	return p, err
 }
 
 func (s *Service) getActiveProviderRuntime() (provider.Provider, ai.ProviderConfig, error) {
+	return s.getActiveProviderRuntimeWithOptions(ai.ChatSendOptions{})
+}
+
+func (s *Service) getActiveProviderRuntimeWithOptions(options ai.ChatSendOptions) (provider.Provider, ai.ProviderConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	localizer := s.serviceLocalizerForLanguageLocked()
@@ -1507,13 +1556,16 @@ func (s *Service) getActiveProviderRuntime() (provider.Provider, ai.ProviderConf
 
 	for _, cfg := range s.providers {
 		if cfg.ID == s.activeProvider {
-			normalized := normalizeProviderConfig(cfg)
+			normalized := normalizeProviderConfig(applyChatSendOptionsToProviderConfig(cfg, options))
 			p, err := provider.NewProvider(normalized)
 			return p, normalized, err
 		}
 	}
 
-	return nil, ai.ProviderConfig{}, fmt.Errorf("%s", serviceTextFromLocalizer(localizer, "ai_service.backend.error.provider_not_configured", nil))
+	return nil, ai.ProviderConfig{}, localizedAIServiceError{
+		key:     "ai_service.backend.error.provider_not_configured",
+		message: serviceTextFromLocalizer(localizer, "ai_service.backend.error.provider_not_configured", nil),
+	}
 }
 
 func providerSessionKey(config ai.ProviderConfig) string {
@@ -1756,7 +1808,11 @@ func (s *Service) loadSessionFile(sessionID string) (sessionFileData, error) {
 	}
 	var sessionData sessionFileData
 	if err := json.Unmarshal(data, &sessionData); err != nil {
-		return sessionFileData{}, err
+		return sessionFileData{}, localizedAIServiceError{
+			key:     "ai_service.backend.error.session_corrupt",
+			message: s.serviceText("ai_service.backend.error.session_corrupt", nil),
+			cause:   err,
+		}
 	}
 	return sessionData, nil
 }
@@ -1844,7 +1900,12 @@ func (s *Service) AIGetSessions() []map[string]interface{} {
 func (s *Service) AILoadSession(sessionID string) map[string]interface{} {
 	sessionData, err := s.loadSessionFile(sessionID)
 	if err != nil {
-		return map[string]interface{}{"success": false, "error": s.serviceText("ai_service.backend.error.session_missing", nil)}
+		switch localizedAIServiceErrorKey(err) {
+		case "ai_service.backend.error.session_corrupt":
+			return map[string]interface{}{"success": false, "error": s.serviceText("ai_service.backend.error.session_corrupt", nil)}
+		default:
+			return map[string]interface{}{"success": false, "error": s.serviceText("ai_service.backend.error.session_missing", nil)}
+		}
 	}
 	return map[string]interface{}{
 		"success":   true,
@@ -1859,13 +1920,31 @@ func (s *Service) AILoadSession(sessionID string) map[string]interface{} {
 func (s *Service) AISaveSession(sessionID string, title string, updatedAt float64, messagesJSON string) error {
 	sessionData, err := s.loadOrCreateSessionFile(sessionID)
 	if err != nil {
-		return err
+		switch localizedAIServiceErrorKey(err) {
+		case "ai_service.backend.error.sessions_dir_create_failed",
+			"ai_service.backend.error.session_serialize_failed",
+			"ai_service.backend.error.session_write_failed",
+			"ai_service.backend.error.session_corrupt":
+			return err
+		default:
+			return s.serviceError("ai_service.backend.error.session_write_failed", nil, err)
+		}
 	}
 	sessionData.ID = sessionID
 	sessionData.Title = title
 	sessionData.UpdatedAt = int64(updatedAt)
 	sessionData.Messages = json.RawMessage(messagesJSON)
-	return s.saveSessionFile(sessionID, sessionData)
+	if err := s.saveSessionFile(sessionID, sessionData); err != nil {
+		switch localizedAIServiceErrorKey(err) {
+		case "ai_service.backend.error.sessions_dir_create_failed",
+			"ai_service.backend.error.session_serialize_failed",
+			"ai_service.backend.error.session_write_failed":
+			return err
+		default:
+			return s.serviceError("ai_service.backend.error.session_write_failed", nil, err)
+		}
+	}
+	return nil
 }
 
 // AIDeleteSession 删除会话文件

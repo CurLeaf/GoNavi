@@ -374,6 +374,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 valuesModel: values.model,
                 customModels: values.models,
             });
+            const inlineCompletionModel = String(values.inlineCompletionModel || '').trim();
             // 内置供应商自动使用 preset label 作为名称
             const finalName = isCustomLike ? (values.name || localizedPreset.label) : localizedPreset.label;
             
@@ -398,6 +399,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 apiKey: secretDraft.apiKey,
                 hasSecret: secretDraft.hasSecret,
                 model: finalModel,
+                inlineCompletionModel,
                 models: resolvedModels,
                 baseUrl: finalBaseUrl,
                 apiFormat: resolvedTransport.apiFormat,
@@ -669,6 +671,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 hasSecret: secretDraft.hasSecret,
                 baseUrl: finalBaseUrl,
                 model: finalModel,
+                inlineCompletionModel: String(values.inlineCompletionModel || '').trim(),
                 models: resolvedModels,
                 maxTokens: Number(values.maxTokens) || 4096,
                 temperature: Number(values.temperature) ?? 0.7,
@@ -687,12 +690,20 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             presetFixedApiFormat: preset.fixedApiFormat,
             valuesApiFormat: form.getFieldValue('apiFormat'),
         });
+        const { model: presetModel, models: presetModels } = resolvePresetModelSelection({
+            presetKey,
+            presetDefaultModel: preset.defaultModel,
+            presetModels: preset.models,
+            customModels: preset.models,
+        });
         form.setFieldsValue({
             presetKey,
             type: resolvedTransport.type,
             apiFormat: resolvedTransport.apiFormat || 'openai',
             baseUrl: preset.defaultBaseUrl,
-            model: preset.defaultModel,
+            model: presetModel,
+            models: presetModels,
+            inlineCompletionModel: '',
         });
     };
 
