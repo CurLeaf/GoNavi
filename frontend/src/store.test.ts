@@ -1051,6 +1051,67 @@ describe('store appearance persistence', () => {
     ]);
   });
 
+  it('keeps persisted sidebar root order until backend connections reload on startup', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        connectionTags: [
+          {
+            id: 'tag-redis',
+            name: 'Redis',
+            connectionIds: ['conn-b'],
+          },
+        ],
+        sidebarRootOrder: [
+          'connection:conn-a',
+          'connection:conn-c',
+          'tag:tag-redis',
+        ],
+      },
+      version: 13,
+    }));
+
+    const {
+      buildSidebarRootConnectionToken,
+      buildSidebarRootTagToken,
+      resolveSidebarRootOrderTokens,
+      useStore,
+    } = await importStore();
+
+    expect(useStore.getState().sidebarRootOrder).toEqual([
+      buildSidebarRootConnectionToken('conn-a'),
+      buildSidebarRootConnectionToken('conn-c'),
+      buildSidebarRootTagToken('tag-redis'),
+    ]);
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'conn-a',
+        name: 'A',
+        config: { id: 'conn-a', type: 'mysql', host: 'a.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'conn-b',
+        name: 'B',
+        config: { id: 'conn-b', type: 'redis', host: 'b.local', port: 6379, user: 'default' },
+      },
+      {
+        id: 'conn-c',
+        name: 'C',
+        config: { id: 'conn-c', type: 'mysql', host: 'c.local', port: 3306, user: 'root' },
+      },
+    ]);
+
+    expect(resolveSidebarRootOrderTokens(
+      useStore.getState().sidebarRootOrder,
+      useStore.getState().connectionTags,
+      useStore.getState().connections,
+    )).toEqual([
+      buildSidebarRootConnectionToken('conn-a'),
+      buildSidebarRootConnectionToken('conn-c'),
+      buildSidebarRootTagToken('tag-redis'),
+    ]);
+  });
+
   it('keeps legacy global proxy password during hydration until explicit cleanup', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {

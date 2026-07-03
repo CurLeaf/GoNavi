@@ -1176,6 +1176,18 @@ export const resolveSidebarRootOrderTokens = (
   return result;
 };
 
+const resolveHydratedSidebarRootOrderTokens = (
+  sidebarRootOrder: unknown,
+  connectionTags?: ConnectionTag[],
+  connections?: SavedConnection[],
+): string[] => {
+  const sanitized = sanitizeSidebarRootOrder(sidebarRootOrder);
+  if (!connectionTags || !connections) {
+    return sanitized;
+  }
+  return resolveSidebarRootOrderTokens(sanitized, connectionTags, connections);
+};
+
 const insertSidebarRootTokenBeforeUngrouped = (
   sidebarRootOrder: string[],
   token: string,
@@ -3834,10 +3846,10 @@ export const useStore = create<AppState>()(
             state.connectionTags,
           );
         }
-        nextState.sidebarRootOrder = resolveSidebarRootOrderTokens(
+        nextState.sidebarRootOrder = resolveHydratedSidebarRootOrderTokens(
           state.sidebarRootOrder,
-          nextState.connectionTags,
-          nextState.connections,
+          state.connectionTags === undefined ? undefined : nextState.connectionTags,
+          state.connections === undefined ? undefined : nextState.connections,
         );
         delete nextState.savedQueries;
         nextState.externalSQLDirectories = sanitizeExternalSQLDirectories(
@@ -3931,10 +3943,12 @@ export const useStore = create<AppState>()(
         const persistedSidebarRootOrder =
           state.sidebarRootOrder === undefined
             ? currentState.sidebarRootOrder
-            : resolveSidebarRootOrderTokens(
+            : resolveHydratedSidebarRootOrderTokens(
                 state.sidebarRootOrder,
-                persistedConnectionTags,
-                persistedConnections,
+                state.connectionTags === undefined
+                  ? undefined
+                  : persistedConnectionTags,
+                state.connections === undefined ? undefined : persistedConnections,
               );
         return {
           ...currentState,
