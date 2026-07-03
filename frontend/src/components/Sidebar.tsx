@@ -31,7 +31,6 @@ import {
 export { formatSidebarDriverAgentUpdateWarning } from './sidebar/useSidebarTreeLoaders';
 import {
   ExternalSQLFileModal,
-  SQLFileExecutionModal,
   useSidebarExternalSqlWorkflow,
 } from './sidebar/SidebarExternalSqlWorkflow';
 export {
@@ -1219,7 +1218,6 @@ const Sidebar: React.FC<{
       handleRemoveExternalSQLDirectory,
       handleRefreshExternalSQLDirectory,
       externalSQLFileModalProps,
-      sqlFileExecutionModalProps,
   } = useSidebarExternalSqlWorkflow({
       connections,
       externalSQLDirectories,
@@ -3183,12 +3181,6 @@ const Sidebar: React.FC<{
             handleBatchDbDelete={handleBatchDbDelete}
             handleCheckAllDb={handleCheckAllDb}
             handleInvertSelectionDb={handleInvertSelectionDb}
-        />
-
-        <SQLFileExecutionModal
-            title={v2OpenExternalSqlFileLabel}
-            modalPanelStyle={modalPanelStyle}
-            {...sqlFileExecutionModalProps}
         />
         <FindInDatabaseModal
             open={findInDbContext.open}

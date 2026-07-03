@@ -706,10 +706,11 @@ func readSQLFileByPath(filePath string) connection.QueryResult {
 	return readSQLFileByPathWithText(filePath, nil)
 }
 
-func readSQLFileByPathWithText(filePath string, text fileBackendTextFunc) connection.QueryResult {
+func resolveSQLFilePathInfoWithText(filePath string, text fileBackendTextFunc) (string, os.FileInfo, *connection.QueryResult) {
 	selection := strings.TrimSpace(filePath)
 	if selection == "" {
-		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.file_path_required", nil)}
+		result := connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.file_path_required", nil)}
+		return "", nil, &result
 	}
 	if abs, err := filepath.Abs(selection); err == nil {
 		selection = abs
@@ -721,22 +722,37 @@ func readSQLFileByPathWithText(filePath string, text fileBackendTextFunc) connec
 		if os.IsNotExist(err) {
 			data["errorCode"] = sqlFileErrorCodeNotFound
 		}
-		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.read_file_info_failed", map[string]any{"detail": err.Error()}), Data: data}
+		result := connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.read_file_info_failed", map[string]any{"detail": err.Error()}), Data: data}
+		return "", nil, &result
 	}
 	if fi.IsDir() {
-		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.selected_path_not_sql_file", nil)}
+		result := connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.selected_path_not_sql_file", nil)}
+		return "", nil, &result
+	}
+	return selection, fi, nil
+}
+
+func buildSQLFileSelectionMetadata(selection string, fileSize int64) map[string]interface{} {
+	return map[string]interface{}{
+		"filePath":   selection,
+		"name":       filepath.Base(selection),
+		"fileSize":   fileSize,
+		"fileSizeMB": fmt.Sprintf("%.1f", float64(fileSize)/(1024*1024)),
+	}
+}
+
+func readSQLFileByPathWithText(filePath string, text fileBackendTextFunc) connection.QueryResult {
+	selection, fi, failed := resolveSQLFilePathInfoWithText(filePath, text)
+	if failed != nil {
+		return *failed
 	}
 
 	if fi.Size() > maxSQLFileSizeBytes {
-		sizeMB := float64(fi.Size()) / (1024 * 1024)
+		payload := buildSQLFileSelectionMetadata(selection, fi.Size())
+		payload["isLargeFile"] = true
 		return connection.QueryResult{
 			Success: true,
-			Data: map[string]interface{}{
-				"isLargeFile": true,
-				"filePath":    selection,
-				"fileSize":    fi.Size(),
-				"fileSizeMB":  fmt.Sprintf("%.1f", sizeMB),
-			},
+			Data:    payload,
 		}
 	}
 
@@ -746,6 +762,17 @@ func readSQLFileByPathWithText(filePath string, text fileBackendTextFunc) connec
 	}
 
 	return connection.QueryResult{Success: true, Data: string(content)}
+}
+
+func selectSQLFileForExecutionByPathWithText(filePath string, text fileBackendTextFunc) connection.QueryResult {
+	selection, fi, failed := resolveSQLFilePathInfoWithText(filePath, text)
+	if failed != nil {
+		return *failed
+	}
+	return connection.QueryResult{
+		Success: true,
+		Data:    buildSQLFileSelectionMetadata(selection, fi.Size()),
+	}
 }
 
 func readSQLFileWithMetadataByPath(filePath string) connection.QueryResult {
@@ -931,6 +958,32 @@ func (a *App) OpenSQLFile() connection.QueryResult {
 	}
 
 	return readSQLFileWithMetadataByPathWithText(selection, a.appText)
+}
+
+func (a *App) SelectSQLFileForExecution() connection.QueryResult {
+	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: a.appText("file.backend.dialog.select_sql_file", nil),
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: a.appText("file.backend.filter.sql_files", nil),
+				Pattern:     "*.sql",
+			},
+			{
+				DisplayName: a.appText("file.backend.filter.all_files_pattern", nil),
+				Pattern:     "*.*",
+			},
+		},
+	})
+
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	if selection == "" {
+		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+
+	return selectSQLFileForExecutionByPathWithText(selection, a.appText)
 }
 
 func (a *App) SelectSQLDirectory(currentDir string) connection.QueryResult {
@@ -1187,7 +1240,12 @@ func joinSQLFileBatchStatements(batch []sqlFilePendingStatement) string {
 	if len(batch) == 0 {
 		return ""
 	}
+	totalLen := 0
+	for _, item := range batch {
+		totalLen += len(item.SQL) + 2
+	}
 	var builder strings.Builder
+	builder.Grow(totalLen)
 	for i, item := range batch {
 		if i > 0 {
 			builder.WriteString(";\n")
