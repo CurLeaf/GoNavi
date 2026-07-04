@@ -9,11 +9,11 @@ import (
 
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/jvm"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"GoNavi-Wails/internal/uievents"
 )
 
 var newJVMDiagnosticTransport = jvm.NewDiagnosticTransport
-var emitJVMDiagnosticRuntimeEvent = runtime.EventsEmit
+var emitJVMDiagnosticRuntimeEvent = uievents.Emit
 
 const diagnosticChunkEvent = "jvm:diagnostic:chunk"
 

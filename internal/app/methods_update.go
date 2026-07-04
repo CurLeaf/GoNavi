@@ -20,6 +20,7 @@ import (
 
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/logger"
+	"GoNavi-Wails/internal/uievents"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -976,7 +977,7 @@ func (a *App) emitUpdateDownloadProgress(status string, downloaded, total int64,
 	if status == "done" && payload.Percent < 100 {
 		payload.Percent = 100
 	}
-	wailsRuntime.EventsEmit(a.ctx, updateDownloadProgressEvent, payload)
+	uievents.Emit(a.ctx, updateDownloadProgressEvent, payload)
 }
 
 func launchUpdateScript(staged *stagedUpdate) error {

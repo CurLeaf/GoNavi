@@ -30,6 +30,7 @@ import (
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
 	"GoNavi-Wails/internal/logger"
+	"GoNavi-Wails/internal/uievents"
 	"GoNavi-Wails/shared/i18n"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -1584,7 +1585,7 @@ func (a *App) emitDriverDownloadProgress(driverType string, status string, downl
 	if payload.Status == "done" && payload.Percent < 100 {
 		payload.Percent = 100
 	}
-	runtime.EventsEmit(a.ctx, driverDownloadProgressEvent, payload)
+	uievents.Emit(a.ctx, driverDownloadProgressEvent, payload)
 }
 
 func probeDriverNetworkEndpoint(client *http.Client, item driverNetworkProbeItem) driverNetworkProbeItem {

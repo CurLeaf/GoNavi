@@ -22,10 +22,10 @@ import (
 	"GoNavi-Wails/internal/appdata"
 	"GoNavi-Wails/internal/logger"
 	"GoNavi-Wails/internal/secretstore"
+	"GoNavi-Wails/internal/uievents"
 	"GoNavi-Wails/shared/i18n"
 
 	"github.com/google/uuid"
-	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // Service AI 服务，作为 Wails Binding 暴露给前端
@@ -1377,7 +1377,7 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 		p, config, err := s.getActiveProviderRuntime()
 		if err != nil {
 			logger.Error(err, "AIChatStream 获取 Provider 失败：sessionID=%s messages=%d tools=%d", sessionID, len(messages), len(tools))
-			wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
+			uievents.Emit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
 				"error": err.Error(),
 				"done":  true,
 			})
@@ -1425,7 +1425,7 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 				if chunk.Error != "" {
 					errorChunks++
 				}
-				wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
+				uievents.Emit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
 					"content":           chunk.Content,
 					"thinking":          chunk.Thinking,
 					"reasoning_content": chunk.ReasoningContent,
@@ -1458,7 +1458,7 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 				if chunk.Error != "" {
 					errorChunks++
 				}
-				wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
+				uievents.Emit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
 					"content":           chunk.Content,
 					"thinking":          chunk.Thinking,
 					"reasoning_content": chunk.ReasoningContent,
@@ -1472,7 +1472,7 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 		// 当 context 被主动 cancel 的时候，不把这个视为向外抛的 error
 		if err != nil && err != context.Canceled {
 			logger.Warnf("AIChatStream 失败：sessionID=%s provider=%s messages=%d tools=%d duration=%s err=%s", sessionID, providerName, len(messages), len(tools), time.Since(started).Round(time.Millisecond), provider.RedactAIUpstreamLogText(err.Error()))
-			wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
+			uievents.Emit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
 				"error": err.Error(),
 				"done":  true,
 			})

@@ -10,6 +10,7 @@ const appSource = readFileSync(
 describe('settings center layout', () => {
   it('uses the same split navigation shell as the tool center', () => {
     expect(appSource).toContain("type SettingsCenterGroupKey = 'preferences' | 'services' | 'about';");
+    expect(appSource).toContain("type SettingsCenterPaneKey = 'language' | 'sidebar-metadata' | 'proxy' | 'web-auth';");
     expect(appSource).toContain("const [activeSettingsCenterGroupKey, setActiveSettingsCenterGroupKey] = useState<SettingsCenterGroupKey>('preferences');");
     expect(appSource).toContain("const [activeSettingsCenterPane, setActiveSettingsCenterPane] = useState<SettingsCenterPaneState | null>(null);");
     expect(appSource).toContain('style={toolCenterModalWorkspaceStyle}');
@@ -39,5 +40,13 @@ describe('settings center layout', () => {
     expect(appSource).toContain("sidebarTableMetadataFields: DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS");
     expect(appSource).toContain("t('sidebar.v2_table_group_menu.display_table_rows')");
     expect(appSource).not.toContain("setIsLanguageModalOpen(true)");
+  });
+
+  it('adds browser auth management into the services settings group', () => {
+    expect(appSource).toContain("key: 'web-auth' as const");
+    expect(appSource).toContain("title: t('app.settings.entry.web_auth.title')");
+    expect(appSource).toContain("description: t('app.settings.entry.web_auth.description')");
+    expect(appSource).toContain("handleOpenSettingsCenterPane('services', 'web-auth')");
+    expect(appSource).toContain("<WebAuthSettingsPanel");
   });
 });

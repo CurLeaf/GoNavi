@@ -23,6 +23,7 @@ import (
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
 	"GoNavi-Wails/internal/logger"
+	"GoNavi-Wails/internal/uievents"
 	"GoNavi-Wails/internal/utils"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -203,7 +204,7 @@ func (r *exportProgressReporter) emit(status string, stage string, current int64
 		FilePath:       r.filePath,
 		Message:        strings.TrimSpace(message),
 	}
-	runtime.EventsEmit(r.app.ctx, exportProgressEvent, payload)
+	uievents.Emit(r.app.ctx, exportProgressEvent, payload)
 	r.lastRows = current
 	r.lastEmittedAt = now
 }
@@ -1601,7 +1602,7 @@ func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, 
 				percent = 100
 			}
 		}
-		runtime.EventsEmit(a.ctx, "sqlfile:progress", map[string]interface{}{
+		uievents.Emit(a.ctx, "sqlfile:progress", map[string]interface{}{
 			"jobId":      jobID,
 			"status":     status,
 			"executed":   executed,
@@ -2365,7 +2366,7 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 
 	writer := newImportDatabaseRowWriter(dbInst, dbType, tableName, columnTypeMap)
 	consumer := newImportBatchConsumer(writer, defaultImportApplyBatchSize, 0, false, func(state importProgressState) {
-		runtime.EventsEmit(a.ctx, "import:progress", state)
+		uievents.Emit(a.ctx, "import:progress", state)
 	})
 	if err := streamImportFile(filePath, consumer); err != nil {
 		resultData := consumer.Result()

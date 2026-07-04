@@ -1,7 +1,7 @@
 ﻿import Modal from './components/common/ResizableDraggableModal';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined } from '@ant-design/icons';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined, PoweroffOutlined } from '@ant-design/icons';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -24,6 +24,7 @@ import SecurityUpdateIntroModal from './components/SecurityUpdateIntroModal';
 import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModal';
 import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModal';
 import LanguageSettingsPanel from './components/LanguageSettingsPanel';
+import WebAuthSettingsPanel from './components/WebAuthSettingsPanel';
 import {
   DEFAULT_APPEARANCE,
   MAX_V2_SIDEBAR_RAIL_SCALE,
@@ -219,7 +220,7 @@ type ToolCenterPaneState = {
 };
 
 type SettingsCenterGroupKey = 'preferences' | 'services' | 'about';
-type SettingsCenterPaneKey = 'language' | 'sidebar-metadata' | 'proxy';
+type SettingsCenterPaneKey = 'language' | 'sidebar-metadata' | 'proxy' | 'web-auth';
 type SettingsCenterPaneState = {
   key: SettingsCenterPaneKey;
   group: SettingsCenterGroupKey;
@@ -541,6 +542,7 @@ function App() {
   const [runtimePlatform, setRuntimePlatform] = useState('');
   const [runtimeBuildType, setRuntimeBuildType] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
+  const isWebRuntime = runtimeBuildType === 'web';
   const [installedFontFamilies, setInstalledFontFamilies] = useState<InstalledFontFamily[]>(EMPTY_INSTALLED_FONT_FAMILIES);
   const [isFontFamiliesLoading, setIsFontFamiliesLoading] = useState(false);
   const [fontFamiliesLoadError, setFontFamiliesLoadError] = useState<string | null>(null);
@@ -2735,6 +2737,18 @@ function App() {
       }
   }, [securityUpdateRepairSource]);
 
+  const handleWebLogout = useCallback(async () => {
+      try {
+          await fetch('/__gonavi/auth/logout', {
+              method: 'POST',
+              credentials: 'same-origin',
+          });
+      } catch (_) {
+          // ignore
+      }
+      window.location.assign('/login');
+  }, []);
+
   const handleTitleBarWindowToggle = async (options?: { allowMacNativeFullscreen?: boolean }) => {
       const allowMacNativeFullscreen = options?.allowMacNativeFullscreen === true;
       const syncWindowStateFromRuntime = async () => {
@@ -3435,6 +3449,13 @@ function App() {
                   description: t('app.settings.entry.proxy.description'),
                   onClick: () => handleOpenSettingsCenterPane('services', 'proxy'),
               },
+              ...(isWebRuntime ? [{
+                  key: 'web-auth' as const,
+                  icon: <SafetyCertificateOutlined />,
+                  title: t('app.settings.entry.web_auth.title'),
+                  description: t('app.settings.entry.web_auth.description'),
+                  onClick: () => handleOpenSettingsCenterPane('services', 'web-auth'),
+              }] : []),
               {
                   key: 'ai',
                   icon: <RobotOutlined />,
@@ -3491,6 +3512,16 @@ function App() {
       if (activeSettingsCenterPane.key === 'proxy') {
           return renderProxySettingsContent();
       }
+      if (activeSettingsCenterPane.key === 'web-auth') {
+          return (
+              <WebAuthSettingsPanel
+                darkMode={darkMode}
+                dividerColor={overlayTheme.divider}
+                mutedColor={String(utilityMutedTextStyle.color || overlayTheme.mutedText)}
+                titleColor={overlayTheme.titleText}
+              />
+          );
+      }
       return null;
   };
 
@@ -3523,8 +3554,8 @@ function App() {
                 background: bgMain,
                 borderBottom: 'none',
                 userSelect: 'none',
-                WebkitAppRegion: 'drag', // Wails drag region
-                '--wails-draggable': 'drag',
+                WebkitAppRegion: isWebRuntime ? 'no-drag' : 'drag',
+                '--wails-draggable': isWebRuntime ? 'no-drag' : 'drag',
                 paddingLeft: getMacNativeTitlebarPaddingLeft(effectiveUiScale, useNativeMacWindowControls),
                 paddingRight: getMacNativeTitlebarPaddingRight(effectiveUiScale, useNativeMacWindowControls),
                 fontSize: tokenFontSize
@@ -3534,7 +3565,21 @@ function App() {
                   {/* Logo can be added here if available */}
                   GoNavi
               </div>
-              {useNativeMacWindowControls ? (
+              {isWebRuntime ? (
+                  <div
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, WebkitAppRegion: 'no-drag', '--wails-draggable': 'no-drag' } as any}
+                  >
+                      <Tooltip title="退出当前 Web 会话">
+                          <Button
+                            type="text"
+                            icon={<PoweroffOutlined />}
+                            style={{ height: '100%', borderRadius: 8, width: titleBarButtonWidth }}
+                            onClick={() => { void handleWebLogout(); }}
+                          />
+                      </Tooltip>
+                  </div>
+              ) : useNativeMacWindowControls ? (
                   <div style={{ minWidth: Math.max(40, Math.round(48 * effectiveUiScale)) }} />
               ) : (
                   <div
@@ -4006,12 +4051,24 @@ function App() {
                 ],
               },
             ] as const;
-            const activeToolCenterGroup = toolCenterGroups.find((group) => group.key === activeToolCenterGroupKey) ?? toolCenterGroups[0];
+            const filteredToolCenterGroups = toolCenterGroups.map((group) => ({
+              ...group,
+              items: group.items.filter((item) => {
+                if (!isWebRuntime) {
+                  return true;
+                }
+                return !['import', 'export', 'data-root'].includes(String(item.key || ''));
+              }),
+            })).filter((group) => group.items.length > 0);
+            const activeToolCenterGroup = filteredToolCenterGroups.find((group) => group.key === activeToolCenterGroupKey) ?? filteredToolCenterGroups[0];
             const activeToolCenterPaneItem = activeToolCenterPane
-              ? toolCenterGroups
+              ? filteredToolCenterGroups
                   .find((group) => group.key === activeToolCenterPane.group)
                   ?.items.find((item) => item.key === activeToolCenterPane.key)
               : null;
+            if (!activeToolCenterGroup) {
+              return null;
+            }
             const closeToolCenterPane = () => {
               if (activeToolCenterPane?.key === 'connection-package') {
                 closeConnectionPackageDialog();
@@ -4491,7 +4548,7 @@ function App() {
                             <div style={utilityMutedTextStyle}>{activeToolCenterGroup.description}</div>
                           </div>
                           <div style={toolCenterScrollableListStyle}>
-                            {activeToolCenterGroup.items.map((item, index) => (
+                  {activeToolCenterGroup.items.map((item, index) => (
                               <Button
                                 key={item.key}
                                 type="text"

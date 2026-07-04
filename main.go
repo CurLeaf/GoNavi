@@ -12,6 +12,7 @@ import (
 	"GoNavi-Wails/internal/app"
 	"GoNavi-Wails/internal/logger"
 	"GoNavi-Wails/internal/mcpserver"
+	"GoNavi-Wails/internal/webserver"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/menu"
@@ -19,8 +20,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
-	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const nativeSelectCurrentLineEvent = "gonavi:native-select-current-line"
@@ -121,14 +122,25 @@ func buildMacApplicationMenu(onNativeSelectCurrentLine func(), frameless bool) *
 }
 
 func runSpecialMode(args []string) bool {
-	if !shouldRunMCPServerMode(args) {
+	if len(args) == 0 {
 		return false
 	}
 
-	if err := runMCPServerMode(context.Background(), args[1:]); err != nil {
-		logger.Error(err, "GoNavi MCP Server 退出")
+	mode := strings.ToLower(strings.TrimSpace(args[0]))
+	switch mode {
+	case "mcp-server", "--mcp-server":
+		if err := runMCPServerMode(context.Background(), args[1:]); err != nil {
+			logger.Error(err, "GoNavi MCP Server 退出")
+		}
+		return true
+	case "web-server", "--web-server":
+		if err := webserver.Run(context.Background(), assets, args[1:]); err != nil {
+			logger.Error(err, "GoNavi Web Server 退出")
+		}
+		return true
+	default:
+		return false
 	}
-	return true
 }
 
 func runMCPServerMode(ctx context.Context, args []string) error {
@@ -151,19 +163,6 @@ func runMCPServerMode(ctx context.Context, args []string) error {
 		return mcpserver.WriteRemoteMCPClientConfig(os.Stdout, args[1:])
 	default:
 		return fmt.Errorf("未知 MCP server 模式: %s（支持 stdio/http/remote-config）", args[0])
-	}
-}
-
-func shouldRunMCPServerMode(args []string) bool {
-	if len(args) == 0 {
-		return false
-	}
-
-	switch strings.ToLower(strings.TrimSpace(args[0])) {
-	case "mcp-server", "--mcp-server":
-		return true
-	default:
-		return false
 	}
 }
 

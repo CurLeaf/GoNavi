@@ -7,8 +7,7 @@ import (
 
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/sync"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"GoNavi-Wails/internal/uievents"
 )
 
 func ensureDataSyncTargetProtection(config sync.SyncConfig) error {
@@ -98,14 +97,14 @@ func (a *App) DataSync(config sync.SyncConfig) sync.SyncResult {
 
 	reporter := sync.Reporter{
 		OnLog: func(event sync.SyncLogEvent) {
-			runtime.EventsEmit(a.ctx, sync.EventSyncLog, event)
+			uievents.Emit(a.ctx, sync.EventSyncLog, event)
 		},
 		OnProgress: func(event sync.SyncProgressEvent) {
-			runtime.EventsEmit(a.ctx, sync.EventSyncProgress, event)
+			uievents.Emit(a.ctx, sync.EventSyncProgress, event)
 		},
 	}
 
-	runtime.EventsEmit(a.ctx, sync.EventSyncStart, map[string]any{
+	uievents.Emit(a.ctx, sync.EventSyncStart, map[string]any{
 		"jobId": jobID,
 		"total": len(config.Tables),
 	})
@@ -117,7 +116,7 @@ func (a *App) DataSync(config sync.SyncConfig) sync.SyncResult {
 			Message: err.Error(),
 			Logs:    []string{err.Error()},
 		}
-		runtime.EventsEmit(a.ctx, sync.EventSyncDone, map[string]any{
+		uievents.Emit(a.ctx, sync.EventSyncDone, map[string]any{
 			"jobId":  jobID,
 			"result": res,
 		})
@@ -127,7 +126,7 @@ func (a *App) DataSync(config sync.SyncConfig) sync.SyncResult {
 	engine := sync.NewSyncEngine(reporter)
 	res := engine.RunSync(resolvedConfig)
 
-	runtime.EventsEmit(a.ctx, sync.EventSyncDone, map[string]any{
+	uievents.Emit(a.ctx, sync.EventSyncDone, map[string]any{
 		"jobId":  jobID,
 		"result": res,
 	})
@@ -145,14 +144,14 @@ func (a *App) DataSyncAnalyze(config sync.SyncConfig) connection.QueryResult {
 
 	reporter := sync.Reporter{
 		OnLog: func(event sync.SyncLogEvent) {
-			runtime.EventsEmit(a.ctx, sync.EventSyncLog, event)
+			uievents.Emit(a.ctx, sync.EventSyncLog, event)
 		},
 		OnProgress: func(event sync.SyncProgressEvent) {
-			runtime.EventsEmit(a.ctx, sync.EventSyncProgress, event)
+			uievents.Emit(a.ctx, sync.EventSyncProgress, event)
 		},
 	}
 
-	runtime.EventsEmit(a.ctx, sync.EventSyncStart, map[string]any{
+	uievents.Emit(a.ctx, sync.EventSyncStart, map[string]any{
 		"jobId": jobID,
 		"total": len(config.Tables),
 		"type":  "analyze",
@@ -161,7 +160,7 @@ func (a *App) DataSyncAnalyze(config sync.SyncConfig) connection.QueryResult {
 	resolvedConfig, err := a.resolveDataSyncConfigSecrets(config)
 	if err != nil {
 		res := sync.SyncResult{Success: false, Message: err.Error(), Logs: []string{err.Error()}}
-		runtime.EventsEmit(a.ctx, sync.EventSyncDone, map[string]any{
+		uievents.Emit(a.ctx, sync.EventSyncDone, map[string]any{
 			"jobId":  jobID,
 			"result": res,
 			"type":   "analyze",
@@ -172,7 +171,7 @@ func (a *App) DataSyncAnalyze(config sync.SyncConfig) connection.QueryResult {
 	engine := sync.NewSyncEngine(reporter)
 	res := engine.Analyze(resolvedConfig)
 
-	runtime.EventsEmit(a.ctx, sync.EventSyncDone, map[string]any{
+	uievents.Emit(a.ctx, sync.EventSyncDone, map[string]any{
 		"jobId":  jobID,
 		"result": res,
 		"type":   "analyze",
