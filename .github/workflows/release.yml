@@ -177,7 +177,7 @@ jobs:
           DRIVERS="$(bash ./tools/detect-changed-driver-agents.sh --base "$BASE_REF" --head "$GITHUB_SHA")"
           if [[ "$BASE_REF" != "all" ]]; then
             REVISION_DRIVERS=""
-            for PLATFORM in darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64; do
+            for PLATFORM in darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64 linux/arm64; do
               PLATFORM_DRIVERS="$(bash ./tools/diff-driver-agent-revisions.sh --base "$BASE_REF" --head "$GITHUB_SHA" --platform "$PLATFORM")" || {
                 echo "⚠️ 平台 revision 差异对比失败（${PLATFORM}），保守回退为全量驱动重建"
                 DRIVERS="$(bash ./tools/detect-changed-driver-agents.sh --base all --head "$GITHUB_SHA")"
@@ -259,6 +259,15 @@ jobs:
             os_name: Linux
             arch_name: Amd64
             build_name: gonavi-build-linux-amd64
+            wails_tags: ""
+            artifact_suffix: ""
+            build_optional_agents: true
+            linux_webkit: "4.0"
+          - os: ubuntu-22.04-arm
+            platform: linux/arm64
+            os_name: Linux
+            arch_name: Arm64
+            build_name: gonavi-build-linux-arm64
             wails_tags: ""
             artifact_suffix: ""
             build_optional_agents: true
@@ -353,6 +362,12 @@ jobs:
 
           # AppImage 运行/打包可能需要 FUSE2。不同发行版/版本包名不同，做兼容兜底。
           sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
+
+          if [ "${{ matrix.arch_name }}" != "Amd64" ]; then
+            echo "⚠️ Linux arm64 暂不生成 AppImage，仅产出 tar.gz"
+            touch /tmp/skip-appimage
+            exit 0
+          fi
 
           # Download linuxdeploy tools for AppImage packaging
           LINUXDEPLOY_URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"

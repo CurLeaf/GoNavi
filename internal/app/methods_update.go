@@ -566,6 +566,9 @@ func expectedAssetNameForExecutable(goos, goarch, version, executablePath string
 		if goarch == "amd64" {
 			return fmt.Sprintf("GoNavi-%s-Linux-Amd64%s.tar.gz", version, resolveLinuxReleaseArtifactSuffix(executablePath)), nil
 		}
+		if goarch == "arm64" {
+			return fmt.Sprintf("GoNavi-%s-Linux-Arm64%s.tar.gz", version, resolveLinuxReleaseArtifactSuffix(executablePath)), nil
+		}
 	}
 	return "", localizedUpdateError{
 		key:    "app.update.backend.error.online_update_unsupported",

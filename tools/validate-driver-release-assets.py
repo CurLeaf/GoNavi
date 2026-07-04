@@ -100,8 +100,11 @@ def infer_asset_path(name: str):
         return f"MacOS/{trimmed}"
     if (
         trimmed.endswith("-driver-agent-linux-amd64")
+        or trimmed.endswith("-driver-agent-linux-arm64")
         or trimmed.endswith("-driver-agent-v1-linux-amd64")
+        or trimmed.endswith("-driver-agent-v1-linux-arm64")
         or trimmed.endswith("-driver-agent-v2-linux-amd64")
+        or trimmed.endswith("-driver-agent-v2-linux-arm64")
     ):
         return f"Linux/{trimmed}"
     return None

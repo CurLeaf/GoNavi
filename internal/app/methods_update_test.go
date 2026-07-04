@@ -190,6 +190,23 @@ func TestExpectedAssetNameForExecutableUsesLinuxWebKit41Suffix(t *testing.T) {
 	}
 }
 
+func TestExpectedAssetNameForExecutableSupportsLinuxArm64(t *testing.T) {
+	assetName, err := expectedAssetNameForExecutable(
+		"linux",
+		"arm64",
+		"v0.6.5",
+		"/opt/GoNavi/gonavi-build-linux-arm64",
+	)
+	if err != nil {
+		t.Fatalf("expectedAssetNameForExecutable returned error: %v", err)
+	}
+
+	want := "GoNavi-0.6.5-Linux-Arm64.tar.gz"
+	if assetName != want {
+		t.Fatalf("unexpected linux arm64 asset name: got %q want %q", assetName, want)
+	}
+}
+
 func TestBuildLinuxScriptPrefersTargetExecutableBasename(t *testing.T) {
 	script := buildLinuxScript(
 		"/tmp/GoNavi-0.6.5-Linux-Amd64-WebKit41.tar.gz",

@@ -8,7 +8,7 @@ SCRIPT_DIR_WINDOWS="$(pwd -W 2>/dev/null || true)"
 SCRIPT_DIR_WINDOWS="${SCRIPT_DIR_WINDOWS//\\//}"
 
 DEFAULT_DRIVERS=(mariadb oceanbase doris starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss gaussdb iris mongodb tdengine iotdb clickhouse elasticsearch)
-TARGET_PLATFORMS=(darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64)
+TARGET_PLATFORMS=(darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64 linux/arm64)
 
 usage() {
   cat <<'EOF'
@@ -627,8 +627,9 @@ declare -a analysis_platforms=()
 analysis_platform_seen="|"
 for file in "${!dependency_matched_platforms[@]}"; do
   matched_platforms="${dependency_matched_platforms[$file]}"
-  if [[ "$matched_platforms" == *"|linux/amd64|"* ]]; then
+  if [[ "$matched_platforms" == *"|linux/amd64|"* || "$matched_platforms" == *"|linux/arm64|"* ]]; then
     add_analysis_platform "linux/amd64"
+    add_analysis_platform "linux/arm64"
     continue
   fi
   for platform in "${TARGET_PLATFORMS[@]}"; do
