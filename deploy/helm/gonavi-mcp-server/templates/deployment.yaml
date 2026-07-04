@@ -1,0 +1,130 @@
+{{- $dataMode := .Values.data.mode -}}
+{{- $driversMode := .Values.drivers.mode -}}
+{{- if not (or (eq $dataMode "secret") (eq $dataMode "hostPath") (eq $dataMode "pvc")) -}}
+{{- fail "data.mode must be one of: secret, hostPath, pvc" -}}
+{{- end -}}
+{{- if not (or (eq $driversMode "none") (eq $driversMode "pvc") (eq $driversMode "hostPath")) -}}
+{{- fail "drivers.mode must be one of: none, pvc, hostPath" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gonavi-mcp-server.fullname" . }}
+  namespace: {{ include "gonavi-mcp-server.namespace" . }}
+  labels:
+    {{- include "gonavi-mcp-server.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "gonavi-mcp-server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gonavi-mcp-server.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: gonavi-mcp-server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - http
+            {{- range .Values.mcp.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          env:
+            - name: GONAVI_DATA_ROOT
+              value: {{ .Values.mcp.dataRoot | quote }}
+            - name: GONAVI_LOG_DIR
+              value: {{ .Values.mcp.logDir | quote }}
+            - name: GONAVI_MCP_HTTP_ADDR
+              value: {{ .Values.mcp.httpAddr | quote }}
+            - name: GONAVI_MCP_HTTP_PATH
+              value: {{ .Values.mcp.httpPath | quote }}
+            - name: GONAVI_MCP_SCHEMA_ONLY
+              value: {{ ternary "true" "false" .Values.mcp.schemaOnly | quote }}
+            - name: GONAVI_MCP_HTTP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gonavi-mcp-server.secretName" . }}
+                  key: {{ .Values.secret.tokenKey }}
+            {{- with .Values.mcp.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: gonavi-data
+              mountPath: {{ .Values.data.mountPath | quote }}
+              readOnly: true
+            {{- if ne $driversMode "none" }}
+            - name: gonavi-drivers
+              mountPath: {{ .Values.drivers.mountPath | quote }}
+              readOnly: true
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+      volumes:
+        - name: gonavi-data
+          {{- if eq $dataMode "secret" }}
+          projected:
+            sources:
+              - secret:
+                  name: {{ include "gonavi-mcp-server.secretName" . }}
+                  items:
+                    - key: {{ .Values.secret.connectionsJsonKey }}
+                      path: connections.json
+                    - key: {{ .Values.secret.dailySecretsJsonKey }}
+                      path: daily_secrets.json
+          {{- else if eq $dataMode "hostPath" }}
+          hostPath:
+            path: {{ required "data.hostPath.path is required when data.mode=hostPath" .Values.data.hostPath.path | quote }}
+            type: {{ default "Directory" .Values.data.hostPath.type | quote }}
+          {{- else if eq $dataMode "pvc" }}
+          persistentVolumeClaim:
+            claimName: {{ required "data.pvc.claimName is required when data.mode=pvc" .Values.data.pvc.claimName | quote }}
+          {{- end }}
+        {{- if eq $driversMode "pvc" }}
+        - name: gonavi-drivers
+          persistentVolumeClaim:
+            claimName: {{ required "drivers.pvc.claimName is required when drivers.mode=pvc" .Values.drivers.pvc.claimName | quote }}
+        {{- else if eq $driversMode "hostPath" }}
+        - name: gonavi-drivers
+          hostPath:
+            path: {{ required "drivers.hostPath.path is required when drivers.mode=hostPath" .Values.drivers.hostPath.path | quote }}
+            type: {{ default "Directory" .Values.drivers.hostPath.type | quote }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gonavi-mcp-server
+  namespace: gonavi
+  labels:
+    app.kubernetes.io/name: gonavi-mcp-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gonavi-mcp-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gonavi-mcp-server
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gonavi-mcp-server
+          # 如需跟随 dev 分支，可改成 ghcr.io/syngnat/gonavi-mcp-server:dev-latest
+          image: ghcr.io/syngnat/gonavi-mcp-server:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - http
+          ports:
+            - name: http
+              containerPort: 8765
+              protocol: TCP
+          env:
+            - name: GONAVI_DATA_ROOT
+              value: /data
+            - name: GONAVI_LOG_DIR
+              value: /var/lib/gonavi/logs
+            - name: GONAVI_MCP_HTTP_ADDR
+              value: 0.0.0.0:8765
+            - name: GONAVI_MCP_HTTP_PATH
+              value: /mcp
+            - name: GONAVI_MCP_SCHEMA_ONLY
+              value: "true"
+            - name: GONAVI_MCP_HTTP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: gonavi-mcp-server-data
+                  key: GONAVI_MCP_HTTP_TOKEN
+          volumeMounts:
+            - name: gonavi-data
+              mountPath: /data
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: gonavi-data
+          projected:
+            sources:
+              - secret:
+                  name: gonavi-mcp-server-data
+                  items:
+                    - key: connections.json
+                      path: connections.json
+                    - key: daily_secrets.json
+                      path: daily_secrets.json

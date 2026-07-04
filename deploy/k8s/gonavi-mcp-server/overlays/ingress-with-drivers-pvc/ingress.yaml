@@ -1,0 +1,33 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gonavi-mcp-server
+  namespace: gonavi
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - gonavi-mcp.example.com
+      secretName: gonavi-mcp-server-tls
+  rules:
+    - host: gonavi-mcp.example.com
+      http:
+        paths:
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: gonavi-mcp-server
+                port:
+                  number: 8765
+          - path: /healthz
+            pathType: Prefix
+            backend:
+              service:
+                name: gonavi-mcp-server
+                port:
+                  number: 8765

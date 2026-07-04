@@ -1,0 +1,10 @@
+data:
+  mode: hostPath
+  hostPath:
+    path: /volume1/docker/gonavi/data
+    type: Directory
+
+secret:
+  create: true
+  stringData:
+    token: replace-with-a-random-token

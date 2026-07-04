@@ -1,0 +1,14 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gonavi-mcp-server
+  namespace: gonavi
+spec:
+  template:
+    spec:
+      volumes:
+        - $patch: replace
+          name: gonavi-data
+          hostPath:
+            path: /volume1/docker/gonavi/data
+            type: Directory

@@ -1,0 +1,7 @@
+apiVersion: v2
+name: gonavi-mcp-server
+description: Helm chart for deploying GoNavi MCP Server
+type: application
+version: 0.1.0
+appVersion: "latest"
+kubeVersion: ">=1.24.0-0"

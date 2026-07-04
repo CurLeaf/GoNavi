@@ -1,0 +1,22 @@
+[Unit]
+Description=GoNavi MCP Server (rootless Podman)
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=gonavi-mcp-server
+Image=ghcr.io/syngnat/gonavi-mcp-server:latest
+Pull=newer
+EnvironmentFile=./gonavi-mcp-server.env
+# 修改成你的 GoNavi 活动数据目录；SELinux 主机建议保留 :Z
+Volume=/absolute/path/to/gonavi-data:/data:Z
+PublishPort=8765:8765
+Exec=http
+LogDriver=journald
+
+[Service]
+Restart=always
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,7 @@
+services:
+  gonavi-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp-server
+    image: ${GONAVI_MCP_IMAGE_LOCAL:-gonavi-mcp-server:local}
+    pull_policy: never

@@ -1,0 +1,42 @@
+# syntax=docker/dockerfile:1.7
+
+ARG GO_IMAGE=golang:1.24-bookworm
+ARG NODE_IMAGE=node:20-bookworm
+
+FROM ${NODE_IMAGE} AS node
+
+FROM ${GO_IMAGE}
+
+ARG WEBKIT_API=4.0
+ARG WAILS_VERSION=v2.11.0
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH=/root/go/bin:${PATH}
+
+COPY --from=node /usr/local/ /usr/local/
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        build-essential \
+        ca-certificates \
+        curl \
+        file \
+        git \
+        make \
+        pkg-config \
+        python3 \
+        unzip \
+        zip \
+        libgtk-3-dev \
+    && if [ "${WEBKIT_API}" = "4.1" ]; then \
+        apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libsoup-3.0-dev; \
+    else \
+        apt-get install -y --no-install-recommends libwebkit2gtk-4.0-dev; \
+    fi \
+    && go install github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION} \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+CMD ["bash"]
