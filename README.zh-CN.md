@@ -33,9 +33,16 @@ GoNavi 面向开发者与 DBA，核心目标是让数据库操作在桌面端做
 | 类别 | 数据源 | 驱动模式 | 典型能力 |
 |---|---|---|---|
 | 关系型 | MySQL | 内置 | 库表浏览、SQL 查询、数据编辑、导出/备份 |
+| 国产数据库 | GoldenDB | 内置 | MySQL 兼容查询工作流、分布式事务场景 |
 | 关系型 | PostgreSQL | 内置 | 库表浏览、SQL 查询、数据编辑、对象管理 |
 | 关系型 | Oracle | 内置 | 连接查询、对象浏览、数据编辑 |
 | 缓存 | Redis | 内置 | Key 浏览、命令执行、编码/视图切换 |
+| 向量数据库 | Chroma | 内置 | Collection 浏览、向量检索、元数据过滤 |
+| 向量数据库 | Qdrant | 内置 | Collection 浏览、向量搜索、Payload 过滤 |
+| 消息队列 | RocketMQ | 内置 | Topic 浏览、消费组检查、消息型工作流 |
+| 消息队列 | MQTT | 内置 | Broker / Topic Filter 工作流与 QoS 连接配置 |
+| 消息队列 | Kafka | 内置 | Topic 浏览、Broker 元数据、消费组工作流 |
+| 消息队列 | RabbitMQ | 内置 | Queue / Exchange 浏览、Virtual Host 检查、Management API 工作流 |
 | 关系型 | MariaDB | 可选驱动代理 | 连接查询、对象管理、数据编辑 |
 | 关系型 | Doris | 可选驱动代理 | 连接查询、对象浏览、SQL 执行 |
 | 列式分析 | StarRocks | 可选驱动代理 | 连接查询、对象浏览、SQL 执行 |
@@ -43,12 +50,17 @@ GoNavi 面向开发者与 DBA，核心目标是让数据库操作在桌面端做
 | 关系型 | SQL Server | 可选驱动代理 | 库表浏览、SQL 查询、对象管理 |
 | 文件型 | SQLite | 可选驱动代理 | 本地文件库浏览、编辑、导出 |
 | 文件型 | DuckDB | 可选驱动代理 | 大表查询、分页浏览、文件库管理 |
+| 国产数据库 | OceanBase | 可选驱动代理 | MySQL / Oracle 租户接入、对象浏览、查询工作流 |
 | 国产数据库 | Dameng | 可选驱动代理 | 连接查询、对象浏览、数据编辑 |
 | 国产数据库 | Kingbase | 可选驱动代理 | 连接查询、对象浏览、数据编辑 |
 | 国产数据库 | HighGo | 可选驱动代理 | 连接查询、对象浏览、数据编辑 |
 | 国产数据库 | Vastbase | 可选驱动代理 | 连接查询、对象浏览、数据编辑 |
+| 国产数据库 | OpenGauss | 可选驱动代理 | 类 PostgreSQL 的库表浏览、SQL 查询、对象管理 |
+| 国产数据库 | GaussDB | 可选驱动代理 | 类 PostgreSQL 的库表浏览、SQL 查询、对象管理 |
+| 多模型数据库 | InterSystems IRIS | 可选驱动代理 | Namespace 浏览、SQL 查询、对象管理 |
 | 文档型 | MongoDB | 可选驱动代理 | 文档查询、集合浏览、连接管理 |
 | 时序 | TDengine | 可选驱动代理 | 时序库表浏览、查询分析 |
+| 时序 | Apache IoTDB | 可选驱动代理 | Storage Group / Device / Timeseries 浏览与查询 |
 | 列式分析 | ClickHouse | 可选驱动代理 | 分析查询、对象浏览、SQL 执行 |
 | 联邦查询 | Trino | 可选驱动代理 | 跨多数据源联邦 SQL、`catalog.schema` 浏览、SQL 执行 |
 | 搜索 | Elasticsearch | 可选驱动代理 | 索引浏览、Mapping 检查、JSON DSL / query_string 查询 |
@@ -74,6 +86,9 @@ GoNavi 面向开发者与 DBA，核心目标是让数据库操作在桌面端做
 - **多模型服务商支持**：内置跨平台接入 OpenAI, Google Gemini, Anthropic Claude，同时支持任意自定义兼容 OpenAI 格式的 API。
 - **关联表结构上下文**：原生支持将当前数据库表结构直接提取作为上下文发送给 AI，让 SQL 生成、分析变得更精准。
 - **快捷指令**：内置多种快捷对话指（如一键生成 SQL、解释执行逻辑、分析性能优化、表字段代码评审等）。
+- **内置 MCP 工作流**：可在 AI 设置里管理 MCP 服务，一键安装 GoNavi MCP 到 Claude Code / Codex，或开启 Streamable HTTP 供远端 Agent 使用。
+- **远端 Agent 边界清晰**：数据库连接与密码继续保留在运行 GoNavi 的主机上，云端 Agent 通过 MCP 读取结构与上下文。
+- **安全控制可追溯**：远端 `schema-only` 模式默认不暴露 `execute_sql`；如开启 SQL 执行，非只读语句仍需显式传入 `allowMutating=true`。
 
 ### 性能与交互
 - 大数据场景下保持流畅交互（含 DataGrid 列宽拖拽、批量编辑流程优化）。
@@ -162,6 +177,82 @@ wails build -clean
 ```
 
 构建产物位于 `build/bin`。
+
+### Docker / Podman（仅 MCP Server）
+
+当前容器化支持仅覆盖 `gonavi-mcp-server`，不包含桌面 GUI 主界面。
+
+### 浏览器访问版（实验中）
+
+仓库主程序现在额外提供了一个 `web-server` 运行模式，用同一套 Go 后端 + React 前端提供浏览器访问入口：
+
+```powershell
+go build .
+.\GoNavi-Wails.exe web-server --addr 127.0.0.1:34116
+```
+
+首次访问会进入 `/setup` 完成 Web 管理员密码初始化；可选启用 Google Authenticator，服务端会落地 `web_auth.json`、Session Cookie、恢复码与登录失败限流。
+
+当前阶段已具备：
+
+- 浏览器端 Wails bridge（`window.go.*` / `window.runtime.*` -> HTTP / SSE）
+- 首次初始化页、登录页、登出接口
+- Session 空闲超时 / 绝对超时 / 记住登录时长
+- Google Authenticator TOTP 与恢复码
+
+当前仍在继续收口：
+
+- 外部 SQL / 连接包导入导出等文件型能力的浏览器上传下载工作台
+- 更多桌面专属能力的 Web 门禁与替代交互
+- 反向代理 / HTTPS / 零信任部署说明
+
+```bash
+cp docker.mcp-server.env.example docker.mcp-server.env
+docker compose --env-file docker.mcp-server.env -f docker-compose.mcp-server.yml up -d
+```
+
+请把 GoNavi 的活动数据目录挂载进容器。该目录内至少应包含 `connections.json`、`daily_secrets.json`，如需可选驱动代理还应包含 `drivers/`。
+
+默认 Compose 会直接拉取 GHCR 预构建镜像。如果你要用当前仓库源码本地构建，再叠加一个 override：
+
+```bash
+docker compose --env-file docker.mcp-server.env \
+  -f docker-compose.mcp-server.yml \
+  -f docker-compose.mcp-server.local.yml \
+  up -d --build
+```
+
+如果你使用 Podman，可直接复用同一套 OCI 镜像，走 `podman run` 或 Quadlet。仓库内已经提供 [deploy/podman/gonavi-mcp-server](deploy/podman/gonavi-mcp-server) 作为 Podman 原生部署入口，适合 Linux 服务器 / NAS 的 rootless systemd 常驻服务。
+
+部署矩阵：
+
+- Docker Desktop / Linux 服务器 / NAS：`docker-compose.mcp-server.yml`
+- Podman / Quadlet：[deploy/podman/gonavi-mcp-server](deploy/podman/gonavi-mcp-server)
+- Kubernetes：[deploy/k8s/gonavi-mcp-server](deploy/k8s/gonavi-mcp-server)（`kustomization.yaml` + overlays）
+- Helm Chart：[deploy/helm/gonavi-mcp-server](deploy/helm/gonavi-mcp-server)
+- 仅构建环境：`Dockerfile.build-env`
+
+完整部署方式与安全边界见 [cmd/gonavi-mcp-server/README.md](cmd/gonavi-mcp-server/README.md)。
+
+### Docker / Podman（仅构建环境）
+
+如果只是想要一套稳定的 Linux 构建环境来编译 Wails，可直接使用 `Dockerfile.build-env`：
+
+```bash
+docker build -f Dockerfile.build-env -t gonavi-build-env:local .
+docker run --rm -it -v "$PWD:/workspace" -w /workspace gonavi-build-env:local bash
+```
+
+同一个 Dockerfile 也可以直接给 Podman 使用，例如 `podman build -f Dockerfile.build-env -t localhost/gonavi-build-env:local .`，然后执行 `podman run --rm -it -v "$PWD:/workspace" -w /workspace localhost/gonavi-build-env:local bash`。
+
+这个镜像默认安装 WebKitGTK 4.0 构建依赖，兼容面更适合常见 Linux / NAS 场景。镜像底座本身支持多架构，`amd64` / `arm64` 会跟随容器平台。
+
+仓库会把预构建镜像推送到 GHCR：
+
+- `ghcr.io/syngnat/gonavi-mcp-server:latest`
+- `ghcr.io/syngnat/gonavi-build-env:latest`
+
+这个镜像只负责构建 Linux 产物，不会把 Wails 桌面 GUI 变成可浏览器访问的 Web 服务。
 
 ### 跨平台发布（GitHub Actions）
 
