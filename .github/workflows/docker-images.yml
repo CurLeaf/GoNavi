@@ -16,12 +16,18 @@ permissions:
   packages: write
 
 jobs:
-  publish:
-    name: Publish ${{ matrix.image_name }}
-    runs-on: ubuntu-latest
+  build:
+    name: Build ${{ matrix.image_name }} (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
+        image_name:
+          - gonavi-mcp-server
+          - gonavi-build-env
+        platform:
+          - linux/amd64
+          - linux/arm64
         include:
           - image_name: gonavi-mcp-server
             dockerfile: Dockerfile.mcp-server
@@ -29,10 +35,118 @@ jobs:
           - image_name: gonavi-build-env
             dockerfile: Dockerfile.build-env
             description: GoNavi Linux build environment image
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Prepare build variables
+        id: prep
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "owner_lc=$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          echo "platform_pair=$(printf '%s' "${{ matrix.platform }}" | tr '/' '-')" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.prep.outputs.owner_lc }}/${{ matrix.image_name }}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image_name }}
+            org.opencontainers.image.description=${{ matrix.description }}
+
+      - name: Build smoke image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: codex-smoke/${{ matrix.image_name }}:local
+          cache-from: type=gha,scope=${{ matrix.image_name }}-${{ steps.prep.outputs.platform_pair }}
+
+      - name: Smoke test MCP Server image
+        if: matrix.image_name == 'gonavi-mcp-server'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cid="$(docker run -d -p 8765:8765 -e GONAVI_MCP_HTTP_TOKEN=smoke-token codex-smoke/${{ matrix.image_name }}:local http)"
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            if curl --fail --silent http://127.0.0.1:8765/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$cid"
+          echo "MCP Server image smoke test failed" >&2
+          exit 1
+
+      - name: Smoke test build environment image
+        if: matrix.image_name == 'gonavi-build-env'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm codex-smoke/${{ matrix.image_name }}:local \
+            bash -lc 'go version && node -v && npm -v && wails version'
+
+      - name: Push by digest
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ghcr.io/${{ steps.prep.outputs.owner_lc }}/${{ matrix.image_name }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.image_name }}-${{ steps.prep.outputs.platform_pair }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image_name }}-${{ steps.prep.outputs.platform_pair }}
+
+      - name: Export digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.push.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image_name }}-${{ steps.prep.outputs.platform_pair }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Publish ${{ matrix.image_name }}
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image_name: gonavi-mcp-server
+            description: GoNavi MCP Server container image
+          - image_name: gonavi-build-env
+            description: GoNavi Linux build environment image
+    steps:
       - name: Normalize image namespace
         id: vars
         shell: bash
@@ -40,8 +154,12 @@ jobs:
           set -euo pipefail
           echo "owner_lc=$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-${{ matrix.image_name }}-*
+          merge-multiple: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -70,49 +188,17 @@ jobs:
             org.opencontainers.image.title=${{ matrix.image_name }}
             org.opencontainers.image.description=${{ matrix.description }}
 
-      - name: Build smoke image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64
-          load: true
-          tags: codex-smoke/${{ matrix.image_name }}:local
-          cache-from: type=gha,scope=${{ matrix.image_name }}
-
-      - name: Smoke test MCP Server image
-        if: matrix.image_name == 'gonavi-mcp-server'
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
         shell: bash
         run: |
           set -euo pipefail
-          cid="$(docker run -d -p 8765:8765 -e GONAVI_MCP_HTTP_TOKEN=smoke-token codex-smoke/${{ matrix.image_name }}:local http)"
-          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
-          for _ in 1 2 3 4 5 6 7 8 9 10; do
-            if curl --fail --silent http://127.0.0.1:8765/healthz >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          docker logs "$cid"
-          echo "MCP Server image smoke test failed" >&2
-          exit 1
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf 'ghcr.io/${{ steps.vars.outputs.owner_lc }}/${{ matrix.image_name }}@sha256:%s ' *)
 
-      - name: Smoke test build environment image
-        if: matrix.image_name == 'gonavi-build-env'
+      - name: Inspect image
         shell: bash
         run: |
           set -euo pipefail
-          docker run --rm codex-smoke/${{ matrix.image_name }}:local \
-            bash -lc 'go version && node -v && npm -v && wails version'
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.image_name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image_name }}
+          docker buildx imagetools inspect "ghcr.io/${{ steps.vars.outputs.owner_lc }}/${{ matrix.image_name }}:${{ steps.meta.outputs.version }}"
