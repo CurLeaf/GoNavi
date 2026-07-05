@@ -105,6 +105,7 @@ if (
     ];
     let mockSkills: any[] = [];
     let mockGlobalProxy: any = { enabled: false, type: 'socks5', host: '', port: 1080, user: '', password: '', hasPassword: false };
+    let mockUpdateChannel: 'latest' | 'dev' = 'latest';
     let mockDataRootInfo: any = {
         path: 'C:/mock/.gonavi',
         defaultPath: 'C:/mock/.gonavi',
@@ -343,10 +344,27 @@ if (
                         bindingStatus: 'active',
                     });
                 },
-                GetAppInfo: async () => ({}),
+                GetAppInfo: async () => ({ success: true, data: { version: '0.0.0', author: 'GoNavi' } }),
                 GetDataRootDirectoryInfo: async () => ({ success: true, data: cloneBrowserMockValue(mockDataRootInfo) }),
-                CheckForUpdates: async () => ({ success: false }),
-                CheckForUpdatesSilently: async () => ({ success: false }),
+                CheckForUpdates: async () => ({
+                    success: true,
+                    data: {
+                        hasUpdate: false,
+                        channel: mockUpdateChannel,
+                        currentVersion: '0.0.0',
+                        latestVersion: mockUpdateChannel === 'dev' ? 'dev-browser-mock' : '0.0.0',
+                    },
+                }),
+                CheckForUpdatesSilently: async () => ({
+                    success: true,
+                    data: {
+                        hasUpdate: false,
+                        channel: mockUpdateChannel,
+                        currentVersion: '0.0.0',
+                        latestVersion: mockUpdateChannel === 'dev' ? 'dev-browser-mock' : '0.0.0',
+                    },
+                }),
+                GetUpdateChannel: async () => ({ success: true, data: { channel: mockUpdateChannel } }),
                 OpenDownloadedUpdateDirectory: async () => ({ success: false }),
                 OpenDriverDownloadDirectory: async (path: string) => ({ success: true, data: { path } }),
                 OpenDataRootDirectory: async () => ({ success: true }),
@@ -408,6 +426,10 @@ if (
                 ExportConnectionsPackage: async (_options?: { includeSecrets?: boolean; filePassword?: string }) => ({ success: false, message: t('app.browser_mock.export_connection_package_unsupported') }),
                 ExportData: async () => ({ success: false }),
                 GetGlobalProxyConfig: async () => ({ success: true, data: cloneBrowserMockValue(mockGlobalProxy) }),
+                SetUpdateChannel: async (channel: string) => {
+                    mockUpdateChannel = String(channel || '').trim().toLowerCase() === 'dev' ? 'dev' : 'latest';
+                    return { success: true, data: { channel: mockUpdateChannel } };
+                },
                 SaveGlobalProxy: async (input: any) => saveMockGlobalProxy(input),
                 ImportLegacyGlobalProxy: async (input: any) => saveMockGlobalProxy(input),
                 SelectDataRootDirectory: async (currentPath: string) => ({ success: true, data: { ...mockDataRootInfo, path: currentPath || mockDataRootInfo.path } }),

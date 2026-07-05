@@ -330,6 +330,10 @@ export function GetUnboundSavedQueries() {
   return window['go']['app']['App']['GetUnboundSavedQueries']();
 }
 
+export function GetUpdateChannel() {
+  return window['go']['app']['App']['GetUpdateChannel']();
+}
+
 export function ImportConfigFile() {
   return window['go']['app']['App']['ImportConfigFile']();
 }
@@ -694,6 +698,10 @@ export function SelectSQLDirectory(arg1) {
   return window['go']['app']['App']['SelectSQLDirectory'](arg1);
 }
 
+export function SelectSQLFileForExecution() {
+  return window['go']['app']['App']['SelectSQLFileForExecution']();
+}
+
 export function SelectSSHKeyFile(arg1) {
   return window['go']['app']['App']['SelectSSHKeyFile'](arg1);
 }
@@ -704,6 +712,10 @@ export function SetLanguage(arg1) {
 
 export function SetMacNativeWindowControls(arg1) {
   return window['go']['app']['App']['SetMacNativeWindowControls'](arg1);
+}
+
+export function SetUpdateChannel(arg1) {
+  return window['go']['app']['App']['SetUpdateChannel'](arg1);
 }
 
 export function SetWindowTranslucency(arg1, arg2) {

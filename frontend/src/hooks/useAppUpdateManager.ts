@@ -5,8 +5,11 @@ import { resolveAboutDisplayVersion } from '../utils/appVersionDisplay';
 
 type Translator = (key: string, params?: Record<string, any>) => string;
 
+export type UpdateChannel = 'latest' | 'dev';
+
 export type UpdateInfo = {
   hasUpdate: boolean;
+  channel?: UpdateChannel | string;
   currentVersion: string;
   latestVersion: string;
   releaseName?: string;
@@ -52,8 +55,16 @@ const createEmptyDownloadProgress = () => ({
   message: '',
 });
 
+const normalizeUpdateChannel = (value: unknown): UpdateChannel =>
+  String(value || '').trim().toLowerCase() === 'dev' ? 'dev' : 'latest';
+
+const buildUpdateKey = (info: Pick<UpdateInfo, 'channel' | 'latestVersion'> | null | undefined): string =>
+  info?.latestVersion
+    ? `${normalizeUpdateChannel(info.channel)}:${String(info.latestVersion || '').trim()}`
+    : '';
+
 export const useAppUpdateManager = ({
-  isMacRuntime,
+  isMacRuntime: _isMacRuntime,
   runtimeBuildType,
   t,
 }: UseAppUpdateManagerOptions) => {
@@ -68,6 +79,9 @@ export const useAppUpdateManager = ({
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const isAboutOpenRef = useRef(false);
   const [aboutLoading, setAboutLoading] = useState(false);
+  const [updateChannel, setUpdateChannelState] = useState<UpdateChannel>('latest');
+  const [isUpdateChannelLoading, setIsUpdateChannelLoading] = useState(false);
+  const [isUpdateChannelSaving, setIsUpdateChannelSaving] = useState(false);
   const [aboutInfo, setAboutInfo] = useState<{
     version: string;
     author: string;
@@ -81,13 +95,14 @@ export const useAppUpdateManager = ({
   const [aboutUpdateStatus, setAboutUpdateStatus] = useState<string>('');
   const [lastUpdateInfo, setLastUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState(createEmptyDownloadProgress);
+  const lastUpdateKey = buildUpdateKey(lastUpdateInfo);
 
   const formatAboutUpdateStatus = useCallback((info: UpdateInfo | null): string => {
     if (!info) {
       return t('app.about.update_status.not_checked');
     }
     if (info.hasUpdate) {
-      const localDownloaded = updateDownloadedVersionRef.current === info.latestVersion;
+      const localDownloaded = updateDownloadedVersionRef.current === buildUpdateKey(info);
       const hasDownloaded = Boolean(info.downloaded) || localDownloaded;
       return hasDownloaded
         ? t('app.about.update_status.new_version_downloaded', { version: info.latestVersion })
@@ -108,9 +123,17 @@ export const useAppUpdateManager = ({
     return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
   }, []);
 
+  const resetLocalUpdateArtifacts = useCallback(() => {
+    updateDownloadedVersionRef.current = null;
+    updateInstallTriggeredVersionRef.current = null;
+    updateDownloadMetaRef.current = null;
+    setUpdateDownloadProgress(createEmptyDownloadProgress());
+  }, []);
+
   const downloadUpdate = useCallback(async (info: UpdateInfo, silent: boolean) => {
     if (updateDownloadInFlightRef.current) return;
-    if (updateDownloadedVersionRef.current === info.latestVersion) {
+    const targetKey = buildUpdateKey(info);
+    if (updateDownloadedVersionRef.current === targetKey) {
       if (!silent) {
         const cachedDownloadPath = updateDownloadMetaRef.current?.downloadPath;
         void message.info(cachedDownloadPath
@@ -125,7 +148,7 @@ export const useAppUpdateManager = ({
     updateDownloadMetaRef.current = null;
     setUpdateDownloadProgress({
       open: true,
-      version: info.latestVersion,
+      version: targetKey,
       status: 'start',
       percent: 0,
       downloaded: 0,
@@ -142,7 +165,7 @@ export const useAppUpdateManager = ({
     if (res?.success) {
       const resultData = (res?.data || {}) as UpdateDownloadResultData;
       updateDownloadMetaRef.current = resultData;
-      updateDownloadedVersionRef.current = info.latestVersion;
+      updateDownloadedVersionRef.current = targetKey;
       setUpdateDownloadProgress((prev) => {
         const total = prev.total > 0 ? prev.total : (info.assetSize || 0);
         return { ...prev, status: 'done', percent: 100, downloaded: total, total, message: '', open: false };
@@ -151,12 +174,14 @@ export const useAppUpdateManager = ({
         if (!prev || prev.latestVersion !== info.latestVersion) {
           return {
             ...info,
+            channel: normalizeUpdateChannel(info.channel),
             downloaded: true,
             downloadPath: resultData?.downloadPath || info.downloadPath,
           };
         }
         return {
           ...prev,
+          channel: normalizeUpdateChannel(prev.channel || info.channel),
           downloaded: true,
           downloadPath: resultData?.downloadPath || prev.downloadPath || info.downloadPath,
         };
@@ -166,7 +191,7 @@ export const useAppUpdateManager = ({
       } else {
         void message.success({ content: t('app.about.message.download_completed'), duration: 2 });
       }
-      setAboutUpdateStatus(formatAboutUpdateStatus({ ...info, downloaded: true }));
+      setAboutUpdateStatus(formatAboutUpdateStatus({ ...info, channel: normalizeUpdateChannel(info.channel), downloaded: true }));
     } else {
       setUpdateDownloadProgress((prev) => ({
         ...prev,
@@ -175,7 +200,7 @@ export const useAppUpdateManager = ({
       }));
       void message.error({ content: t('app.about.message.download_failed_with_error', { error: res?.message || t('common.unknown') }), duration: 4 });
     }
-  }, [formatAboutUpdateStatus, isMacRuntime, t]);
+  }, [formatAboutUpdateStatus, t]);
 
   const showUpdateDownloadProgress = useCallback(() => {
     setUpdateDownloadProgress((prev) => {
@@ -190,21 +215,21 @@ export const useAppUpdateManager = ({
 
   const isLatestUpdateDownloaded = Boolean(lastUpdateInfo?.hasUpdate) && (
     Boolean(lastUpdateInfo?.downloaded)
-    || (Boolean(lastUpdateInfo?.latestVersion) && updateDownloadedVersionRef.current === lastUpdateInfo?.latestVersion)
+    || (Boolean(lastUpdateKey) && updateDownloadedVersionRef.current === lastUpdateKey)
   );
   const isBackgroundProgressForLatestUpdate = Boolean(lastUpdateInfo?.hasUpdate)
-    && Boolean(lastUpdateInfo?.latestVersion)
-    && updateDownloadProgress.version === lastUpdateInfo?.latestVersion
+    && Boolean(lastUpdateKey)
+    && updateDownloadProgress.version === lastUpdateKey
     && (updateDownloadProgress.status === 'start'
       || updateDownloadProgress.status === 'downloading'
       || updateDownloadProgress.status === 'done'
       || updateDownloadProgress.status === 'error');
   const canShowProgressEntry = (isLatestUpdateDownloaded || isBackgroundProgressForLatestUpdate)
-    && updateInstallTriggeredVersionRef.current !== (lastUpdateInfo?.latestVersion || null);
+    && updateInstallTriggeredVersionRef.current !== (lastUpdateKey || null);
 
   const handleInstallFromProgress = useCallback(async () => {
     const canInstall = updateDownloadProgress.status === 'done'
-      || (Boolean(lastUpdateInfo?.hasUpdate) && (Boolean(lastUpdateInfo?.downloaded) || updateDownloadedVersionRef.current === lastUpdateInfo?.latestVersion));
+      || (Boolean(lastUpdateInfo?.hasUpdate) && (Boolean(lastUpdateInfo?.downloaded) || updateDownloadedVersionRef.current === lastUpdateKey));
     if (!canInstall) {
       return;
     }
@@ -213,9 +238,9 @@ export const useAppUpdateManager = ({
       void message.error(t('app.about.message.install_failed_with_error', { error: res?.message || t('common.unknown') }));
       return;
     }
-    updateInstallTriggeredVersionRef.current = updateDownloadProgress.version || lastUpdateInfo?.latestVersion || null;
+    updateInstallTriggeredVersionRef.current = lastUpdateKey || null;
     hideUpdateDownloadProgress();
-  }, [hideUpdateDownloadProgress, lastUpdateInfo, updateDownloadProgress.status, updateDownloadProgress.version, t]);
+  }, [hideUpdateDownloadProgress, lastUpdateInfo, lastUpdateKey, t, updateDownloadProgress.status]);
 
   const checkForUpdates = useCallback(async (silent: boolean) => {
     if (updateCheckInFlightRef.current) return;
@@ -237,19 +262,24 @@ export const useAppUpdateManager = ({
       }
       return;
     }
-    const info: UpdateInfo = res.data;
+    const info: UpdateInfo = {
+      ...(res.data || {}),
+      channel: normalizeUpdateChannel(res?.data?.channel),
+    };
     if (!info) return;
+    setUpdateChannelState(normalizeUpdateChannel(info.channel));
     const aboutOpen = isAboutOpenRef.current;
     if (info.hasUpdate) {
-      if (!info.downloaded && updateDownloadedVersionRef.current === info.latestVersion) {
+      const infoKey = buildUpdateKey(info);
+      if (!info.downloaded && updateDownloadedVersionRef.current === infoKey) {
         updateDownloadedVersionRef.current = null;
         updateDownloadMetaRef.current = null;
       }
-      const localDownloaded = updateDownloadedVersionRef.current === info.latestVersion;
+      const localDownloaded = updateDownloadedVersionRef.current === infoKey;
       const hasDownloaded = Boolean(info.downloaded) || localDownloaded;
       if (hasDownloaded) {
         const downloadPath = info.downloadPath || updateDownloadMetaRef.current?.downloadPath || '';
-        updateDownloadedVersionRef.current = info.latestVersion;
+        updateDownloadedVersionRef.current = infoKey;
         updateDownloadMetaRef.current = {
           ...(updateDownloadMetaRef.current || {}),
           info,
@@ -262,8 +292,8 @@ export const useAppUpdateManager = ({
           const total = info.assetSize || prev.total || 0;
           return {
             ...prev,
-            open: prev.open && prev.version === info.latestVersion,
-            version: info.latestVersion,
+            open: prev.open && prev.version === infoKey,
+            version: infoKey,
             status: 'done',
             percent: 100,
             downloaded: total,
@@ -277,7 +307,7 @@ export const useAppUpdateManager = ({
           downloadPath: downloadPath || undefined,
         });
       } else {
-        if (updateDownloadedVersionRef.current !== info.latestVersion) {
+        if (updateDownloadedVersionRef.current !== infoKey) {
           updateDownloadMetaRef.current = null;
         }
         setUpdateDownloadProgress((prev) => {
@@ -287,7 +317,7 @@ export const useAppUpdateManager = ({
           return {
             ...prev,
             open: false,
-            version: info.latestVersion,
+            version: infoKey,
             status: 'idle',
             percent: 0,
             downloaded: 0,
@@ -305,8 +335,8 @@ export const useAppUpdateManager = ({
       if (silent && aboutOpen) {
         setAboutUpdateStatus(statusText);
       }
-      if (silent && !aboutOpen && updateMutedVersionRef.current !== info.latestVersion && updateNotifiedVersionRef.current !== info.latestVersion) {
-        updateNotifiedVersionRef.current = info.latestVersion;
+      if (silent && !aboutOpen && updateMutedVersionRef.current !== infoKey && updateNotifiedVersionRef.current !== infoKey) {
+        updateNotifiedVersionRef.current = infoKey;
         setIsAboutOpen(true);
       }
     } else if (!silent) {
@@ -346,12 +376,63 @@ export const useAppUpdateManager = ({
     setAboutLoading(false);
   }, [t]);
 
+  const loadUpdateChannel = useCallback(async () => {
+    const backendApp = (window as any).go?.app?.App;
+    if (typeof backendApp?.GetUpdateChannel !== 'function') {
+      return;
+    }
+    setIsUpdateChannelLoading(true);
+    try {
+      const res = await backendApp.GetUpdateChannel();
+      if (res?.success) {
+        setUpdateChannelState(normalizeUpdateChannel(res?.data?.channel));
+      }
+    } catch (e) {
+      console.warn('Wails API: GetUpdateChannel unavailable', e);
+    } finally {
+      setIsUpdateChannelLoading(false);
+    }
+  }, []);
+
+  const changeUpdateChannel = useCallback(async (nextChannel: UpdateChannel | string) => {
+    const normalizedChannel = normalizeUpdateChannel(nextChannel);
+    const backendApp = (window as any).go?.app?.App;
+    if (typeof backendApp?.SetUpdateChannel !== 'function') {
+      setUpdateChannelState(normalizedChannel);
+      resetLocalUpdateArtifacts();
+      setLastUpdateInfo(null);
+      setAboutUpdateStatus(t('app.about.update_status.not_checked'));
+      return;
+    }
+
+    setIsUpdateChannelSaving(true);
+    try {
+      const res = await backendApp.SetUpdateChannel(normalizedChannel);
+      if (!res?.success) {
+        void message.error(t('app.about.message.channel_switch_failed_with_error', { error: res?.message || t('common.unknown') }));
+        return;
+      }
+
+      const effectiveChannel = normalizeUpdateChannel(res?.data?.channel || normalizedChannel);
+      setUpdateChannelState(effectiveChannel);
+      resetLocalUpdateArtifacts();
+      setLastUpdateInfo(null);
+      setAboutUpdateStatus(t('app.about.update_status.not_checked'));
+      await checkForUpdates(false);
+    } catch (e: any) {
+      const error = e?.message || t('common.unknown');
+      void message.error(t('app.about.message.channel_switch_failed_with_error', { error }));
+    } finally {
+      setIsUpdateChannelSaving(false);
+    }
+  }, [checkForUpdates, resetLocalUpdateArtifacts, t]);
+
   const muteLatestUpdate = useCallback(() => {
-    if (lastUpdateInfo?.latestVersion) {
-      updateMutedVersionRef.current = lastUpdateInfo.latestVersion;
+    if (lastUpdateKey) {
+      updateMutedVersionRef.current = lastUpdateKey;
     }
     setIsAboutOpen(false);
-  }, [lastUpdateInfo?.latestVersion]);
+  }, [lastUpdateKey]);
 
   const markUpdateProgressDismissed = useCallback(() => {
     updateUserDismissedRef.current = true;
@@ -367,6 +448,10 @@ export const useAppUpdateManager = ({
       void loadAboutInfo();
     }
   }, [formatAboutUpdateStatus, isAboutOpen, lastUpdateInfo, loadAboutInfo]);
+
+  useEffect(() => {
+    void loadUpdateChannel();
+  }, [loadUpdateChannel]);
 
   useEffect(() => {
     const startupTimer = window.setTimeout(() => {
@@ -421,6 +506,7 @@ export const useAppUpdateManager = ({
     aboutLoading,
     aboutUpdateStatus,
     canShowProgressEntry,
+    changeUpdateChannel,
     checkForUpdates,
     downloadUpdate,
     formatBytes,
@@ -429,11 +515,14 @@ export const useAppUpdateManager = ({
     isAboutOpen,
     isBackgroundProgressForLatestUpdate,
     isLatestUpdateDownloaded,
+    isUpdateChannelLoading,
+    isUpdateChannelSaving,
     lastUpdateInfo,
     markUpdateProgressDismissed,
     muteLatestUpdate,
     setIsAboutOpen,
     showUpdateDownloadProgress,
+    updateChannel,
     updateDownloadProgress,
   };
 };

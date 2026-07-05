@@ -1695,6 +1695,7 @@ function App() {
       aboutLoading,
       aboutUpdateStatus,
       canShowProgressEntry,
+      changeUpdateChannel,
       checkForUpdates,
       downloadUpdate,
       formatBytes,
@@ -1703,11 +1704,14 @@ function App() {
       isAboutOpen,
       isBackgroundProgressForLatestUpdate,
       isLatestUpdateDownloaded,
+      isUpdateChannelLoading,
+      isUpdateChannelSaving,
       lastUpdateInfo,
       markUpdateProgressDismissed,
       muteLatestUpdate,
       setIsAboutOpen,
       showUpdateDownloadProgress,
+      updateChannel,
       updateDownloadProgress,
   } = useAppUpdateManager({
       isMacRuntime,
@@ -4997,6 +5001,27 @@ function App() {
                             <div style={{ gridColumn: '1 / -1' }}>
                                 <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.update_status')}</div>
                                 <div style={utilityMutedTextStyle}>{aboutUpdateStatus || t('app.about.update_status.not_checked')}</div>
+                            </div>
+                            <div style={{ gridColumn: '1 / -1' }}>
+                                <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.update_channel')}</div>
+                                <Select
+                                    value={updateChannel}
+                                    options={[
+                                        { value: 'latest', label: t('app.about.update_channel.latest') },
+                                        { value: 'dev', label: t('app.about.update_channel.dev') },
+                                    ]}
+                                    onChange={(value) => {
+                                        void changeUpdateChannel(String(value));
+                                    }}
+                                    loading={isUpdateChannelLoading}
+                                    disabled={
+                                        isUpdateChannelLoading
+                                        || isUpdateChannelSaving
+                                        || updateDownloadProgress.status === 'start'
+                                        || updateDownloadProgress.status === 'downloading'
+                                    }
+                                    style={{ width: 220, maxWidth: '100%' }}
+                                />
                             </div>
                             {aboutInfo?.communityUrl ? (
                                 <div style={{ gridColumn: '1 / -1' }}>

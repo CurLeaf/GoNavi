@@ -24,8 +24,10 @@ type BackendAppMock = {
   CheckForUpdates: ReturnType<typeof vi.fn>;
   CheckForUpdatesSilently: ReturnType<typeof vi.fn>;
   DownloadUpdate: ReturnType<typeof vi.fn>;
+  GetUpdateChannel: ReturnType<typeof vi.fn>;
   InstallUpdateAndRestart: ReturnType<typeof vi.fn>;
   OpenDownloadedUpdateDirectory: ReturnType<typeof vi.fn>;
+  SetUpdateChannel: ReturnType<typeof vi.fn>;
   GetAppInfo: ReturnType<typeof vi.fn>;
 };
 
@@ -33,8 +35,10 @@ const createBackendAppMock = (): BackendAppMock => ({
   CheckForUpdates: vi.fn(),
   CheckForUpdatesSilently: vi.fn(),
   DownloadUpdate: vi.fn(),
+  GetUpdateChannel: vi.fn(async () => ({ success: true, data: { channel: 'latest' } })),
   InstallUpdateAndRestart: vi.fn(),
   OpenDownloadedUpdateDirectory: vi.fn(),
+  SetUpdateChannel: vi.fn(async (channel: string) => ({ success: true, data: { channel } })),
   GetAppInfo: vi.fn(async () => ({ success: true, data: { version: '0.8.1', author: 'Syngnat' } })),
 });
 
@@ -155,5 +159,29 @@ describe('useAppUpdateManager', () => {
     expect(backendApp.DownloadUpdate).toHaveBeenCalledTimes(1);
     expect(backendApp.OpenDownloadedUpdateDirectory).not.toHaveBeenCalled();
     expect(hook?.lastUpdateInfo?.downloaded).toBe(true);
+  });
+
+  it('switches update channel and re-checks against the selected channel', async () => {
+    backendApp.SetUpdateChannel.mockResolvedValue({ success: true, data: { channel: 'dev' } });
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: false,
+        channel: 'dev',
+        currentVersion: '0.8.1',
+        latestVersion: 'dev-a1b2c3d',
+      },
+    });
+
+    renderHook(false);
+
+    await act(async () => {
+      await hook?.changeUpdateChannel('dev');
+    });
+
+    expect(backendApp.SetUpdateChannel).toHaveBeenCalledWith('dev');
+    expect(backendApp.CheckForUpdates).toHaveBeenCalledTimes(1);
+    expect(hook?.updateChannel).toBe('dev');
+    expect(hook?.lastUpdateInfo?.channel).toBe('dev');
   });
 });

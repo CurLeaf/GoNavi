@@ -170,6 +170,8 @@ export function GetSlowQueries(arg1:connection.ConnectionConfig,arg2:string,arg3
 
 export function GetUnboundSavedQueries():Promise<Array<connection.SavedQuery>>;
 
+export function GetUpdateChannel():Promise<connection.QueryResult>;
+
 export function ImportConfigFile():Promise<connection.QueryResult>;
 
 export function ImportConnectionsPayload(arg1:string,arg2:string):Promise<Array<connection.SavedConnectionView>>;
@@ -352,11 +354,15 @@ export function SelectDriverPackageFile(arg1:string):Promise<connection.QueryRes
 
 export function SelectSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 
+export function SelectSQLFileForExecution():Promise<connection.QueryResult>;
+
 export function SelectSSHKeyFile(arg1:string):Promise<connection.QueryResult>;
 
 export function SetLanguage(arg1:string):Promise<void>;
 
 export function SetMacNativeWindowControls(arg1:boolean):Promise<void>;
+
+export function SetUpdateChannel(arg1:string):Promise<connection.QueryResult>;
 
 export function SetWindowTranslucency(arg1:number,arg2:number):Promise<void>;
 

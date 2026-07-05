@@ -27,13 +27,15 @@ import (
 
 const (
 	updateRepo                  = "Syngnat/GoNavi"
-	updateAPIURL                = "https://api.github.com/repos/" + updateRepo + "/releases/latest"
+	updateLatestAPIURL          = "https://api.github.com/repos/" + updateRepo + "/releases/latest"
+	updateDevAPIURL             = "https://api.github.com/repos/" + updateRepo + "/releases/tags/" + updateDevReleaseTag
 	updateChecksumAsset         = "SHA256SUMS"
 	updateDownloadProgressEvent = "update:download-progress"
 )
 
 var (
 	updateFetchLatestRelease = fetchLatestRelease
+	updateFetchDevRelease    = fetchDevRelease
 	updateFetchReleaseSHA256 = fetchReleaseSHA256
 	updateLogCheckError      = func(err error) { logger.Error(err, "检查更新失败") }
 )
@@ -46,6 +48,7 @@ type updateState struct {
 
 type UpdateInfo struct {
 	HasUpdate       bool   `json:"hasUpdate"`
+	Channel         string `json:"channel"`
 	CurrentVersion  string `json:"currentVersion"`
 	LatestVersion   string `json:"latestVersion"`
 	ReleaseName     string `json:"releaseName"`
@@ -86,6 +89,7 @@ type updateDownloadProgressPayload struct {
 }
 
 type stagedUpdate struct {
+	Channel        updateChannel
 	Version        string
 	AssetName      string
 	FilePath       string
@@ -138,7 +142,8 @@ func (a *App) CheckForUpdatesSilently() connection.QueryResult {
 }
 
 func (a *App) checkForUpdates(logFailure bool) connection.QueryResult {
-	info, err := fetchLatestUpdateInfo()
+	channel := a.currentUpdateChannel()
+	info, err := fetchLatestUpdateInfo(channel)
 	if err != nil {
 		if logFailure {
 			updateLogCheckError(err)
@@ -157,7 +162,7 @@ func (a *App) checkForUpdates(logFailure bool) connection.QueryResult {
 			info.Downloaded = true
 			info.DownloadPath = reusable.FilePath
 			currentStaged = reusable
-		} else if currentStaged != nil && currentStaged.Version != info.LatestVersion {
+		} else if currentStaged != nil && (currentStaged.Version != info.LatestVersion || currentStaged.Channel != updateChannel(info.Channel)) {
 			currentStaged = nil
 		}
 	} else {
@@ -336,7 +341,7 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 	}
 
 	// 使用版本号命名的工作目录，便于识别和调试
-	stagedDir := filepath.Join(workspaceDir, fmt.Sprintf(".gonavi-update-%s-%s", stdRuntime.GOOS, info.LatestVersion))
+	stagedDir := filepath.Join(workspaceDir, buildUpdateStageDirName(info.Channel, info.LatestVersion))
 	// 清理可能残留的旧目录（上次下载失败后未清理）
 	// Windows 上文件可能被杀毒软件/索引服务占用，需要重试
 	for retry := 0; retry < 5; retry++ {
@@ -348,7 +353,7 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 			time.Sleep(time.Duration(retry+1) * 500 * time.Millisecond)
 		} else {
 			// 最后一次仍然失败，换一个带时间戳的目录名避免冲突
-			stagedDir = filepath.Join(workspaceDir, fmt.Sprintf(".gonavi-update-%s-%s-%d", stdRuntime.GOOS, info.LatestVersion, time.Now().UnixNano()))
+			stagedDir = filepath.Join(workspaceDir, fmt.Sprintf("%s-%d", buildUpdateStageDirName(info.Channel, info.LatestVersion), time.Now().UnixNano()))
 		}
 	}
 	if err := os.MkdirAll(stagedDir, 0o755); err != nil {
@@ -390,6 +395,7 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 	}
 
 	staged := &stagedUpdate{
+		Channel:        updateChannel(info.Channel),
 		Version:        info.LatestVersion,
 		AssetName:      info.AssetName,
 		FilePath:       assetPath,
@@ -406,22 +412,31 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 	return connection.QueryResult{Success: true, Message: a.appText("app.update.backend.message.package_downloaded", nil), Data: buildUpdateDownloadResult(info, staged)}
 }
 
-func fetchLatestUpdateInfo() (UpdateInfo, error) {
-	release, err := updateFetchLatestRelease()
+func fetchLatestUpdateInfo(channel updateChannel) (UpdateInfo, error) {
+	if channel != updateChannelDev {
+		channel = updateChannelLatest
+	}
+	release, err := fetchReleaseForChannel(channel)
 	if err != nil {
 		return UpdateInfo{}, err
 	}
 
 	currentVersion := getCurrentVersion()
-	latestVersion := normalizeVersion(release.TagName)
+	latestVersion := resolveReleaseVersion(channel, release)
 	if latestVersion == "" {
 		return UpdateInfo{}, localizedUpdateError{key: "app.update.backend.error.latest_version_unparseable"}
 	}
 
-	hasUpdate := compareVersion(currentVersion, latestVersion) < 0
+	hasUpdate := false
+	if channel == updateChannelDev {
+		hasUpdate = normalizeVersion(currentVersion) != latestVersion
+	} else {
+		hasUpdate = compareVersion(currentVersion, latestVersion) < 0
+	}
 	if !hasUpdate {
 		return UpdateInfo{
 			HasUpdate:       false,
+			Channel:         string(channel),
 			CurrentVersion:  currentVersion,
 			LatestVersion:   latestVersion,
 			ReleaseName:     release.Name,
@@ -430,7 +445,7 @@ func fetchLatestUpdateInfo() (UpdateInfo, error) {
 	}
 
 	assetVersion := strings.TrimSpace(release.TagName)
-	if assetVersion == "" {
+	if assetVersion == "" || strings.EqualFold(normalizeVersion(assetVersion), updateDevReleaseTag) {
 		assetVersion = latestVersion
 	}
 	assetName, err := expectedAssetName(stdRuntime.GOOS, stdRuntime.GOARCH, assetVersion)
@@ -452,6 +467,7 @@ func fetchLatestUpdateInfo() (UpdateInfo, error) {
 	}
 	return UpdateInfo{
 		HasUpdate:       hasUpdate,
+		Channel:         string(channel),
 		CurrentVersion:  currentVersion,
 		LatestVersion:   latestVersion,
 		ReleaseName:     release.Name,
@@ -463,11 +479,26 @@ func fetchLatestUpdateInfo() (UpdateInfo, error) {
 	}, nil
 }
 
+func fetchReleaseForChannel(channel updateChannel) (*githubRelease, error) {
+	if channel == updateChannelDev {
+		return updateFetchDevRelease()
+	}
+	return updateFetchLatestRelease()
+}
+
 func swapUpdateFetchLatestRelease(next func() (*githubRelease, error)) func() {
 	original := updateFetchLatestRelease
 	updateFetchLatestRelease = next
 	return func() {
 		updateFetchLatestRelease = original
+	}
+}
+
+func swapUpdateFetchDevRelease(next func() (*githubRelease, error)) func() {
+	original := updateFetchDevRelease
+	updateFetchDevRelease = next
+	return func() {
+		updateFetchDevRelease = original
 	}
 }
 
@@ -499,8 +530,16 @@ func getCurrentAuthor() string {
 }
 
 func fetchLatestRelease() (*githubRelease, error) {
+	return fetchReleaseByURL(updateLatestAPIURL)
+}
+
+func fetchDevRelease() (*githubRelease, error) {
+	return fetchReleaseByURL(updateDevAPIURL)
+}
+
+func fetchReleaseByURL(apiURL string) (*githubRelease, error) {
 	client := newHTTPClientWithGlobalProxy(15 * time.Second)
-	req, err := http.NewRequest(http.MethodGet, updateAPIURL, nil)
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -806,6 +845,84 @@ func buildUpdateInstallLogPath(baseDir string) string {
 	return filepath.Join(logDir, fmt.Sprintf("gonavi-update-%s-%d.log", platform, time.Now().UnixNano()))
 }
 
+func buildUpdateStageDirName(channel string, version string) string {
+	normalizedChannel, err := normalizeUpdateChannel(channel)
+	if err != nil {
+		normalizedChannel = updateChannelLatest
+	}
+	return fmt.Sprintf(
+		".gonavi-update-%s-%s-%s",
+		stdRuntime.GOOS,
+		sanitizeVersionForPath(string(normalizedChannel)),
+		sanitizeVersionForPath(version),
+	)
+}
+
+func resolveReleaseVersion(channel updateChannel, release *githubRelease) string {
+	if release == nil {
+		return ""
+	}
+
+	tagVersion := normalizeVersion(release.TagName)
+	if channel != updateChannelDev && tagVersion != "" && !strings.EqualFold(tagVersion, updateDevReleaseTag) {
+		return tagVersion
+	}
+
+	if nameVersion := extractVersionFromReleaseName(release.Name); nameVersion != "" {
+		return nameVersion
+	}
+	if assetVersion := extractVersionFromReleaseAssets(release.Assets); assetVersion != "" {
+		return assetVersion
+	}
+	if tagVersion != "" && !strings.EqualFold(tagVersion, updateDevReleaseTag) {
+		return tagVersion
+	}
+	return ""
+}
+
+func extractVersionFromReleaseName(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(strings.ToLower(trimmed), "dev-") {
+		return normalizeVersion(trimmed)
+	}
+
+	if left := strings.LastIndex(trimmed, "("); left >= 0 && strings.HasSuffix(trimmed, ")") {
+		candidate := strings.TrimSpace(trimmed[left+1 : len(trimmed)-1])
+		if candidate != "" {
+			return normalizeVersion(candidate)
+		}
+	}
+	return ""
+}
+
+func extractVersionFromReleaseAssets(assets []githubAsset) string {
+	const assetPrefix = "GoNavi-"
+	osMarkers := []string{"-Windows-", "-MacOS-", "-Linux-"}
+
+	for _, asset := range assets {
+		name := strings.TrimSpace(asset.Name)
+		if !strings.HasPrefix(name, assetPrefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(name, assetPrefix)
+		for _, marker := range osMarkers {
+			index := strings.Index(rest, marker)
+			if index <= 0 {
+				continue
+			}
+			candidate := normalizeVersion(rest[:index])
+			if candidate != "" {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
 func sanitizeVersionForPath(version string) string {
 	trimmed := strings.TrimSpace(version)
 	if trimmed == "" {
@@ -877,19 +994,30 @@ func isExistingDownloadedAsset(filePath string, expectedSize int64) bool {
 }
 
 func resolveReusableStagedUpdate(info UpdateInfo, current *stagedUpdate) *stagedUpdate {
+	channel, err := normalizeUpdateChannel(info.Channel)
+	if err != nil {
+		channel = updateChannelLatest
+	}
 	version := strings.TrimSpace(info.LatestVersion)
 	assetName := strings.TrimSpace(info.AssetName)
 	if version == "" || assetName == "" {
 		return nil
 	}
 
-	if current != nil && strings.TrimSpace(current.Version) == version {
-		currentPath := strings.TrimSpace(current.FilePath)
-		if isExistingDownloadedAsset(currentPath, info.AssetSize) {
-			if strings.TrimSpace(current.InstallLogPath) == "" {
-				current.InstallLogPath = buildUpdateInstallLogPath(filepath.Dir(currentPath))
+	if current != nil {
+		currentChannel := current.Channel
+		if currentChannel == "" {
+			currentChannel = updateChannelLatest
+		}
+		if currentChannel == channel && strings.TrimSpace(current.Version) == version {
+			currentPath := strings.TrimSpace(current.FilePath)
+			if isExistingDownloadedAsset(currentPath, info.AssetSize) {
+				if strings.TrimSpace(current.InstallLogPath) == "" {
+					current.InstallLogPath = buildUpdateInstallLogPath(filepath.Dir(currentPath))
+				}
+				current.Channel = channel
+				return current
 			}
-			return current
 		}
 	}
 
@@ -898,7 +1026,10 @@ func resolveReusableStagedUpdate(info UpdateInfo, current *stagedUpdate) *staged
 		stagedDir    string
 		assetPath    string
 	}
-	stagedDirName := fmt.Sprintf(".gonavi-update-%s-%s", stdRuntime.GOOS, version)
+	stagedDirNames := []string{
+		buildUpdateStageDirName(string(channel), version),
+		fmt.Sprintf(".gonavi-update-%s-%s", stdRuntime.GOOS, version),
+	}
 	workspaceCandidates := []string{
 		resolveUpdateWorkspaceDir(version),
 		resolveLegacyUpdateWorkspaceDir(),
@@ -915,20 +1046,22 @@ func resolveReusableStagedUpdate(info UpdateInfo, current *stagedUpdate) *staged
 		}
 		seenWorkspace[workspaceDir] = struct{}{}
 
-		stagedDir := filepath.Join(workspaceDir, stagedDirName)
-		assetPath := resolveUpdateAssetPath(workspaceDir, stagedDir, assetName)
-		candidates = append(candidates, pathCandidate{
-			workspaceDir: workspaceDir,
-			stagedDir:    stagedDir,
-			assetPath:    assetPath,
-		})
-		legacyAssetPath := filepath.Join(stagedDir, assetName)
-		if legacyAssetPath != assetPath {
+		for _, stagedDirName := range stagedDirNames {
+			stagedDir := filepath.Join(workspaceDir, stagedDirName)
+			assetPath := resolveUpdateAssetPath(workspaceDir, stagedDir, assetName)
 			candidates = append(candidates, pathCandidate{
 				workspaceDir: workspaceDir,
 				stagedDir:    stagedDir,
-				assetPath:    legacyAssetPath,
+				assetPath:    assetPath,
 			})
+			legacyAssetPath := filepath.Join(stagedDir, assetName)
+			if legacyAssetPath != assetPath {
+				candidates = append(candidates, pathCandidate{
+					workspaceDir: workspaceDir,
+					stagedDir:    stagedDir,
+					assetPath:    legacyAssetPath,
+				})
+			}
 		}
 	}
 
@@ -937,6 +1070,7 @@ func resolveReusableStagedUpdate(info UpdateInfo, current *stagedUpdate) *staged
 			continue
 		}
 		return &stagedUpdate{
+			Channel:        channel,
 			Version:        version,
 			AssetName:      assetName,
 			FilePath:       candidate.assetPath,
