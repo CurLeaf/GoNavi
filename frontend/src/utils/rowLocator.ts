@@ -6,7 +6,7 @@ import { t as translateCatalog, type I18nParams } from '../i18n';
 export const ORACLE_ROWID_LOCATOR_COLUMN = '__gonavi_oracle_rowid__';
 export const DUCKDB_ROWID_LOCATOR_COLUMN = '__gonavi_duckdb_rowid__';
 
-export type RowLocatorStrategy = 'primary-key' | 'unique-key' | 'oracle-rowid' | 'duckdb-rowid' | 'none';
+export type RowLocatorStrategy = 'primary-key' | 'unique-key' | 'oracle-rowid' | 'duckdb-rowid' | 'all-columns' | 'none';
 
 export type EditRowLocator = {
   strategy: RowLocatorStrategy;
@@ -51,20 +51,46 @@ const findColumn = (columns: string[], target: string): string => {
   return columns.find((column) => normalizeColumnName(column).toLowerCase() === normalizedTarget) || target;
 };
 
-const buildReadOnlyLocator = (reason: string): EditRowLocator => ({
-  strategy: 'none',
-  columns: [],
-  valueColumns: [],
-  readOnly: true,
-  reason,
-});
+const GONAVI_INTERNAL_COLUMN_PREFIX = '__gonavi';
 
-const ROW_LOCATOR_REASON_KEYS = {
-  noSafeLocator: 'data_viewer.read_only.reason.no_safe_locator',
-  oracleRowIDMissing: 'data_viewer.read_only.reason.oracle_rowid_missing',
-  duckDBRowIDMissing: 'data_viewer.read_only.reason.duckdb_rowid_missing',
-  primaryKeyColumnMissing: 'data_viewer.read_only.reason.primary_key_column_missing',
-} as const;
+// Values longer than this are excluded from all-columns locators because
+// LOB-typed columns cannot be compared with "=" on several dialects (Oracle).
+const ALL_COLUMNS_LOCATOR_MAX_VALUE_LENGTH = 4000;
+
+const ALL_COLUMNS_LOCATOR_HINT_KEY = 'data_viewer.edit_hint.all_columns_locator';
+
+const isInternalLocatorColumn = (column: string): boolean => (
+  normalizeColumnName(column).toLowerCase().startsWith(GONAVI_INTERNAL_COLUMN_PREFIX)
+);
+
+const isScalarLocatorValue = (value: any): boolean => (
+  typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint'
+);
+
+export const buildAllColumnsLocator = (
+  resultColumns: string[],
+  options?: {
+    hiddenColumns?: string[];
+    writableColumns?: Record<string, string>;
+    translate?: RowLocatorTranslator;
+  },
+): EditRowLocator => {
+  const hidden = new Set((options?.hiddenColumns || []).map((column) => normalizeColumnName(column).toLowerCase()));
+  const columns = (resultColumns || [])
+    .map(normalizeColumnName)
+    .filter(Boolean)
+    .filter((column) => !isInternalLocatorColumn(column))
+    .filter((column) => !hidden.has(column.toLowerCase()));
+  return {
+    strategy: 'all-columns',
+    columns,
+    valueColumns: [...columns],
+    hiddenColumns: options?.hiddenColumns,
+    writableColumns: options?.writableColumns,
+    readOnly: false,
+    reason: translateReason(options?.translate, ALL_COLUMNS_LOCATOR_HINT_KEY),
+  };
+};
 
 const translateReason = (
   translate: RowLocatorTranslator | undefined,
@@ -98,11 +124,7 @@ export const resolveEditRowLocator = ({
         readOnly: false,
       };
     }
-    return buildReadOnlyLocator(translateReason(
-      translate,
-      ROW_LOCATOR_REASON_KEYS.primaryKeyColumnMissing,
-      { columns: missing.join(', ') },
-    ));
+    return buildAllColumnsLocator(columns, { translate });
   }
 
   const uniqueKeyGroups = resolveUniqueKeyGroupsFromIndexes(indexes);
@@ -138,15 +160,40 @@ export const resolveEditRowLocator = ({
     };
   }
 
-  if (allowOracleRowID && isOracleLikeDialect(dbType)) {
-    return buildReadOnlyLocator(translateReason(translate, ROW_LOCATOR_REASON_KEYS.oracleRowIDMissing));
-  }
+  return buildAllColumnsLocator(columns, { translate });
+};
 
-  if (allowDuckDBRowID && String(dbType || '').trim().toLowerCase() === 'duckdb') {
-    return buildReadOnlyLocator(translateReason(translate, ROW_LOCATOR_REASON_KEYS.duckDBRowIDMissing));
-  }
+const resolveAllColumnsLocatorValues = (
+  locator: EditRowLocator,
+  row: Record<string, any>,
+  messages?: RowLocatorMessages,
+): ResolveRowLocatorValuesResult => {
+  const hidden = new Set((locator.hiddenColumns || []).map((column) => normalizeColumnName(column).toLowerCase()));
+  const rowKeys = Object.keys(row || {});
+  const rowKeyByLower = new Map<string, string>();
+  rowKeys.forEach((key) => rowKeyByLower.set(normalizeColumnName(key).toLowerCase(), key));
 
-  return buildReadOnlyLocator(translateReason(translate, ROW_LOCATOR_REASON_KEYS.noSafeLocator));
+  const candidateColumns = (locator.columns.length > 0 ? locator.columns : rowKeys)
+    .map(normalizeColumnName)
+    .filter(Boolean)
+    .filter((column) => !isInternalLocatorColumn(column))
+    .filter((column) => !hidden.has(column.toLowerCase()));
+
+  const values: Record<string, any> = {};
+  candidateColumns.forEach((column) => {
+    const rowKey = rowKeyByLower.get(column.toLowerCase());
+    if (rowKey === undefined) return;
+    const value = row?.[rowKey];
+    if (value === null || value === undefined || value === '') return;
+    if (!isScalarLocatorValue(value)) return;
+    if (typeof value === 'string' && value.length > ALL_COLUMNS_LOCATOR_MAX_VALUE_LENGTH) return;
+    values[column] = value;
+  });
+
+  if (Object.keys(values).length === 0) {
+    return { ok: false, error: messages?.noSafeLocator?.() || 'No usable locator values were found on this row, so changes cannot be submitted safely.' };
+  }
+  return { ok: true, values };
 };
 
 export const resolveRowLocatorValues = (
@@ -156,6 +203,10 @@ export const resolveRowLocatorValues = (
 ): ResolveRowLocatorValuesResult => {
   if (!locator || locator.readOnly || locator.strategy === 'none') {
     return { ok: false, error: messages?.noSafeLocator?.() || 'No safe row locator is available for this result set.' };
+  }
+
+  if (locator.strategy === 'all-columns') {
+    return resolveAllColumnsLocatorValues(locator, row, messages);
   }
 
   const values: Record<string, any> = {};

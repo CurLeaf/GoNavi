@@ -4604,6 +4604,7 @@
   "data_sync.warning.tdengine_target_type_fallback": "Столбец {{column}} типа {{type}} деградирован до {{targetType}}",
   "data_sync.warning.tdengine_target_type_no_mapping_fallback": "Для столбца {{column}} типа {{type}} нет отдельного сопоставления TDengine; он деградирован до {{targetType}}",
   "data_sync.warning.tdengine_target_user_defined_type_fallback": "Столбец {{column}} является пользовательским типом и деградирован до {{targetType}}",
+  "data_viewer.edit_hint.all_columns_locator": "Первичный ключ или уникальный индекс не обнаружены, поэтому строки будут определяться по совпадению всех столбцов. Редактируйте с осторожностью.",
   "data_viewer.message.connection_not_found": "Подключение не найдено",
   "data_viewer.message.duckdb_query_timeout": "Запрос DuckDB превысил тайм-аут подключения и был прерван. Увеличьте тайм-аут подключения или сократите область сортировки/фильтрации и повторите попытку.",
   "data_viewer.message.fetch_data_failed_detail": "Ошибка при получении данных: {{detail}}",

@@ -4604,6 +4604,7 @@
   "data_sync.warning.tdengine_target_type_fallback": "Spalte {{column}} Typ {{type}} wurde zu {{targetType}} herabgestuft",
   "data_sync.warning.tdengine_target_type_no_mapping_fallback": "Spalte {{column}} Typ {{type}} hat keine dedizierte TDengine-Zuordnung und wurde zu {{targetType}} herabgestuft",
   "data_sync.warning.tdengine_target_user_defined_type_fallback": "Spalte {{column}} ist ein benutzerdefinierter Typ und wurde zu {{targetType}} herabgestuft",
+  "data_viewer.edit_hint.all_columns_locator": "Kein Primärschlüssel oder eindeutiger Index erkannt. Zeilen werden durch Abgleich aller Spalten lokalisiert. Bitte mit Vorsicht bearbeiten.",
   "data_viewer.message.connection_not_found": "Verbindung nicht gefunden",
   "data_viewer.message.duckdb_query_timeout": "Die DuckDB-Abfrage hat das Verbindungstimeout überschritten und wurde unterbrochen. Erhöhen Sie das Verbindungstimeout oder verkleinern Sie den Sortier-/Filterbereich und versuchen Sie es erneut.",
   "data_viewer.message.fetch_data_failed_detail": "Fehler beim Abrufen der Daten: {{detail}}",

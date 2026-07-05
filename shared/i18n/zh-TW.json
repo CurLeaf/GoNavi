@@ -4604,6 +4604,7 @@
   "data_sync.warning.tdengine_target_type_fallback": "欄位 {{column}} 型別 {{type}} 已降級為 {{targetType}}",
   "data_sync.warning.tdengine_target_type_no_mapping_fallback": "欄位 {{column}} 型別 {{type}} 沒有專用 TDengine 對應，已降級為 {{targetType}}",
   "data_sync.warning.tdengine_target_user_defined_type_fallback": "欄位 {{column}} 為使用者自定義型別，已降級為 {{targetType}}",
+  "data_viewer.edit_hint.all_columns_locator": "未偵測到主鍵或唯一索引，將使用全欄位匹配定位資料列，請謹慎編輯。",
   "data_viewer.message.connection_not_found": "找不到連線",
   "data_viewer.message.duckdb_query_timeout": "DuckDB 查詢超過連線逾時時間，已中斷。請調高連線逾時時間，或縮小排序/篩選範圍後再試。",
   "data_viewer.message.fetch_data_failed_detail": "取得資料失敗：{{detail}}",

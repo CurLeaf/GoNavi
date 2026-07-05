@@ -4604,6 +4604,7 @@
   "data_sync.warning.tdengine_target_type_fallback": "列 {{column}} の型 {{type}} は {{targetType}} に降格されました",
   "data_sync.warning.tdengine_target_type_no_mapping_fallback": "列 {{column}} の型 {{type}} には専用の TDengine マッピングがないため、{{targetType}} に降格されました",
   "data_sync.warning.tdengine_target_user_defined_type_fallback": "列 {{column}} はユーザー定義型のため、{{targetType}} に降格されました",
+  "data_viewer.edit_hint.all_columns_locator": "主キーまたは一意インデックスが検出されなかったため、全列一致で行を特定します。編集には注意してください。",
   "data_viewer.message.connection_not_found": "接続が見つかりません",
   "data_viewer.message.duckdb_query_timeout": "DuckDB クエリが接続タイムアウトを超えたため中断されました。接続タイムアウトを延長するか、並べ替え/フィルター範囲を絞って再試行してください。",
   "data_viewer.message.fetch_data_failed_detail": "データ取得に失敗しました: {{detail}}",

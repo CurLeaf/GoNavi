@@ -65,6 +65,9 @@ const readQueryEditorResultsPanelSource = (): string =>
 const readSqlDialectSource = (): string =>
   readFileSync(new URL("../utils/sqlDialect.ts", import.meta.url), "utf8");
 
+const readRowLocatorSource = (): string =>
+  readFileSync(new URL("../utils/rowLocator.ts", import.meta.url), "utf8");
+
 const sliceBetween = (source: string, start: string, end: string): string => {
   const startIndex = source.indexOf(start);
   const endIndex = source.indexOf(end, startIndex + start.length);
@@ -1831,157 +1834,31 @@ describe("i18n catalog", () => {
     assertSourceDoesNotInlineCatalogValues(databaseSuggestionDetailSource, [databaseLabelKey]);
   });
 
-  it("keeps QueryEditor no-safe-locator read-only warning copy in catalogs instead of source literals", () => {
-    const noSafeLocatorReasonKey = "query_editor.message.read_only_no_safe_locator" as const;
-    const readOnlyWarningWrapperKey = "query_editor.message.read_only_warning_with_detail" as const;
-    const source = readQueryEditorHelpersSource();
-    const noSafeLocatorSource = sliceBetween(
-      source,
-      "                if (!resIndexes?.success) {",
-      "        const executableAppendExpressions = [",
+  it("keeps the all-columns edit hint in catalogs instead of source literals", () => {
+    const allColumnsHintKey = "data_viewer.edit_hint.all_columns_locator" as const;
+    const rowLocatorSource = readRowLocatorSource();
+    const helpersSource = readQueryEditorHelpersSource();
+    const buildAllColumnsLocatorSource = sliceBetween(
+      rowLocatorSource,
+      "export const buildAllColumnsLocator = (",
+      "export const resolveEditRowLocator = ({",
     );
 
     for (const language of SUPPORTED_LANGUAGES) {
-      expect(catalogs[language]).toHaveProperty(noSafeLocatorReasonKey);
-      expect(catalogs[language][noSafeLocatorReasonKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][noSafeLocatorReasonKey])).toEqual([]);
-
-      expect(catalogs[language]).toHaveProperty(readOnlyWarningWrapperKey);
-      expect(catalogs[language][readOnlyWarningWrapperKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][readOnlyWarningWrapperKey])).toEqual(["detail"]);
+      expect(catalogs[language]).toHaveProperty(allColumnsHintKey);
+      expect(catalogs[language][allColumnsHintKey]).toBeTruthy();
+      expect(getPlaceholders(catalogs[language][allColumnsHintKey])).toEqual([]);
     }
 
-    expect(t("zh-CN", noSafeLocatorReasonKey)).toBe("未检测到主键或可用唯一索引，无法安全提交修改。");
-    expect(t("en-US", noSafeLocatorReasonKey)).toBe("No primary key or usable unique index was detected, so changes cannot be committed safely.");
-    expect(t("zh-CN", readOnlyWarningWrapperKey, { detail: "main.users 未检测到主键或可用唯一索引，无法安全提交修改。" }))
-      .toBe("查询结果保持只读：main.users 未检测到主键或可用唯一索引，无法安全提交修改。");
-    expect(t("en-US", readOnlyWarningWrapperKey, { detail: "main.users No primary key or usable unique index was detected, so changes cannot be committed safely." }))
-      .toBe("Query results remain read-only: main.users No primary key or usable unique index was detected, so changes cannot be committed safely.");
+    expect(t("zh-CN", allColumnsHintKey)).toBe("未检测到主键或唯一索引，将使用全列匹配定位行，请谨慎编辑。");
+    expect(t("en-US", allColumnsHintKey)).toBe("No primary key or unique index was detected, so rows will be located by matching all columns. Edit with care.");
 
-    expect(noSafeLocatorSource).toContain(noSafeLocatorReasonKey);
-    expect(noSafeLocatorSource).toContain(readOnlyWarningWrapperKey);
-    expect(noSafeLocatorSource).not.toContain("未检测到主键或可用唯一索引，无法安全提交修改。");
+    expect(rowLocatorSource).toContain(allColumnsHintKey);
+    expect(buildAllColumnsLocatorSource).toContain("ALL_COLUMNS_LOCATOR_HINT_KEY");
+    expect(helpersSource).toContain("buildAllColumnsLocator");
 
-    assertSourceDoesNotInlineCatalogValues(noSafeLocatorSource, [noSafeLocatorReasonKey, readOnlyWarningWrapperKey]);
-  });
-
-  it("keeps QueryEditor index-metadata-unavailable read-only warning copy in catalogs instead of source literals", () => {
-    const indexMetadataUnavailableReasonKey = "query_editor.message.read_only_index_metadata_unavailable" as const;
-    const readOnlyWarningWrapperKey = "query_editor.message.read_only_warning_with_detail" as const;
-    const source = readQueryEditorHelpersSource();
-    const indexMetadataUnavailableSource = sliceBetween(
-      source,
-      "                if (!resIndexes?.success) {",
-      "        const executableAppendExpressions = [",
-    );
-
-    for (const language of SUPPORTED_LANGUAGES) {
-      expect(catalogs[language]).toHaveProperty(indexMetadataUnavailableReasonKey);
-      expect(catalogs[language][indexMetadataUnavailableReasonKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][indexMetadataUnavailableReasonKey])).toEqual([]);
-
-      expect(catalogs[language]).toHaveProperty(readOnlyWarningWrapperKey);
-      expect(catalogs[language][readOnlyWarningWrapperKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][readOnlyWarningWrapperKey])).toEqual(["detail"]);
-    }
-
-    expect(t("zh-CN", indexMetadataUnavailableReasonKey)).toBe("无法加载唯一索引元数据，无法安全提交修改。");
-    expect(t("en-US", indexMetadataUnavailableReasonKey)).toBe("Unable to load unique index metadata, so changes cannot be committed safely.");
-    expect(t("zh-CN", readOnlyWarningWrapperKey, { detail: "main.users 无法加载唯一索引元数据，无法安全提交修改。" }))
-      .toBe("查询结果保持只读：main.users 无法加载唯一索引元数据，无法安全提交修改。");
-    expect(t("en-US", readOnlyWarningWrapperKey, { detail: "main.users Unable to load unique index metadata, so changes cannot be committed safely." }))
-      .toBe("Query results remain read-only: main.users Unable to load unique index metadata, so changes cannot be committed safely.");
-
-    expect(indexMetadataUnavailableSource).toContain(indexMetadataUnavailableReasonKey);
-    expect(indexMetadataUnavailableSource).toContain(readOnlyWarningWrapperKey);
-    expect(indexMetadataUnavailableSource).not.toContain("无法加载唯一索引元数据，无法安全提交修改。");
-
-    assertSourceDoesNotInlineCatalogValues(indexMetadataUnavailableSource, [indexMetadataUnavailableReasonKey, readOnlyWarningWrapperKey]);
-  });
-
-  it("keeps QueryEditor table-locator-metadata-unavailable read-only warning copy in catalogs instead of source literals", () => {
-    const tableLocatorMetadataUnavailableReasonKey = "query_editor.message.read_only_table_locator_metadata_unavailable" as const;
-    const readOnlyWarningWrapperKey = "query_editor.message.read_only_warning_with_detail" as const;
-    const source = readQueryEditorHelpersSource();
-    const resolveQueryLocatorPlanSource = sliceBetween(
-      source,
-      "export const resolveQueryLocatorPlan = async ({",
-      "\n};",
-    );
-    const resColsFailureSource = sliceBetween(
-      resolveQueryLocatorPlanSource,
-      "        if (!resCols?.success || !Array.isArray(resCols.data)) {",
-      "            return plan;",
-    );
-    const catchFailureSource = sliceBetween(
-      resolveQueryLocatorPlanSource,
-      "    } catch {",
-      "        return plan;",
-    );
-
-    for (const language of SUPPORTED_LANGUAGES) {
-      expect(catalogs[language]).toHaveProperty(tableLocatorMetadataUnavailableReasonKey);
-      expect(catalogs[language][tableLocatorMetadataUnavailableReasonKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][tableLocatorMetadataUnavailableReasonKey])).toEqual(["table"]);
-
-      expect(catalogs[language]).toHaveProperty(readOnlyWarningWrapperKey);
-      expect(catalogs[language][readOnlyWarningWrapperKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][readOnlyWarningWrapperKey])).toEqual(["detail"]);
-    }
-
-    expect(t("zh-CN", tableLocatorMetadataUnavailableReasonKey, { table: "main.users" }))
-      .toBe("无法加载 main.users 的主键/唯一索引元数据，无法安全提交修改。");
-    expect(t("en-US", tableLocatorMetadataUnavailableReasonKey, { table: "main.users" }))
-      .toBe("Unable to load primary key/unique index metadata for main.users, so changes cannot be committed safely.");
-    expect(t("zh-CN", readOnlyWarningWrapperKey, { detail: "无法加载 main.users 的主键/唯一索引元数据，无法安全提交修改。" }))
-      .toBe("查询结果保持只读：无法加载 main.users 的主键/唯一索引元数据，无法安全提交修改。");
-    expect(t("en-US", readOnlyWarningWrapperKey, { detail: "Unable to load primary key/unique index metadata for main.users, so changes cannot be committed safely." }))
-      .toBe("Query results remain read-only: Unable to load primary key/unique index metadata for main.users, so changes cannot be committed safely.");
-
-    expect(resColsFailureSource).toContain(tableLocatorMetadataUnavailableReasonKey);
-    expect(resColsFailureSource).toContain(readOnlyWarningWrapperKey);
-    expect(resColsFailureSource).not.toContain("无法加载 main.users 的主键/唯一索引元数据，无法安全提交修改。");
-
-    expect(catchFailureSource).toContain(tableLocatorMetadataUnavailableReasonKey);
-    expect(catchFailureSource).toContain(readOnlyWarningWrapperKey);
-    expect(catchFailureSource).not.toContain("无法加载 main.users 的主键/唯一索引元数据，无法安全提交修改。");
-
-    assertSourceDoesNotInlineCatalogValues(resColsFailureSource, [tableLocatorMetadataUnavailableReasonKey, readOnlyWarningWrapperKey]);
-    assertSourceDoesNotInlineCatalogValues(catchFailureSource, [tableLocatorMetadataUnavailableReasonKey, readOnlyWarningWrapperKey]);
-  });
-
-  it("keeps QueryEditor Oracle ROWID fallback read-only warning copy in catalogs instead of source literals", () => {
-    const oracleRowIdFallbackReasonKey = "query_editor.message.read_only_oracle_rowid_injection_unavailable" as const;
-    const readOnlyWarningWrapperKey = "query_editor.message.read_only_warning_with_detail" as const;
-    const source = readQueryEditorHelpersSource();
-    const oracleRowIdFallbackSource = sliceBetween(
-      source,
-      "        if (executableAppendExpressions.length > 0 && isOracleLikeDialect(dbType) && selectInfo.selectsBareAll) {",
-      "        plan.executedSql = appendQuerySelectExpressions(executableStatement, executableAppendExpressions);",
-    );
-
-    for (const language of SUPPORTED_LANGUAGES) {
-      expect(catalogs[language]).toHaveProperty(oracleRowIdFallbackReasonKey);
-      expect(catalogs[language][oracleRowIdFallbackReasonKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][oracleRowIdFallbackReasonKey])).toEqual([]);
-
-      expect(catalogs[language]).toHaveProperty(readOnlyWarningWrapperKey);
-      expect(catalogs[language][readOnlyWarningWrapperKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][readOnlyWarningWrapperKey])).toEqual(["detail"]);
-    }
-
-    expect(t("zh-CN", oracleRowIdFallbackReasonKey)).toBe("Oracle 查询使用 * 时无法自动注入 ROWID 定位列，已保持只读。");
-    expect(t("en-US", oracleRowIdFallbackReasonKey)).toBe("The Oracle query uses *, so the ROWID locator column could not be injected automatically. Results remain read-only.");
-    expect(t("zh-CN", readOnlyWarningWrapperKey, { detail: "Oracle 查询使用 * 时无法自动注入 ROWID 定位列，已保持只读。" }))
-      .toBe("查询结果保持只读：Oracle 查询使用 * 时无法自动注入 ROWID 定位列，已保持只读。");
-    expect(t("en-US", readOnlyWarningWrapperKey, { detail: "The Oracle query uses *, so the ROWID locator column could not be injected automatically. Results remain read-only." }))
-      .toBe("Query results remain read-only: The Oracle query uses *, so the ROWID locator column could not be injected automatically. Results remain read-only.");
-
-    expect(oracleRowIdFallbackSource).toContain(oracleRowIdFallbackReasonKey);
-    expect(oracleRowIdFallbackSource).toContain(readOnlyWarningWrapperKey);
-    expect(oracleRowIdFallbackSource).not.toContain("Oracle 查询使用 * 时无法自动注入 ROWID 定位列，已保持只读。");
-
-    assertSourceDoesNotInlineCatalogValues(oracleRowIdFallbackSource, [oracleRowIdFallbackReasonKey, readOnlyWarningWrapperKey]);
+    assertSourceDoesNotInlineCatalogValues(rowLocatorSource, [allColumnsHintKey]);
+    assertSourceDoesNotInlineCatalogValues(helpersSource, [allColumnsHintKey]);
   });
 
   it("keeps QueryEditor AI context menu labels in catalogs instead of source literals", () => {

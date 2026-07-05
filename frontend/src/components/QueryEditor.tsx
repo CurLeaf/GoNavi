@@ -6092,14 +6092,25 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             }
             const statementPlans: QueryStatementPlan[] = [];
             for (let index = 0; index < sourceStatements.length; index += 1) {
-                statementPlans.push(await resolveQueryLocatorPlan({
-                    statement: executedSourceStatements[index] || sourceStatements[index],
-                    originalStatement: sourceStatements[index],
-                    dbType: normalizedDbType,
-                    currentDb,
-                    config,
-                    forceReadOnly: forceReadOnlyResult,
-                }));
+                const statementForPlan = executedSourceStatements[index] || sourceStatements[index];
+                try {
+                    statementPlans.push(await resolveQueryLocatorPlan({
+                        statement: statementForPlan,
+                        originalStatement: sourceStatements[index],
+                        dbType: normalizedDbType,
+                        currentDb,
+                        config,
+                        forceReadOnly: forceReadOnlyResult,
+                    }));
+                } catch (planError) {
+                    // 行定位计划失败绝不能阻断查询执行，兜底裸计划保证结果页始终呈现。
+                    console.warn('resolveQueryLocatorPlan failed; falling back to a bare statement plan', planError);
+                    statementPlans.push({
+                        originalSql: sourceStatements[index],
+                        executedSql: statementForPlan,
+                        pkColumns: [],
+                    });
+                }
             }
 
             // 自动给 SELECT 语句注入行数限制（防止大结果集卡死）

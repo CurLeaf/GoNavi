@@ -8593,7 +8593,7 @@ describe('QueryEditor external SQL save', () => {
     expect(dataGridState.latestProps?.data).not.toEqual(expect.arrayContaining([expect.objectContaining({ name: 'master' })]));
   });
 
-  it('localizes the non-Oracle no-safe-locator read-only warning in English while preserving the raw table name', async () => {
+  it('falls back to all-columns editing when no safe locator exists for non-Oracle results', async () => {
     storeState.languagePreference = 'en-US';
     setCurrentLanguage('en-US');
     backendApp.DBQueryMulti.mockResolvedValueOnce({
@@ -8621,12 +8621,12 @@ describe('QueryEditor external SQL save', () => {
     expect(dataGridState.latestProps?.tableName).toBe('users');
     expect(dataGridState.latestProps?.pkColumns).toEqual([]);
     expect(dataGridState.latestProps?.editLocator).toMatchObject({
-      strategy: 'none',
-      readOnly: true,
-      reason: 'No primary key or usable unique index was detected, so changes cannot be committed safely.',
+      strategy: 'all-columns',
+      readOnly: false,
+      reason: 'No primary key or unique index was detected, so rows will be located by matching all columns. Edit with care.',
     });
-    expect(dataGridState.latestProps?.readOnly).toBe(true);
-    expect(messageApi.warning).toHaveBeenCalledWith(
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalledWith(
       'Query results remain read-only: main.users No primary key or usable unique index was detected, so changes cannot be committed safely.',
     );
     expect(messageApi.warning).not.toHaveBeenCalledWith(
@@ -8634,7 +8634,7 @@ describe('QueryEditor external SQL save', () => {
     );
   });
 
-  it('localizes the non-Oracle index-metadata-unavailable read-only warning in English while preserving the raw table name', async () => {
+  it('falls back to all-columns editing when unique index metadata is unavailable', async () => {
     storeState.languagePreference = 'en-US';
     setCurrentLanguage('en-US');
     backendApp.DBQueryMulti.mockResolvedValueOnce({
@@ -8665,12 +8665,11 @@ describe('QueryEditor external SQL save', () => {
 
     expect(dataGridState.latestProps?.tableName).toBe('users');
     expect(dataGridState.latestProps?.editLocator).toMatchObject({
-      strategy: 'none',
-      readOnly: true,
-      reason: 'Unable to load unique index metadata, so changes cannot be committed safely.',
+      strategy: 'all-columns',
+      readOnly: false,
     });
-    expect(dataGridState.latestProps?.readOnly).toBe(true);
-    expect(messageApi.warning).toHaveBeenCalledWith(
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalledWith(
       'Query results remain read-only: main.users Unable to load unique index metadata, so changes cannot be committed safely.',
     );
     expect(messageApi.warning).not.toHaveBeenCalledWith(
@@ -8678,7 +8677,7 @@ describe('QueryEditor external SQL save', () => {
     );
   });
 
-  it('localizes the table-locator-metadata-unavailable read-only warning in English while preserving the raw table name', async () => {
+  it('falls back to all-columns editing when table locator metadata is unavailable', async () => {
     storeState.languagePreference = 'en-US';
     setCurrentLanguage('en-US');
     backendApp.DBQueryMulti.mockResolvedValueOnce({
@@ -8705,12 +8704,12 @@ describe('QueryEditor external SQL save', () => {
 
     expect(dataGridState.latestProps?.tableName).toBe('users');
     expect(dataGridState.latestProps?.editLocator).toMatchObject({
-      strategy: 'none',
-      readOnly: true,
-      reason: 'Unable to load primary key/unique index metadata for main.users, so changes cannot be committed safely.',
+      strategy: 'all-columns',
+      columns: [],
+      readOnly: false,
     });
-    expect(dataGridState.latestProps?.readOnly).toBe(true);
-    expect(messageApi.warning).toHaveBeenCalledWith(
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalledWith(
       'Query results remain read-only: Unable to load primary key/unique index metadata for main.users, so changes cannot be committed safely.',
     );
     expect(messageApi.warning).not.toHaveBeenCalledWith(

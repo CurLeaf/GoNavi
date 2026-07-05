@@ -4604,6 +4604,7 @@
   "data_sync.warning.tdengine_target_type_fallback": "Column {{column}} type {{type}} was degraded to {{targetType}}",
   "data_sync.warning.tdengine_target_type_no_mapping_fallback": "Column {{column}} type {{type}} has no dedicated TDengine mapping and was degraded to {{targetType}}",
   "data_sync.warning.tdengine_target_user_defined_type_fallback": "Column {{column}} is a user-defined type and was degraded to {{targetType}}",
+  "data_viewer.edit_hint.all_columns_locator": "No primary key or unique index was detected, so rows will be located by matching all columns. Edit with care.",
   "data_viewer.message.connection_not_found": "Connection not found",
   "data_viewer.message.duckdb_query_timeout": "DuckDB query exceeded the connection timeout and was interrupted. Increase the connection timeout, or reduce the sort/filter scope and retry.",
   "data_viewer.message.fetch_data_failed_detail": "Error fetching data: {{detail}}",

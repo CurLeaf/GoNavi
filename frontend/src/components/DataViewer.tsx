@@ -19,6 +19,7 @@ import {
 import {
   DUCKDB_ROWID_LOCATOR_COLUMN,
   ORACLE_ROWID_LOCATOR_COLUMN,
+  buildAllColumnsLocator,
   resolveEditRowLocator,
   type EditRowLocator,
 } from '../utils/rowLocator';
@@ -652,12 +653,12 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                 if (pkKeyRef.current !== locatorKey) return;
 
                 if (!resCols?.success || !Array.isArray(resCols.data)) {
-                    const nextLocator = buildDataViewerReadOnlyLocator(tr('data_viewer.read_only.reason.metadata_unavailable'));
+                    const nextLocator = buildAllColumnsLocator([], { translate: tr });
                     pkColumnsForQuery = [];
                     editLocatorForQuery = nextLocator;
                     setPkColumns([]);
                     setEditLocator(nextLocator);
-                    warnDataViewerReadOnly('table', formatDataViewerTableName(dbName, tableName), nextLocator.reason, tr);
+                    if (nextLocator.reason) message.info(nextLocator.reason);
                 } else {
                     const columnDefs = resCols.data as ColumnDefinition[];
                     const primaryKeys = columnDefs
@@ -673,7 +674,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                         : (String(dbType || '').trim().toLowerCase() === 'duckdb'
                             ? [...resultColumns, DUCKDB_ROWID_LOCATOR_COLUMN]
                             : resultColumns);
-                    let nextLocator = localizeDataViewerReadOnlyLocator(resolveEditRowLocator({
+                    const nextLocator = localizeDataViewerReadOnlyLocator(resolveEditRowLocator({
                         dbType,
                         resultColumns: locatorColumns,
                         primaryKeys,
@@ -683,28 +684,26 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                         translate: tr,
                     }), tr);
 
-                    if (nextLocator.readOnly && primaryKeys.length === 0 && !resIndexes?.success && !isOracleLikeDialect(dbType)) {
-                        nextLocator = buildDataViewerReadOnlyLocator(tr('data_viewer.read_only.reason.index_metadata_unavailable'));
-                    }
-
                     pkColumnsForQuery = primaryKeys;
                     editLocatorForQuery = nextLocator;
                     setPkColumns(primaryKeys);
                     setEditLocator(nextLocator);
                     if (nextLocator.readOnly) {
                         warnDataViewerReadOnly('table', formatDataViewerTableName(dbName, tableName), nextLocator.reason, tr);
+                    } else if (nextLocator.strategy === 'all-columns' && nextLocator.reason) {
+                        message.info(nextLocator.reason);
                     }
                 }
             } catch {
                 if (fetchSeqRef.current !== seq) return;
                 if (pkSeqRef.current !== locatorSeq) return;
                 if (pkKeyRef.current !== locatorKey) return;
-                const nextLocator = buildDataViewerReadOnlyLocator(tr('data_viewer.read_only.reason.metadata_unavailable'));
+                const nextLocator = buildAllColumnsLocator([], { translate: tr });
                 pkColumnsForQuery = [];
                 editLocatorForQuery = nextLocator;
                 setPkColumns([]);
                 setEditLocator(nextLocator);
-                warnDataViewerReadOnly('table', formatDataViewerTableName(dbName, tableName), nextLocator.reason, tr);
+                if (nextLocator.reason) message.info(nextLocator.reason);
             }
         }
     }

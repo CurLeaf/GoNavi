@@ -68,36 +68,35 @@ describe('resolveEditRowLocator', () => {
     });
   });
 
-  it('ignores non-unique indexes', () => {
+  it('falls back to all-columns matching when only non-unique indexes exist', () => {
     expect(resolveEditRowLocator({
       dbType: 'mysql',
       resultColumns: ['NAME'],
       indexes: [normalIndex('idx_name', 'NAME')],
     })).toMatchObject({
-      strategy: 'none',
-      readOnly: true,
-      reason: 'No primary key or usable unique index was found, so changes cannot be submitted safely.',
+      strategy: 'all-columns',
+      columns: ['NAME'],
+      valueColumns: ['NAME'],
+      readOnly: false,
+      reason: 'No primary key or unique index was detected, so rows will be located by matching all columns. Edit with care.',
     });
   });
 
-  it('keeps results read-only when primary key columns are missing from result columns', () => {
+  it('falls back to all-columns matching when primary key columns are missing from result columns', () => {
     expect(resolveEditRowLocator({
       dbType: 'oracle',
       resultColumns: ['NAME'],
       primaryKeys: ['ID'],
     })).toMatchObject({
-      strategy: 'none',
-      readOnly: true,
-      reason: 'The result set is missing primary key column ID, so changes cannot be submitted safely.',
+      strategy: 'all-columns',
+      columns: ['NAME'],
+      readOnly: false,
     });
   });
 
-  it('localizes read-only reasons while preserving raw locator names', () => {
-    const translate = (key: string, params?: Record<string, string | number | boolean | null | undefined>) => ({
-      'data_viewer.read_only.reason.primary_key_column_missing': `結果集中缺少主鍵欄位 ${params?.columns}，無法安全提交修改。`,
-      'data_viewer.read_only.reason.no_safe_locator': '未偵測到主鍵或可用唯一索引，無法安全提交修改。',
-      'data_viewer.read_only.reason.oracle_rowid_missing': '未偵測到主鍵或可用唯一索引，且結果集中缺少 Oracle ROWID，無法安全提交修改。',
-      'data_viewer.read_only.reason.duckdb_rowid_missing': '未偵測到主鍵、可用唯一索引或 DuckDB rowid，無法安全提交修改。',
+  it('localizes the all-columns hint through the provided translator', () => {
+    const translate = (key: string) => ({
+      'data_viewer.edit_hint.all_columns_locator': '未偵測到主鍵或唯一索引，將使用全欄位匹配定位資料列，請謹慎編輯。',
     }[key] ?? key);
 
     expect(resolveEditRowLocator({
@@ -106,9 +105,9 @@ describe('resolveEditRowLocator', () => {
       primaryKeys: ['TENANT_ID', 'ID'],
       translate,
     })).toMatchObject({
-      strategy: 'none',
-      readOnly: true,
-      reason: '結果集中缺少主鍵欄位 TENANT_ID, ID，無法安全提交修改。',
+      strategy: 'all-columns',
+      readOnly: false,
+      reason: '未偵測到主鍵或唯一索引，將使用全欄位匹配定位資料列，請謹慎編輯。',
     });
 
     expect(resolveEditRowLocator({
@@ -117,9 +116,9 @@ describe('resolveEditRowLocator', () => {
       allowOracleRowID: true,
       translate,
     })).toMatchObject({
-      strategy: 'none',
-      readOnly: true,
-      reason: '未偵測到主鍵或可用唯一索引，且結果集中缺少 Oracle ROWID，無法安全提交修改。',
+      strategy: 'all-columns',
+      columns: ['NAME'],
+      readOnly: false,
     });
 
     expect(resolveEditRowLocator({
@@ -128,9 +127,9 @@ describe('resolveEditRowLocator', () => {
       allowDuckDBRowID: true,
       translate,
     })).toMatchObject({
-      strategy: 'none',
-      readOnly: true,
-      reason: '未偵測到主鍵、可用唯一索引或 DuckDB rowid，無法安全提交修改。',
+      strategy: 'all-columns',
+      columns: ['name'],
+      readOnly: false,
     });
   });
 
@@ -211,6 +210,70 @@ describe('resolveRowLocatorValues', () => {
     expect(resolveRowLocatorValues(locator, { name: 'launch', [DUCKDB_ROWID_LOCATOR_COLUMN]: 17 })).toEqual({
       ok: true,
       values: { rowid: 17 },
+    });
+  });
+
+  it('collects non-empty scalar values for all-columns locators', () => {
+    const locator = resolveEditRowLocator({
+      dbType: 'mysql',
+      resultColumns: ['ID', 'NAME', 'NOTE', 'PAYLOAD'],
+    });
+
+    expect(locator.strategy).toBe('all-columns');
+    expect(resolveRowLocatorValues(locator, {
+      ID: 7,
+      NAME: 'A',
+      NOTE: null,
+      PAYLOAD: { nested: true },
+    })).toEqual({
+      ok: true,
+      values: { ID: 7, NAME: 'A' },
+    });
+  });
+
+  it('skips oversized string values for all-columns locators', () => {
+    const locator = resolveEditRowLocator({
+      dbType: 'mysql',
+      resultColumns: ['ID', 'BLOB_TEXT'],
+    });
+
+    expect(resolveRowLocatorValues(locator, {
+      ID: 1,
+      BLOB_TEXT: 'x'.repeat(5000),
+    })).toEqual({
+      ok: true,
+      values: { ID: 1 },
+    });
+  });
+
+  it('falls back to row keys when an all-columns locator has no columns', () => {
+    const locator = resolveEditRowLocator({
+      dbType: 'mysql',
+      resultColumns: [],
+    });
+
+    expect(locator.strategy).toBe('all-columns');
+    expect(resolveRowLocatorValues(locator, {
+      ID: 3,
+      NAME: 'B',
+      __gonavi_row_key__: 'internal',
+    })).toEqual({
+      ok: true,
+      values: { ID: 3, NAME: 'B' },
+    });
+  });
+
+  it('rejects all-columns rows without any usable locator value', () => {
+    const locator = resolveEditRowLocator({
+      dbType: 'mysql',
+      resultColumns: ['NOTE'],
+    });
+
+    expect(resolveRowLocatorValues(locator, { NOTE: null }, {
+      noSafeLocator: () => 'No usable locator values.',
+    })).toEqual({
+      ok: false,
+      error: 'No usable locator values.',
     });
   });
 });

@@ -11,6 +11,7 @@ import { SIDEBAR_SQL_EDITOR_DRAG_MIME, decodeSidebarSqlEditorDragPayload } from 
 import {
     DUCKDB_ROWID_LOCATOR_COLUMN,
     ORACLE_ROWID_LOCATOR_COLUMN,
+    buildAllColumnsLocator,
     type EditRowLocator,
 } from '../../utils/rowLocator';
 import { getQueryTabDraft, hasQueryTabDraft } from '../../utils/sqlFileTabDrafts';
@@ -2226,35 +2227,35 @@ export const resolveQueryLocatorPlan = async ({
     };
     if (forceReadOnly) return plan;
 
-    const defaultSchema = isOracleLikeDialect(dbType)
-        ? resolveOracleLikeExecutionSchemaName(config, currentDb)
-        : '';
-    let tableRef = extractQueryResultTableRef(statement, dbType, currentDb, defaultSchema);
-    if (!tableRef) return plan;
-    plan.tableRef = tableRef;
-    if (isSystemMetadataQueryResult(tableRef, dbType)) {
-        plan.editLocator = buildQueryReadOnlyLocator(translate('query_editor.message.read_only_system_metadata'));
-        return plan;
-    }
-
-    const selectInfo = parseSimpleSelectInfo(statement);
-    if (!selectInfo) {
-        // 聚合、函数和表达式结果天然无法安全回写到单行，静默保持只读即可。
-        return plan;
-    }
-    if (!selectInfo.selectsAll && Object.keys(selectInfo.writableColumns).length === 0) {
-        return plan;
-    }
-
-    if (isOracleLikeDialect(dbType) && defaultSchema && !String(tableRef.tableName || '').includes('.')) {
-        tableRef = {
-            ...tableRef,
-            tableName: `${tableRef.metadataDbName}.${tableRef.metadataTableName}`,
-        };
-        plan.tableRef = tableRef;
-    }
-
     try {
+        const defaultSchema = isOracleLikeDialect(dbType)
+            ? resolveOracleLikeExecutionSchemaName(config, currentDb)
+            : '';
+        let tableRef = extractQueryResultTableRef(statement, dbType, currentDb, defaultSchema);
+        if (!tableRef) return plan;
+        plan.tableRef = tableRef;
+        if (isSystemMetadataQueryResult(tableRef, dbType)) {
+            plan.editLocator = buildQueryReadOnlyLocator(translate('query_editor.message.read_only_system_metadata'));
+            return plan;
+        }
+
+        const selectInfo = parseSimpleSelectInfo(statement);
+        if (!selectInfo) {
+            // 聚合、函数和表达式结果天然无法安全回写到单行，静默保持只读即可。
+            return plan;
+        }
+        if (!selectInfo.selectsAll && Object.keys(selectInfo.writableColumns).length === 0) {
+            return plan;
+        }
+
+        if (isOracleLikeDialect(dbType) && defaultSchema && !String(tableRef.tableName || '').includes('.')) {
+            tableRef = {
+                ...tableRef,
+                tableName: `${tableRef.metadataDbName}.${tableRef.metadataTableName}`,
+            };
+            plan.tableRef = tableRef;
+        }
+
         const [resCols, resIndexes] = await Promise.all([
             withSoftTimeout(
                 DBGetColumns(buildRpcConnectionConfig(config) as any, tableRef.metadataDbName, tableRef.metadataTableName),
@@ -2267,11 +2268,7 @@ export const resolveQueryLocatorPlan = async ({
             ),
         ]);
         if (!resCols?.success || !Array.isArray(resCols.data)) {
-            const reason = translate('query_editor.message.read_only_table_locator_metadata_unavailable', {
-                table: `${tableRef.metadataDbName}.${tableRef.metadataTableName}`,
-            });
-            plan.editLocator = buildQueryReadOnlyLocator(reason);
-            plan.warning = translate('query_editor.message.read_only_warning_with_detail', { detail: reason });
+            plan.editLocator = buildAllColumnsLocator([], { translate });
             return plan;
         }
 
@@ -2349,19 +2346,7 @@ export const resolveQueryLocatorPlan = async ({
                     readOnly: false,
                 };
             } else {
-                if (!resIndexes?.success) {
-                    const reason = translate('query_editor.message.read_only_index_metadata_unavailable');
-                    plan.editLocator = buildQueryReadOnlyLocator(reason);
-                    plan.warning = translate('query_editor.message.read_only_warning_with_detail', {
-                        detail: `${tableRef.metadataDbName}.${tableRef.metadataTableName} ${reason}`,
-                    });
-                } else {
-                    const reason = translate('query_editor.message.read_only_no_safe_locator');
-                    plan.editLocator = buildQueryReadOnlyLocator(reason);
-                    plan.warning = translate('query_editor.message.read_only_warning_with_detail', {
-                        detail: `${tableRef.metadataDbName}.${tableRef.metadataTableName} ${reason}`,
-                    });
-                }
+                plan.editLocator = buildAllColumnsLocator(tableColumnNames, { writableColumns, translate });
             }
         }
 
@@ -2378,20 +2363,14 @@ export const resolveQueryLocatorPlan = async ({
                 return plan;
             }
 
-            const reason = translate('query_editor.message.read_only_oracle_rowid_injection_unavailable');
-            plan.editLocator = buildQueryReadOnlyLocator(reason);
-            plan.warning = translate('query_editor.message.read_only_warning_with_detail', { detail: reason });
+            plan.editLocator = buildAllColumnsLocator(tableColumnNames, { writableColumns, translate });
             return plan;
         }
 
         plan.executedSql = appendQuerySelectExpressions(executableStatement, executableAppendExpressions);
         return plan;
     } catch {
-        const reason = translate('query_editor.message.read_only_table_locator_metadata_unavailable', {
-            table: `${tableRef.metadataDbName}.${tableRef.metadataTableName}`,
-        });
-        plan.editLocator = buildQueryReadOnlyLocator(reason);
-        plan.warning = translate('query_editor.message.read_only_warning_with_detail', { detail: reason });
+        plan.editLocator = buildAllColumnsLocator([], { translate });
         return plan;
     }
 };
