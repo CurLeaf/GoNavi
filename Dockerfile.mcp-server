@@ -8,6 +8,8 @@ ARG TARGETARCH=amd64
 WORKDIR /src
 
 COPY go.mod go.sum ./
+COPY third_party/highgo-pq/go.mod ./third_party/highgo-pq/go.mod
+COPY third_party/go-irisnative/go.mod third_party/go-irisnative/go.sum ./third_party/go-irisnative/
 RUN go mod download
 
 COPY . .
