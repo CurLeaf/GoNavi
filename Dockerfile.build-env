@@ -20,10 +20,13 @@ RUN printf 'export PATH=/go/bin:/usr/local/go/bin:$PATH\n' > /etc/profile.d/10-g
 # Copy only Node.js runtime assets so the Go toolchain from the base image
 # stays intact for smoke tests and interactive build shells.
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
-COPY --from=node /usr/local/bin/npm /usr/local/bin/npm
-COPY --from=node /usr/local/bin/npx /usr/local/bin/npx
-COPY --from=node /usr/local/bin/corepack /usr/local/bin/corepack
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+
+# npm/npx/corepack are symlinks in the node image; COPY dereferences them into
+# standalone scripts whose relative requires break, so recreate the symlinks.
+RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && ln -sf ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
