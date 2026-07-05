@@ -2877,6 +2877,8 @@
   "app.update.backend.error.sha256_missing_current_package": "SHA256SUMS does not include the current platform update package",
   "app.update.backend.error.sha256sums_download_failed": "Failed to download SHA256SUMS: HTTP {{status}}",
   "app.update.backend.error.sha256sums_missing": "Release did not provide SHA256SUMS",
+  "app.update.backend.error.install_target_not_writable": "The current install directory is not writable: {{path}} ({{detail}})",
+  "app.update.backend.error.install_target_unresolved": "Unable to determine the current install directory",
   "app.update.backend.error.update_package_not_found": "Update package not found: {{name}}",
   "app.update.backend.message.app_directory_unavailable": "Cannot access app directory: {{path}}",
   "app.update.backend.message.app_directory_unresolved_download": "Cannot determine the current app directory, so the update cannot be downloaded",

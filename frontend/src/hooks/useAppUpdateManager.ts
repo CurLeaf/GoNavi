@@ -242,6 +242,20 @@ export const useAppUpdateManager = ({
     hideUpdateDownloadProgress();
   }, [hideUpdateDownloadProgress, lastUpdateInfo, lastUpdateKey, t, updateDownloadProgress.status]);
 
+  const openDownloadedUpdateDirectory = useCallback(async () => {
+    const backendApp = (window as any).go?.app?.App;
+    if (typeof backendApp?.OpenDownloadedUpdateDirectory !== 'function') {
+      void message.error(t('app.about.message.open_install_directory_failed_with_error', { error: t('common.unknown') }));
+      return;
+    }
+    const res = await backendApp.OpenDownloadedUpdateDirectory();
+    if (!res?.success) {
+      void message.error(t('app.about.message.open_install_directory_failed_with_error', { error: res?.message || t('common.unknown') }));
+      return;
+    }
+    void message.success(res?.message || t('app.about.message.install_directory_opened_manual_replace'));
+  }, [t]);
+
   const checkForUpdates = useCallback(async (silent: boolean) => {
     if (updateCheckInFlightRef.current) return;
     updateCheckInFlightRef.current = true;
@@ -523,6 +537,7 @@ export const useAppUpdateManager = ({
     lastUpdateInfo,
     markUpdateProgressDismissed,
     muteLatestUpdate,
+    openDownloadedUpdateDirectory,
     setIsAboutOpen,
     showUpdateDownloadProgress,
     updateChannel,

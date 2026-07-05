@@ -2877,6 +2877,8 @@
   "app.update.backend.error.sha256_missing_current_package": "SHA256SUMS 未包含目前平台更新套件",
   "app.update.backend.error.sha256sums_download_failed": "下載 SHA256SUMS 失敗：HTTP {{status}}",
   "app.update.backend.error.sha256sums_missing": "Release 未提供 SHA256SUMS",
+  "app.update.backend.error.install_target_not_writable": "目前安裝目錄不可寫：{{path}}（{{detail}}）",
+  "app.update.backend.error.install_target_unresolved": "無法確定目前安裝目錄",
   "app.update.backend.error.update_package_not_found": "未找到更新套件：{{name}}",
   "app.update.backend.message.app_directory_unavailable": "無法存取應用程式目錄：{{path}}",
   "app.update.backend.message.app_directory_unresolved_download": "無法判斷目前應用程式目錄，因此無法下載更新",

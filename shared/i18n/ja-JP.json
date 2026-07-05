@@ -2877,6 +2877,8 @@
   "app.update.backend.error.sha256_missing_current_package": "SHA256SUMS に現在のプラットフォーム用更新パッケージが含まれていません",
   "app.update.backend.error.sha256sums_download_failed": "SHA256SUMS のダウンロードに失敗しました: HTTP {{status}}",
   "app.update.backend.error.sha256sums_missing": "Release に SHA256SUMS が提供されていません",
+  "app.update.backend.error.install_target_not_writable": "現在のインストール先ディレクトリに書き込めません: {{path}} ({{detail}})",
+  "app.update.backend.error.install_target_unresolved": "現在のインストール先ディレクトリを特定できません",
   "app.update.backend.error.update_package_not_found": "更新パッケージが見つかりません: {{name}}",
   "app.update.backend.message.app_directory_unavailable": "アプリディレクトリにアクセスできません: {{path}}",
   "app.update.backend.message.app_directory_unresolved_download": "現在のアプリディレクトリを特定できないため、更新をダウンロードできません",

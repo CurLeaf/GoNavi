@@ -183,4 +183,34 @@ describe('useAppUpdateManager', () => {
     expect(hook?.updateChannel).toBe('dev');
     expect(hook?.lastUpdateInfo?.channel).toBe('dev');
   });
+
+  it('opens the downloaded update directory when a package is already downloaded', async () => {
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        downloaded: true,
+        assetSize: 1024,
+      },
+    });
+    backendApp.OpenDownloadedUpdateDirectory.mockResolvedValue({
+      success: true,
+      message: 'opened-install-directory',
+    });
+
+    renderHook();
+
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+
+    await act(async () => {
+      await hook?.openDownloadedUpdateDirectory();
+    });
+
+    expect(backendApp.OpenDownloadedUpdateDirectory).toHaveBeenCalledTimes(1);
+    expect(messageApi.success).toHaveBeenCalledWith('opened-install-directory');
+  });
 });

@@ -1709,6 +1709,7 @@ function App() {
       lastUpdateInfo,
       markUpdateProgressDismissed,
       muteLatestUpdate,
+      openDownloadedUpdateDirectory,
       setIsAboutOpen,
       showUpdateDownloadProgress,
       updateChannel,
@@ -4972,7 +4973,12 @@ function App() {
                 <Button key="check" icon={<CloudDownloadOutlined />} onClick={() => checkForUpdates(false)}>{t('app.about.action.check_updates')}</Button>,
                 <Button key="close" onClick={() => setIsAboutOpen(false)}>{t('common.close')}</Button>,
                 lastUpdateInfo?.hasUpdate && !isLatestUpdateDownloaded && !isBackgroundProgressForLatestUpdate ? (
-                    <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={() => downloadUpdate(lastUpdateInfo, false)}>{t('app.about.action.download_update')}</Button>
+                <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={() => downloadUpdate(lastUpdateInfo, false)}>{t('app.about.action.download_update')}</Button>
+                ) : null,
+                isLatestUpdateDownloaded ? (
+                    <Button key="open-install-directory" onClick={openDownloadedUpdateDirectory}>
+                        {t('app.about.action.open_install_directory')}
+                    </Button>
                 ) : null,
                 isLatestUpdateDownloaded ? (
                     <Button key="install-direct" type="primary" icon={<DownloadOutlined />} onClick={handleInstallFromProgress}>
@@ -6006,6 +6012,9 @@ function App() {
                   </Button>
               ] : (updateDownloadProgress.status === 'done' ? [
                   <Button key="close" onClick={hideUpdateDownloadProgress}>{t('common.close')}</Button>,
+                  <Button key="open-install-directory" onClick={openDownloadedUpdateDirectory}>
+                      {t('app.about.action.open_install_directory')}
+                  </Button>,
                   <Button key="install" type="primary" onClick={handleInstallFromProgress}>
                       {t('app.about.action.install_update')}
                   </Button>

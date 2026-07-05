@@ -340,6 +340,87 @@ func TestDownloadUpdateUsesCurrentLanguageForBackendMessage(t *testing.T) {
 	}
 }
 
+func TestEnsureWindowsUpdateTargetWritableAcceptsWritableDirectory(t *testing.T) {
+	if stdRuntime.GOOS != "windows" {
+		t.Skip("windows-only update target validation")
+	}
+
+	target := filepath.Join(t.TempDir(), "GoNavi.exe")
+	if err := ensureWindowsUpdateTargetWritable(target); err != nil {
+		t.Fatalf("ensureWindowsUpdateTargetWritable returned error: %v", err)
+	}
+}
+
+func TestInstallUpdateAndRestartFailsBeforeLaunchWhenWindowsTargetDirIsNotWritable(t *testing.T) {
+	if stdRuntime.GOOS != "windows" {
+		t.Skip("windows-only update target validation")
+	}
+
+	stagedDir := t.TempDir()
+	assetPath := filepath.Join(stagedDir, "GoNavi-0.8.2-Windows-Amd64.exe")
+	if err := os.WriteFile(assetPath, []byte("12345678"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	app := NewApp()
+	app.updateState.staged = &stagedUpdate{
+		Channel:   updateChannelLatest,
+		Version:   "0.8.2",
+		AssetName: filepath.Base(assetPath),
+		FilePath:  assetPath,
+		StagedDir: stagedDir,
+	}
+
+	originalResolveInstallTarget := updateResolveInstallTarget
+	originalLaunchInstallScript := updateLaunchInstallScript
+	t.Cleanup(func() {
+		updateResolveInstallTarget = originalResolveInstallTarget
+		updateLaunchInstallScript = originalLaunchInstallScript
+	})
+
+	updateResolveInstallTarget = func() string {
+		return filepath.Join(stagedDir, "missing", "GoNavi.exe")
+	}
+
+	launched := false
+	updateLaunchInstallScript = func(*stagedUpdate) error {
+		launched = true
+		return nil
+	}
+
+	result := app.InstallUpdateAndRestart()
+	if result.Success {
+		t.Fatalf("expected InstallUpdateAndRestart to fail, got %#v", result)
+	}
+	if launched {
+		t.Fatal("expected launch script to be skipped when install target is not writable")
+	}
+	if !strings.Contains(result.Message, "not writable") {
+		t.Fatalf("expected install target write failure in message, got %q", result.Message)
+	}
+}
+
+func TestResolveUpdateWorkspaceDirPrefersCurrentInstallDirectory(t *testing.T) {
+	if stdRuntime.GOOS == "darwin" {
+		t.Skip("macOS keeps update downloads on Desktop")
+	}
+
+	targetDir := t.TempDir()
+	originalResolveInstallTarget := updateResolveInstallTarget
+	t.Cleanup(func() {
+		updateResolveInstallTarget = originalResolveInstallTarget
+	})
+
+	updateResolveInstallTarget = func() string {
+		return filepath.Join(targetDir, "GoNavi.exe")
+	}
+
+	got := resolveUpdateWorkspaceDir("0.8.2")
+	if got != targetDir {
+		t.Fatalf("expected workspace dir %q, got %q", targetDir, got)
+	}
+}
+
 func TestExpectedAssetNameForExecutableUsesLinuxWebKit41Suffix(t *testing.T) {
 	assetName, err := expectedAssetNameForExecutable(
 		"linux",

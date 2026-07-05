@@ -34,10 +34,12 @@ const (
 )
 
 var (
-	updateFetchLatestRelease = fetchLatestRelease
-	updateFetchDevRelease    = fetchDevRelease
-	updateFetchReleaseSHA256 = fetchReleaseSHA256
-	updateLogCheckError      = func(err error) { logger.Error(err, "检查更新失败") }
+	updateFetchLatestRelease   = fetchLatestRelease
+	updateFetchDevRelease      = fetchDevRelease
+	updateFetchReleaseSHA256   = fetchReleaseSHA256
+	updateLogCheckError        = func(err error) { logger.Error(err, "检查更新失败") }
+	updateResolveInstallTarget = resolveUpdateInstallTarget
+	updateLaunchInstallScript  = launchUpdateScript
 )
 
 type updateState struct {
@@ -244,7 +246,18 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.no_downloaded_package", nil)}
 	}
 
-	if err := launchUpdateScript(staged); err != nil {
+	if stdRuntime.GOOS == "windows" {
+		if err := ensureWindowsUpdateTargetWritable(updateResolveInstallTarget()); err != nil {
+			return connection.QueryResult{
+				Success: false,
+				Message: a.appText("app.update.backend.message.install_launch_failed", map[string]any{
+					"detail": a.localizedUpdateError(err),
+				}),
+			}
+		}
+	}
+
+	if err := updateLaunchInstallScript(staged); err != nil {
 		logger.Error(err, "启动更新脚本失败")
 		detail := a.localizedUpdateError(err)
 		msg := a.appText("app.update.backend.message.install_launch_failed", map[string]any{"detail": detail})
@@ -956,8 +969,7 @@ func resolveLegacyUpdateWorkspaceDir() string {
 }
 
 func resolveUpdateWorkspaceDir(version string) string {
-	// 默认使用系统临时目录作为更新工作区，避免目录权限与锁冲突。
-	// macOS 用户要求更新包默认保存在桌面：Desktop/GoNavi-<version>/。
+	// macOS 更新包继续保存在桌面版本目录根级，方便用户直接处理 DMG。
 	if stdRuntime.GOOS == "darwin" {
 		homeDir, err := os.UserHomeDir()
 		if err == nil && strings.TrimSpace(homeDir) != "" {
@@ -967,6 +979,16 @@ func resolveUpdateWorkspaceDir(version string) string {
 			}
 		}
 	}
+
+	// Windows / Linux 更新包优先落到当前应用运行目录，方便用户直接找到下载产物。
+	targetPath := strings.TrimSpace(updateResolveInstallTarget())
+	if targetPath != "" {
+		targetDir := strings.TrimSpace(filepath.Dir(targetPath))
+		if targetDir != "" && targetDir != "." {
+			return targetDir
+		}
+	}
+
 	return resolveLegacyUpdateWorkspaceDir()
 }
 
@@ -1092,6 +1114,33 @@ func resolveUpdateInstallTarget() string {
 		return resolveMacUpdateTarget(exePath)
 	}
 	return exePath
+}
+
+func ensureWindowsUpdateTargetWritable(targetExe string) error {
+	targetExe = strings.TrimSpace(targetExe)
+	targetDir := strings.TrimSpace(filepath.Dir(targetExe))
+	if targetExe == "" || targetDir == "" || targetDir == "." {
+		return localizedUpdateError{key: "app.update.backend.error.install_target_unresolved"}
+	}
+
+	probePath := filepath.Join(targetDir, fmt.Sprintf(".gonavi-update-write-probe-%d.tmp", time.Now().UnixNano()))
+	file, err := os.OpenFile(probePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return localizedUpdateError{
+			key: "app.update.backend.error.install_target_not_writable",
+			params: map[string]any{
+				"path":   targetDir,
+				"detail": err.Error(),
+			},
+		}
+	}
+	if closeErr := file.Close(); closeErr != nil {
+		logger.Warnf("关闭 Windows 更新写入探针失败：%v", closeErr)
+	}
+	if removeErr := os.Remove(probePath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		logger.Warnf("清理 Windows 更新写入探针失败：%v", removeErr)
+	}
+	return nil
 }
 
 func (a *App) emitUpdateDownloadProgress(status string, downloaded, total int64, message string) {

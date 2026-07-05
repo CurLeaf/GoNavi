@@ -2877,6 +2877,8 @@
   "app.update.backend.error.sha256_missing_current_package": "SHA256SUMS enthält kein Updatepaket für die aktuelle Plattform",
   "app.update.backend.error.sha256sums_download_failed": "SHA256SUMS konnte nicht heruntergeladen werden: HTTP {{status}}",
   "app.update.backend.error.sha256sums_missing": "Release stellt keine SHA256SUMS bereit",
+  "app.update.backend.error.install_target_not_writable": "Das aktuelle Installationsverzeichnis ist nicht beschreibbar: {{path}} ({{detail}})",
+  "app.update.backend.error.install_target_unresolved": "Das aktuelle Installationsverzeichnis konnte nicht ermittelt werden",
   "app.update.backend.error.update_package_not_found": "Updatepaket nicht gefunden: {{name}}",
   "app.update.backend.message.app_directory_unavailable": "Auf das App-Verzeichnis kann nicht zugegriffen werden: {{path}}",
   "app.update.backend.message.app_directory_unresolved_download": "Das aktuelle App-Verzeichnis kann nicht bestimmt werden, daher kann das Update nicht heruntergeladen werden",
