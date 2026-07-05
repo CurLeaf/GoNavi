@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG GO_IMAGE=golang:1.24-bookworm
+ARG GO_IMAGE=golang:1.25-bookworm
 ARG NODE_IMAGE=node:20-bookworm
 
 FROM ${NODE_IMAGE} AS node
@@ -11,9 +11,15 @@ ARG WEBKIT_API=4.0
 ARG WAILS_VERSION=v2.11.0
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PATH=/root/go/bin:${PATH}
+ENV PATH=/root/go/bin:/usr/local/go/bin:${PATH}
 
-COPY --from=node /usr/local/ /usr/local/
+# Copy only Node.js runtime assets so the Go toolchain from the base image
+# stays intact for smoke tests and interactive build shells.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/bin/npm /usr/local/bin/npm
+COPY --from=node /usr/local/bin/npx /usr/local/bin/npx
+COPY --from=node /usr/local/bin/corepack /usr/local/bin/corepack
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
