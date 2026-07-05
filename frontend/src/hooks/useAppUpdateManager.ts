@@ -40,7 +40,6 @@ type UpdateDownloadResultData = {
 };
 
 type UseAppUpdateManagerOptions = {
-  isMacRuntime: boolean;
   runtimeBuildType: string;
   t: Translator;
 };
@@ -48,6 +47,7 @@ type UseAppUpdateManagerOptions = {
 const createEmptyDownloadProgress = () => ({
   open: false,
   version: '',
+  key: '',
   status: 'idle' as 'idle' | 'start' | 'downloading' | 'done' | 'error',
   percent: 0,
   downloaded: 0,
@@ -64,7 +64,6 @@ const buildUpdateKey = (info: Pick<UpdateInfo, 'channel' | 'latestVersion'> | nu
     : '';
 
 export const useAppUpdateManager = ({
-  isMacRuntime: _isMacRuntime,
   runtimeBuildType,
   t,
 }: UseAppUpdateManagerOptions) => {
@@ -148,7 +147,8 @@ export const useAppUpdateManager = ({
     updateDownloadMetaRef.current = null;
     setUpdateDownloadProgress({
       open: true,
-      version: targetKey,
+      version: info.latestVersion,
+      key: targetKey,
       status: 'start',
       percent: 0,
       downloaded: 0,
@@ -219,7 +219,7 @@ export const useAppUpdateManager = ({
   );
   const isBackgroundProgressForLatestUpdate = Boolean(lastUpdateInfo?.hasUpdate)
     && Boolean(lastUpdateKey)
-    && updateDownloadProgress.version === lastUpdateKey
+    && updateDownloadProgress.key === lastUpdateKey
     && (updateDownloadProgress.status === 'start'
       || updateDownloadProgress.status === 'downloading'
       || updateDownloadProgress.status === 'done'
@@ -292,8 +292,9 @@ export const useAppUpdateManager = ({
           const total = info.assetSize || prev.total || 0;
           return {
             ...prev,
-            open: prev.open && prev.version === infoKey,
-            version: infoKey,
+            open: prev.open && prev.key === infoKey,
+            version: info.latestVersion,
+            key: infoKey,
             status: 'done',
             percent: 100,
             downloaded: total,
@@ -317,7 +318,8 @@ export const useAppUpdateManager = ({
           return {
             ...prev,
             open: false,
-            version: infoKey,
+            version: info.latestVersion,
+            key: infoKey,
             status: 'idle',
             percent: 0,
             downloaded: 0,
@@ -485,6 +487,7 @@ export const useAppUpdateManager = ({
         setUpdateDownloadProgress((prev) => ({
           open: prev.open,
           version: prev.version,
+          key: prev.key,
           status: nextStatus,
           percent,
           downloaded,

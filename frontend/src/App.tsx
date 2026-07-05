@@ -1714,7 +1714,6 @@ function App() {
       updateChannel,
       updateDownloadProgress,
   } = useAppUpdateManager({
-      isMacRuntime,
       runtimeBuildType,
       t,
   });

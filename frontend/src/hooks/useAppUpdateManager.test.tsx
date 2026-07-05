@@ -54,10 +54,9 @@ describe('useAppUpdateManager', () => {
     return key;
   };
 
-  const renderHook = (isMacRuntime: boolean) => {
+  const renderHook = () => {
     const Harness = () => {
       hook = useAppUpdateManager({
-        isMacRuntime,
         runtimeBuildType: 'release',
         t,
       });
@@ -113,7 +112,7 @@ describe('useAppUpdateManager', () => {
     backendApp.InstallUpdateAndRestart.mockResolvedValue({ success: true });
     backendApp.OpenDownloadedUpdateDirectory.mockResolvedValue({ success: true });
 
-    renderHook(true);
+    renderHook();
 
     await act(async () => {
       await hook?.checkForUpdates(false);
@@ -146,7 +145,7 @@ describe('useAppUpdateManager', () => {
     });
     backendApp.OpenDownloadedUpdateDirectory.mockResolvedValue({ success: true });
 
-    renderHook(true);
+    renderHook();
 
     await act(async () => {
       await hook?.checkForUpdates(false);
@@ -173,7 +172,7 @@ describe('useAppUpdateManager', () => {
       },
     });
 
-    renderHook(false);
+    renderHook();
 
     await act(async () => {
       await hook?.changeUpdateChannel('dev');
