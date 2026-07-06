@@ -99,6 +99,12 @@ type stagedUpdate struct {
 	InstallLogPath string
 }
 
+type updatePathCandidate struct {
+	workspaceDir string
+	stagedDir    string
+	assetPath    string
+}
+
 type githubRelease struct {
 	TagName    string        `json:"tag_name"`
 	Name       string        `json:"name"`
@@ -1026,6 +1032,88 @@ func resolveUpdateStagedDirForPlatform(goos string, workspaceDir string, channel
 	return filepath.Join(baseDir, buildUpdateStageDirNameForPlatform(goos, channel, version))
 }
 
+func shouldReuseUpdateAssetFromStagedDirForPlatform(goos string, assetName string) bool {
+	return !(strings.EqualFold(strings.TrimSpace(goos), "windows") &&
+		shouldWindowsUpdateLaunchDownloadedAssetDirectly(assetName))
+}
+
+func normalizeUpdatePathForPrefixCheck(path string) string {
+	normalized := strings.ReplaceAll(strings.TrimSpace(path), "\\", "/")
+	normalized = filepath.ToSlash(filepath.Clean(normalized))
+	if normalized == "." {
+		return ""
+	}
+	return strings.TrimRight(normalized, "/")
+}
+
+func isUpdateAssetPathInsideStagedDir(filePath string, stagedDir string) bool {
+	normalizedFilePath := normalizeUpdatePathForPrefixCheck(filePath)
+	normalizedStagedDir := normalizeUpdatePathForPrefixCheck(stagedDir)
+	if normalizedFilePath == "" || normalizedStagedDir == "" {
+		return false
+	}
+	return normalizedFilePath == normalizedStagedDir || strings.HasPrefix(normalizedFilePath, normalizedStagedDir+"/")
+}
+
+func buildReusableUpdatePathCandidatesForPlatform(goos string, preferredWorkspaceDir string, legacyWorkspaceDir string, channel string, version string, assetName string) []updatePathCandidate {
+	preferredWorkspaceDir = strings.TrimSpace(preferredWorkspaceDir)
+	legacyWorkspaceDir = strings.TrimSpace(legacyWorkspaceDir)
+	assetName = strings.TrimSpace(assetName)
+	preferredStagedDir := resolveUpdateStagedDirForPlatform(goos, preferredWorkspaceDir, channel, version)
+	stagedDirNames := []string{
+		buildUpdateStageDirNameForPlatform(goos, channel, version),
+		fmt.Sprintf(".gonavi-update-%s-%s", strings.TrimSpace(strings.ToLower(goos)), version),
+	}
+	workspaceCandidates := []string{preferredWorkspaceDir, legacyWorkspaceDir}
+	stageBaseCandidates := []string{preferredWorkspaceDir, legacyWorkspaceDir}
+	seenWorkspace := make(map[string]struct{}, len(workspaceCandidates))
+	seenStageBase := make(map[string]struct{}, len(stageBaseCandidates))
+	candidates := make([]updatePathCandidate, 0, 8)
+
+	for _, workspaceDir := range workspaceCandidates {
+		workspaceDir = strings.TrimSpace(workspaceDir)
+		if workspaceDir == "" {
+			continue
+		}
+		if _, exists := seenWorkspace[workspaceDir]; exists {
+			continue
+		}
+		seenWorkspace[workspaceDir] = struct{}{}
+		if shouldStoreUpdateAssetInWorkspaceRoot(goos) {
+			candidates = append(candidates, updatePathCandidate{
+				workspaceDir: workspaceDir,
+				stagedDir:    preferredStagedDir,
+				assetPath:    filepath.Join(workspaceDir, assetName),
+			})
+		}
+	}
+
+	if !shouldReuseUpdateAssetFromStagedDirForPlatform(goos, assetName) {
+		return candidates
+	}
+
+	for _, stageBaseDir := range stageBaseCandidates {
+		stageBaseDir = strings.TrimSpace(stageBaseDir)
+		if stageBaseDir == "" {
+			continue
+		}
+		if _, exists := seenStageBase[stageBaseDir]; exists {
+			continue
+		}
+		seenStageBase[stageBaseDir] = struct{}{}
+		for _, stagedDirName := range stagedDirNames {
+			stagedDir := filepath.Join(stageBaseDir, stagedDirName)
+			candidates = append(candidates, updatePathCandidate{
+				workspaceDir: stageBaseDir,
+				stagedDir:    stagedDir,
+				assetPath:    filepath.Join(stagedDir, assetName),
+			})
+		}
+	}
+
+	return candidates
+}
+
 func isExistingDownloadedAsset(filePath string, expectedSize int64) bool {
 	path := strings.TrimSpace(filePath)
 	if path == "" {
@@ -1042,6 +1130,16 @@ func isExistingDownloadedAsset(filePath string, expectedSize int64) bool {
 }
 
 func resolveReusableStagedUpdate(info UpdateInfo, current *stagedUpdate) *stagedUpdate {
+	return resolveReusableStagedUpdateForPlatform(
+		stdRuntime.GOOS,
+		resolveUpdateWorkspaceDir(strings.TrimSpace(info.LatestVersion)),
+		resolveLegacyUpdateWorkspaceDir(),
+		info,
+		current,
+	)
+}
+
+func resolveReusableStagedUpdateForPlatform(goos string, preferredWorkspaceDir string, legacyWorkspaceDir string, info UpdateInfo, current *stagedUpdate) *stagedUpdate {
 	channel, err := normalizeUpdateChannel(info.Channel)
 	if err != nil {
 		channel = updateChannelLatest
@@ -1051,6 +1149,7 @@ func resolveReusableStagedUpdate(info UpdateInfo, current *stagedUpdate) *staged
 	if version == "" || assetName == "" {
 		return nil
 	}
+	allowStagedDirReuse := shouldReuseUpdateAssetFromStagedDirForPlatform(goos, assetName)
 
 	if current != nil {
 		currentChannel := current.Channel
@@ -1060,68 +1159,27 @@ func resolveReusableStagedUpdate(info UpdateInfo, current *stagedUpdate) *staged
 		if currentChannel == channel && strings.TrimSpace(current.Version) == version {
 			currentPath := strings.TrimSpace(current.FilePath)
 			if isExistingDownloadedAsset(currentPath, info.AssetSize) {
-				if strings.TrimSpace(current.InstallLogPath) == "" {
-					current.InstallLogPath = buildUpdateInstallLogPath(filepath.Dir(currentPath))
+				if !allowStagedDirReuse && isUpdateAssetPathInsideStagedDir(currentPath, current.StagedDir) {
+					current = nil
+				} else {
+					if strings.TrimSpace(current.InstallLogPath) == "" {
+						current.InstallLogPath = buildUpdateInstallLogPath(filepath.Dir(currentPath))
+					}
+					current.Channel = channel
+					return current
 				}
-				current.Channel = channel
-				return current
 			}
 		}
 	}
 
-	type pathCandidate struct {
-		workspaceDir string
-		stagedDir    string
-		assetPath    string
-	}
-	preferredWorkspaceDir := resolveUpdateWorkspaceDir(version)
-	preferredStagedDir := resolveUpdateStagedDir(preferredWorkspaceDir, string(channel), version)
-	legacyWorkspaceDir := resolveLegacyUpdateWorkspaceDir()
-	stagedDirNames := []string{
-		buildUpdateStageDirName(string(channel), version),
-		fmt.Sprintf(".gonavi-update-%s-%s", stdRuntime.GOOS, version),
-	}
-	workspaceCandidates := []string{preferredWorkspaceDir, legacyWorkspaceDir}
-	stageBaseCandidates := []string{preferredWorkspaceDir, legacyWorkspaceDir}
-	seenWorkspace := make(map[string]struct{}, len(workspaceCandidates))
-	seenStageBase := make(map[string]struct{}, len(stageBaseCandidates))
-	candidates := make([]pathCandidate, 0, 8)
-	for _, workspaceDir := range workspaceCandidates {
-		workspaceDir = strings.TrimSpace(workspaceDir)
-		if workspaceDir == "" {
-			continue
-		}
-		if _, exists := seenWorkspace[workspaceDir]; exists {
-			continue
-		}
-		seenWorkspace[workspaceDir] = struct{}{}
-		if shouldStoreUpdateAssetInWorkspaceRoot(stdRuntime.GOOS) {
-			candidates = append(candidates, pathCandidate{
-				workspaceDir: workspaceDir,
-				stagedDir:    preferredStagedDir,
-				assetPath:    filepath.Join(workspaceDir, assetName),
-			})
-		}
-	}
-	for _, stageBaseDir := range stageBaseCandidates {
-		stageBaseDir = strings.TrimSpace(stageBaseDir)
-		if stageBaseDir == "" {
-			continue
-		}
-		if _, exists := seenStageBase[stageBaseDir]; exists {
-			continue
-		}
-		seenStageBase[stageBaseDir] = struct{}{}
-		for _, stagedDirName := range stagedDirNames {
-			stagedDir := filepath.Join(stageBaseDir, stagedDirName)
-			candidates = append(candidates, pathCandidate{
-				workspaceDir: stageBaseDir,
-				stagedDir:    stagedDir,
-				assetPath:    filepath.Join(stagedDir, assetName),
-			})
-		}
-	}
-
+	candidates := buildReusableUpdatePathCandidatesForPlatform(
+		goos,
+		preferredWorkspaceDir,
+		legacyWorkspaceDir,
+		string(channel),
+		version,
+		assetName,
+	)
 	for _, candidate := range candidates {
 		if !isExistingDownloadedAsset(candidate.assetPath, info.AssetSize) {
 			continue

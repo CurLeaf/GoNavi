@@ -327,6 +327,104 @@ func TestResolveReusableStagedUpdateDoesNotReuseDifferentChannelPackage(t *testi
 	}
 }
 
+func TestResolveReusableStagedUpdateForPlatformSkipsLegacyWindowsExeStagedAsset(t *testing.T) {
+	preferredWorkspaceDir := t.TempDir()
+	legacyWorkspaceDir := t.TempDir()
+	info := UpdateInfo{
+		Channel:       string(updateChannelLatest),
+		LatestVersion: "0.8.4",
+		AssetName:     "GoNavi-0.8.4-Windows-Amd64.exe",
+		AssetSize:     8,
+	}
+
+	legacyStagedDir := filepath.Join(
+		legacyWorkspaceDir,
+		buildUpdateStageDirNameForPlatform("windows", info.Channel, info.LatestVersion),
+	)
+	if err := os.MkdirAll(legacyStagedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	legacyAssetPath := filepath.Join(legacyStagedDir, info.AssetName)
+	if err := os.WriteFile(legacyAssetPath, []byte("12345678"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	reused := resolveReusableStagedUpdateForPlatform("windows", preferredWorkspaceDir, legacyWorkspaceDir, info, nil)
+	if reused != nil {
+		t.Fatalf("expected legacy staged windows exe to be ignored, got %#v", reused)
+	}
+}
+
+func TestResolveReusableStagedUpdateForPlatformPrefersWindowsExeInInstallDirectory(t *testing.T) {
+	preferredWorkspaceDir := t.TempDir()
+	legacyWorkspaceDir := t.TempDir()
+	info := UpdateInfo{
+		Channel:       string(updateChannelLatest),
+		LatestVersion: "0.8.4",
+		AssetName:     "GoNavi-0.8.4-Windows-Amd64.exe",
+		AssetSize:     8,
+	}
+
+	preferredAssetPath := filepath.Join(preferredWorkspaceDir, info.AssetName)
+	if err := os.WriteFile(preferredAssetPath, []byte("12345678"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	legacyStagedDir := filepath.Join(
+		legacyWorkspaceDir,
+		buildUpdateStageDirNameForPlatform("windows", info.Channel, info.LatestVersion),
+	)
+	if err := os.MkdirAll(legacyStagedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	legacyAssetPath := filepath.Join(legacyStagedDir, info.AssetName)
+	if err := os.WriteFile(legacyAssetPath, []byte("87654321"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	reused := resolveReusableStagedUpdateForPlatform("windows", preferredWorkspaceDir, legacyWorkspaceDir, info, nil)
+	if reused == nil {
+		t.Fatal("expected install-directory windows exe to be reused")
+	}
+	if reused.FilePath != preferredAssetPath {
+		t.Fatalf("expected preferred install-directory asset %q, got %q", preferredAssetPath, reused.FilePath)
+	}
+}
+
+func TestResolveReusableStagedUpdateForPlatformDoesNotReuseCurrentWindowsExeInsideStagedDir(t *testing.T) {
+	preferredWorkspaceDir := t.TempDir()
+	legacyWorkspaceDir := t.TempDir()
+	info := UpdateInfo{
+		Channel:       string(updateChannelLatest),
+		LatestVersion: "0.8.4",
+		AssetName:     "GoNavi-0.8.4-Windows-Amd64.exe",
+		AssetSize:     8,
+	}
+
+	legacyStagedDir := filepath.Join(
+		legacyWorkspaceDir,
+		buildUpdateStageDirNameForPlatform("windows", info.Channel, info.LatestVersion),
+	)
+	if err := os.MkdirAll(legacyStagedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	legacyAssetPath := filepath.Join(legacyStagedDir, info.AssetName)
+	if err := os.WriteFile(legacyAssetPath, []byte("12345678"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	reused := resolveReusableStagedUpdateForPlatform("windows", preferredWorkspaceDir, legacyWorkspaceDir, info, &stagedUpdate{
+		Channel:   updateChannelLatest,
+		Version:   info.LatestVersion,
+		AssetName: info.AssetName,
+		FilePath:  legacyAssetPath,
+		StagedDir: legacyStagedDir,
+	})
+	if reused != nil {
+		t.Fatalf("expected current staged windows exe inside staging dir to be ignored, got %#v", reused)
+	}
+}
+
 func TestDownloadUpdateUsesCurrentLanguageForBackendMessage(t *testing.T) {
 	app := NewApp()
 	app.SetLanguage("en-US")
