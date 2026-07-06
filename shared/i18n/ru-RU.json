@@ -4739,7 +4739,7 @@
   "db.backend.message.mongo_members_discovered": "Обнаружено участников: {{count}}",
   "db.backend.message.mongo_primary_credentials_label": "учетные данные primary",
   "db.backend.message.mongo_replica_credentials_label": "учетные данные реплики",
-  "db.backend.message.multi_statement_sequential_fallback": "Текущий источник данных ({{dbType}}) не поддерживает нативное выполнение нескольких операторов. Запрос был автоматически разделен на {{count}} операторов и выполнен последовательно.",
+  "db.backend.message.multi_statement_sequential_fallback": "Для этого выполнения текущий источник данных ({{dbType}}) не использовал нативный путь результатов для нескольких операторов. Запрос был автоматически разделен на {{count}} операторов и выполнен последовательно.",
   "db.backend.message.procedure_dropped": "Хранимая процедура удалена",
   "db.backend.message.release_success": "Подключение освобождено",
   "db.backend.message.schema_created": "Схема создана",

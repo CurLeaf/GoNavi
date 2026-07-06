@@ -529,7 +529,7 @@ func TestMethodsDBQueryMultiMessagesUseLocalizedText(t *testing.T) {
 	rawMessages := []string{
 		`fmt.Sprintf("第 %d 条语句执行失败: %v", idx+1, err)`,
 		`fmt.Sprintf("（前 %d 条已执行成功）", len(resultSets))`,
-		`fmt.Sprintf("当前数据源（%s）不支持原生多语句执行，已自动拆分为 %d 条语句逐条执行。", runConfig.Type, len(statements))`,
+		`fmt.Sprintf("当前数据源（%s）本次未走原生多语句结果路径，已自动拆分为 %d 条语句逐条执行。", runConfig.Type, len(statements))`,
 	}
 	keys := []string{
 		"db.backend.error.multi_statement_execution_failed",
@@ -629,7 +629,7 @@ func TestMethodsDBQueryMultiSequentialFallbackUsesEnglishMessages(t *testing.T) 
 	if !result.Success {
 		t.Fatalf("expected DBQueryMulti success, got failure: %+v", result)
 	}
-	if result.Message != "The current data source (mysql) does not support native multi-statement execution. It was automatically split into 2 statements and executed sequentially." {
+	if result.Message != "The current data source (mysql) did not use the native multi-statement result path for this execution. It was automatically split into 2 statements and executed sequentially." {
 		t.Fatalf("expected localized sequential fallback message, got %q", result.Message)
 	}
 }

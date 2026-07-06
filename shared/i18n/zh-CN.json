@@ -4739,7 +4739,7 @@
   "db.backend.message.mongo_members_discovered": "发现 {{count}} 个成员",
   "db.backend.message.mongo_primary_credentials_label": "主库凭据",
   "db.backend.message.mongo_replica_credentials_label": "从库凭据",
-  "db.backend.message.multi_statement_sequential_fallback": "当前数据源（{{dbType}}）不支持原生多语句执行，已自动拆分为 {{count}} 条语句逐条执行。",
+  "db.backend.message.multi_statement_sequential_fallback": "当前数据源（{{dbType}}）本次未走原生多语句结果路径，已自动拆分为 {{count}} 条语句逐条执行。",
   "db.backend.message.procedure_dropped": "存储过程删除成功",
   "db.backend.message.release_success": "连接已释放",
   "db.backend.message.schema_created": "模式创建成功",

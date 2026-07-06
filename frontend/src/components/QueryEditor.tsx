@@ -6361,7 +6361,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 if (plan.warning) message.warning(plan.warning);
             });
 
-            // 后端附带的提示信息（如数据源不支持原生多语句执行的回退提示）
+            // 后端附带的提示信息（如本次改走逐条执行的多语句回退提示）
             if (res.message) {
                 message.info(res.message);
             }

@@ -4739,7 +4739,7 @@
   "db.backend.message.mongo_members_discovered": "{{count}} Mitglieder gefunden",
   "db.backend.message.mongo_primary_credentials_label": "Primär-Anmeldedaten",
   "db.backend.message.mongo_replica_credentials_label": "Replikat-Anmeldedaten",
-  "db.backend.message.multi_statement_sequential_fallback": "Die aktuelle Datenquelle ({{dbType}}) unterstützt keine native Ausführung mehrerer Anweisungen. Sie wurde automatisch in {{count}} Anweisungen aufgeteilt und nacheinander ausgeführt.",
+  "db.backend.message.multi_statement_sequential_fallback": "Bei dieser Ausführung hat die aktuelle Datenquelle ({{dbType}}) nicht den nativen Mehrfach-Statement-Ergebnispfad verwendet. Sie wurde automatisch in {{count}} Anweisungen aufgeteilt und nacheinander ausgeführt.",
   "db.backend.message.procedure_dropped": "Gespeicherte Prozedur gelöscht",
   "db.backend.message.release_success": "Verbindung freigegeben",
   "db.backend.message.schema_created": "Schema erstellt",

@@ -4739,7 +4739,7 @@
   "db.backend.message.mongo_members_discovered": "發現 {{count}} 個成員",
   "db.backend.message.mongo_primary_credentials_label": "主庫憑證",
   "db.backend.message.mongo_replica_credentials_label": "從庫憑證",
-  "db.backend.message.multi_statement_sequential_fallback": "目前資料來源（{{dbType}}）不支援原生多語句執行，已自動拆分為 {{count}} 條語句逐條執行。",
+  "db.backend.message.multi_statement_sequential_fallback": "目前資料來源（{{dbType}}）本次未走原生多語句結果路徑，已自動拆分為 {{count}} 條語句逐條執行。",
   "db.backend.message.procedure_dropped": "預存程序刪除成功",
   "db.backend.message.release_success": "連線已釋放",
   "db.backend.message.schema_created": "模式建立成功",

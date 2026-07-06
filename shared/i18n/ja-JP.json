@@ -4739,7 +4739,7 @@
   "db.backend.message.mongo_members_discovered": "{{count}} 件のメンバーを検出しました",
   "db.backend.message.mongo_primary_credentials_label": "プライマリ認証情報",
   "db.backend.message.mongo_replica_credentials_label": "レプリカ認証情報",
-  "db.backend.message.multi_statement_sequential_fallback": "現在のデータソース（{{dbType}}）はネイティブな複数ステートメント実行をサポートしていないため、{{count}} 件のステートメントに自動分割して順番に実行しました。",
+  "db.backend.message.multi_statement_sequential_fallback": "現在のデータソース（{{dbType}}）では今回の実行でネイティブな複数ステートメント結果パスを使用せず、{{count}} 件のステートメントに自動分割して順番に実行しました。",
   "db.backend.message.procedure_dropped": "ストアドプロシージャを削除しました",
   "db.backend.message.release_success": "接続を解放しました",
   "db.backend.message.schema_created": "スキーマを作成しました",

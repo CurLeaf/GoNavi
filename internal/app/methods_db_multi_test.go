@@ -1616,7 +1616,7 @@ func TestDBQueryMultiRunsSQLServerStatisticsBatchNatively(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
 	}
-	if strings.Contains(result.Message, "不支持原生多语句执行") {
+	if strings.Contains(result.Message, "逐条执行") {
 		t.Fatalf("expected SQL Server statistics batch to avoid sequential fallback warning, got %q", result.Message)
 	}
 	if fakeDB.multiCalls != 1 {
@@ -1936,6 +1936,73 @@ func TestDBQueryMultiPrefersPlainQueryForDamengReadResults(t *testing.T) {
 	}
 	if got := resultSets[0].Rows[0]["NAME"]; got != "timer_a" {
 		t.Fatalf("expected plain query SELECT result NAME=timer_a, got %#v", got)
+	}
+}
+
+func TestDBQueryMultiPrefersPlainQueryForOceanBaseOracleReadResults(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := "SELECT * FROM EINP_BASICINFO.AC01"
+	nativeEmptyRowsResult := []connection.ResultSetData{{
+		Rows:    []map[string]interface{}{},
+		Columns: []string{"AAC001", "AAC003"},
+	}}
+	baseDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {
+				{"AAC001": 1001, "AAC003": "张三"},
+			},
+		},
+		fieldMap: map[string][]string{
+			query: {"AAC001", "AAC003"},
+		},
+		multiResult: map[string][]connection.ResultSetData{
+			query: nativeEmptyRowsResult,
+		},
+		queryErr: map[string]error{},
+	}
+	fakeDB := &fakeNativeMultiResultDB{fakeBatchWriteDB: baseDB}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{
+		Type:              "oceanbase",
+		Host:              "127.0.0.1",
+		Port:              2881,
+		User:              "SBDEVREAD",
+		OceanBaseProtocol: "oracle",
+	}
+
+	result := app.DBQueryMulti(config, "SBDEV", query, "oceanbase-oracle-plain-query-result-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.multiCalls != 0 {
+		t.Fatalf("expected OceanBase Oracle read query to skip top-level native multi-result path, got %d calls", fakeDB.multiCalls)
+	}
+	if baseDB.session == nil {
+		t.Fatal("expected DBQueryMulti to open a pinned session for OceanBase Oracle read query")
+	}
+	if baseDB.session.queryCalls != 1 {
+		t.Fatalf("expected OceanBase Oracle read query to use plain session query once, got %d calls", baseDB.session.queryCalls)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 1 {
+		t.Fatalf("expected one result set, got %#v", resultSets)
+	}
+	if !reflect.DeepEqual(resultSets[0].Columns, []string{"AAC001", "AAC003"}) {
+		t.Fatalf("expected plain query columns, got %#v", resultSets[0].Columns)
+	}
+	if got := resultSets[0].Rows[0]["AAC003"]; got != "张三" {
+		t.Fatalf("expected plain query SELECT result AAC003=张三, got %#v", got)
 	}
 }
 
@@ -2369,5 +2436,50 @@ func TestExecuteManagedSQLTransactionStatementsPrefersPlainQueryForDamengReadRes
 	}
 	if got := results[0].Rows[0]["NAME"]; got != "timer_a" {
 		t.Fatalf("expected plain query SELECT result NAME=timer_a, got %#v", got)
+	}
+}
+
+func TestExecuteManagedSQLTransactionStatementsPrefersPlainQueryForOceanBaseOracleReadResults(t *testing.T) {
+	query := "SELECT * FROM EINP_BASICINFO.AC01"
+	baseDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {
+				{"AAC001": 1001, "AAC003": "张三"},
+			},
+		},
+		fieldMap: map[string][]string{
+			query: {"AAC001", "AAC003"},
+		},
+		multiResult: map[string][]connection.ResultSetData{
+			query: {{
+				Rows:    []map[string]interface{}{},
+				Columns: []string{"AAC001", "AAC003"},
+			}},
+		},
+		queryErr: map[string]error{},
+	}
+	session := &fakeBatchWriteSession{parent: baseDB}
+
+	results, err := executeManagedSQLTransactionStatements(
+		context.Background(),
+		session,
+		connection.ConnectionConfig{Type: "oceanbase", OceanBaseProtocol: "oracle"},
+		[]string{query},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("expected executeManagedSQLTransactionStatements success, got %v", err)
+	}
+	if session.queryCalls != 1 {
+		t.Fatalf("expected OceanBase Oracle managed read query to use plain query once, got %d calls", session.queryCalls)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one result set, got %#v", results)
+	}
+	if !reflect.DeepEqual(results[0].Columns, []string{"AAC001", "AAC003"}) {
+		t.Fatalf("expected plain query columns, got %#v", results[0].Columns)
+	}
+	if got := results[0].Rows[0]["AAC003"]; got != "张三" {
+		t.Fatalf("expected plain query SELECT result AAC003=张三, got %#v", got)
 	}
 }

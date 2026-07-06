@@ -1420,6 +1420,7 @@ func shouldUseNativeMultiResultBatch(dbType string, statements []string, allRead
 func shouldPreferPlainReadQueryResult(dbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
 	case "postgres", "postgresql",
+		"oracle",
 		"kingbase", "kingbase8", "kingbasees", "kingbasev8",
 		"highgo", "vastbase",
 		"opengauss", "open_gauss", "open-gauss",
