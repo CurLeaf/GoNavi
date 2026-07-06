@@ -246,7 +246,7 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.no_downloaded_package", nil)}
 	}
 
-	if stdRuntime.GOOS == "windows" {
+	if stdRuntime.GOOS == "windows" && !shouldWindowsUpdateLaunchDownloadedAssetDirectly(staged.FilePath) {
 		if err := ensureWindowsUpdateTargetWritable(updateResolveInstallTarget()); err != nil {
 			return connection.QueryResult{
 				Success: false,
@@ -354,7 +354,8 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 	}
 
 	// 使用版本号命名的工作目录，便于识别和调试
-	stagedDir := filepath.Join(workspaceDir, buildUpdateStageDirName(info.Channel, info.LatestVersion))
+	stagedDir := resolveUpdateStagedDir(workspaceDir, info.Channel, info.LatestVersion)
+	stageBaseDir := filepath.Dir(stagedDir)
 	// 清理可能残留的旧目录（上次下载失败后未清理）
 	// Windows 上文件可能被杀毒软件/索引服务占用，需要重试
 	for retry := 0; retry < 5; retry++ {
@@ -366,7 +367,7 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 			time.Sleep(time.Duration(retry+1) * 500 * time.Millisecond)
 		} else {
 			// 最后一次仍然失败，换一个带时间戳的目录名避免冲突
-			stagedDir = filepath.Join(workspaceDir, fmt.Sprintf("%s-%d", buildUpdateStageDirName(info.Channel, info.LatestVersion), time.Now().UnixNano()))
+			stagedDir = filepath.Join(stageBaseDir, fmt.Sprintf("%s-%d", buildUpdateStageDirName(info.Channel, info.LatestVersion), time.Now().UnixNano()))
 		}
 	}
 	if err := os.MkdirAll(stagedDir, 0o755); err != nil {
@@ -375,7 +376,7 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: errMsg}
 	}
 
-	// macOS 下载包放在桌面版本目录根级；其他平台继续放在 staging 目录。
+	// 安装包本体放在工作区根级，staging 目录只保留更新脚本和临时展开物。
 	assetPath := resolveUpdateAssetPath(workspaceDir, stagedDir, info.AssetName)
 	actualHash, err := downloadFileWithHash(info.AssetURL, assetPath, func(downloaded, total int64) {
 		reportTotal := total
@@ -859,13 +860,17 @@ func buildUpdateInstallLogPath(baseDir string) string {
 }
 
 func buildUpdateStageDirName(channel string, version string) string {
+	return buildUpdateStageDirNameForPlatform(stdRuntime.GOOS, channel, version)
+}
+
+func buildUpdateStageDirNameForPlatform(goos string, channel string, version string) string {
 	normalizedChannel, err := normalizeUpdateChannel(channel)
 	if err != nil {
 		normalizedChannel = updateChannelLatest
 	}
 	return fmt.Sprintf(
 		".gonavi-update-%s-%s-%s",
-		stdRuntime.GOOS,
+		strings.TrimSpace(strings.ToLower(goos)),
 		sanitizeVersionForPath(string(normalizedChannel)),
 		sanitizeVersionForPath(version),
 	)
@@ -994,10 +999,31 @@ func resolveUpdateWorkspaceDir(version string) string {
 
 func resolveUpdateAssetPath(workspaceDir string, stagedDir string, assetName string) string {
 	name := strings.TrimSpace(assetName)
-	if stdRuntime.GOOS == "darwin" {
+	if shouldStoreUpdateAssetInWorkspaceRoot(stdRuntime.GOOS) {
 		return filepath.Join(workspaceDir, name)
 	}
 	return filepath.Join(stagedDir, name)
+}
+
+func shouldStoreUpdateAssetInWorkspaceRoot(goos string) bool {
+	switch strings.TrimSpace(strings.ToLower(goos)) {
+	case "darwin", "windows", "linux":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveUpdateStagedDir(workspaceDir string, channel string, version string) string {
+	return resolveUpdateStagedDirForPlatform(stdRuntime.GOOS, workspaceDir, channel, version)
+}
+
+func resolveUpdateStagedDirForPlatform(goos string, workspaceDir string, channel string, version string) string {
+	baseDir := strings.TrimSpace(workspaceDir)
+	if strings.EqualFold(strings.TrimSpace(goos), "windows") || baseDir == "" {
+		baseDir = resolveLegacyUpdateWorkspaceDir()
+	}
+	return filepath.Join(baseDir, buildUpdateStageDirNameForPlatform(goos, channel, version))
 }
 
 func isExistingDownloadedAsset(filePath string, expectedSize int64) bool {
@@ -1048,16 +1074,18 @@ func resolveReusableStagedUpdate(info UpdateInfo, current *stagedUpdate) *staged
 		stagedDir    string
 		assetPath    string
 	}
+	preferredWorkspaceDir := resolveUpdateWorkspaceDir(version)
+	preferredStagedDir := resolveUpdateStagedDir(preferredWorkspaceDir, string(channel), version)
+	legacyWorkspaceDir := resolveLegacyUpdateWorkspaceDir()
 	stagedDirNames := []string{
 		buildUpdateStageDirName(string(channel), version),
 		fmt.Sprintf(".gonavi-update-%s-%s", stdRuntime.GOOS, version),
 	}
-	workspaceCandidates := []string{
-		resolveUpdateWorkspaceDir(version),
-		resolveLegacyUpdateWorkspaceDir(),
-	}
+	workspaceCandidates := []string{preferredWorkspaceDir, legacyWorkspaceDir}
+	stageBaseCandidates := []string{preferredWorkspaceDir, legacyWorkspaceDir}
 	seenWorkspace := make(map[string]struct{}, len(workspaceCandidates))
-	candidates := make([]pathCandidate, 0, 4)
+	seenStageBase := make(map[string]struct{}, len(stageBaseCandidates))
+	candidates := make([]pathCandidate, 0, 8)
 	for _, workspaceDir := range workspaceCandidates {
 		workspaceDir = strings.TrimSpace(workspaceDir)
 		if workspaceDir == "" {
@@ -1067,23 +1095,30 @@ func resolveReusableStagedUpdate(info UpdateInfo, current *stagedUpdate) *staged
 			continue
 		}
 		seenWorkspace[workspaceDir] = struct{}{}
-
-		for _, stagedDirName := range stagedDirNames {
-			stagedDir := filepath.Join(workspaceDir, stagedDirName)
-			assetPath := resolveUpdateAssetPath(workspaceDir, stagedDir, assetName)
+		if shouldStoreUpdateAssetInWorkspaceRoot(stdRuntime.GOOS) {
 			candidates = append(candidates, pathCandidate{
 				workspaceDir: workspaceDir,
-				stagedDir:    stagedDir,
-				assetPath:    assetPath,
+				stagedDir:    preferredStagedDir,
+				assetPath:    filepath.Join(workspaceDir, assetName),
 			})
-			legacyAssetPath := filepath.Join(stagedDir, assetName)
-			if legacyAssetPath != assetPath {
-				candidates = append(candidates, pathCandidate{
-					workspaceDir: workspaceDir,
-					stagedDir:    stagedDir,
-					assetPath:    legacyAssetPath,
-				})
-			}
+		}
+	}
+	for _, stageBaseDir := range stageBaseCandidates {
+		stageBaseDir = strings.TrimSpace(stageBaseDir)
+		if stageBaseDir == "" {
+			continue
+		}
+		if _, exists := seenStageBase[stageBaseDir]; exists {
+			continue
+		}
+		seenStageBase[stageBaseDir] = struct{}{}
+		for _, stagedDirName := range stagedDirNames {
+			stagedDir := filepath.Join(stageBaseDir, stagedDirName)
+			candidates = append(candidates, pathCandidate{
+				workspaceDir: stageBaseDir,
+				stagedDir:    stagedDir,
+				assetPath:    filepath.Join(stagedDir, assetName),
+			})
 		}
 	}
 
@@ -1143,6 +1178,10 @@ func ensureWindowsUpdateTargetWritable(targetExe string) error {
 	return nil
 }
 
+func shouldWindowsUpdateLaunchDownloadedAssetDirectly(assetPath string) bool {
+	return strings.EqualFold(strings.TrimSpace(filepath.Ext(strings.TrimSpace(assetPath))), ".exe")
+}
+
 func (a *App) emitUpdateDownloadProgress(status string, downloaded, total int64, message string) {
 	if a.ctx == nil {
 		return
@@ -1187,6 +1226,9 @@ func launchUpdateScript(staged *stagedUpdate) error {
 }
 
 func launchWindowsUpdate(staged *stagedUpdate, targetExe string, pid int) error {
+	if err := os.MkdirAll(staged.StagedDir, 0o755); err != nil {
+		return err
+	}
 	scriptPath := filepath.Join(staged.StagedDir, "update.cmd")
 	logPath := strings.TrimSpace(staged.InstallLogPath)
 	if logPath == "" {
@@ -1266,6 +1308,7 @@ for %%I in ("%TARGET%") do set "TARGET_NAME=%%~nxI"
 for %%I in ("%TARGET%") do set "TARGET_DIR=%%~dpI"
 for %%I in ("%SOURCE%") do set "SOURCE_EXT=%%~xI"
 set "SOURCE_EXE="
+set "SOURCE_DIR="
 
 if /I "%SOURCE_EXT%"==".zip" (
   set "EXTRACT_DIR=%STAGED%\_extract"
@@ -1294,6 +1337,7 @@ if /I "%SOURCE_EXT%"==".zip" (
 ) else (
   set "SOURCE_EXE=%SOURCE%"
 )
+for %%I in ("%SOURCE_EXE%") do set "SOURCE_DIR=%%~dpI"
 
 :waitloop
 tasklist /FI "PID eq %PID%" | find "%PID%" >nul
@@ -1312,6 +1356,28 @@ rem -- Win10 needs extra time for kernel to release exe file handles --
 timeout /t 3 /nobreak >nul
 call :log cooldown finished, starting file replace
 
+if /I "%SOURCE_EXT%"==".zip" goto replace_from_zip
+goto launch_downloaded_exe
+
+:launch_downloaded_exe
+if not exist "%SOURCE_EXE%" (
+  call :log downloaded executable not found: %SOURCE_EXE%
+  exit /b 1
+)
+call :log launching downloaded executable: %SOURCE_EXE%
+start "" /D "%SOURCE_DIR%" "%SOURCE_EXE%" >> "%LOG_FILE%" 2>&1
+if %ERRORLEVEL% NEQ 0 (
+  call :log cmd start failed, trying powershell Start-Process
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%SOURCE_EXE%' -WorkingDirectory '%SOURCE_DIR%'" >> "%LOG_FILE%" 2>&1
+  if !ERRORLEVEL! NEQ 0 (
+    call :log relaunch failed
+    exit /b 1
+  )
+)
+call :log update finished
+exit /b 0
+
+:replace_from_zip
 set /a RETRY=0
 :move_retry
 call :log attempt !RETRY!: trying rename-then-copy strategy

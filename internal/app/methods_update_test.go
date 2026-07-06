@@ -421,6 +421,71 @@ func TestResolveUpdateWorkspaceDirPrefersCurrentInstallDirectory(t *testing.T) {
 	}
 }
 
+func TestShouldStoreUpdateAssetInWorkspaceRoot(t *testing.T) {
+	cases := []struct {
+		goos string
+		want bool
+	}{
+		{goos: "windows", want: true},
+		{goos: "darwin", want: true},
+		{goos: "linux", want: true},
+		{goos: "freebsd", want: false},
+	}
+
+	for _, tc := range cases {
+		if got := shouldStoreUpdateAssetInWorkspaceRoot(tc.goos); got != tc.want {
+			t.Fatalf("shouldStoreUpdateAssetInWorkspaceRoot(%q) = %v, want %v", tc.goos, got, tc.want)
+		}
+	}
+}
+
+func TestResolveUpdateStagedDirForPlatformUsesLegacyWorkspaceOnWindows(t *testing.T) {
+	workspaceDir := filepath.Join("C:\\GoNavi", "app")
+	got := resolveUpdateStagedDirForPlatform("windows", workspaceDir, "dev", "dev-93dc696")
+	want := filepath.Join(resolveLegacyUpdateWorkspaceDir(), buildUpdateStageDirNameForPlatform("windows", "dev", "dev-93dc696"))
+	if got != want {
+		t.Fatalf("expected windows staged dir %q, got %q", want, got)
+	}
+}
+
+func TestShouldWindowsUpdateLaunchDownloadedAssetDirectly(t *testing.T) {
+	cases := []struct {
+		assetPath string
+		want      bool
+	}{
+		{assetPath: `C:\GoNavi\GoNavi-dev-93dc696-Windows-Amd64.exe`, want: true},
+		{assetPath: `C:\GoNavi\GoNavi-0.8.2-Windows-Amd64.zip`, want: false},
+		{assetPath: "", want: false},
+	}
+
+	for _, tc := range cases {
+		if got := shouldWindowsUpdateLaunchDownloadedAssetDirectly(tc.assetPath); got != tc.want {
+			t.Fatalf("shouldWindowsUpdateLaunchDownloadedAssetDirectly(%q) = %v, want %v", tc.assetPath, got, tc.want)
+		}
+	}
+}
+
+func TestBuildWindowsScriptLaunchesDownloadedExeDirectly(t *testing.T) {
+	script := buildWindowsScript(
+		`C:\GoNavi\GoNavi-dev-93dc696-Windows-Amd64.exe`,
+		`C:\GoNavi\GoNavi-dev-00d70d2-Windows-Amd64.exe`,
+		`C:\Users\tester\AppData\Local\Temp\gonavi-updates\.gonavi-update-windows-dev-dev-93dc696`,
+		`C:\Users\tester\AppData\Local\Temp\gonavi-updates\gonavi-update-windows.log`,
+		12345,
+	)
+
+	mustContain := []string{
+		`goto launch_downloaded_exe`,
+		`call :log launching downloaded executable: %SOURCE_EXE%`,
+		`start "" /D "%SOURCE_DIR%" "%SOURCE_EXE%"`,
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(script, want) {
+			t.Fatalf("windows update script missing required token: %s\nscript:\n%s", want, script)
+		}
+	}
+}
+
 func TestExpectedAssetNameForExecutableUsesLinuxWebKit41Suffix(t *testing.T) {
 	assetName, err := expectedAssetNameForExecutable(
 		"linux",
