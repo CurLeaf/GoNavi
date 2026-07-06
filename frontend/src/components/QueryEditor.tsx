@@ -859,6 +859,78 @@ let sharedCurrentConnectionId = '';
 let sharedConnections: any[] = [];
 let sharedTablesData: CompletionTableMeta[] = [];
 let sharedAllColumnsData: CompletionColumnMeta[] = [];
+
+// AI 补全的元数据预热可能把整库列（数十万条）灌入 sharedAllColumnsData，普通补全逐列全量
+// 扫描会阻塞主线程；按 (库, 表名末段) 建索引，并以数组身份为键缓存，数组重新赋值时自动失效。
+const sharedColumnsIndexCache = new WeakMap<CompletionColumnMeta[], Map<string, CompletionColumnMeta[]>>();
+const findSharedPreloadedColumns = (dbName: string, tableName: string): CompletionColumnMeta[] => {
+    const columns = sharedAllColumnsData;
+    let index = sharedColumnsIndexCache.get(columns);
+    if (!index) {
+        index = new Map<string, CompletionColumnMeta[]>();
+        columns.forEach((column) => {
+            const dbLower = String(column.dbName || '').toLowerCase();
+            const tableLower = String(column.tableName || '').toLowerCase();
+            const lastPartLower = String(splitCompletionSchemaAndTable(column.tableName || '').table || '').toLowerCase();
+            const keys = lastPartLower && lastPartLower !== tableLower
+                ? [`${dbLower}\u0000${tableLower}`, `${dbLower}\u0000${lastPartLower}`]
+                : [`${dbLower}\u0000${tableLower}`];
+            keys.forEach((key) => {
+                const list = index!.get(key);
+                if (list) {
+                    list.push(column);
+                } else {
+                    index!.set(key, [column]);
+                }
+            });
+        });
+        sharedColumnsIndexCache.set(columns, index);
+    }
+    const key = `${String(dbName || '').toLowerCase()}\u0000${String(tableName || '').toLowerCase()}`;
+    return index.get(key) || [];
+};
+
+// 普通建议的“相关列”按 SQL 中引用的表标识符（db.table / table / 纯表名）匹配，
+// 同样避免对全量列做逐条正则扫描；索引以列数组身份为键缓存。
+const sharedColumnsByIdentCache = new WeakMap<CompletionColumnMeta[], Map<string, CompletionColumnMeta[]>>();
+const collectSharedColumnsForTableIdents = (
+    columns: CompletionColumnMeta[],
+    idents: ReadonlySet<string>,
+): CompletionColumnMeta[] => {
+    let index = sharedColumnsByIdentCache.get(columns);
+    if (!index) {
+        index = new Map<string, CompletionColumnMeta[]>();
+        columns.forEach((column) => {
+            const tableLower = String(column.tableName || '').toLowerCase();
+            const fullLower = `${String(column.dbName || '').toLowerCase()}.${tableLower}`;
+            const pureLower = String(splitCompletionSchemaAndTable(column.tableName || '').table || '').toLowerCase();
+            new Set([fullLower, tableLower, pureLower]).forEach((key) => {
+                if (!key) {
+                    return;
+                }
+                const list = index!.get(key);
+                if (list) {
+                    list.push(column);
+                } else {
+                    index!.set(key, [column]);
+                }
+            });
+        });
+        sharedColumnsByIdentCache.set(columns, index);
+    }
+    const seen = new Set<CompletionColumnMeta>();
+    const result: CompletionColumnMeta[] = [];
+    idents.forEach((ident) => {
+        (index!.get(ident) || []).forEach((column) => {
+            if (seen.has(column)) {
+                return;
+            }
+            seen.add(column);
+            result.push(column);
+        });
+    });
+    return result;
+};
 let sharedVisibleDbs: string[] = [];
 let sharedViewsData: CompletionViewMeta[] = [];
 let sharedMaterializedViewsData: CompletionViewMeta[] = [];
@@ -1091,6 +1163,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const aiInlineGhostRequestSeqRef = useRef(0);
   const triggerAiInlineCompletionRef = useRef<(() => void) | null>(null);
   const aiContextMetadataWarmupRef = useRef<Record<string, Promise<boolean> | undefined>>({});
+  const aiContextCacheRef = useRef<{ deps: unknown[]; value: QueryEditorAiContext } | null>(null);
   const triggerSqlAiCompletionAltPressedRef = useRef(false);
   const triggerSqlAiCompletionAltGestureAtRef = useRef(0);
   const triggerSqlAiCompletionFallbackRef = useRef<{ observedAt: number } | null>(null);
@@ -1707,7 +1780,27 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           || tab.dbName
           || '',
       ).trim();
-      const lazyTables = sharedLazyTablesCache[`${resolvedConnectionId}|${currentDbName}`] || [];
+      const lazyTablesEntry = sharedLazyTablesCache[`${resolvedConnectionId}|${currentDbName}`];
+
+      // 大库下全量合并可达数十万条且每次补全请求都会调用；依赖引用未变时复用上次结果，
+      // 同时保持 tables/columns 数组身份稳定，让下游按数组身份缓存的索引也能跨请求复用。
+      const cacheDeps: unknown[] = [
+          resolvedConnectionId,
+          conn,
+          currentDbName,
+          lazyTablesEntry,
+          sharedTablesData,
+          tablesRef.current,
+          sharedAllColumnsData,
+          allColumnsRef.current,
+          visibleDbsRef.current,
+      ];
+      const cached = aiContextCacheRef.current;
+      if (cached && cached.deps.every((dep, index) => dep === cacheDeps[index])) {
+          return cached.value;
+      }
+
+      const lazyTables = lazyTablesEntry || [];
       const mergedTablesByKey = new Map<string, CompletionTableMeta>();
       [...sharedTablesData, ...tablesRef.current, ...lazyTables].forEach((table) => {
           const tableKey = `${String(table?.dbName || '').trim().toLowerCase()}\u0000${String(table?.tableName || '').trim().toLowerCase()}`;
@@ -1724,7 +1817,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
           mergedColumnsByKey.set(columnKey, column);
       });
-      return {
+      const value: QueryEditorAiContext = {
           connectionName: conn?.name,
           host: resolveQueryEditorAiConnectionHost(conn),
           port: conn?.config?.port,
@@ -1734,6 +1827,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           tables: [...mergedTablesByKey.values()],
           columns: [...mergedColumnsByKey.values()],
       };
+      aiContextCacheRef.current = { deps: cacheDeps, value };
+      return value;
   }, [currentConnectionId, currentDb, tab.connectionId, tab.dbName]);
 
   const ensureQueryEditorAiContextMetadata = useCallback(async (
@@ -4066,11 +4161,26 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
       });
 
+      // 滚动/布局事件可达每帧多次，rAF 合并避免高频 DOM 重排。
+      let repositionAiInlineGhostRafId: number | null = null;
+      const scheduleRepositionAiInlineGhost = () => {
+          if (!aiInlineGhostRef.current || repositionAiInlineGhostRafId !== null) {
+              return;
+          }
+          repositionAiInlineGhostRafId = window.requestAnimationFrame(() => {
+              repositionAiInlineGhostRafId = null;
+              if (editorRef.current !== editor) {
+                  return;
+              }
+              repositionAiInlineGhost();
+          });
+      };
+
       editor.onDidScrollChange?.(() => {
-          repositionAiInlineGhost();
+          scheduleRepositionAiInlineGhost();
       });
       editor.onDidLayoutChange?.(() => {
-          repositionAiInlineGhost();
+          scheduleRepositionAiInlineGhost();
       });
 
       editor.onMouseMove?.((event: any) => {
@@ -4572,17 +4682,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   }))
                   .filter((column) => !!column.name);
 
-              const findPreloadedColumns = (dbName: string, tableName: string) => {
-                  const targetDbLower = String(dbName || '').toLowerCase();
-                  const targetTableLower = String(tableName || '').toLowerCase();
-                  return sharedAllColumnsData.filter((column) => {
-                      if (String(column.dbName || '').toLowerCase() !== targetDbLower) return false;
-                      const columnTableLower = String(column.tableName || '').toLowerCase();
-                      if (columnTableLower === targetTableLower) return true;
-                      const parsed = splitSchemaAndTable(column.tableName || '');
-                      return String(parsed.table || '').toLowerCase() === targetTableLower;
-                  });
-              };
+              const findPreloadedColumns = (dbName: string, tableName: string) =>
+                  findSharedPreloadedColumns(dbName, tableName);
 
               const mergeSharedCompletionColumns = (columns: CompletionColumnMeta[]) => {
                   if (columns.length === 0) return;
@@ -4923,13 +5024,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       referencedColumns.push(...cols);
                   }
               }
-              const completionColumns = referencedColumns.length > 0
-                  ? [...sharedAllColumnsData, ...referencedColumns]
-                  : sharedAllColumnsData;
-
               // 相关列提示：匹配 SQL 中引用的表（FROM/JOIN 等）
               // 权重最高，输入 WHERE 条件时优先显示
-              const relevantColumns = (expectsTableName ? [] : completionColumns)
+              // 先用索引把候选收敛到被引用表的列，避免整库列全量扫描。
+              const relevantColumnCandidates = expectsTableName || foundTables.size === 0
+                  ? []
+                  : [
+                      ...collectSharedColumnsForTableIdents(sharedAllColumnsData, foundTables),
+                      ...referencedColumns,
+                  ];
+              const relevantColumns = relevantColumnCandidates
                   .filter(c => {
                       const fullIdent = `${c.dbName}.${c.tableName}`.toLowerCase();
                       const shortIdent = (c.tableName || '').toLowerCase();
