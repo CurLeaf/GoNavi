@@ -1498,7 +1498,7 @@ describe('QueryEditor external SQL save', () => {
     expect(editorState.value).toBe('SELECT * FROM ');
   });
 
-  it('uses structured SQL suggestions instead of freeform AI when manual completion is triggered in table-name context', async () => {
+  it('does not fall back to structured SQL suggestions when manual AI completion is triggered in table-name context', async () => {
     backendApp.DBGetTables.mockResolvedValueOnce({
       success: true,
       data: [
@@ -1566,7 +1566,7 @@ describe('QueryEditor external SQL save', () => {
       }
     });
 
-    expect(editorState.editor.trigger).toHaveBeenCalledWith(
+    expect(editorState.editor.trigger).not.toHaveBeenCalledWith(
       'gonavi-ai-inline-manual',
       'editor.action.triggerSuggest',
       undefined,
@@ -1962,7 +1962,7 @@ describe('QueryEditor external SQL save', () => {
     }
   });
 
-  it('strips a stray backslash before opening manual table suggestions from the toolbar AI button', async () => {
+  it('strips a stray backslash before keeping manual toolbar AI completion on the AI path', async () => {
     backendApp.DBGetTables.mockResolvedValueOnce({
       success: true,
       data: [
@@ -2013,7 +2013,39 @@ describe('QueryEditor external SQL save', () => {
       })],
     );
     expect(editorState.value).toBe('SELECT * FROM ');
-    expect(editorState.editor.trigger).toHaveBeenCalledWith(
+    expect(editorState.editor.trigger).not.toHaveBeenCalledWith(
+      'gonavi-ai-inline-manual',
+      'editor.action.triggerSuggest',
+      undefined,
+    );
+  });
+
+  it('keeps the AI dropdown completion action on the AI path instead of opening plain suggestions', async () => {
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { TABLE_NAME: 'videos' },
+        { TABLE_NAME: 'visits' },
+      ],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ', dbName: 'main' })} />);
+    });
+
+    editorState.value = 'SELECT * FROM ';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM '.length + 1 };
+    editorState.editor.trigger.mockClear();
+
+    await act(async () => {
+      findButton(renderer!, '触发 SQL AI 自动补全').props.onClick();
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(editorState.editor.trigger).not.toHaveBeenCalledWith(
       'gonavi-ai-inline-manual',
       'editor.action.triggerSuggest',
       undefined,

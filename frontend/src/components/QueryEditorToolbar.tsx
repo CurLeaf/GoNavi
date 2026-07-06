@@ -400,6 +400,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
               className={isV2Ui ? "gn-v2-query-toolbar-icon-action" : undefined}
               icon={<DownOutlined />}
               aria-label="AI more actions"
+              onMouseDown={onCaptureEditorCursorPosition}
             />
           </Dropdown>
         </div>

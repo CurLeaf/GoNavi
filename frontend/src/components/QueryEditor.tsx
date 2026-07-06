@@ -3599,17 +3599,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           return;
                       }
                       if (!insertText.trim()) {
-                          if (intent.intent === 'table_name' || intent.intent === 'column_name') {
-                              const shouldTriggerStructuredSuggest = manualTrigger
-                                  || shouldTriggerQueryEditorInlineObjectSuggestFallback({
-                                      aiContext: buildQueryEditorAiContext(),
-                                      editorSnapshot,
-                                  });
+                          // Keep the manual AI action on the AI path; silently downgrading to plain suggest is misleading.
+                          if (!manualTrigger && (intent.intent === 'table_name' || intent.intent === 'column_name')) {
+                              const shouldTriggerStructuredSuggest = shouldTriggerQueryEditorInlineObjectSuggestFallback({
+                                  aiContext: buildQueryEditorAiContext(),
+                                  editorSnapshot,
+                              });
                               if (shouldTriggerStructuredSuggest) {
-                                  triggerStructuredSqlSuggest(
-                                      manualTrigger ? 'gonavi-ai-inline-manual' : 'gonavi-ai-inline-auto',
-                                      !manualTrigger,
-                                  );
+                                  triggerStructuredSqlSuggest('gonavi-ai-inline-auto', true);
                               }
                           }
                           return;
