@@ -252,7 +252,7 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.no_downloaded_package", nil)}
 	}
 
-	if stdRuntime.GOOS == "windows" && !shouldWindowsUpdateLaunchDownloadedAssetDirectly(staged.FilePath) {
+	if stdRuntime.GOOS == "windows" {
 		if err := ensureWindowsUpdateTargetWritable(updateResolveInstallTarget()); err != nil {
 			return connection.QueryResult{
 				Success: false,
@@ -1366,7 +1366,6 @@ for %%I in ("%TARGET%") do set "TARGET_NAME=%%~nxI"
 for %%I in ("%TARGET%") do set "TARGET_DIR=%%~dpI"
 for %%I in ("%SOURCE%") do set "SOURCE_EXT=%%~xI"
 set "SOURCE_EXE="
-set "SOURCE_DIR="
 
 if /I "%SOURCE_EXT%"==".zip" (
   set "EXTRACT_DIR=%STAGED%\_extract"
@@ -1414,28 +1413,11 @@ rem -- Win10 needs extra time for kernel to release exe file handles --
 timeout /t 3 /nobreak >nul
 call :log cooldown finished, starting file replace
 
-if /I "%SOURCE_EXT%"==".zip" goto replace_from_zip
-goto launch_downloaded_exe
-
-:launch_downloaded_exe
-if not exist "%SOURCE_EXE%" (
-  call :log downloaded executable not found: %SOURCE_EXE%
-  exit /b 1
+:replace_binary
+if /I "%SOURCE_EXE%"=="%TARGET%" (
+  call :log downloaded executable already at target path, skip replace
+  goto move_done
 )
-call :log launching downloaded executable: %SOURCE_EXE%
-start "" /D "%SOURCE_DIR%" "%SOURCE_EXE%" >> "%LOG_FILE%" 2>&1
-if %ERRORLEVEL% NEQ 0 (
-  call :log cmd start failed, trying powershell Start-Process
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%SOURCE_EXE%' -WorkingDirectory '%SOURCE_DIR%'" >> "%LOG_FILE%" 2>&1
-  if !ERRORLEVEL! NEQ 0 (
-    call :log relaunch failed
-    exit /b 1
-  )
-)
-call :log update finished
-exit /b 0
-
-:replace_from_zip
 set /a RETRY=0
 :move_retry
 call :log attempt !RETRY!: trying rename-then-copy strategy
@@ -1473,6 +1455,7 @@ exit /b 1
 
 :move_done
 del /F /Q "%TARGET_OLD%" >> "%LOG_FILE%" 2>&1
+if exist "%SOURCE%" del /F /Q "%SOURCE%" >> "%LOG_FILE%" 2>&1
 start "" /D "%TARGET_DIR%" "%TARGET%" >> "%LOG_FILE%" 2>&1
 if %ERRORLEVEL% NEQ 0 (
   call :log cmd start failed, trying powershell Start-Process

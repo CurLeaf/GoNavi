@@ -563,7 +563,7 @@ func TestShouldWindowsUpdateLaunchDownloadedAssetDirectly(t *testing.T) {
 	}
 }
 
-func TestBuildWindowsScriptLaunchesDownloadedExeDirectly(t *testing.T) {
+func TestBuildWindowsScriptReplacesTargetWithDownloadedExe(t *testing.T) {
 	script := buildWindowsScript(
 		`C:\GoNavi\GoNavi-dev-93dc696-Windows-Amd64.exe`,
 		`C:\GoNavi\GoNavi-dev-00d70d2-Windows-Amd64.exe`,
@@ -573,14 +573,19 @@ func TestBuildWindowsScriptLaunchesDownloadedExeDirectly(t *testing.T) {
 	)
 
 	mustContain := []string{
-		`goto launch_downloaded_exe`,
-		`call :log launching downloaded executable: %SOURCE_EXE%`,
-		`start "" /D "%SOURCE_DIR%" "%SOURCE_EXE%"`,
+		`:replace_binary`,
+		`move /Y "%TARGET%" "%TARGET_OLD%"`,
+		`copy /Y "%SOURCE_EXE%" "%TARGET%"`,
+		`if exist "%SOURCE%" del /F /Q "%SOURCE%"`,
+		`start "" /D "%TARGET_DIR%" "%TARGET%"`,
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(script, want) {
 			t.Fatalf("windows update script missing required token: %s\nscript:\n%s", want, script)
 		}
+	}
+	if strings.Contains(script, "launch_downloaded_exe") {
+		t.Fatalf("windows update script should not launch downloaded exe side-by-side\nscript:\n%s", script)
 	}
 }
 
