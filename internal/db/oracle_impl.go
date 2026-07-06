@@ -384,6 +384,18 @@ func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 
 		return parseOracleColumns(data), nil
 	}
+	for _, target := range o.lookupOracleSynonymTargets(dbName, tableName) {
+		query := buildOracleColumnsQuery(target.schema, target.table)
+		data, _, err := o.Query(query)
+		if err != nil {
+			return nil, err
+		}
+		if len(data) == 0 {
+			continue
+		}
+
+		return parseOracleColumns(data), nil
+	}
 	if columns, err := o.inferOracleColumnsFromSelect(dbName, tableName); err == nil && len(columns) > 0 {
 		return columns, nil
 	}
@@ -716,6 +728,61 @@ func oracleMetadataNamePairs(dbName string, tableName string) []oracleMetadataNa
 	add(rawSchema, upperTable)
 	add(upperSchema, rawTable)
 	return pairs
+}
+
+func (o *OracleDB) lookupOracleSynonymTargets(dbName string, tableName string) []oracleMetadataNamePair {
+	targets := make([]oracleMetadataNamePair, 0, 4)
+	seen := map[string]struct{}{}
+	add := func(schema string, table string) {
+		key := schema + "\x00" + table
+		if strings.TrimSpace(table) == "" {
+			return
+		}
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
+		targets = append(targets, oracleMetadataNamePair{schema: schema, table: table})
+	}
+
+	for _, candidate := range oracleMetadataNamePairs(dbName, tableName) {
+		data, _, err := o.Query(buildOracleSynonymLookupQuery(candidate.schema, candidate.table))
+		if err != nil {
+			continue
+		}
+		for _, row := range data {
+			targetSchema := oracleRowString(row, "TABLE_OWNER", "table_owner")
+			targetTable := oracleRowString(row, "TABLE_NAME", "table_name")
+			for _, target := range oracleMetadataNamePairs(targetSchema, targetTable) {
+				add(target.schema, target.table)
+			}
+			if strings.TrimSpace(targetTable) != "" {
+				break
+			}
+		}
+	}
+
+	return targets
+}
+
+func buildOracleSynonymLookupQuery(schema string, table string) string {
+	metadataTableName := escapeOracleMetadataLiteralExact(table)
+	if strings.TrimSpace(schema) == "" {
+		return fmt.Sprintf(`SELECT table_owner AS "TABLE_OWNER", table_name AS "TABLE_NAME"
+FROM all_synonyms
+WHERE synonym_name = '%s'
+  AND db_link IS NULL
+  AND (owner = USER OR owner = 'PUBLIC')
+ORDER BY CASE WHEN owner = USER THEN 0 WHEN owner = 'PUBLIC' THEN 1 ELSE 2 END`, metadataTableName)
+	}
+
+	metadataSchemaName := escapeOracleMetadataLiteralExact(schema)
+	return fmt.Sprintf(`SELECT table_owner AS "TABLE_OWNER", table_name AS "TABLE_NAME"
+FROM all_synonyms
+WHERE synonym_name = '%s'
+  AND db_link IS NULL
+  AND owner IN ('%s', 'PUBLIC')
+ORDER BY CASE WHEN owner = '%s' THEN 0 WHEN owner = 'PUBLIC' THEN 1 ELSE 2 END`, metadataTableName, metadataSchemaName, metadataSchemaName)
 }
 
 func buildOracleColumnsQuery(schema string, table string) string {
