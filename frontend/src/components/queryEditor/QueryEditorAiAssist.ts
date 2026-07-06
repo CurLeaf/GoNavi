@@ -409,7 +409,10 @@ export const buildQueryEditorInlineCompletionMessages = ({
     editorSnapshot: QueryEditorAiEditorSnapshot;
     userPromptSettings: AIUserPromptSettings;
 }): QueryEditorAiMessage[] => {
-    const inlineAiContext = buildQueryEditorInlineCompletionContext(aiContext, editorSnapshot);
+    // inlineCompletionIntent 已存在说明调用方传入的已是收敛后的内联上下文，避免重复做 O(列数) 的过滤。
+    const inlineAiContext = aiContext.inlineCompletionIntent !== undefined
+        ? aiContext
+        : buildQueryEditorInlineCompletionContext(aiContext, editorSnapshot);
     return [
         {
             role: 'system',
@@ -904,6 +907,48 @@ const collectReferencedSchemaTables = (
     return result.slice(0, MAX_INLINE_SCHEMA_TABLES);
 };
 
+// 大库列元数据可达数十万条，逐列正则匹配会阻塞主线程；按表名末段建一次索引，同一 columns 数组内复用。
+const inlineColumnIndexCache = new WeakMap<CompletionColumnMeta[], Map<string, CompletionColumnMeta[]>>();
+
+const getInlineColumnsByTableLastPart = (
+    columns: CompletionColumnMeta[],
+): Map<string, CompletionColumnMeta[]> => {
+    const cached = inlineColumnIndexCache.get(columns);
+    if (cached) {
+        return cached;
+    }
+    const index = new Map<string, CompletionColumnMeta[]>();
+    columns.forEach((column) => {
+        const lastPart = getInlineIdentifierLastPart(column.tableName || '').toLowerCase();
+        if (!lastPart) {
+            return;
+        }
+        const list = index.get(lastPart);
+        if (list) {
+            list.push(column);
+        } else {
+            index.set(lastPart, [column]);
+        }
+    });
+    inlineColumnIndexCache.set(columns, index);
+    return index;
+};
+
+const collectColumnsMatchingReference = (
+    columns: CompletionColumnMeta[],
+    ref: QueryEditorAiTableReference,
+): CompletionColumnMeta[] => {
+    const refLastPart = getInlineIdentifierLastPart(ref.tableName || '').toLowerCase();
+    if (!refLastPart) {
+        return [];
+    }
+    const candidates = getInlineColumnsByTableLastPart(columns).get(refLastPart) || [];
+    return candidates.filter((column) => tableMatchesInlineReference(
+        { dbName: column.dbName, tableName: column.tableName },
+        ref,
+    ));
+};
+
 const filterColumnsForTables = (
     columns: CompletionColumnMeta[],
     tables: CompletionTableMeta[],
@@ -912,18 +957,22 @@ const filterColumnsForTables = (
     if (!columns.length || (!tables.length && !refs.length)) {
         return [];
     }
-    return columns.filter((column) => {
-        if (tables.some((table) => tableMatchesInlineReference(
-            { dbName: column.dbName, tableName: column.tableName },
-            { dbName: table.dbName, tableName: table.tableName, raw: table.tableName },
-        ))) {
-            return true;
-        }
-        return refs.some((ref) => tableMatchesInlineReference(
-            { dbName: column.dbName, tableName: column.tableName },
-            ref,
-        ));
+    const targets: QueryEditorAiTableReference[] = [
+        ...tables.map((table) => ({ dbName: table.dbName, tableName: table.tableName, raw: table.tableName })),
+        ...refs,
+    ];
+    const seen = new Set<CompletionColumnMeta>();
+    const result: CompletionColumnMeta[] = [];
+    targets.forEach((ref) => {
+        collectColumnsMatchingReference(columns, ref).forEach((column) => {
+            if (seen.has(column)) {
+                return;
+            }
+            seen.add(column);
+            result.push(column);
+        });
     });
+    return result;
 };
 
 const collectCurrentDatabaseTables = (
@@ -1087,11 +1136,7 @@ const collectInlineColumnCandidateLabels = (
         return [];
     }
 
-    return (context.columns || [])
-        .filter((column) => tableMatchesInlineReference(
-            { dbName: column.dbName, tableName: column.tableName },
-            ownerRef,
-        ))
+    return collectColumnsMatchingReference(context.columns || [], ownerRef)
         .map((column) => stripInlineIdentifierQuotes(column.name || '').trim())
         .filter(Boolean);
 };

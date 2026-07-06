@@ -437,6 +437,32 @@ describe('QueryEditorAiAssist', () => {
         expect(focused.columns).toEqual([{ dbName: 'shop', tableName: 'videos', name: 'code', type: 'varchar' }]);
     });
 
+    it('matches schema-qualified table metadata columns by table name last part', () => {
+        const focused = buildQueryEditorInlineCompletionContext({
+            connectionName: 'Local Oracle',
+            sourceType: 'oracle',
+            currentDb: 'APP',
+            visibleDbs: ['APP'],
+            tables: [
+                { dbName: 'APP', tableName: 'SCOTT.ORDERS' },
+                { dbName: 'APP', tableName: 'SCOTT.USERS' },
+            ],
+            columns: [
+                { dbName: 'APP', tableName: 'SCOTT.ORDERS', name: 'ORDER_ID', type: 'number' },
+                { dbName: 'APP', tableName: 'SCOTT.USERS', name: 'USER_ID', type: 'number' },
+            ],
+        }, {
+            prefix: 'select * from orders o where',
+            suffix: '',
+            currentLineBeforeCursor: 'select * from orders o where',
+            currentLineAfterCursor: '',
+        });
+
+        expect(focused.inlineSchemaScope).toBe('referenced_tables');
+        expect(focused.tables).toEqual([{ dbName: 'APP', tableName: 'SCOTT.ORDERS' }]);
+        expect(focused.columns).toEqual([{ dbName: 'APP', tableName: 'SCOTT.ORDERS', name: 'ORDER_ID', type: 'number' }]);
+    });
+
     it('checks active provider readiness before inline AI requests', async () => {
         const service = readyService('select * from users where id > 1;');
         const readiness = await resolveQueryEditorAiRuntimeReadiness(service);

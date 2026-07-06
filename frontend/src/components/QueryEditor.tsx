@@ -1090,7 +1090,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const aiInlineGhostTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const aiInlineGhostRequestSeqRef = useRef(0);
   const triggerAiInlineCompletionRef = useRef<(() => void) | null>(null);
-  const aiContextMetadataWarmupRef = useRef<Record<string, Promise<void> | undefined>>({});
+  const aiContextMetadataWarmupRef = useRef<Record<string, Promise<boolean> | undefined>>({});
   const triggerSqlAiCompletionAltPressedRef = useRef(false);
   const triggerSqlAiCompletionAltGestureAtRef = useRef(0);
   const triggerSqlAiCompletionFallbackRef = useRef<{ observedAt: number } | null>(null);
@@ -1772,11 +1772,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           return;
       }
 
-      const warmupPromise = (async () => {
+      const warmupPromise = (async (): Promise<boolean> => {
           const conn = connectionsRef.current.find((item) => item.id === connectionId);
           if (!conn) {
-              return;
+              return false;
           }
+          let warmupSucceeded = true;
 
           const config = {
               ...conn.config,
@@ -1794,6 +1795,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       fetchCompletionTableCommentMap(config, dbName, metadataDialect).catch(() => new Map<string, string>()),
                       DBGetTables(buildRpcConnectionConfig(config) as any, dbName),
                   ]);
+                  if (!resTables?.success) {
+                      warmupSucceeded = false;
+                  }
                   if (resTables?.success && Array.isArray(resTables.data)) {
                       const fetchedTables = resTables.data
                           .map((row: any) => buildCompletionTableMeta(dbName, row, tableComments))
@@ -1817,6 +1821,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       }
                   }
               } catch (error) {
+                  warmupSucceeded = false;
                   console.warn('GoNavi AI inline table metadata warmup failed', error);
               }
           }
@@ -1824,6 +1829,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (needsColumns) {
               try {
                   const resCols = await DBGetAllColumns(buildRpcConnectionConfig(config) as any, dbName);
+                  if (!resCols?.success) {
+                      warmupSucceeded = false;
+                  }
                   if (resCols?.success && Array.isArray(resCols.data)) {
                       const fetchedColumns = resCols.data.map((col: any) => ({
                           dbName,
@@ -1850,16 +1858,22 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       }
                   }
               } catch (error) {
+                  warmupSucceeded = false;
                   console.warn('GoNavi AI inline column metadata warmup failed', error);
               }
           }
+          return warmupSucceeded;
       })();
 
+      // 成功的 warmup 结果整个会话内复用，避免每次内联补全都真实查库；失败时删除缓存以便重试。
       aiContextMetadataWarmupRef.current[warmupKey] = warmupPromise;
+      let warmupSucceeded = false;
       try {
-          await warmupPromise;
+          warmupSucceeded = await warmupPromise;
       } finally {
-          delete aiContextMetadataWarmupRef.current[warmupKey];
+          if (!warmupSucceeded) {
+              delete aiContextMetadataWarmupRef.current[warmupKey];
+          }
       }
   }, [currentConnectionId, currentDb, tab.connectionId, tab.dbName]);
 
