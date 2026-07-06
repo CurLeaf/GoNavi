@@ -8140,6 +8140,10 @@ describe('QueryEditor external SQL save', () => {
     (storeState.connections[0].config as any).readOnly = true;
     backendApp.DBGetTables.mockResolvedValueOnce({
       success: true,
+      data: [],
+    });
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
       data: [{ Table: 'SBDEV.PERSON_INFO' }],
     });
     backendApp.DBQueryMulti.mockResolvedValueOnce({
@@ -8161,7 +8165,8 @@ describe('QueryEditor external SQL save', () => {
     });
 
     const executedSql = String(backendApp.DBQueryMulti.mock.calls[0][2]);
-    expect(backendApp.DBGetTables).toHaveBeenCalledWith(expect.anything(), 'SBDEV');
+    expect(backendApp.DBGetTables).toHaveBeenNthCalledWith(1, expect.anything(), 'SBDEVREAD');
+    expect(backendApp.DBGetTables).toHaveBeenNthCalledWith(2, expect.anything(), 'SBDEV');
     expect(backendApp.DBGetColumns).not.toHaveBeenCalled();
     expect(executedSql).toMatch(/from\s+"SBDEV"\."PERSON_INFO"\s+where\s+zjjhm=''/i);
     expect(executedSql).not.toContain('SBDEVREAD.PERSON_INFO');
@@ -8170,6 +8175,46 @@ describe('QueryEditor external SQL save', () => {
       sql: "select * from person_info where zjjhm=''",
       status: 'success',
     }));
+    renderer?.unmount();
+  });
+
+  it('keeps qualifying OceanBase Oracle read-only queries when config.database already equals the selected schema', async () => {
+    storeState.connections[0].config.type = 'oceanbase';
+    (storeState.connections[0].config as any).oceanBaseProtocol = 'oracle';
+    storeState.connections[0].config.user = 'SBDEVREAD';
+    storeState.connections[0].config.database = 'SBDEV';
+    (storeState.connections[0].config as any).readOnly = true;
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [],
+    });
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [{ Table: 'SBDEV.SYSM_USER' }],
+    });
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['USER_ID'], rows: [{ USER_ID: '0001477884' }] }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'SBDEV', query: "select * from sysm_user where user_id='0001477884'" })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const executedSql = String(backendApp.DBQueryMulti.mock.calls[0][2]);
+    expect(backendApp.DBGetTables).toHaveBeenNthCalledWith(1, expect.anything(), 'SBDEVREAD');
+    expect(backendApp.DBGetTables).toHaveBeenNthCalledWith(2, expect.anything(), 'SBDEV');
+    expect(executedSql).toMatch(/from\s+"SBDEV"\."SYSM_USER"\s+where\s+user_id='0001477884'/i);
+    expect(executedSql).not.toContain('SBDEVREAD.SYSM_USER');
     renderer?.unmount();
   });
 

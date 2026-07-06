@@ -1305,6 +1305,27 @@ export const resolveOracleLikeExecutionSchemaName = (config: any, currentDb: str
     return resolveOracleLikeDefaultSchemaName(config) || selectedDb;
 };
 
+export const resolveOracleLikeLookupSchemaCandidates = (config: any, currentDb: string): string[] => {
+    const candidates: string[] = [];
+    const seen = new Set<string>();
+    const push = (value: string) => {
+        const normalized = String(value || '').trim();
+        if (!normalized) return;
+        const key = normalized.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        candidates.push(normalized);
+    };
+
+    const defaultSchema = resolveOracleLikeDefaultSchemaName(config);
+    const selectedDb = String(currentDb || '').trim();
+    push(defaultSchema);
+    if (selectedDb && selectedDb.toLowerCase() !== String(defaultSchema || '').trim().toLowerCase()) {
+        push(selectedDb);
+    }
+    return candidates;
+};
+
 export const getQueryEditorModelTextIfWithinLimit = (model: any, maxTextLength: number): string | null => {
     const modelLength = getQueryEditorModelValueLength(model);
     if (modelLength !== null && modelLength > maxTextLength) {
