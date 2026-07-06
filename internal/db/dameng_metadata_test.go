@@ -3,6 +3,7 @@ package db
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -116,5 +117,46 @@ func TestCollectDamengDatabaseNames_FallbackToCurrentUser(t *testing.T) {
 	want := []string{"SYSDBA"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("兜底查询应该返回当前用户, got=%v want=%v", got, want)
+	}
+}
+
+func TestBuildDamengColumnsQuery_IncludesColumnCommentsJoin(t *testing.T) {
+	t.Parallel()
+
+	userQuery := buildDamengColumnsQuery("", "orders")
+	if !strings.Contains(userQuery, "user_col_comments") {
+		t.Fatalf("expected user query to join user_col_comments, got: %s", userQuery)
+	}
+	if !strings.Contains(userQuery, "cc.comments AS comment") {
+		t.Fatalf("expected user query to select column comments, got: %s", userQuery)
+	}
+
+	allQuery := buildDamengColumnsQuery("app", "orders")
+	if !strings.Contains(allQuery, "all_col_comments") {
+		t.Fatalf("expected schema query to join all_col_comments, got: %s", allQuery)
+	}
+	if !strings.Contains(allQuery, "cc.comments AS comment") {
+		t.Fatalf("expected schema query to select column comments, got: %s", allQuery)
+	}
+}
+
+func TestBuildDamengColumnDefinitions_MapsComment(t *testing.T) {
+	t.Parallel()
+
+	columns := buildDamengColumnDefinitions([]map[string]interface{}{
+		{
+			"COLUMN_NAME": "ID",
+			"DATA_TYPE":   "NUMBER",
+			"NULLABLE":    "N",
+			"COLUMN_KEY":  "PRI",
+			"COMMENT":     "主键",
+		},
+	})
+
+	if len(columns) != 1 {
+		t.Fatalf("expected one column, got=%d", len(columns))
+	}
+	if columns[0].Comment != "主键" {
+		t.Fatalf("expected comment to be mapped, got=%q", columns[0].Comment)
 	}
 }

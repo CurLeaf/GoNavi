@@ -110,9 +110,11 @@ func buildDamengColumnsQuery(dbName, tableName string) string {
 	upperDBName := strings.ToUpper(strings.TrimSpace(dbName))
 
 	if upperDBName == "" {
-		return fmt.Sprintf(`SELECT c.column_name, c.data_type, c.data_length, c.char_length, c.data_precision, c.data_scale, c.nullable, c.data_default,
+		return fmt.Sprintf(`SELECT c.column_name, c.data_type, c.data_length, c.char_length, c.data_precision, c.data_scale, c.nullable, c.data_default, cc.comments AS comment,
 		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key
 		FROM user_tab_columns c
+		LEFT JOIN user_col_comments cc
+		  ON cc.table_name = c.table_name AND cc.column_name = c.column_name
 		LEFT JOIN (
 			SELECT cols.table_name, cols.column_name
 			FROM user_constraints cons
@@ -125,9 +127,11 @@ func buildDamengColumnsQuery(dbName, tableName string) string {
 		ORDER BY c.column_id`, upperTableName, upperTableName, upperTableName)
 	}
 
-	return fmt.Sprintf(`SELECT c.column_name, c.data_type, c.data_length, c.char_length, c.data_precision, c.data_scale, c.nullable, c.data_default,
+	return fmt.Sprintf(`SELECT c.column_name, c.data_type, c.data_length, c.char_length, c.data_precision, c.data_scale, c.nullable, c.data_default, cc.comments AS comment,
 		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key
 		FROM all_tab_columns c
+		LEFT JOIN all_col_comments cc
+		  ON cc.owner = c.owner AND cc.table_name = c.table_name AND cc.column_name = c.column_name
 		LEFT JOIN (
 			SELECT cols.owner, cols.table_name, cols.column_name
 			FROM all_constraints cons
@@ -243,6 +247,7 @@ func buildDamengColumnDefinitions(data []map[string]interface{}) []connection.Co
 			Type:     formatDamengColumnType(row),
 			Nullable: normalizeDamengNullable(getDamengRowString(row, "NULLABLE")),
 			Key:      getDamengRowString(row, "COLUMN_KEY"),
+			Comment:  getDamengRowString(row, "COMMENT", "COMMENTS"),
 		}
 
 		defaultValue := getDamengRowString(row, "DATA_DEFAULT")

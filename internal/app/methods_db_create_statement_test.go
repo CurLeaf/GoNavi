@@ -286,6 +286,39 @@ func TestResolveCreateStatementWithFallback_KingbaseIncludesColumnComments(t *te
 	}
 }
 
+func TestResolveCreateStatementWithFallback_DamengAppendsColumnComments(t *testing.T) {
+	t.Parallel()
+
+	dbInst := &fakeCreateStatementDB{
+		createSQL: `CREATE TABLE "APP"."ORDERS" ("ID" NUMBER NOT NULL, "STATUS" VARCHAR2(32));`,
+		columns: []connection.ColumnDefinition{
+			{Name: "ID", Type: "NUMBER", Nullable: "NO", Key: "PRI", Comment: "主键"},
+			{Name: "STATUS", Type: "VARCHAR2(32)", Nullable: "YES", Comment: "状态"},
+		},
+	}
+
+	ddl, err := resolveCreateStatementWithFallback(dbInst, connection.ConnectionConfig{
+		Type: "dameng",
+	}, "APP", "ORDERS")
+	if err != nil {
+		t.Fatalf("resolveCreateStatementWithFallback() unexpected error: %v", err)
+	}
+	if !strings.Contains(ddl, dbInst.createSQL) {
+		t.Fatalf("expected original dameng create SQL to be preserved, got: %s", ddl)
+	}
+	for _, want := range []string{
+		`COMMENT ON COLUMN "APP"."ORDERS"."ID" IS '主键';`,
+		`COMMENT ON COLUMN "APP"."ORDERS"."STATUS" IS '状态';`,
+	} {
+		if !strings.Contains(ddl, want) {
+			t.Fatalf("expected dameng DDL to contain %q, got: %s", want, ddl)
+		}
+	}
+	if dbInst.columnsCalls != 1 {
+		t.Fatalf("expected dameng path to load column metadata once, got %d", dbInst.columnsCalls)
+	}
+}
+
 func TestResolveCreateStatementWithFallback_KingbaseIncludesSecondaryIndexes(t *testing.T) {
 	t.Parallel()
 
