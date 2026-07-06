@@ -27,7 +27,7 @@ type QueryTabDraftSnapshotTab = Pick<
 const persistedDrafts = new Map<string, PersistedQueryTabDraftEntry>();
 
 let persistedDraftsHydrated = false;
-let persistTimer: number | null = null;
+let persistTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
 let flushListenersBound = false;
 
 const getWindowTimerApi = (): {
