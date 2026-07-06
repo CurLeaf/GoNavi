@@ -1033,6 +1033,63 @@ func TestDBQueryMultiTransactionalUsesImplicitSessionTransactionForOracle(t *tes
 	}
 }
 
+func TestDBQueryMultiTransactionalKeepsOracleAnonymousBlockTransactionOpenUntilRollback(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	stmt := `BEGIN
+    UPDATE users SET name = 'new' WHERE id = 1;
+    DELETE FROM audit_logs WHERE user_id = 1;
+END;`
+	fakeDB := &fakeBatchWriteDB{
+		execAffected: map[string]int64{
+			stmt: 2,
+		},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "oracle", Host: "127.0.0.1", Port: 1521, User: "app"}
+
+	result := app.DBQueryMultiTransactional(config, "ORCLPDB1", stmt, "oracle-anonymous-block-tx-query")
+	if !result.Success {
+		t.Fatalf("expected Oracle anonymous block transactional query success, got failure: %s", result.Message)
+	}
+	if result.TransactionID == "" || !result.TransactionPending {
+		t.Fatalf("expected pending transaction metadata, got id=%q pending=%v", result.TransactionID, result.TransactionPending)
+	}
+	if fakeDB.session == nil {
+		t.Fatal("expected Oracle anonymous block to open a pinned session")
+	}
+	if fakeDB.session.closed {
+		t.Fatal("expected Oracle anonymous block transaction session to stay open before rollback")
+	}
+	if len(fakeDB.execQueries) != 1 || fakeDB.execQueries[0] != stmt {
+		t.Fatalf("expected Oracle anonymous block to execute as a single statement before rollback, got %#v", fakeDB.execQueries)
+	}
+
+	rollbackResult := app.DBRollbackTransaction(result.TransactionID)
+	if !rollbackResult.Success {
+		t.Fatalf("expected Oracle anonymous block rollback success, got failure: %s", rollbackResult.Message)
+	}
+	if !fakeDB.session.closed {
+		t.Fatal("expected Oracle anonymous block transaction session to close after rollback")
+	}
+	wantExecs := []string{stmt, "ROLLBACK"}
+	if len(fakeDB.execQueries) != len(wantExecs) {
+		t.Fatalf("expected Oracle anonymous block rollback on pinned session, got %#v", fakeDB.execQueries)
+	}
+	for i, want := range wantExecs {
+		if fakeDB.execQueries[i] != want {
+			t.Fatalf("expected exec query %d = %q, got %q", i, want, fakeDB.execQueries[i])
+		}
+	}
+}
+
 func TestDBQueryMultiTransactionalOraclePrefersTransactionProviderForFinish(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {
