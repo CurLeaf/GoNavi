@@ -37,6 +37,13 @@ describe('formatSqlExecutionError', () => {
     expect(formatted).toContain('Raw error: driver returned unexpected status 123');
   });
 
+  it('recognizes driver bad connection during SQL execution as timeout semantics', () => {
+    const formatted = formatSqlExecutionError('第 1 条语句执行失败：driver: bad connection');
+
+    expect(formatted).toContain('Semantic meaning: Query timed out or was canceled');
+    expect(formatted).toContain('Raw error: 第 1 条语句执行失败：driver: bad connection');
+  });
+
   it('recognizes localized connection-timeout wrappers as timeout semantics', () => {
     const translate = (key: string, params?: Record<string, unknown>) => {
       if (key === 'query_editor.sql_error.wrapper.semantic_line') {
