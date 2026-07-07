@@ -37,6 +37,7 @@ func launchWindowsUpdateWithCleanup(staged *stagedUpdate, targetExe string, pid 
 		return err
 	}
 
+	currentTargetExe := strings.TrimSpace(targetExe)
 	originalSourceDir := strings.TrimSpace(filepath.Dir(staged.FilePath))
 	preparedSource, err := prepareWindowsStagedUpdateAsset(staged.FilePath, staged.StagedDir)
 	if err != nil {
@@ -44,23 +45,26 @@ func launchWindowsUpdateWithCleanup(staged *stagedUpdate, targetExe string, pid 
 	}
 	staged.FilePath = preparedSource
 	staged.InstallLogPath = buildUpdateInstallLogPath(staged.StagedDir)
+	finalTargetExe := resolveWindowsUpdateFinalTargetPath(currentTargetExe, staged.FilePath)
 
 	cleanupWindowsUpdateArtifacts([]string{
 		originalSourceDir,
-		strings.TrimSpace(filepath.Dir(targetExe)),
+		strings.TrimSpace(filepath.Dir(currentTargetExe)),
+		strings.TrimSpace(filepath.Dir(finalTargetExe)),
 	}, map[string]struct{}{
-		cleanComparablePath(targetExe):        {},
+		cleanComparablePath(currentTargetExe): {},
+		cleanComparablePath(finalTargetExe):   {},
 		cleanComparablePath(staged.FilePath):  {},
 		cleanComparablePath(staged.StagedDir): {},
 	})
 
 	scriptPath := filepath.Join(staged.StagedDir, "update.cmd")
-	content := buildWindowsScriptWithCleanup(staged.FilePath, targetExe, staged.StagedDir, staged.InstallLogPath, pid)
+	content := buildWindowsScriptWithCurrentTargetCleanup(staged.FilePath, finalTargetExe, currentTargetExe, staged.StagedDir, staged.InstallLogPath, pid)
 	if err := os.WriteFile(scriptPath, []byte(content), 0o644); err != nil {
 		return err
 	}
 
-	logger.Infof("启动 Windows 更新脚本：target=%s script=%s log=%s", targetExe, scriptPath, staged.InstallLogPath)
+	logger.Infof("启动 Windows 更新脚本：current=%s target=%s script=%s log=%s", currentTargetExe, finalTargetExe, scriptPath, staged.InstallLogPath)
 	cmd := buildWindowsLaunchCommand(scriptPath)
 	if err := cmd.Start(); err != nil {
 		return err
@@ -71,6 +75,27 @@ func launchWindowsUpdateWithCleanup(staged *stagedUpdate, targetExe string, pid 
 		}
 	}
 	return nil
+}
+
+func resolveWindowsUpdateFinalTargetPath(currentTarget string, sourcePath string) string {
+	currentTarget = strings.TrimSpace(currentTarget)
+	if currentTarget == "" {
+		return currentTarget
+	}
+	currentName := filepath.Base(currentTarget)
+	sourceName := filepath.Base(strings.TrimSpace(sourcePath))
+	if isVersionedWindowsUpdatePackageName(currentName) && isVersionedWindowsUpdatePackageName(sourceName) {
+		return filepath.Join(filepath.Dir(currentTarget), sourceName)
+	}
+	return currentTarget
+}
+
+func isVersionedWindowsUpdatePackageName(name string) bool {
+	trimmed := strings.TrimSpace(name)
+	lower := strings.ToLower(trimmed)
+	return strings.HasPrefix(trimmed, "GoNavi-")
+		&& strings.Contains(trimmed, "-Windows-")
+		&& strings.HasSuffix(lower, ".exe")
 }
 
 func prepareWindowsStagedUpdateAsset(sourcePath string, stagedDir string) (string, error) {
@@ -194,10 +219,15 @@ func cleanComparablePath(path string) string {
 }
 
 func buildWindowsScriptWithCleanup(source, target, stagedDir, logPath string, pid int) string {
+	return buildWindowsScriptWithCurrentTargetCleanup(source, target, target, stagedDir, logPath, pid)
+}
+
+func buildWindowsScriptWithCurrentTargetCleanup(source, target, currentTarget, stagedDir, logPath string, pid int) string {
 	script := `@echo off
 setlocal EnableExtensions EnableDelayedExpansion
 set "SOURCE=__GONAVI_UPDATE_SOURCE__"
 set "TARGET=__GONAVI_UPDATE_TARGET__"
+set "CURRENT_TARGET=__GONAVI_CURRENT_TARGET__"
 set "TARGET_OLD=%TARGET%.old"
 set "STAGED=__GONAVI_UPDATE_STAGED__"
 set "LOG_FILE=__GONAVI_UPDATE_LOG__"
@@ -301,6 +331,9 @@ exit /b 1
 
 :move_done
 del /F /Q "%TARGET_OLD%" >> "%LOG_FILE%" 2>&1
+if /I not "%CURRENT_TARGET%"=="%TARGET%" (
+  if exist "%CURRENT_TARGET%" del /F /Q "%CURRENT_TARGET%" >> "%LOG_FILE%" 2>&1
+)
 if exist "%SOURCE%" del /F /Q "%SOURCE%" >> "%LOG_FILE%" 2>&1
 start "" /D "%TARGET_DIR%" "%TARGET%" >> "%LOG_FILE%" 2>&1
 if %ERRORLEVEL% NEQ 0 (
@@ -322,6 +355,7 @@ exit /b 0
 	return strings.NewReplacer(
 		"__GONAVI_UPDATE_SOURCE__", source,
 		"__GONAVI_UPDATE_TARGET__", target,
+		"__GONAVI_CURRENT_TARGET__", currentTarget,
 		"__GONAVI_UPDATE_STAGED__", stagedDir,
 		"__GONAVI_UPDATE_LOG__", logPath,
 		"__GONAVI_UPDATE_PID__", strconv.Itoa(pid),
