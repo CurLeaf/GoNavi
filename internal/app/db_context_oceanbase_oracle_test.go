@@ -20,8 +20,8 @@ func TestNormalizeRunConfig_OceanBaseOracleAddsCurrentSchemaInit(t *testing.T) {
 	if runConfig.Database != "OBORCL" {
 		t.Fatalf("expected OceanBase Oracle service name to stay OBORCL, got %q", runConfig.Database)
 	}
-	if runConfig.Timeout != defaultOceanBaseOracleQueryTimeoutSeconds {
-		t.Fatalf("expected OceanBase Oracle default query timeout %d, got %d", defaultOceanBaseOracleQueryTimeoutSeconds, runConfig.Timeout)
+	if runConfig.Timeout != 0 {
+		t.Fatalf("expected default OceanBase Oracle timeout to stay unset, got %d", runConfig.Timeout)
 	}
 	values, err := url.ParseQuery(runConfig.ConnectionParams)
 	if err != nil {
