@@ -9,8 +9,6 @@ import (
 	"GoNavi-Wails/internal/db"
 )
 
-const defaultOceanBaseOracleQueryTimeoutSeconds = 120
-
 func normalizeRunConfig(config connection.ConnectionConfig, dbName string) connection.ConnectionConfig {
 	runConfig := config
 	name := strings.TrimSpace(dbName)
@@ -55,10 +53,6 @@ func applyOceanBaseOracleCurrentSchemaInit(config connection.ConnectionConfig, s
 	normalizedSchema := strings.TrimSpace(schema)
 	if normalizedSchema == "" {
 		return config
-	}
-	if config.Timeout <= 0 {
-		// OceanBase Oracle 查询经常需要经过 OBProxy/Oracle driver 的读等待；默认 30s 容易把慢查询误报成 driver: bad connection。
-		config.Timeout = defaultOceanBaseOracleQueryTimeoutSeconds
 	}
 	values, err := url.ParseQuery(strings.TrimSpace(config.ConnectionParams))
 	if err != nil {
