@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import Editor, { loader, type BeforeMount, type EditorProps } from '@monaco-editor/react';
+import Editor, { loader, type BeforeMount, type EditorProps, type OnMount } from '@monaco-editor/react';
 import { useStore } from '../store';
 import { sanitizeDataTableFontSize } from '../utils/dataGridDisplay';
 import { DEFAULT_MONO_FONT_FAMILY } from '../utils/fontFamilies';
@@ -10,12 +10,53 @@ export type GonaviMonacoTypography = 'code' | 'data';
 const DEFAULT_FONT_SIZE = 14;
 const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 20;
+const QUERY_EDITOR_AI_INLINE_CONTEXT_KEY = 'gonaviAiInlineSuggestionVisible';
 let monacoConfiguredPromise: Promise<void> | null = null;
 let transparentThemesRegistered = false;
 
 const isTestRuntime = (): boolean => {
   const env = (import.meta as unknown as { env?: Record<string, unknown> }).env || {};
   return env.MODE === 'test' || env.VITEST === true || env.VITEST === 'true';
+};
+
+const sameEditorPosition = (left: any, right: any): boolean => (
+  Number(left?.lineNumber) === Number(right?.lineNumber)
+  && Number(left?.column) === Number(right?.column)
+);
+
+const patchQueryEditorAiInlineRightArrowFallback = (editor: any, monaco: any) => {
+  const originalAddCommand = editor?.addCommand?.bind?.(editor);
+  if (!originalAddCommand || !monaco?.KeyCode?.RightArrow) {
+    return;
+  }
+  if (editor.__gonaviAiInlineRightArrowFallbackPatched) {
+    return;
+  }
+  Object.defineProperty(editor, '__gonaviAiInlineRightArrowFallbackPatched', {
+    value: true,
+    configurable: true,
+  });
+
+  editor.addCommand = (keybinding: any, handler: any, context: any) => {
+    if (
+      keybinding === monaco.KeyCode.RightArrow
+      && context === QUERY_EDITOR_AI_INLINE_CONTEXT_KEY
+      && typeof handler === 'function'
+    ) {
+      return originalAddCommand(keybinding, (...args: any[]) => {
+        const beforePosition = editor.getPosition?.();
+        const beforeValue = String(editor.getValue?.() ?? '');
+        const result = handler(...args);
+        const afterPosition = editor.getPosition?.();
+        const afterValue = String(editor.getValue?.() ?? '');
+        if (beforeValue === afterValue && sameEditorPosition(beforePosition, afterPosition)) {
+          editor.trigger?.('gonavi-ai-inline-fallback', 'cursorRight', null);
+        }
+        return result;
+      }, context);
+    }
+    return originalAddCommand(keybinding, handler, context);
+  };
 };
 
 export const registerGonaviMonacoThemes: BeforeMount = (monaco) => {
@@ -75,6 +116,7 @@ const MonacoEditor: React.FC<MonacoEditorProps> = ({
   beforeMount,
   gonaviTypography = 'code',
   loading,
+  onMount,
   options,
   ...props
 }) => {
@@ -110,6 +152,11 @@ const MonacoEditor: React.FC<MonacoEditorProps> = ({
     registerGonaviMonacoThemes(monaco);
     beforeMount?.(monaco);
   }, [beforeMount]);
+
+  const handleMount: OnMount = useCallback((editor, monaco) => {
+    patchQueryEditorAiInlineRightArrowFallback(editor, monaco);
+    onMount?.(editor, monaco);
+  }, [onMount]);
 
   const resolvedOptions = useMemo(() => {
     if (uiVersion !== 'v2') {
@@ -168,6 +215,7 @@ const MonacoEditor: React.FC<MonacoEditorProps> = ({
       options={resolvedOptions}
       loading={loading}
       beforeMount={handleBeforeMount}
+      onMount={handleMount}
     />
   );
 };
