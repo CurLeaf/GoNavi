@@ -20,6 +20,9 @@ func TestNormalizeRunConfig_OceanBaseOracleAddsCurrentSchemaInit(t *testing.T) {
 	if runConfig.Database != "OBORCL" {
 		t.Fatalf("expected OceanBase Oracle service name to stay OBORCL, got %q", runConfig.Database)
 	}
+	if runConfig.Timeout != defaultOceanBaseOracleQueryTimeoutSeconds {
+		t.Fatalf("expected OceanBase Oracle default query timeout %d, got %d", defaultOceanBaseOracleQueryTimeoutSeconds, runConfig.Timeout)
+	}
 	values, err := url.ParseQuery(runConfig.ConnectionParams)
 	if err != nil {
 		t.Fatalf("unexpected connection params parse error: %v", err)
@@ -30,17 +33,21 @@ func TestNormalizeRunConfig_OceanBaseOracleAddsCurrentSchemaInit(t *testing.T) {
 	}
 }
 
-func TestNormalizeRunConfig_OceanBaseOraclePreservesExistingInit(t *testing.T) {
+func TestNormalizeRunConfig_OceanBaseOraclePreservesExplicitTimeoutAndExistingInit(t *testing.T) {
 	t.Parallel()
 
 	config := connection.ConnectionConfig{
 		Type:              "oceanbase",
 		Database:          "OBORCL",
 		OceanBaseProtocol: "oracle",
+		Timeout:           45,
 		ConnectionParams:  "init=ALTER+SESSION+SET+NLS_DATE_FORMAT%3D%27YYYY-MM-DD%27&timeout=10s",
 	}
 	runConfig := normalizeRunConfig(config, "sbdev")
 
+	if runConfig.Timeout != 45 {
+		t.Fatalf("expected explicit timeout to be preserved, got %d", runConfig.Timeout)
+	}
 	values, err := url.ParseQuery(runConfig.ConnectionParams)
 	if err != nil {
 		t.Fatalf("unexpected connection params parse error: %v", err)
