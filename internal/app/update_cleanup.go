@@ -59,7 +59,7 @@ func launchWindowsUpdateWithCleanup(staged *stagedUpdate, targetExe string, pid 
 	})
 
 	scriptPath := filepath.Join(staged.StagedDir, "update.cmd")
-	content := buildWindowsScriptWithCleanup(staged.FilePath, finalTargetExe, currentTargetExe, staged.StagedDir, staged.InstallLogPath, pid)
+	content := buildWindowsScriptWithCurrentTargetCleanup(staged.FilePath, finalTargetExe, currentTargetExe, staged.StagedDir, staged.InstallLogPath, pid)
 	if err := os.WriteFile(scriptPath, []byte(content), 0o644); err != nil {
 		return err
 	}
@@ -218,7 +218,11 @@ func cleanComparablePath(path string) string {
 	return cleaned
 }
 
-func buildWindowsScriptWithCleanup(source, target, currentTarget, stagedDir, logPath string, pid int) string {
+func buildWindowsScriptWithCleanup(source, target, stagedDir, logPath string, pid int) string {
+	return buildWindowsScriptWithCurrentTargetCleanup(source, target, target, stagedDir, logPath, pid)
+}
+
+func buildWindowsScriptWithCurrentTargetCleanup(source, target, currentTarget, stagedDir, logPath string, pid int) string {
 	script := `@echo off
 setlocal EnableExtensions EnableDelayedExpansion
 set "SOURCE=__GONAVI_UPDATE_SOURCE__"
