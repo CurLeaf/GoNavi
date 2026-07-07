@@ -35,6 +35,22 @@ export interface DataGridPaginationBarProps {
   translate?: DataGridPaginationTranslate;
 }
 
+const findToolbarTotalCountButton = (
+  trigger: HTMLElement,
+  labels: string[],
+): HTMLButtonElement | null => {
+  const root = trigger.closest('.data-grid-root') || trigger.ownerDocument?.body;
+  if (!root) return null;
+  const normalizedLabels = labels.map((label) => String(label || '').trim()).filter(Boolean);
+  const buttons = Array.from(root.querySelectorAll('button')) as HTMLButtonElement[];
+  return buttons.find((button) => {
+    if (button === trigger) return false;
+    if (button.disabled) return false;
+    const text = String(button.textContent || '').replace(/\s+/g, ' ').trim();
+    return normalizedLabels.some((label) => text === label || text.includes(label));
+  }) || null;
+};
+
 const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
   isV2Ui,
   pagination,
@@ -64,14 +80,34 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
     return null;
   }
 
-  const totalCountButton = manualTotalCountAvailable && onToggleTotalCount ? (
+  const countTotalLabel = translate('data_grid.toolbar.count_total');
+  const cancelCountLabel = translate('data_grid.toolbar.cancel_count');
+  const effectiveTotalCountLoading = totalCountLoading || Boolean(pagination.totalCountLoading);
+  const shouldShowTotalCountButton = Boolean(
+    onToggleTotalCount
+    || manualTotalCountAvailable
+    || pagination.totalCountLoading
+    || pagination.totalKnown === false,
+  );
+  const handleToggleTotalCount = (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (onToggleTotalCount) {
+      onToggleTotalCount();
+      return;
+    }
+    // Backward-compatible bridge for existing DataGridShell callers: the top toolbar already owns
+    // the total-count handler, but it can be horizontally scrolled out of view on large toolbars.
+    // Trigger that existing button so the pagination bar can expose the action without duplicating data-flow state.
+    const toolbarButton = findToolbarTotalCountButton(event.currentTarget, [countTotalLabel, cancelCountLabel]);
+    toolbarButton?.click();
+  };
+  const totalCountButton = shouldShowTotalCountButton ? (
     <Button
       data-grid-pagination-total-count="true"
       size="small"
-      icon={totalCountLoading ? <CloseOutlined /> : <VerticalAlignBottomOutlined />}
-      onClick={onToggleTotalCount}
+      icon={effectiveTotalCountLoading ? <CloseOutlined /> : <VerticalAlignBottomOutlined />}
+      onClick={handleToggleTotalCount}
     >
-      {totalCountLoading ? translate('data_grid.toolbar.cancel_count') : translate('data_grid.toolbar.count_total')}
+      {effectiveTotalCountLoading ? cancelCountLabel : countTotalLabel}
     </Button>
   ) : null;
 
