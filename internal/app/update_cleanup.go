@@ -7,6 +7,8 @@ import (
 	stdRuntime "runtime"
 	"strconv"
 	"strings"
+
+	"GoNavi-Wails/internal/logger"
 )
 
 func init() {
