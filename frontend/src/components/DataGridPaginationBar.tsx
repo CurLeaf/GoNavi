@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button, InputNumber, Pagination, Select } from 'antd';
-import { LeftOutlined, RightOutlined } from '@ant-design/icons';
+import { CloseOutlined, LeftOutlined, RightOutlined, VerticalAlignBottomOutlined } from '@ant-design/icons';
 import { t as defaultTranslate, type I18nParams } from '../i18n';
 
 interface DataGridPaginationState {
@@ -26,11 +26,30 @@ export interface DataGridPaginationBarProps {
   paginationPageText: string;
   paginationPageSizeOptions: string[];
   showKnownPageCount: boolean;
+  manualTotalCountAvailable?: boolean;
+  totalCountLoading?: boolean;
   onPageChange?: (page: number, size: number) => void;
   onPageSizeChange: (value: string) => void;
   onV2PageStep: (direction: 'previous' | 'next') => void;
+  onToggleTotalCount?: () => void;
   translate?: DataGridPaginationTranslate;
 }
+
+const findToolbarTotalCountButton = (
+  trigger: HTMLElement,
+  labels: string[],
+): HTMLButtonElement | null => {
+  const root = trigger.closest('.data-grid-root') || trigger.ownerDocument?.body;
+  if (!root) return null;
+  const normalizedLabels = labels.map((label) => String(label || '').trim()).filter(Boolean);
+  const buttons = Array.from(root.querySelectorAll('button')) as HTMLButtonElement[];
+  return buttons.find((button) => {
+    if (button === trigger) return false;
+    if (button.disabled) return false;
+    const text = String(button.textContent || '').replace(/\s+/g, ' ').trim();
+    return normalizedLabels.some((label) => text === label || text.includes(label));
+  }) || null;
+};
 
 const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
   isV2Ui,
@@ -42,9 +61,12 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
   paginationPageText,
   paginationPageSizeOptions,
   showKnownPageCount,
+  manualTotalCountAvailable = false,
+  totalCountLoading = false,
   onPageChange,
   onPageSizeChange,
   onV2PageStep,
+  onToggleTotalCount,
   translate = defaultTranslate,
 }) => {
   const [jumpPage, setJumpPage] = React.useState<number | null>(pagination?.current ?? null);
@@ -57,6 +79,37 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
   if (!pagination) {
     return null;
   }
+
+  const countTotalLabel = translate('data_grid.toolbar.count_total');
+  const cancelCountLabel = translate('data_grid.toolbar.cancel_count');
+  const effectiveTotalCountLoading = totalCountLoading || Boolean(pagination.totalCountLoading);
+  const shouldShowTotalCountButton = Boolean(
+    onToggleTotalCount
+    || manualTotalCountAvailable
+    || pagination.totalCountLoading
+    || pagination.totalKnown === false,
+  );
+  const handleToggleTotalCount = (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (onToggleTotalCount) {
+      onToggleTotalCount();
+      return;
+    }
+    // Backward-compatible bridge for existing DataGridShell callers: the top toolbar already owns
+    // the total-count handler, but it can be horizontally scrolled out of view on large toolbars.
+    // Trigger that existing button so the pagination bar can expose the action without duplicating data-flow state.
+    const toolbarButton = findToolbarTotalCountButton(event.currentTarget, [countTotalLabel, cancelCountLabel]);
+    toolbarButton?.click();
+  };
+  const totalCountButton = shouldShowTotalCountButton ? (
+    <Button
+      data-grid-pagination-total-count="true"
+      size="small"
+      icon={effectiveTotalCountLoading ? <CloseOutlined /> : <VerticalAlignBottomOutlined />}
+      onClick={handleToggleTotalCount}
+    >
+      {effectiveTotalCountLoading ? cancelCountLabel : countTotalLabel}
+    </Button>
+  ) : null;
 
   const maxJumpPage = showKnownPageCount ? Math.max(1, paginationTotalPages) : null;
   const normalizedJumpPage = Number.isFinite(Number(jumpPage)) && Number(jumpPage) > 0
@@ -132,6 +185,7 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
           <div className="data-grid-pagination-summary" aria-live="polite">
             <span className="data-grid-pagination-summary-value">{paginationV2SummaryText}</span>
           </div>
+          {totalCountButton}
           <Button
             data-grid-v2-pagination-prev="true"
             size="small"
@@ -174,6 +228,7 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
             <span className="data-grid-pagination-kicker">{translate('data_grid.pagination.result_set')}</span>
             <span className="data-grid-pagination-summary-value">{paginationSummaryText}</span>
           </div>
+          {totalCountButton}
           {showSequentialPagination ? sequentialPaginationControl : (
             <Pagination
               current={pagination.current}
