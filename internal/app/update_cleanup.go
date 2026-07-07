@@ -1,10 +1,8 @@
 package app
 
 import (
-	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	stdRuntime "runtime"
 	"strconv"
@@ -327,6 +325,3 @@ exit /b 0
 		"__GONAVI_UPDATE_PID__", strconv.Itoa(pid),
 	).Replace(strings.ReplaceAll(script, "\n", "\r\n"))
 }
-
-var _ = exec.Command
-var _ = fmt.Sprintf
