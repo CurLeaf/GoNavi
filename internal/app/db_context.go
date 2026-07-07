@@ -1,6 +1,7 @@
 package app
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -23,7 +24,9 @@ func normalizeRunConfig(config connection.ConnectionConfig, dbName string) conne
 	case "kafka", "apache-kafka", "apache_kafka":
 		// Kafka 的 Database 字段表示默认 Topic，不能被树上的 synthetic database(topics) 覆盖。
 	case "oceanbase":
-		if !isOceanBaseOracleProtocol(config) {
+		if isOceanBaseOracleProtocol(config) {
+			runConfig = applyOceanBaseOracleCurrentSchemaInit(runConfig, name)
+		} else {
 			runConfig.Database = name
 		}
 	case "mysql", "mariadb", "goldendb", "greatdb", "gdb", "diros", "starrocks", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "iris", "intersystems", "intersystemsiris", "inter-systems", "inter-systems-iris", "mongodb", "tdengine", "iotdb", "clickhouse", "trino", "rabbitmq", "rabbit-mq", "rabbit_mq":
@@ -44,6 +47,59 @@ func normalizeRunConfig(config connection.ConnectionConfig, dbName string) conne
 	}
 
 	return runConfig
+}
+
+func applyOceanBaseOracleCurrentSchemaInit(config connection.ConnectionConfig, schema string) connection.ConnectionConfig {
+	normalizedSchema := strings.TrimSpace(schema)
+	if normalizedSchema == "" {
+		return config
+	}
+	values, err := url.ParseQuery(strings.TrimSpace(config.ConnectionParams))
+	if err != nil {
+		return config
+	}
+	statement := "ALTER SESSION SET CURRENT_SCHEMA = " + quoteOracleCurrentSchemaIdentifier(normalizedSchema)
+	for _, existing := range values["init"] {
+		if strings.EqualFold(strings.TrimSpace(existing), statement) {
+			return config
+		}
+	}
+	values.Add("init", statement)
+	config.ConnectionParams = values.Encode()
+	return config
+}
+
+func quoteOracleCurrentSchemaIdentifier(schema string) string {
+	normalized := strings.TrimSpace(schema)
+	if normalized == "" {
+		return normalized
+	}
+	if isSimpleOracleIdentifier(normalized) {
+		return strings.ToUpper(normalized)
+	}
+	return `"` + strings.ReplaceAll(normalized, `"`, `""`) + `"`
+}
+
+func isSimpleOracleIdentifier(value string) bool {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return false
+	}
+	for index, r := range text {
+		isLetter := (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
+		isDigit := r >= '0' && r <= '9'
+		isSpecial := r == '_' || r == '$' || r == '#'
+		if index == 0 {
+			if !isLetter && r != '_' {
+				return false
+			}
+			continue
+		}
+		if !isLetter && !isDigit && !isSpecial {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, tableName string) (string, string) {
