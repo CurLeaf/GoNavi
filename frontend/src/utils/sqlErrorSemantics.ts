@@ -135,6 +135,7 @@ const SQL_ERROR_RULES: SqlErrorSemanticRule[] = [
       /context cancelled/i,
       /timeout/i,
       /timed out/i,
+      /driver:\s*bad connection/i,
     ],
   },
   {
