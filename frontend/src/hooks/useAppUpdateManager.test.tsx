@@ -157,7 +157,44 @@ describe('useAppUpdateManager', () => {
 
     expect(backendApp.DownloadUpdate).toHaveBeenCalledTimes(1);
     expect(backendApp.OpenDownloadedUpdateDirectory).not.toHaveBeenCalled();
+    expect(backendApp.InstallUpdateAndRestart).not.toHaveBeenCalled();
     expect(hook?.lastUpdateInfo?.downloaded).toBe(true);
+  });
+
+  it('auto-installs a macOS update immediately after download when the backend reports auto relaunch support', async () => {
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        downloaded: false,
+        assetSize: 2048,
+      },
+    });
+    backendApp.DownloadUpdate.mockResolvedValue({
+      success: true,
+      data: {
+        platform: 'darwin',
+        autoRelaunch: true,
+        downloadPath: '/Users/test/Desktop/GoNavi-0.8.2/GoNavi-0.8.2-MacOS-Arm64.dmg',
+      },
+    });
+    backendApp.InstallUpdateAndRestart.mockResolvedValue({ success: true });
+
+    renderHook();
+
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+
+    await act(async () => {
+      await hook?.downloadUpdate(hook?.lastUpdateInfo!, false);
+    });
+
+    expect(backendApp.DownloadUpdate).toHaveBeenCalledTimes(1);
+    expect(backendApp.InstallUpdateAndRestart).toHaveBeenCalledTimes(1);
+    expect(backendApp.OpenDownloadedUpdateDirectory).not.toHaveBeenCalled();
   });
 
   it('switches update channel and re-checks against the selected channel', async () => {
