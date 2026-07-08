@@ -93,6 +93,12 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     const hideTooltipTitle = toggleShortcutLabel
         ? t('query_editor.results_panel.tooltip.hide_with_shortcut', { shortcut: toggleShortcutLabel })
         : t('query_editor.results_panel.tooltip.hide');
+    const activeResultKeyExists = activeResultKey === QUERY_EDITOR_SQL_LOG_TAB_KEY
+        ? shouldShowSqlLogTab
+        : resultSets.some((result) => result.key === activeResultKey);
+    const resolvedActiveResultKey = activeResultKeyExists
+        ? activeResultKey
+        : resultSets[0]?.key || (shouldShowSqlLogTab ? QUERY_EDITOR_SQL_LOG_TAB_KEY : '');
 
     const handleMessageTextareaKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'a') {
@@ -335,12 +341,6 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
         }
         : null;
     const tabItems = logTabItem ? [logTabItem, ...resultTabItems] : resultTabItems;
-
-    const resolvedActiveResultKey = (() => {
-        if (activeResultKey && tabItems.some((item) => item.key === activeResultKey)) return activeResultKey;
-        if (resultSets[0]?.key) return resultSets[0].key;
-        return shouldShowSqlLogTab ? QUERY_EDITOR_SQL_LOG_TAB_KEY : '';
-    })();
     const activeResultSet = resultSets.find((rs) => rs.key === resolvedActiveResultKey) || null;
     const activeResultUsesDataGrid = Boolean(activeResultSet && activeResultSet.resultType !== 'message' && !isAffectedRowsResult(activeResultSet));
 
