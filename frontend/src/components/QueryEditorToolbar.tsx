@@ -291,7 +291,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
           value={maxRows}
           onChange={(val) => onMaxRowsChange(Number(val))}
           options={[
-            { label: t("query_editor.max_rows.option_100"), value: 100 },
+            { label: '100', value: 100 },
             { label: t("query_editor.max_rows.option_500"), value: 500 },
             { label: t("query_editor.max_rows.option_1000"), value: 1000 },
             { label: t("query_editor.max_rows.option_5000"), value: 5000 },
