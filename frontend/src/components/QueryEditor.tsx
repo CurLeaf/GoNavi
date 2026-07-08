@@ -170,6 +170,8 @@ const QUERY_EDITOR_MONACO_FIND_OPTIONS = {
     addExtraSpaceOnTop: true,
 } as const;
 const QUERY_EDITOR_NATIVE_SELECT_CURRENT_LINE_EVENT = 'gonavi:native-select-current-line';
+const QUERY_EDITOR_MAC_FIND_WITH_SELECTION_COMBO = 'Meta+E';
+const QUERY_EDITOR_MAC_FIND_WITH_SELECTION_GUARD_ACTION_ID = 'gonavi.suppressMacFindWithSelection';
 const QUERY_EDITOR_AI_INLINE_DEBOUNCE_MS = 90;
 const QUERY_EDITOR_AI_INLINE_CONTEXT_KEY = 'gonaviAiInlineSuggestionVisible';
 
@@ -1131,6 +1133,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const monacoRef = useRef<any>(null);
   const runQueryActionRef = useRef<any>(null);
   const selectCurrentStatementActionRef = useRef<any>(null);
+  const macFindWithSelectionGuardActionRef = useRef<any>(null);
   const duplicateCurrentLineActionRef = useRef<any>(null);
   const saveQueryActionRef = useRef<any>(null);
   const findInEditorActionRef = useRef<any>(null);
@@ -4308,6 +4311,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           objectHoverActionRef.current = null;
           triggerSqlAiCompletionActionRef.current?.dispose?.();
           triggerSqlAiCompletionActionRef.current = null;
+          macFindWithSelectionGuardActionRef.current?.dispose?.();
+          macFindWithSelectionGuardActionRef.current = null;
           triggerSqlAiCompletionKeydownDisposableRef.current?.dispose?.();
           triggerSqlAiCompletionKeydownDisposableRef.current = null;
           triggerAiInlineCompletionRef.current = null;
@@ -4367,6 +4372,30 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   run: handleSelectCurrentStatement,
               });
           }
+      }
+
+      const macFindWithSelectionGuardKeyBinding = activeShortcutPlatform === 'mac'
+          ? comboToMonacoKeyBinding(
+              QUERY_EDITOR_MAC_FIND_WITH_SELECTION_COMBO, monaco.KeyMod, monaco.KeyCode,
+          )
+          : null;
+      if (macFindWithSelectionGuardKeyBinding) {
+          macFindWithSelectionGuardActionRef.current = editor.addAction({
+              id: QUERY_EDITOR_MAC_FIND_WITH_SELECTION_GUARD_ACTION_ID,
+              label: 'GoNavi: Suppress macOS Cmd+E Find with Selection',
+              keybindings: [
+                  macFindWithSelectionGuardKeyBinding.keyMod
+                  | macFindWithSelectionGuardKeyBinding.keyCode,
+              ],
+              run: () => {
+                  if (
+                      selectStatementBinding?.enabled
+                      && normalizeShortcutCombo(selectStatementBinding.combo) === QUERY_EDITOR_MAC_FIND_WITH_SELECTION_COMBO
+                  ) {
+                      void handleSelectCurrentStatement();
+                  }
+              },
+          });
       }
 
       const duplicateLineBinding = duplicateCurrentLineShortcutBinding;
@@ -6734,21 +6763,51 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           selectCurrentStatementActionRef.current.dispose();
           selectCurrentStatementActionRef.current = null;
       }
+      if (macFindWithSelectionGuardActionRef.current) {
+          macFindWithSelectionGuardActionRef.current.dispose();
+          macFindWithSelectionGuardActionRef.current = null;
+      }
 
       const editor = editorRef.current;
       const monaco = monacoRef.current;
       if (!editor || !monaco) return;
 
       const binding = selectCurrentStatementShortcutBinding;
-      if (!binding?.enabled || !binding.combo) return;
+      if (binding?.enabled && binding.combo) {
+          const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+          if (keyBinding) {
+              selectCurrentStatementActionRef.current = editor.addAction({
+                  id: 'gonavi.selectCurrentStatement',
+                  label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.selectCurrentStatement.label'),
+                  keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+                  run: handleSelectCurrentStatement,
+              });
+          }
+      }
 
-      const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
-      if (keyBinding) {
-          selectCurrentStatementActionRef.current = editor.addAction({
-              id: 'gonavi.selectCurrentStatement',
-              label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.selectCurrentStatement.label'),
-              keybindings: [keyBinding.keyMod | keyBinding.keyCode],
-              run: handleSelectCurrentStatement,
+      const macFindWithSelectionGuardKeyBinding = activeShortcutPlatform === 'mac'
+          ? comboToMonacoKeyBinding(
+              QUERY_EDITOR_MAC_FIND_WITH_SELECTION_COMBO,
+              monaco.KeyMod,
+              monaco.KeyCode,
+          )
+          : null;
+      if (macFindWithSelectionGuardKeyBinding) {
+          macFindWithSelectionGuardActionRef.current = editor.addAction({
+              id: QUERY_EDITOR_MAC_FIND_WITH_SELECTION_GUARD_ACTION_ID,
+              label: 'GoNavi: Suppress macOS Cmd+E Find with Selection',
+              keybindings: [
+                  macFindWithSelectionGuardKeyBinding.keyMod
+                  | macFindWithSelectionGuardKeyBinding.keyCode,
+              ],
+              run: () => {
+                  if (
+                      binding?.enabled
+                      && normalizeShortcutCombo(binding.combo) === QUERY_EDITOR_MAC_FIND_WITH_SELECTION_COMBO
+                  ) {
+                      void handleSelectCurrentStatement();
+                  }
+              },
           });
       }
 
@@ -6757,8 +6816,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               selectCurrentStatementActionRef.current.dispose();
               selectCurrentStatementActionRef.current = null;
           }
+          if (macFindWithSelectionGuardActionRef.current) {
+              macFindWithSelectionGuardActionRef.current.dispose();
+              macFindWithSelectionGuardActionRef.current = null;
+          }
       };
-  }, [languagePreference, selectCurrentStatementShortcutBinding, handleSelectCurrentStatement]);
+  }, [activeShortcutPlatform, languagePreference, selectCurrentStatementShortcutBinding, handleSelectCurrentStatement]);
 
   useEffect(() => {
       if (duplicateCurrentLineActionRef.current) {

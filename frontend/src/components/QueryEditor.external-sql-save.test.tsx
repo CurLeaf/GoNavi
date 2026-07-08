@@ -4481,6 +4481,39 @@ describe('QueryEditor external SQL save', () => {
     ).not.toContain('gonavi:find-active-query');
   });
 
+  it('keeps SQL editor search on Cmd+F only and suppresses Monaco Cmd+E find-with-selection', async () => {
+    storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: false, combo: '' };
+    storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: false, combo: '' };
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'SELECT 1;\nSELECT 2 AS two;\nSELECT 3;',
+        readOnly: true,
+      })} />);
+    });
+    (window.dispatchEvent as any).mockClear();
+    (document.execCommand as any).mockClear();
+
+    expect(findEditorAction('gonavi.findInEditor')).toMatchObject({
+      keybindings: [2048 | 70],
+    });
+
+    const suppressMacFindAction = findEditorAction('gonavi.suppressMacFindWithSelection');
+    expect(suppressMacFindAction).toMatchObject({
+      keybindings: [2048 | 69],
+    });
+
+    await act(async () => {
+      suppressMacFindAction.run();
+      await Promise.resolve();
+    });
+
+    expect(
+      (window.dispatchEvent as any).mock.calls.map((call: any[]) => call[0]?.type),
+    ).not.toContain('gonavi:find-active-query');
+    expect(document.execCommand).not.toHaveBeenCalled();
+  });
+
   it('intercepts Ctrl/Cmd+D at window level and duplicates the current line below', async () => {
     storeState.shortcutOptions.duplicateCurrentLine.mac = { enabled: true, combo: 'Meta+D' };
     storeState.shortcutOptions.duplicateCurrentLine.windows = { enabled: true, combo: 'Ctrl+D' };

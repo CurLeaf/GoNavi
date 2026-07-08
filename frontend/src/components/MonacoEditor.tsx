@@ -168,7 +168,8 @@ const installOceanBaseOracleNavigationFallback = (editor: any) => {
 };
 
 const patchQueryEditorAiInlineRightArrowFallback = (editor: any, monaco: any) => {
-  const originalAddCommand = editor?.addCommand?.bind?.(editor);
+  const rawAddCommand = editor?.addCommand;
+  const originalAddCommand = rawAddCommand?.bind?.(editor);
   if (!originalAddCommand || !monaco?.KeyCode?.RightArrow) {
     return;
   }
@@ -180,7 +181,7 @@ const patchQueryEditorAiInlineRightArrowFallback = (editor: any, monaco: any) =>
     configurable: true,
   });
 
-  editor.addCommand = (keybinding: any, handler: any, context: any) => {
+  const patchedAddCommand = (keybinding: any, handler: any, context: any) => {
     if (
       keybinding === monaco.KeyCode.RightArrow
       && context === QUERY_EDITOR_AI_INLINE_CONTEXT_KEY
@@ -200,6 +201,32 @@ const patchQueryEditorAiInlineRightArrowFallback = (editor: any, monaco: any) =>
     }
     return originalAddCommand(keybinding, handler, context);
   };
+
+  if (rawAddCommand?.mock) {
+    for (const propertyName of [
+      'mock',
+      'mockClear',
+      'mockReset',
+      'mockRestore',
+      'mockImplementation',
+      'mockImplementationOnce',
+      'mockName',
+      'getMockName',
+    ]) {
+      if (!(propertyName in rawAddCommand)) {
+        continue;
+      }
+      Object.defineProperty(patchedAddCommand, propertyName, {
+        configurable: true,
+        get: () => {
+          const value = rawAddCommand[propertyName];
+          return typeof value === 'function' ? value.bind(rawAddCommand) : value;
+        },
+      });
+    }
+  }
+
+  editor.addCommand = patchedAddCommand;
 };
 
 const installPrintableInputFallback = (editor: any, monaco: any) => {
@@ -207,8 +234,9 @@ const installPrintableInputFallback = (editor: any, monaco: any) => {
   if (!editorDomNode || editor.__gonaviPrintableInputFallbackInstalled) {
     return;
   }
+  const TextAreaElement = typeof HTMLTextAreaElement === 'undefined' ? null : HTMLTextAreaElement;
   const input = editorDomNode.querySelector?.('textarea.inputarea, .inputarea textarea, textarea') as HTMLTextAreaElement | null;
-  if (!(input instanceof HTMLTextAreaElement)) {
+  if (!TextAreaElement || !(input instanceof TextAreaElement)) {
     return;
   }
   Object.defineProperty(editor, '__gonaviPrintableInputFallbackInstalled', {
