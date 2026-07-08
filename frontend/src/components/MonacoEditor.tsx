@@ -24,6 +24,14 @@ const sameEditorPosition = (left: any, right: any): boolean => (
   && Number(left?.column) === Number(right?.column)
 );
 
+const isSelectionEmpty = (selection: any): boolean => (
+  !selection
+  || (
+    Number(selection.startLineNumber) === Number(selection.endLineNumber)
+    && Number(selection.startColumn) === Number(selection.endColumn)
+  )
+);
+
 const stripSqlIdentifierQuotes = (value: string): string => {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -194,6 +202,72 @@ const patchQueryEditorAiInlineRightArrowFallback = (editor: any, monaco: any) =>
   };
 };
 
+const installPrintableInputFallback = (editor: any, monaco: any) => {
+  const editorDomNode = editor?.getDomNode?.();
+  if (!editorDomNode || editor.__gonaviPrintableInputFallbackInstalled) {
+    return;
+  }
+  const input = editorDomNode.querySelector?.('textarea.inputarea, .inputarea textarea, textarea') as HTMLTextAreaElement | null;
+  if (!(input instanceof HTMLTextAreaElement)) {
+    return;
+  }
+  Object.defineProperty(editor, '__gonaviPrintableInputFallbackInstalled', {
+    value: true,
+    configurable: true,
+  });
+
+  const isReadOnly = (): boolean => {
+    try {
+      const optionId = monaco?.editor?.EditorOption?.readOnly;
+      return optionId !== undefined ? editor.getOption?.(optionId) === true : false;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleBeforeInput = (event: InputEvent) => {
+    const text = String(event.data || '');
+    if (
+      event.defaultPrevented
+      || event.isComposing
+      || event.inputType !== 'insertText'
+      || !text
+      || text.length > 8
+      || isReadOnly()
+    ) {
+      return;
+    }
+
+    const selectionBefore = editor.getSelection?.();
+    if (!isSelectionEmpty(selectionBefore)) {
+      return;
+    }
+    const beforeValue = String(editor.getValue?.() ?? '');
+    const beforePosition = editor.getPosition?.();
+
+    window.setTimeout(() => {
+      const domNode = editor.getDomNode?.();
+      if (!(domNode instanceof HTMLElement) || !domNode.isConnected || isReadOnly()) {
+        return;
+      }
+      if (document.activeElement && !domNode.contains(document.activeElement)) {
+        return;
+      }
+      const afterValue = String(editor.getValue?.() ?? '');
+      const afterPosition = editor.getPosition?.();
+      if (afterValue !== beforeValue || !sameEditorPosition(beforePosition, afterPosition)) {
+        return;
+      }
+      editor.trigger?.('gonavi-printable-input-fallback', 'type', { text });
+    }, 16);
+  };
+
+  input.addEventListener('beforeinput', handleBeforeInput);
+  editor.onDidDispose?.(() => {
+    input.removeEventListener('beforeinput', handleBeforeInput);
+  });
+};
+
 export const registerGonaviMonacoThemes: BeforeMount = (monaco) => {
   if (transparentThemesRegistered) {
     return;
@@ -291,6 +365,7 @@ const MonacoEditor: React.FC<MonacoEditorProps> = ({
   const handleMount: OnMount = useCallback((editor, monaco) => {
     installOceanBaseOracleNavigationFallback(editor);
     patchQueryEditorAiInlineRightArrowFallback(editor, monaco);
+    installPrintableInputFallback(editor, monaco);
     onMount?.(editor, monaco);
   }, [onMount]);
 
