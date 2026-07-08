@@ -93,9 +93,9 @@ func resolveWindowsUpdateFinalTargetPath(currentTarget string, sourcePath string
 func isVersionedWindowsUpdatePackageName(name string) bool {
 	trimmed := strings.TrimSpace(name)
 	lower := strings.ToLower(trimmed)
-	return strings.HasPrefix(trimmed, "GoNavi-")
-		&& strings.Contains(trimmed, "-Windows-")
-		&& strings.HasSuffix(lower, ".exe")
+	return strings.HasPrefix(trimmed, "GoNavi-") &&
+		strings.Contains(trimmed, "-Windows-") &&
+		strings.HasSuffix(lower, ".exe")
 }
 
 func prepareWindowsStagedUpdateAsset(sourcePath string, stagedDir string) (string, error) {
