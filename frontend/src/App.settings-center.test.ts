@@ -7,10 +7,15 @@ const appSource = readFileSync(
   'utf8',
 );
 
+const aiSettingsModalSource = readFileSync(
+  fileURLToPath(new globalThis.URL('./components/AISettingsModal.tsx', import.meta.url)),
+  'utf8',
+);
+
 describe('settings center layout', () => {
   it('uses the same split navigation shell as the tool center', () => {
     expect(appSource).toContain("type SettingsCenterGroupKey = 'preferences' | 'services' | 'about';");
-    expect(appSource).toContain("type SettingsCenterPaneKey = 'language' | 'sidebar-metadata' | 'proxy' | 'web-auth';");
+    expect(appSource).toContain("type SettingsCenterPaneKey = 'language' | 'theme' | 'sidebar-metadata' | 'proxy' | 'web-auth' | 'ai' | 'about-go-navi';");
     expect(appSource).toContain("const [activeSettingsCenterGroupKey, setActiveSettingsCenterGroupKey] = useState<SettingsCenterGroupKey>('preferences');");
     expect(appSource).toContain("const [activeSettingsCenterPane, setActiveSettingsCenterPane] = useState<SettingsCenterPaneState | null>(null);");
     expect(appSource).toContain('style={toolCenterModalWorkspaceStyle}');
@@ -48,5 +53,65 @@ describe('settings center layout', () => {
     expect(appSource).toContain("description: t('app.settings.entry.web_auth.description')");
     expect(appSource).toContain("handleOpenSettingsCenterPane('services', 'web-auth')");
     expect(appSource).toContain("<WebAuthSettingsPanel");
+  });
+
+  it('adds global proxy connection testing controls', () => {
+    expect(appSource).toContain("const DEFAULT_GLOBAL_PROXY_TEST_URL = 'https://api.github.com/';");
+    expect(appSource).toContain('const [proxyTestUrl, setProxyTestUrl]');
+    expect(appSource).toContain('const [proxyTesting, setProxyTesting]');
+    expect(appSource).toContain('const [proxyTestResult, setProxyTestResult]');
+    expect(appSource).toContain('handleTestGlobalProxyDraft');
+    expect(appSource).toContain('TestGlobalProxyConnection');
+    expect(appSource).toContain('https://github.com/Syngnat/GoNavi/releases/latest');
+    expect(appSource).toContain("t('app.proxy.test.action')");
+    expect(appSource).toContain("t('app.proxy.test.target_placeholder')");
+  });
+
+  it('adds cancel and back actions to settings center detail panes', () => {
+    expect(appSource).toContain('const handleBackFromSettingsCenterPane = useCallback(() => {');
+    expect(appSource).toContain('const handleCancelSettingsCenterPane = useCallback(() => {');
+    expect(appSource).toContain('onClick={handleCancelSettingsCenterPane}');
+    expect(appSource).toContain("t('common.cancel')");
+    expect(appSource).toContain('onClick={handleBackFromSettingsCenterPane}');
+    expect(appSource).toContain("t('common.back_to_previous')");
+  });
+
+  it('opens theme, AI, and about entries inside settings center detail panes', () => {
+    expect(appSource).toContain("handleOpenSettingsCenterPane('preferences', 'theme')");
+    expect(appSource).toContain("handleOpenSettingsCenterPane('services', 'ai')");
+    expect(appSource).toContain("handleOpenSettingsCenterPane('about', 'about-go-navi')");
+    expect(appSource).toContain("if (activeSettingsCenterPane.key === 'theme')");
+    expect(appSource).toContain("if (activeSettingsCenterPane.key === 'ai')");
+    expect(appSource).toContain('<AISettingsContent');
+    expect(appSource).toContain("if (activeSettingsCenterPane.key === 'about-go-navi')");
+    expect(appSource).toContain('renderSettingsCenterAboutPane()');
+  });
+
+  it('renders the settings center about page with the reference card layout', () => {
+    expect(appSource).toContain('const renderSettingsCenterAboutPane = () => {');
+    expect(appSource).toContain('const renderSettingsCenterAboutProjectEntry = ({');
+    expect(appSource).toContain("padding: '18px 22px'");
+    expect(appSource).toContain('width: 64');
+    expect(appSource).toContain('height: 64');
+    expect(appSource).toContain('minWidth: 260');
+    expect(appSource).toContain("t('app.about.version_update.title')");
+    expect(appSource).toContain("t('app.about.project.github.title')");
+    expect(appSource).toContain("t('app.about.project.issues.title')");
+    expect(appSource).toContain("t('app.about.project.releases.title')");
+    expect(appSource).toContain('const renderSettingsCenterAboutFooter = () => (');
+    expect(appSource).toContain("t('app.about.last_checked_at', { time: aboutLastCheckedAt })");
+    expect(appSource).toContain('renderAboutUpdateActions()');
+  });
+
+  it('keeps embedded split-pane settings stable at scroll boundaries', () => {
+    expect(appSource).toContain('const isSettingsCenterContainedScrollPane =');
+    expect(appSource).toContain("activeSettingsCenterPane?.key === 'theme' || activeSettingsCenterPane?.key === 'ai'");
+    expect(appSource).toContain('const settingsCenterDetailBodyStyle: React.CSSProperties = isSettingsCenterContainedScrollPane');
+    expect(appSource).toContain("overflowY: 'hidden'");
+    expect(appSource).toContain('style={settingsCenterDetailBodyStyle}');
+    expect(appSource).toContain("boxSizing: 'border-box'");
+    expect(appSource).toContain("overscrollBehavior: 'contain'");
+    expect(aiSettingsModalSource).toContain("boxSizing: 'border-box'");
+    expect(aiSettingsModalSource).toContain("overscrollBehavior: 'contain'");
   });
 });

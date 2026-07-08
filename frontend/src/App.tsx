@@ -1,7 +1,7 @@
 ﻿import Modal from './components/common/ResizableDraggableModal';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Layout, Button, ConfigProvider, theme, message, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined, PoweroffOutlined } from '@ant-design/icons';
+import { Layout, Button, ConfigProvider, theme, message, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip, Alert } from 'antd';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined, PoweroffOutlined, TagOutlined, UserOutlined, UpCircleOutlined, MessageOutlined, FileTextOutlined, SyncOutlined, SendOutlined } from '@ant-design/icons';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -16,7 +16,7 @@ import { type DataSyncEntryMode } from './components/dataSyncEntryMode';
 import DriverManagerModal from './components/DriverManagerModal';
 import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';
 import LogPanel from './components/LogPanel';
-import AISettingsModal from './components/AISettingsModal';
+import AISettingsModal, { AISettingsContent } from './components/AISettingsModal';
 import AIChatPanel from './components/AIChatPanel';
 import AIPanelErrorBoundary from './components/ai/AIPanelErrorBoundary';
 import SecurityUpdateBanner from './components/SecurityUpdateBanner';
@@ -32,7 +32,7 @@ import {
   sanitizeV2SidebarRailScale,
   useStore,
 } from './store';
-import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
+import { GlobalProxyConfig, SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
 import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, getLinuxCJKFontInstallHint, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
 import {
@@ -55,7 +55,7 @@ import {
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { shouldEnableMacWindowDiagnostics } from './utils/macWindowDiagnostics';
 import { getConnectionWorkbenchState } from './utils/startupReadiness';
-import { toSaveGlobalProxyInput } from './utils/globalProxyDraft';
+import { createGlobalProxyDraft, toSaveGlobalProxyInput } from './utils/globalProxyDraft';
 import {
   detectConnectionImportKind,
   isConnectionPackagePasswordRequiredError,
@@ -220,10 +220,55 @@ type ToolCenterPaneState = {
 };
 
 type SettingsCenterGroupKey = 'preferences' | 'services' | 'about';
-type SettingsCenterPaneKey = 'language' | 'sidebar-metadata' | 'proxy' | 'web-auth';
+type SettingsCenterPaneKey = 'language' | 'theme' | 'sidebar-metadata' | 'proxy' | 'web-auth' | 'ai' | 'about-go-navi';
 type SettingsCenterPaneState = {
   key: SettingsCenterPaneKey;
   group: SettingsCenterGroupKey;
+};
+
+const DEFAULT_GLOBAL_PROXY_TEST_URL = 'https://api.github.com/';
+
+type GlobalProxyTestResultState = {
+  success: boolean;
+  message: string;
+  url?: string;
+  finalUrl?: string;
+  statusCode?: number;
+  durationMs?: number;
+  viaProxy?: boolean;
+};
+
+const getGlobalProxyDefaultPort = (type: GlobalProxyConfig['type']): number => (
+  type === 'http' ? 8080 : 1080
+);
+
+const createGlobalProxyComparableDraft = (
+  value: Partial<GlobalProxyConfig> = {},
+): GlobalProxyConfig => ({
+  ...createGlobalProxyDraft(value),
+  password: typeof value.password === 'string' ? value.password : '',
+});
+
+const areGlobalProxyDraftsEqual = (
+  left: Partial<GlobalProxyConfig>,
+  right: Partial<GlobalProxyConfig>,
+): boolean => {
+  const normalizedLeft = createGlobalProxyComparableDraft(left);
+  const normalizedRight = createGlobalProxyComparableDraft(right);
+  return (
+    normalizedLeft.enabled === normalizedRight.enabled &&
+    normalizedLeft.type === normalizedRight.type &&
+    normalizedLeft.host === normalizedRight.host &&
+    normalizedLeft.port === normalizedRight.port &&
+    normalizedLeft.user === normalizedRight.user &&
+    normalizedLeft.password === normalizedRight.password &&
+    normalizedLeft.hasPassword === normalizedRight.hasPassword
+  );
+};
+
+const formatAboutCheckedAt = (value: Date): string => {
+  const pad = (input: number) => String(input).padStart(2, '0');
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}`;
 };
 
 type ConnectionPackageDialogState = {
@@ -348,7 +393,6 @@ function App() {
   const startupFullscreen = useStore(state => state.startupFullscreen);
   const setStartupFullscreen = useStore(state => state.setStartupFullscreen);
   const globalProxy = useStore(state => state.globalProxy);
-  const setGlobalProxy = useStore(state => state.setGlobalProxy);
   const replaceConnections = useStore(state => state.replaceConnections);
   const replaceGlobalProxy = useStore(state => state.replaceGlobalProxy);
   const replaceSavedQueries = useStore(state => state.replaceSavedQueries);
@@ -580,7 +624,6 @@ function App() {
   const aiPanelVisible = useStore(state => state.aiPanelVisible);
   const toggleAIPanel = useStore(state => state.toggleAIPanel);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
-  const globalProxyInvalidHintShownRef = React.useRef(false);
   const windowDiagSequenceRef = React.useRef(0);
   const windowDiagLastSignatureRef = React.useRef('');
   const windowDiagLastAtRef = React.useRef(0);
@@ -778,71 +821,6 @@ function App() {
   }, [applySecurityUpdateStatus, isStoreHydrated, replaceConnections, replaceGlobalProxy, t]);
 
   useEffect(() => {
-      if (!isStoreHydrated || !hasLoadedSecureConfig) {
-          return;
-      }
-
-      const host = String(globalProxy.host || '').trim();
-      const port = Number(globalProxy.port);
-      const portValid = Number.isFinite(port) && port > 0 && port <= 65535;
-      const invalidWhenEnabled = globalProxy.enabled && (!host || !portValid);
-
-      if (invalidWhenEnabled) {
-          if (!globalProxyInvalidHintShownRef.current) {
-              void message.warning({
-                  content: t('app.proxy.message.invalid_enabled'),
-                  key: 'global-proxy-invalid',
-              });
-              globalProxyInvalidHintShownRef.current = true;
-          }
-          return;
-      }
-
-      globalProxyInvalidHintShownRef.current = false;
-      void message.destroy('global-proxy-invalid');
-
-      const backendApp = (window as any).go?.app?.App;
-      if (typeof backendApp?.SaveGlobalProxy !== 'function') {
-          return;
-      }
-
-      let cancelled = false;
-      Promise.resolve(
-          backendApp.SaveGlobalProxy(
-              toSaveGlobalProxyInput({
-                  ...globalProxy,
-                  host,
-                  port: portValid ? port : (globalProxy.type === 'http' ? 8080 : 1080),
-              })
-          )
-      )
-          .catch((err) => {
-              if (cancelled) {
-                  return;
-              }
-              const errMsg = err instanceof Error ? err.message : String(err || t('common.unknown'));
-              void message.error({
-                  content: t('app.proxy.message.save_failed', { error: errMsg }),
-                  key: 'global-proxy-sync-error',
-              });
-          });
-
-      return () => {
-          cancelled = true;
-      };
-  }, [
-      isStoreHydrated,
-      hasLoadedSecureConfig,
-      globalProxy.enabled,
-      globalProxy.type,
-      globalProxy.host,
-      globalProxy.port,
-      globalProxy.user,
-      globalProxy.password,
-      t,
-  ]);
-
-  useEffect(() => {
       let cancelled = false;
       let startupWindowTimer: number | null = null;
       const maxApplyAttempts = 6;
@@ -902,7 +880,7 @@ function App() {
                       } catch (e) {
                           console.warn("Wails Window APIs unavailable", e);
                       }
-                      
+
                       if (await checkStartupPreferenceApplied()) {
                           return;
                       }
@@ -1433,7 +1411,7 @@ function App() {
       resolvedAppearance,
       sidebarWidth,
   });
-  
+
   const addTab = useStore(state => state.addTab);
   const activeContext = useStore(state => state.activeContext);
   const connections = useStore(state => state.connections);
@@ -1718,6 +1696,18 @@ function App() {
       runtimeBuildType,
       t,
   });
+  const [aboutLastCheckedAt, setAboutLastCheckedAt] = useState('');
+  useEffect(() => {
+      if (!lastUpdateInfo) {
+          return;
+      }
+      setAboutLastCheckedAt(formatAboutCheckedAt(new Date()));
+  }, [
+      lastUpdateInfo?.channel,
+      lastUpdateInfo?.currentVersion,
+      lastUpdateInfo?.hasUpdate,
+      lastUpdateInfo?.latestVersion,
+  ]);
 
   const emitWindowDiagnostic = useCallback(async (stage: string, extra: Record<string, unknown> = {}) => {
       if (!macWindowDiagnosticsEnabled) {
@@ -2262,9 +2252,10 @@ function App() {
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
   const tabDisplaySettingsPanelRef = useRef<HTMLDivElement | null>(null);
   const [tabDisplaySettingsFocusRequest, setTabDisplaySettingsFocusRequest] = useState(0);
+  const isThemeSettingsPaneOpen = activeSettingsCenterPane?.key === 'theme';
   useEffect(() => {
       const shouldLoadInstalledFonts =
-          runtimePlatform === 'linux' || (isThemeModalOpen && themeModalSection === 'appearance');
+          runtimePlatform === 'linux' || ((isThemeModalOpen || isThemeSettingsPaneOpen) && themeModalSection === 'appearance');
       if (!shouldLoadInstalledFonts) {
           return;
       }
@@ -2313,17 +2304,17 @@ function App() {
       return () => {
           cancelled = true;
       };
-  }, [isThemeModalOpen, runtimePlatform, t, themeModalSection]);
+  }, [isThemeModalOpen, isThemeSettingsPaneOpen, runtimePlatform, t, themeModalSection]);
 
   useEffect(() => {
-      if (!isThemeModalOpen || themeModalSection !== 'appearance' || tabDisplaySettingsFocusRequest === 0) {
+      if ((!isThemeModalOpen && !isThemeSettingsPaneOpen) || themeModalSection !== 'appearance' || tabDisplaySettingsFocusRequest === 0) {
           return;
       }
       const timer = window.setTimeout(() => {
           tabDisplaySettingsPanelRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
       }, 80);
       return () => window.clearTimeout(timer);
-  }, [isThemeModalOpen, themeModalSection, tabDisplaySettingsFocusRequest]);
+  }, [isThemeModalOpen, isThemeSettingsPaneOpen, themeModalSection, tabDisplaySettingsFocusRequest]);
 
   const shortcutConflictMap = useMemo(() => {
       const map: Partial<Record<ShortcutAction, ConflictInfo[]>> = {};
@@ -2342,6 +2333,12 @@ function App() {
       return map;
   }, [activeShortcutPlatform, language, shortcutOptions]);
   const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
+  const [proxyDraft, setProxyDraft] = useState<GlobalProxyConfig>(() => createGlobalProxyComparableDraft(globalProxy));
+  const [proxyDraftClearPassword, setProxyDraftClearPassword] = useState(false);
+  const [proxyApplying, setProxyApplying] = useState(false);
+  const [proxyTestUrl, setProxyTestUrl] = useState(DEFAULT_GLOBAL_PROXY_TEST_URL);
+  const [proxyTesting, setProxyTesting] = useState(false);
+  const [proxyTestResult, setProxyTestResult] = useState<GlobalProxyTestResultState | null>(null);
   const [isDataRootModalOpen, setIsDataRootModalOpen] = useState(false);
   const [dataRootInfo, setDataRootInfo] = useState<any>(null);
   const [selectedDataRootPath, setSelectedDataRootPath] = useState('');
@@ -2363,6 +2360,219 @@ function App() {
           panelWidth: DEFAULT_AI_PANEL_WIDTH,
       })
       : DEFAULT_AI_PANEL_WIDTH;
+  const appliedGlobalProxyDraft = useMemo(() => (
+      createGlobalProxyComparableDraft(globalProxy)
+  ), [
+      globalProxy.enabled,
+      globalProxy.type,
+      globalProxy.host,
+      globalProxy.port,
+      globalProxy.user,
+      globalProxy.password,
+      globalProxy.hasPassword,
+  ]);
+  const proxyDraftHost = String(proxyDraft.host || '').trim();
+  const proxyDraftUser = String(proxyDraft.user || '').trim();
+  const proxyDraftPort = Number(proxyDraft.port);
+  const proxyDraftPortValid = Number.isFinite(proxyDraftPort) && proxyDraftPort > 0 && proxyDraftPort <= 65535;
+  const proxyDraftValid = !proxyDraft.enabled || (proxyDraftHost !== '' && proxyDraftPortValid);
+  const proxyDraftDirty = proxyDraftClearPassword || !areGlobalProxyDraftsEqual(proxyDraft, appliedGlobalProxyDraft);
+  const proxyPanelOpen = isProxyModalOpen || activeSettingsCenterPane?.key === 'proxy';
+  const proxyPanelWasOpenRef = useRef(false);
+  const proxyStatusTone = proxyDraft.enabled
+      ? (proxyDraftValid ? 'success' : 'warning')
+      : 'info';
+  const proxyStatusTitle = proxyDraft.enabled
+      ? (proxyDraftValid ? t('app.proxy.status.enabled') : t('app.proxy.status.incomplete'))
+      : t('app.proxy.status.disabled');
+  const proxyStatusDescription = proxyDraft.enabled && proxyDraftValid
+      ? t('app.proxy.status.enabled_description', {
+          type: proxyDraft.type.toUpperCase(),
+          endpoint: `${proxyDraftHost}:${proxyDraftPort}`,
+      })
+      : (proxyDraft.enabled
+          ? t('app.proxy.status.incomplete_description')
+          : t('app.proxy.status.disabled_description'));
+  const proxyPresetItems = useMemo(() => ([
+      { key: 'clash-mixed', label: t('app.proxy.preset.clash_mixed'), type: 'socks5' as const, host: '127.0.0.1', port: 7890 },
+      { key: 'socks5-local', label: t('app.proxy.preset.socks5_local'), type: 'socks5' as const, host: '127.0.0.1', port: 1080 },
+      { key: 'http-local', label: t('app.proxy.preset.http_local'), type: 'http' as const, host: '127.0.0.1', port: 8080 },
+  ]), [t]);
+  const proxyTestPresetItems = useMemo(() => ([
+      { key: 'github-api', label: t('app.proxy.test.preset.github_api'), url: 'https://api.github.com/' },
+      { key: 'github-release', label: t('app.proxy.test.preset.github_release'), url: 'https://github.com/Syngnat/GoNavi/releases/latest' },
+      { key: 'go-module-proxy', label: t('app.proxy.test.preset.go_module_proxy'), url: 'https://proxy.golang.org/' },
+      { key: 'baidu', label: t('app.proxy.test.preset.baidu'), url: 'https://www.baidu.com/' },
+  ]), [t]);
+  const proxyTestUrlTrimmed = String(proxyTestUrl || '').trim();
+  const proxyCanTest = proxyDraft.enabled && proxyDraftValid && proxyTestUrlTrimmed !== '' && !proxyTesting;
+  useEffect(() => {
+      if (!proxyPanelOpen) {
+          proxyPanelWasOpenRef.current = false;
+          return;
+      }
+      if (proxyPanelWasOpenRef.current) {
+          return;
+      }
+      proxyPanelWasOpenRef.current = true;
+      setProxyDraft(appliedGlobalProxyDraft);
+      setProxyDraftClearPassword(false);
+  }, [appliedGlobalProxyDraft, proxyPanelOpen]);
+  useEffect(() => {
+      setProxyTestResult(null);
+  }, [
+      proxyDraft.enabled,
+      proxyDraft.type,
+      proxyDraft.host,
+      proxyDraft.port,
+      proxyDraft.user,
+      proxyDraft.password,
+      proxyDraftClearPassword,
+      proxyTestUrlTrimmed,
+  ]);
+  const resetProxyDraftToCurrent = useCallback(() => {
+      setProxyDraft(appliedGlobalProxyDraft);
+      setProxyDraftClearPassword(false);
+  }, [appliedGlobalProxyDraft]);
+  const updateProxyDraftType = useCallback((type: GlobalProxyConfig['type']) => {
+      setProxyDraft((current) => {
+          const currentPort = Number(current.port);
+          const previousDefault = getGlobalProxyDefaultPort(current.type);
+          const shouldSwitchPort = !Number.isFinite(currentPort) || currentPort === previousDefault;
+          return {
+              ...current,
+              type,
+              port: shouldSwitchPort ? getGlobalProxyDefaultPort(type) : current.port,
+          };
+      });
+  }, []);
+  const applyProxyPreset = useCallback((preset: { type: GlobalProxyConfig['type']; host: string; port: number }) => {
+      setProxyDraft((current) => ({
+          ...current,
+          enabled: true,
+          type: preset.type,
+          host: preset.host,
+          port: preset.port,
+      }));
+  }, []);
+  const handleTestGlobalProxyDraft = useCallback(async () => {
+      if (!proxyDraft.enabled) {
+          void message.warning(t('app.proxy.test.message.enable_first'));
+          return;
+      }
+      if (!proxyDraftValid) {
+          void message.warning(t('app.proxy.message.invalid_enabled'));
+          return;
+      }
+      if (proxyTestUrlTrimmed === '') {
+          void message.warning(t('app.proxy.test.message.url_required'));
+          return;
+      }
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.TestGlobalProxyConnection !== 'function') {
+          void message.error(t('app.proxy.test.message.unavailable'));
+          return;
+      }
+      setProxyTesting(true);
+      try {
+          const res = await backendApp.TestGlobalProxyConnection({
+              proxy: toSaveGlobalProxyInput({
+                  ...proxyDraft,
+                  host: proxyDraftHost,
+                  user: proxyDraftUser,
+                  port: proxyDraftPortValid ? proxyDraftPort : getGlobalProxyDefaultPort(proxyDraft.type),
+                  clearPassword: proxyDraftClearPassword,
+              }),
+              url: proxyTestUrlTrimmed,
+              timeoutSeconds: 8,
+          });
+          const data = (res?.data || {}) as Partial<GlobalProxyTestResultState>;
+          const statusCode = Number(data.statusCode);
+          setProxyTestResult({
+              success: res?.success === true,
+              message: res?.message || t('common.unknown'),
+              url: data.url || proxyTestUrlTrimmed,
+              finalUrl: data.finalUrl,
+              statusCode: Number.isFinite(statusCode) ? statusCode : undefined,
+              durationMs: typeof data.durationMs === 'number' ? data.durationMs : undefined,
+              viaProxy: data.viaProxy === true,
+          });
+      } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err || t('common.unknown'));
+          setProxyTestResult({
+              success: false,
+              message: errMsg,
+              url: proxyTestUrlTrimmed,
+          });
+      } finally {
+          setProxyTesting(false);
+      }
+  }, [
+      proxyDraft,
+      proxyDraftClearPassword,
+      proxyDraftHost,
+      proxyDraftPort,
+      proxyDraftPortValid,
+      proxyDraftUser,
+      proxyDraftValid,
+      proxyTestUrlTrimmed,
+      t,
+  ]);
+  const handleApplyGlobalProxyDraft = useCallback(async () => {
+      if (!proxyDraftValid) {
+          void message.warning({
+              content: t('app.proxy.message.invalid_enabled'),
+              key: 'global-proxy-invalid',
+          });
+          return;
+      }
+      void message.destroy('global-proxy-invalid');
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.SaveGlobalProxy !== 'function') {
+          void message.error({
+              content: t('app.proxy.message.save_failed', { error: t('common.unknown') }),
+              key: 'global-proxy-sync-error',
+          });
+          return;
+      }
+      const saveInput = toSaveGlobalProxyInput({
+          ...proxyDraft,
+          host: proxyDraftHost,
+          user: proxyDraftUser,
+          port: proxyDraftPortValid ? proxyDraftPort : getGlobalProxyDefaultPort(proxyDraft.type),
+          clearPassword: proxyDraftClearPassword,
+      });
+      setProxyApplying(true);
+      try {
+          const saved = await backendApp.SaveGlobalProxy(saveInput);
+          const nextDraft = createGlobalProxyComparableDraft(saved || saveInput);
+          replaceGlobalProxy(nextDraft);
+          setProxyDraft(nextDraft);
+          setProxyDraftClearPassword(false);
+          void message.success({
+              content: t('app.proxy.message.config_applied'),
+              key: 'global-proxy-applied',
+          });
+      } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err || t('common.unknown'));
+          void message.error({
+              content: t('app.proxy.message.save_failed', { error: errMsg }),
+              key: 'global-proxy-sync-error',
+          });
+      } finally {
+          setProxyApplying(false);
+      }
+  }, [
+      proxyDraft,
+      proxyDraftClearPassword,
+      proxyDraftHost,
+      proxyDraftPort,
+      proxyDraftPortValid,
+      proxyDraftUser,
+      proxyDraftValid,
+      replaceGlobalProxy,
+      t,
+  ]);
   const legacyAiEdgeHandleDockStyle = useMemo(
       () => resolveLegacyAIEdgeHandleDockStyle(legacyAiEdgeHandleAttachment),
       [legacyAiEdgeHandleAttachment],
@@ -2389,6 +2599,15 @@ function App() {
       setActiveSettingsCenterGroupKey(group);
       setActiveSettingsCenterPane({ key, group });
       setIsSettingsModalOpen(true);
+  }, []);
+  const handleBackFromSettingsCenterPane = useCallback(() => {
+      const returnGroup = activeSettingsCenterPane?.group ?? activeSettingsCenterGroupKey;
+      setActiveSettingsCenterGroupKey(returnGroup);
+      setActiveSettingsCenterPane(null);
+  }, [activeSettingsCenterGroupKey, activeSettingsCenterPane?.group]);
+  const handleCancelSettingsCenterPane = useCallback(() => {
+      setActiveSettingsCenterPane(null);
+      setIsSettingsModalOpen(false);
   }, []);
   const handleOpenToolCenterPane = useCallback((group: ToolCenterGroupKey, key: ToolCenterPaneKey) => {
       setToolCenterBackGroupKey(group);
@@ -2536,7 +2755,7 @@ function App() {
   const handleCloseLogPanel = useCallback(() => {
       handleCloseAppLogPanel();
   }, [handleCloseAppLogPanel]);
-  
+
   const handleCreateConnection = useCallback(() => {
       setSecurityUpdateRepairSource(null);
       setEditingConnection(null);
@@ -2853,7 +3072,7 @@ function App() {
           message.error(t('app.window_zoom.message.reset_failed'));
       }
   }, [t]);
-  
+
   const {
       ghostRef,
       handleSidebarMouseDown,
@@ -3276,74 +3495,261 @@ function App() {
           ),
       });
   }, [setQueryOptions, sidebarMetadataFieldItems, sidebarTableMetadataFields]);
-  const renderProxySettingsContent = useCallback(() => (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
-          <div style={utilityPanelStyle}>
-              <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.proxy.section_title')}</div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                  <span>{t('app.proxy.enable')}</span>
-                  <Switch checked={globalProxy.enabled} onChange={(checked) => setGlobalProxy({ enabled: checked })} />
+  const renderProxySettingsContent = useCallback(() => {
+      const fieldLabelStyle: React.CSSProperties = {
+          marginBottom: 6,
+          fontSize: 12,
+          color: darkMode ? 'rgba(255,255,255,0.55)' : 'rgba(16,24,40,0.58)',
+      };
+      const proxyGridColumns = viewportWidth < 760 ? '1fr' : '1fr 1fr';
+      const proxyCardAccent = proxyDraft.enabled
+          ? (darkMode ? 'rgba(34,197,94,0.12)' : 'rgba(16,185,129,0.10)')
+          : (darkMode ? 'rgba(148,163,184,0.12)' : 'rgba(71,85,105,0.08)');
+      const proxyTestAlertType = proxyTestResult
+          ? (!proxyTestResult.success ? 'error' : ((proxyTestResult.statusCode || 0) >= 400 ? 'warning' : 'success'))
+          : 'info';
+
+      return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '12px 0' }}>
+              <div style={{ ...utilityPanelStyle, background: `linear-gradient(135deg, ${proxyCardAccent}, transparent 58%)` }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+                      <div>
+                          <div style={{ fontWeight: 700, fontSize: 15 }}>{t('app.proxy.section_title')}</div>
+                          <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>{t('app.proxy.description')}</div>
+                      </div>
+                      <Switch
+                          checked={proxyDraft.enabled}
+                          checkedChildren={t('app.proxy.switch.enabled')}
+                          unCheckedChildren={t('app.proxy.switch.disabled')}
+                          onChange={(checked) => setProxyDraft((current) => ({ ...current, enabled: checked }))}
+                      />
+                  </div>
+                  <Alert
+                      showIcon
+                      type={proxyStatusTone}
+                      message={proxyStatusTitle}
+                      description={proxyStatusDescription}
+                      style={{ marginTop: 14 }}
+                  />
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+                      {proxyPresetItems.map((preset) => (
+                          <Button key={preset.key} size="small" onClick={() => applyProxyPreset(preset)}>
+                              {preset.label}
+                          </Button>
+                      ))}
+                  </div>
+                  {proxyDraftDirty && (
+                      <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
+                          {t('app.proxy.unsaved_hint')}
+                      </div>
+                  )}
               </div>
-              <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, opacity: globalProxy.enabled ? 1 : 0.7 }}>
-                  <div>
-                      <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.type')}</div>
-                      <Select
-                          value={globalProxy.type}
-                          disabled={!globalProxy.enabled}
-                          options={[
-                              { value: 'socks5', label: 'SOCKS5' },
-                              { value: 'http', label: 'HTTP' },
-                          ]}
-                          onChange={(value) => setGlobalProxy({ type: value as 'socks5' | 'http' })}
-                      />
+
+              <div style={utilityPanelStyle}>
+                  <div style={{ fontWeight: 600, marginBottom: 12 }}>{t('app.proxy.connection_title')}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: proxyGridColumns, gap: 12 }}>
+                      <div>
+                          <div style={fieldLabelStyle}>{t('app.proxy.type')}</div>
+                          <Segmented
+                              block
+                              value={proxyDraft.type}
+                              options={[
+                                  { label: t('app.proxy.type_socks5'), value: 'socks5' },
+                                  { label: t('app.proxy.type_http'), value: 'http' },
+                              ]}
+                              onChange={(value) => updateProxyDraftType(value as GlobalProxyConfig['type'])}
+                          />
+                      </div>
+                      <div>
+                          <div style={fieldLabelStyle}>{t('app.proxy.port')}</div>
+                          <InputNumber
+                              min={1}
+                              max={65535}
+                              status={proxyDraft.enabled && !proxyDraftPortValid ? 'error' : undefined}
+                              style={{ width: '100%' }}
+                              value={proxyDraft.port}
+                              onChange={(value) => setProxyDraft((current) => ({
+                                  ...current,
+                                  port: typeof value === 'number' ? value : getGlobalProxyDefaultPort(current.type),
+                              }))}
+                          />
+                      </div>
+                      <div style={{ gridColumn: viewportWidth < 760 ? 'auto' : '1 / span 2' }}>
+                          <div style={fieldLabelStyle}>{t('app.proxy.host')}</div>
+                          <Input
+                              placeholder={t('app.proxy.host_placeholder')}
+                              status={proxyDraft.enabled && proxyDraftHost === '' ? 'error' : undefined}
+                              value={proxyDraft.host}
+                              onChange={(e) => setProxyDraft((current) => ({ ...current, host: e.target.value }))}
+                          />
+                      </div>
                   </div>
-                  <div>
-                      <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.port')}</div>
-                      <InputNumber
-                          min={1}
-                          max={65535}
-                          style={{ width: '100%' }}
-                          value={globalProxy.port}
-                          disabled={!globalProxy.enabled}
-                          onChange={(value) => setGlobalProxy({
-                              port: typeof value === 'number' ? value : (globalProxy.type === 'http' ? 8080 : 1080),
-                          })}
-                      />
-                  </div>
-                  <div style={{ gridColumn: '1 / span 2' }}>
-                      <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.host')}</div>
-                      <Input
-                          placeholder={t('app.proxy.host_placeholder')}
-                          value={globalProxy.host}
-                          disabled={!globalProxy.enabled}
-                          onChange={(e) => setGlobalProxy({ host: e.target.value })}
-                      />
-                  </div>
-                  <div>
-                      <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.username_optional')}</div>
-                      <Input
-                          placeholder="proxy-user"
-                          value={globalProxy.user}
-                          disabled={!globalProxy.enabled}
-                          onChange={(e) => setGlobalProxy({ user: e.target.value })}
-                      />
-                  </div>
-                  <div>
-                      <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.password_optional')}</div>
-                      <Input.Password
-                          placeholder="proxy-password"
-                          value={globalProxy.password}
-                          disabled={!globalProxy.enabled}
-                          onChange={(e) => setGlobalProxy({ password: e.target.value })}
-                      />
+                  <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
+                      {proxyDraft.enabled ? t('app.proxy.enabled_edit_hint') : t('app.proxy.disabled_hint')}
                   </div>
               </div>
-              <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 6 }}>
-                  {t('app.proxy.scope_hint')}
+
+              <div style={utilityPanelStyle}>
+                  <div style={{ fontWeight: 600, marginBottom: 12 }}>{t('app.proxy.auth_title')}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: proxyGridColumns, gap: 12 }}>
+                      <div>
+                          <div style={fieldLabelStyle}>{t('app.proxy.username_optional')}</div>
+                          <Input
+                              placeholder="proxy-user"
+                              value={proxyDraft.user}
+                              onChange={(e) => setProxyDraft((current) => ({ ...current, user: e.target.value }))}
+                          />
+                      </div>
+                      <div>
+                          <div style={fieldLabelStyle}>{t('app.proxy.password_optional')}</div>
+                          <Input.Password
+                              placeholder="proxy-password"
+                              value={proxyDraft.password}
+                              onChange={(e) => {
+                                  const nextPassword = e.target.value;
+                                  setProxyDraft((current) => ({
+                                      ...current,
+                                      password: nextPassword,
+                                      hasPassword: nextPassword !== '' ? true : current.hasPassword,
+                                  }));
+                                  setProxyDraftClearPassword(false);
+                              }}
+                          />
+                      </div>
+                  </div>
+                  {proxyDraftClearPassword ? (
+                      <Alert
+                          showIcon
+                          type="warning"
+                          message={t('app.proxy.clear_saved_password_pending')}
+                          style={{ marginTop: 12 }}
+                      />
+                  ) : proxyDraft.hasPassword && proxyDraft.password === '' ? (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 12 }}>
+                          <span style={utilityMutedTextStyle}>{t('app.proxy.password_saved_hint')}</span>
+                          <Button
+                              size="small"
+                              onClick={() => {
+                                  setProxyDraft((current) => ({ ...current, password: '', hasPassword: false }));
+                                  setProxyDraftClearPassword(true);
+                              }}
+                          >
+                              {t('app.proxy.clear_saved_password')}
+                          </Button>
+                      </div>
+                  ) : (
+                      <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>{t('app.proxy.no_auth_hint')}</div>
+                  )}
+              </div>
+
+              <div style={utilityPanelStyle}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                      <div>
+                          <div style={{ fontWeight: 600 }}>{t('app.proxy.test.title')}</div>
+                          <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>{t('app.proxy.test.description')}</div>
+                      </div>
+                      <Button
+                          type="primary"
+                          loading={proxyTesting}
+                          disabled={!proxyCanTest}
+                          onClick={handleTestGlobalProxyDraft}
+                      >
+                          {t('app.proxy.test.action')}
+                      </Button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div>
+                          <div style={fieldLabelStyle}>{t('app.proxy.test.target_label')}</div>
+                          <Select
+                              value={proxyTestUrlTrimmed}
+                              style={{ width: '100%' }}
+                              options={proxyTestPresetItems.map((item) => ({
+                                  value: item.url,
+                                  label: `${item.label} - ${item.url}`,
+                              }))}
+                              onChange={(value) => setProxyTestUrl(value)}
+                          />
+                      </div>
+                      <Input
+                          value={proxyTestUrl}
+                          placeholder={t('app.proxy.test.target_placeholder')}
+                          onChange={(event) => setProxyTestUrl(event.target.value)}
+                          onPressEnter={() => {
+                              if (proxyCanTest) {
+                                  void handleTestGlobalProxyDraft();
+                              }
+                          }}
+                      />
+                      {!proxyDraft.enabled && (
+                          <div style={utilityMutedTextStyle}>{t('app.proxy.test.disabled_hint')}</div>
+                      )}
+                      {proxyTestResult && (
+                          <Alert
+                              showIcon
+                              type={proxyTestAlertType}
+                              message={proxyTestResult.message}
+                              description={[
+                                  proxyTestResult.statusCode ? t('app.proxy.test.result.status', { status: proxyTestResult.statusCode }) : '',
+                                  typeof proxyTestResult.durationMs === 'number' ? t('app.proxy.test.result.duration', { duration: proxyTestResult.durationMs }) : '',
+                                  proxyTestResult.finalUrl && proxyTestResult.finalUrl !== proxyTestResult.url ? t('app.proxy.test.result.final_url', { url: proxyTestResult.finalUrl }) : '',
+                              ].filter(Boolean).join('  ')}
+                          />
+                      )}
+                  </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ ...utilityMutedTextStyle, flex: '1 1 260px' }}>{t('app.proxy.scope_hint')}</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                      <Button onClick={resetProxyDraftToCurrent} disabled={!proxyDraftDirty || proxyApplying}>
+                          {t('app.proxy.reset')}
+                      </Button>
+                      <Button
+                          type="primary"
+                          loading={proxyApplying}
+                          disabled={!proxyDraftDirty && !proxyApplying}
+                          onClick={handleApplyGlobalProxyDraft}
+                      >
+                          {t('app.proxy.apply')}
+                      </Button>
+                  </div>
               </div>
           </div>
-      </div>
-  ), [darkMode, globalProxy.enabled, globalProxy.host, globalProxy.password, globalProxy.port, globalProxy.type, globalProxy.user, setGlobalProxy, t, utilityPanelStyle]);
+      );
+  }, [
+      applyProxyPreset,
+      darkMode,
+      handleApplyGlobalProxyDraft,
+      proxyApplying,
+      proxyCanTest,
+      proxyDraft.enabled,
+      proxyDraft.hasPassword,
+      proxyDraft.host,
+      proxyDraft.password,
+      proxyDraft.port,
+      proxyDraft.type,
+      proxyDraft.user,
+      proxyDraftClearPassword,
+      proxyDraftDirty,
+      proxyDraftHost,
+      proxyDraftPortValid,
+      proxyTestPresetItems,
+      proxyTestResult,
+      proxyTesting,
+      proxyTestUrl,
+      proxyTestUrlTrimmed,
+      proxyPresetItems,
+      proxyStatusDescription,
+      proxyStatusTitle,
+      proxyStatusTone,
+      resetProxyDraftToCurrent,
+      t,
+      handleTestGlobalProxyDraft,
+      updateProxyDraftType,
+      utilityMutedTextStyle,
+      utilityPanelStyle,
+      viewportWidth,
+  ]);
   const renderSidebarMetadataSettingsPane = useCallback(() => (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
           <div style={utilityPanelStyle}>
@@ -3406,6 +3812,1116 @@ function App() {
       utilityMutedTextStyle,
       utilityPanelStyle,
   ]);
+  const renderAboutUpdateActions = (closeAction?: React.ReactNode) => [
+      isBackgroundProgressForLatestUpdate && !isLatestUpdateDownloaded ? (
+          <Button key="progress" icon={<DownloadOutlined />} onClick={showUpdateDownloadProgress}>{t('app.about.action.download_progress')}</Button>
+      ) : null,
+      lastUpdateInfo?.hasUpdate && !isLatestUpdateDownloaded && !isBackgroundProgressForLatestUpdate ? (
+          <Button key="mute" onClick={muteLatestUpdate}>{t('app.about.action.mute_this_version')}</Button>
+      ) : null,
+      <Button key="check" icon={<CloudDownloadOutlined />} onClick={() => checkForUpdates(false)}>{t('app.about.action.check_updates')}</Button>,
+      closeAction ?? null,
+      lastUpdateInfo?.hasUpdate && !isLatestUpdateDownloaded && !isBackgroundProgressForLatestUpdate ? (
+          <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={() => downloadUpdate(lastUpdateInfo, false)}>{t('app.about.action.download_update')}</Button>
+      ) : null,
+      isLatestUpdateDownloaded ? (
+          <Button key="open-install-directory" onClick={openDownloadedUpdateDirectory}>
+              {t('app.about.action.open_install_directory')}
+          </Button>
+      ) : null,
+      isLatestUpdateDownloaded ? (
+          <Button key="install-direct" type="primary" icon={<DownloadOutlined />} onClick={handleInstallFromProgress}>
+              {t('app.about.action.install_update')}
+          </Button>
+      ) : null,
+  ].filter(Boolean);
+
+  const renderAboutSettingsContent = () => (
+      aboutLoading ? (
+          <div style={{ padding: '16px 0', textAlign: 'center' }}>
+              <Spin />
+          </div>
+      ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={utilityPanelStyle}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+                      <div>
+                          <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.version')}</div>
+                          <div style={utilityMutedTextStyle}>{aboutDisplayVersion}</div>
+                      </div>
+                      <div>
+                          <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.author')}</div>
+                          <div style={utilityMutedTextStyle}>{aboutInfo?.author || t('common.unknown')}</div>
+                      </div>
+                      <div style={{ gridColumn: '1 / -1' }}>
+                          <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.update_status')}</div>
+                          <div style={utilityMutedTextStyle}>{aboutUpdateStatus || t('app.about.update_status.not_checked')}</div>
+                      </div>
+                      <div style={{ gridColumn: '1 / -1' }}>
+                          <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.update_channel')}</div>
+                          <Select
+                              value={updateChannel}
+                              options={[
+                                  { value: 'latest', label: t('app.about.update_channel.latest') },
+                                  { value: 'dev', label: t('app.about.update_channel.dev') },
+                              ]}
+                              onChange={(value) => {
+                                  void changeUpdateChannel(String(value));
+                              }}
+                              loading={isUpdateChannelLoading}
+                              disabled={
+                                  isUpdateChannelLoading
+                                  || isUpdateChannelSaving
+                                  || updateDownloadProgress.status === 'start'
+                                  || updateDownloadProgress.status === 'downloading'
+                              }
+                              style={{ width: 220, maxWidth: '100%' }}
+                          />
+                      </div>
+                      {aboutInfo?.communityUrl ? (
+                          <div style={{ gridColumn: '1 / -1' }}>
+                              <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.community')}</div>
+                              <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.communityUrl) BrowserOpenURL(aboutInfo.communityUrl); }} href={aboutInfo.communityUrl}>{t('app.about.community.ai_book')}</a>
+                          </div>
+                      ) : null}
+                  </div>
+              </div>
+              <div style={utilityPanelStyle}>
+                  <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.about.project_links')}</div>
+                  <div style={{ display: 'grid', gap: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <GithubOutlined />
+                          {aboutInfo?.repoUrl ? (
+                              <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.repoUrl) BrowserOpenURL(aboutInfo.repoUrl); }} href={aboutInfo.repoUrl}>{aboutInfo.repoUrl}</a>
+                          ) : t('common.unknown')}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <BugOutlined />
+                          {aboutInfo?.issueUrl ? (
+                              <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.issueUrl) BrowserOpenURL(aboutInfo.issueUrl); }} href={aboutInfo.issueUrl}>{aboutInfo.issueUrl}</a>
+                          ) : t('common.unknown')}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <CloudDownloadOutlined />
+                          {aboutInfo?.releaseUrl ? (
+                              <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.releaseUrl) BrowserOpenURL(aboutInfo.releaseUrl); }} href={aboutInfo.releaseUrl}>{aboutInfo.releaseUrl}</a>
+                          ) : t('common.unknown')}
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )
+  );
+
+  const renderSettingsCenterAboutProjectEntry = ({
+      icon,
+      title,
+      description,
+      url,
+  }: {
+      icon: React.ReactNode;
+      title: string;
+      description: string;
+      url?: string;
+  }) => (
+      <button
+        type="button"
+        onClick={() => {
+            if (url) {
+                BrowserOpenURL(url);
+            }
+        }}
+        disabled={!url}
+        style={{
+            width: '100%',
+            display: 'grid',
+            gridTemplateColumns: '44px minmax(0, 1fr) auto',
+            alignItems: 'center',
+            gap: 14,
+            padding: '18px 20px',
+            borderRadius: 12,
+            border: `1px solid ${darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(16,24,40,0.10)'}`,
+            background: darkMode ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.76)',
+            color: darkMode ? 'rgba(255,255,255,0.90)' : '#101828',
+            cursor: url ? 'pointer' : 'not-allowed',
+            opacity: url ? 1 : 0.58,
+            textAlign: 'left',
+        }}
+      >
+          <span style={{ fontSize: 26, display: 'grid', placeItems: 'center', color: darkMode ? '#f8fafc' : '#0f172a' }}>
+              {icon}
+          </span>
+          <span style={{ minWidth: 0 }}>
+              <span style={{ display: 'block', fontSize: 16, fontWeight: 700, lineHeight: 1.4 }}>{title}</span>
+              <span style={{ ...utilityMutedTextStyle, display: 'block', marginTop: 3, lineHeight: 1.45 }}>{description}</span>
+          </span>
+          <RightOutlined style={{ color: overlayTheme.mutedText, fontSize: 18 }} />
+      </button>
+  );
+
+  const renderSettingsCenterAboutPane = () => {
+      if (aboutLoading) {
+          return (
+              <div style={{ padding: '16px 0', textAlign: 'center' }}>
+                  <Spin />
+              </div>
+          );
+      }
+
+      const hasUpdate = Boolean(lastUpdateInfo?.hasUpdate);
+      const latestVersionText = lastUpdateInfo?.latestVersion || t('common.unknown');
+      const updateStatusText = hasUpdate
+          ? t('app.about.hero.update_available_version', { version: latestVersionText })
+          : (lastUpdateInfo ? t('app.about.hero.no_update') : t('app.about.update_status.not_checked'));
+      const currentVersionText = lastUpdateInfo?.currentVersion || aboutDisplayVersion;
+      const releaseNotesText = lastUpdateInfo?.releaseName || (hasUpdate ? t('app.about.release_notes.fallback') : '-');
+      const cardBorder = darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(16,24,40,0.11)';
+      const cardBg = darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.82)';
+      const mutedText = utilityMutedTextStyle.color;
+      const dividerColor = darkMode ? 'rgba(255,255,255,0.09)' : 'rgba(16,24,40,0.09)';
+      const versionRows = [
+          [t('app.about.version.current'), currentVersionText],
+          [t('app.about.version.latest'), latestVersionText],
+          [t('app.about.version.release_time'), '-'],
+          [t('app.about.version.release_notes'), releaseNotesText],
+      ];
+
+      return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '10px 0 20px' }}>
+              <div
+                style={{
+                    border: `1px solid ${cardBorder}`,
+                    borderRadius: 14,
+                    padding: '18px 22px',
+                    background: cardBg,
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0, 1fr) auto',
+                    alignItems: 'center',
+                    gap: 18,
+                }}
+              >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 18, minWidth: 0 }}>
+                      <div
+                        style={{
+                            width: 64,
+                            height: 64,
+                            borderRadius: 14,
+                            background: 'linear-gradient(135deg, #19b968 0%, #058d40 100%)',
+                            display: 'grid',
+                            placeItems: 'center',
+                            color: '#fff',
+                            fontSize: 36,
+                            boxShadow: darkMode ? '0 12px 26px rgba(0,0,0,0.26)' : '0 10px 22px rgba(16,185,129,0.22)',
+                            flexShrink: 0,
+                        }}
+                      >
+                          <SendOutlined />
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 24, lineHeight: 1.1, fontWeight: 800, color: overlayTheme.titleText }}>GoNavi</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
+                              <span
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 7,
+                                    padding: '5px 10px',
+                                    borderRadius: 999,
+                                    background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(16,24,40,0.04)',
+                                    color: mutedText,
+                                    fontWeight: 600,
+                                }}
+                              >
+                                  <TagOutlined />
+                                  {aboutDisplayVersion}
+                              </span>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: mutedText, fontWeight: 600 }}>
+                                  <UserOutlined />
+                                  {aboutInfo?.author || t('common.unknown')}
+                              </span>
+                          </div>
+                      </div>
+                  </div>
+                  <div
+                    style={{
+                        minWidth: 260,
+                        padding: '11px 18px',
+                        borderRadius: 10,
+                        border: `1px solid ${hasUpdate ? (darkMode ? 'rgba(74,222,128,0.46)' : 'rgba(22,163,74,0.30)') : cardBorder}`,
+                        background: hasUpdate
+                            ? (darkMode ? 'rgba(34,197,94,0.10)' : 'rgba(22,163,74,0.055)')
+                            : (darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(16,24,40,0.025)'),
+                        color: hasUpdate ? (darkMode ? '#86efac' : '#16a34a') : mutedText,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 10,
+                        fontSize: 15,
+                        fontWeight: 700,
+                    }}
+                  >
+                      <UpCircleOutlined style={{ fontSize: 21 }} />
+                      {updateStatusText}
+                  </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 22 }}>
+                  <div style={{ border: `1px solid ${cardBorder}`, borderRadius: 12, background: cardBg, overflow: 'hidden' }}>
+                      <div style={{ padding: '22px 24px', fontSize: 18, fontWeight: 800, color: overlayTheme.titleText }}>
+                          {t('app.about.version_update.title')}
+                      </div>
+                      <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 24px' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 210px', alignItems: 'center', gap: 16 }}>
+                              <div>
+                                  <div style={{ fontSize: 15, fontWeight: 600, color: overlayTheme.titleText }}>{t('app.about.field.update_channel')}</div>
+                                  <div style={{ ...utilityMutedTextStyle, marginTop: 6 }}>{t('app.about.version_update.channel_hint')}</div>
+                              </div>
+                              <Select
+                                value={updateChannel}
+                                options={[
+                                    { value: 'latest', label: t('app.about.update_channel.latest') },
+                                    { value: 'dev', label: t('app.about.update_channel.dev') },
+                                ]}
+                                onChange={(value) => {
+                                    void changeUpdateChannel(String(value));
+                                }}
+                                loading={isUpdateChannelLoading}
+                                disabled={
+                                    isUpdateChannelLoading
+                                    || isUpdateChannelSaving
+                                    || updateDownloadProgress.status === 'start'
+                                    || updateDownloadProgress.status === 'downloading'
+                                }
+                                style={{ width: '100%' }}
+                              />
+                          </div>
+                          <div style={{ height: 1, background: dividerColor, margin: '18px 0' }} />
+                          <div style={{ display: 'grid', gap: 13 }}>
+                              {versionRows.map(([label, value]) => (
+                                  <div key={label} style={{ display: 'grid', gridTemplateColumns: '150px minmax(0, 1fr)', gap: 16, alignItems: 'baseline' }}>
+                                      <div style={{ fontWeight: 600, color: overlayTheme.titleText }}>{label}</div>
+                                      <div style={{ color: label === t('app.about.version.latest') && hasUpdate ? (darkMode ? '#86efac' : '#16a34a') : mutedText, fontWeight: label === t('app.about.version.latest') && hasUpdate ? 700 : 500 }}>
+                                          {value}
+                                      </div>
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
+                      <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 10, color: hasUpdate ? (darkMode ? '#86efac' : '#16a34a') : mutedText, fontWeight: 700 }}>
+                          <CheckOutlined />
+                          {hasUpdate ? t('app.about.version_update.available') : t('app.about.version_update.up_to_date')}
+                      </div>
+                  </div>
+
+                  <div style={{ border: `1px solid ${cardBorder}`, borderRadius: 12, background: cardBg, padding: '22px 24px' }}>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: overlayTheme.titleText, marginBottom: 18 }}>
+                          {t('app.about.project_links')}
+                      </div>
+                      <div style={{ display: 'grid', gap: 14 }}>
+                          {renderSettingsCenterAboutProjectEntry({
+                              icon: <GithubOutlined />,
+                              title: t('app.about.project.github.title'),
+                              description: t('app.about.project.github.description'),
+                              url: aboutInfo?.repoUrl,
+                          })}
+                          {renderSettingsCenterAboutProjectEntry({
+                              icon: <MessageOutlined />,
+                              title: t('app.about.project.issues.title'),
+                              description: t('app.about.project.issues.description'),
+                              url: aboutInfo?.issueUrl,
+                          })}
+                          {renderSettingsCenterAboutProjectEntry({
+                              icon: <FileTextOutlined />,
+                              title: t('app.about.project.releases.title'),
+                              description: t('app.about.project.releases.description'),
+                              url: lastUpdateInfo?.releaseNotesUrl || aboutInfo?.releaseUrl,
+                          })}
+                      </div>
+                  </div>
+              </div>
+          </div>
+      );
+  };
+
+  const renderSettingsCenterAboutFooter = () => (
+      <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, color: overlayTheme.mutedText, fontWeight: 600 }}>
+              <SyncOutlined style={{ color: darkMode ? '#86efac' : '#16a34a', fontSize: 22 }} />
+              <span>
+                  {aboutLastCheckedAt
+                      ? t('app.about.last_checked_at', { time: aboutLastCheckedAt })
+                      : t('app.about.last_checked_never')}
+              </span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              {renderAboutUpdateActions()}
+          </div>
+      </>
+  );
+
+  const renderThemeSettingsContent = () => (
+              <div style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0', height: '100%', minHeight: 0, overflow: 'hidden', alignItems: 'stretch', boxSizing: 'border-box' }}>
+                  <div style={{ ...utilityPanelStyle, padding: 12, height: 'fit-content' }}>
+                      <div style={{ marginBottom: 12, fontWeight: 600 }}>{t('app.theme.navigation_title')}</div>
+                      <div style={{ display: 'grid', gap: 10 }}>
+                          {[
+                              { key: 'theme', title: t('app.theme.nav.theme.title'), description: t('app.theme.nav.theme.description'), icon: <SkinOutlined /> },
+                              { key: 'appearance', title: t('app.theme.nav.appearance.title'), description: t('app.theme.nav.appearance.description'), icon: <BgColorsOutlined /> },
+                          ].map((item) => {
+                              const active = themeModalSection === item.key;
+                              return (
+                                  <button
+                                      key={item.key}
+                                      type="button"
+                                      onClick={() => setThemeModalSection(item.key as 'theme' | 'appearance')}
+                                      style={{
+                                          textAlign: 'left',
+                                          padding: '12px 12px',
+                                          borderRadius: 12,
+                                          border: `1px solid ${active
+                                              ? (isV2Ui
+                                                  ? v2AntPrimaryBorderColor
+                                                  : (darkMode ? 'rgba(255,214,102,0.3)' : 'rgba(24,144,255,0.24)'))
+                                              : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
+                                          background: active
+                                              ? (isV2Ui
+                                                  ? `linear-gradient(180deg, ${v2AntPrimaryBgHoverColor} 0%, ${v2AntPrimaryBgColor} 100%)`
+                                                  : (darkMode ? 'linear-gradient(180deg, rgba(255,214,102,0.12) 0%, rgba(255,214,102,0.06) 100%)' : 'linear-gradient(180deg, rgba(24,144,255,0.10) 0%, rgba(24,144,255,0.05) 100%)'))
+                                              : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
+                                          color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
+                                          cursor: 'pointer',
+                                      }}
+                                  >
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                          <span>{item.icon}</span>
+                                          <span style={{ fontWeight: 700 }}>{item.title}</span>
+                                      </div>
+                                      <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: active ? (darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(22,32,51,0.68)') : utilityMutedTextStyle.color }}>
+                                          {item.description}
+                                      </div>
+                                  </button>
+                              );
+                          })}
+                      </div>
+                  </div>
+                  <div style={{ minWidth: 0, minHeight: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain', paddingRight: 8, paddingBottom: 28 }}>
+                      {themeModalSection === 'theme' ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <span>{t('app.theme.ui_version.title')}</span>
+                                      <span style={{
+                                          fontSize: 10,
+                                          fontWeight: 700,
+                                          padding: '1px 6px',
+                                          background: darkMode ? 'rgba(56,189,248,0.18)' : 'rgba(2,132,199,0.10)',
+                                          color: darkMode ? '#7dd3fc' : '#0284c7',
+                                          borderRadius: 4,
+                                      }}>
+                                          {t('app.theme.ui_version.badge.new')}
+                                      </span>
+                                  </div>
+                                  <div style={{ ...utilityMutedTextStyle, marginBottom: 12 }}>
+                                      {t('app.theme.ui_version.description')}
+                                  </div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+                                      {[
+                                          { key: 'legacy', label: t('app.theme.ui_version.legacy.label'), description: t('app.theme.ui_version.legacy.description'), badge: t('app.theme.ui_version.legacy.badge') },
+                                          { key: 'v2', label: t('app.theme.ui_version.v2.label'), description: t('app.theme.ui_version.v2.description'), badge: t('app.theme.ui_version.v2.badge') },
+                                      ].map((item) => {
+                                          const active = (appearance.uiVersion ?? 'legacy') === item.key;
+                                          return (
+                                              <button
+                                                  key={item.key}
+                                                  type="button"
+                                                  onClick={() => setAppearance({ uiVersion: item.key as 'legacy' | 'v2' })}
+                                                  style={{
+                                                      textAlign: 'left',
+                                                      padding: '14px 14px',
+                                                      borderRadius: 14,
+                                                      border: `1px solid ${active
+                                                          ? (darkMode ? 'rgba(34,197,94,0.36)' : 'rgba(22,163,74,0.32)')
+                                                          : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
+                                                      background: active
+                                                          ? (darkMode ? 'linear-gradient(180deg, rgba(34,197,94,0.14) 0%, rgba(34,197,94,0.06) 100%)' : 'linear-gradient(180deg, rgba(22,163,74,0.10) 0%, rgba(22,163,74,0.05) 100%)')
+                                                          : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
+                                                      color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
+                                                      cursor: 'pointer',
+                                                  }}
+                                              >
+                                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                                          <span style={{ fontSize: 14, fontWeight: 700 }}>{item.label}</span>
+                                                          <span style={{
+                                                              fontSize: 10,
+                                                              fontWeight: 600,
+                                                              padding: '1px 6px',
+                                                              background: item.key === 'v2'
+                                                                  ? (darkMode ? 'rgba(56,189,248,0.18)' : 'rgba(2,132,199,0.10)')
+                                                                  : (darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(16,24,40,0.06)'),
+                                                              color: item.key === 'v2'
+                                                                  ? (darkMode ? '#7dd3fc' : '#0284c7')
+                                                                  : (darkMode ? 'rgba(255,255,255,0.7)' : 'rgba(16,24,40,0.6)'),
+                                                              borderRadius: 4,
+                                                          }}>
+                                                              {item.badge}
+                                                          </span>
+                                                      </span>
+                                                      {active ? <CheckOutlined style={{ color: darkMode ? '#4ade80' : '#16a34a' }} /> : null}
+                                                  </div>
+                                                  <div style={{
+                                                      marginTop: 6,
+                                                      fontSize: 12,
+                                                      lineHeight: 1.6,
+                                                      color: active ? (darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(22,32,51,0.68)') : utilityMutedTextStyle.color,
+                                                  }}>
+                                                      {item.description}
+                                                  </div>
+                                              </button>
+                                          );
+                                      })}
+                                  </div>
+                                  <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
+                                      {t('app.theme.ui_version.platform_hint')}
+                                  </div>
+                                  {appearance.uiVersion === 'v2' && (
+                                      <div style={{
+                                          marginTop: 10,
+                                          padding: '8px 10px',
+                                          background: darkMode ? 'rgba(245,158,11,0.10)' : 'rgba(245,158,11,0.08)',
+                                          border: `1px solid ${darkMode ? 'rgba(245,158,11,0.24)' : 'rgba(245,158,11,0.22)'}`,
+                                          borderRadius: 8,
+                                          fontSize: 11.5,
+                                          color: darkMode ? 'rgba(252,211,77,0.92)' : 'rgba(120,53,15,0.85)',
+                                          lineHeight: 1.55,
+                                      }}>
+                                          {t('app.theme.ui_version.beta_warning')}
+                                      </div>
+                                  )}
+                                  {appearance.uiVersion === 'v2' && (
+                                      <div style={{ marginTop: 14 }}>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.ui_version.sidebar_search.title')}</div>
+                                          <Segmented
+                                              block
+                                              options={[
+                                                  { label: t('app.theme.ui_version.sidebar_search.command'), value: 'command' },
+                                                  { label: t('app.theme.ui_version.sidebar_search.filter'), value: 'filter' },
+                                              ]}
+                                              value={appearance.v2SidebarSearchMode ?? 'command'}
+                                              onChange={(value) => setAppearance({ v2SidebarSearchMode: value as 'command' | 'filter' })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
+                                              {t('app.theme.ui_version.sidebar_search.hint')}
+                                          </div>
+                                      </div>
+                                  )}
+                              </div>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.theme.mode_title')}</div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+                                      {[
+                                          { key: 'light', label: t('app.theme.mode.light.label'), description: t('app.theme.mode.light.description') },
+                                          { key: 'dark', label: t('app.theme.mode.dark.label'), description: t('app.theme.mode.dark.description') },
+                                          { key: 'system', label: t('app.theme.mode.system.label'), description: t('app.theme.mode.system.description') },
+                                      ].map((item) => {
+                                          const active = themePreference === item.key;
+                                          return (
+                                              <button
+                                                  key={item.key}
+                                                  type="button"
+                                                  onClick={() => setThemePreference(item.key as 'light' | 'dark' | 'system')}
+                                                  style={{
+                                                      textAlign: 'left',
+                                                      padding: '14px 14px',
+                                                      borderRadius: 14,
+                                                      border: `1px solid ${active
+                                                          ? (isV2Ui
+                                                              ? v2AntPrimaryBorderColor
+                                                              : (darkMode ? 'rgba(255,214,102,0.3)' : 'rgba(24,144,255,0.24)'))
+                                                          : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
+                                                      background: active
+                                                          ? (isV2Ui
+                                                              ? `linear-gradient(180deg, ${v2AntPrimaryBgHoverColor} 0%, ${v2AntPrimaryBgColor} 100%)`
+                                                              : (darkMode ? 'linear-gradient(180deg, rgba(255,214,102,0.12) 0%, rgba(255,214,102,0.06) 100%)' : 'linear-gradient(180deg, rgba(24,144,255,0.10) 0%, rgba(24,144,255,0.05) 100%)'))
+                                                          : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
+                                                      color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
+                                                      cursor: 'pointer',
+                                                  }}
+                                              >
+                                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                                      <span style={{ fontSize: 14, fontWeight: 700 }}>{item.label}</span>
+                                                      {active ? <CheckOutlined style={{ color: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff') }} /> : null}
+                                                  </div>
+                                                  <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: active ? (darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(22,32,51,0.68)') : utilityMutedTextStyle.color }}>
+                                                      {item.description}
+                                                  </div>
+                                              </button>
+                                          );
+                                      })}
+                                  </div>
+                              </div>
+                          </div>
+                      ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.ui_scale_title')}</div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                      <Slider
+                                        min={MIN_UI_SCALE}
+                                        max={MAX_UI_SCALE}
+                                        step={0.05}
+                                        value={effectiveUiScale}
+                                        onChange={(v) => setUiScale(Number(v))}
+                                        style={{ flex: 1 }}
+                                      />
+                                      <span style={{ width: 56 }}>{Math.round(effectiveUiScale * 100)}%</span>
+                                  </div>
+                                  <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 4 }}>
+                                      {t('app.theme.appearance.ui_scale_hint')}
+                                  </div>
+                              </div>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.font_size_title')}</div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                      <Slider
+                                        min={MIN_FONT_SIZE}
+                                        max={MAX_FONT_SIZE}
+                                        step={1}
+                                        value={effectiveFontSize}
+                                        onChange={(v) => setFontSize(Number(v))}
+                                        style={{ flex: 1 }}
+                                      />
+                                      <span style={{ width: 56 }}>{effectiveFontSize}px</span>
+                                  </div>
+                              </div>
+                              {appearance.uiVersion === 'v2' && (
+                                  <div style={utilityPanelStyle}>
+                                      <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.sidebar_rail_scale_title')}</div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                          <Slider
+                                            min={MIN_V2_SIDEBAR_RAIL_SCALE}
+                                            max={MAX_V2_SIDEBAR_RAIL_SCALE}
+                                            step={0.05}
+                                            value={effectiveSidebarRailScale}
+                                            onChange={(value) => setAppearance({
+                                                v2SidebarRailScale: sanitizeV2SidebarRailScale(value),
+                                            })}
+                                            style={{ flex: 1 }}
+                                          />
+                                          <span style={{ width: 56 }}>{Math.round(effectiveSidebarRailScale * 100)}%</span>
+                                      </div>
+                                      <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
+                                          {t('app.theme.appearance.sidebar_rail_scale_hint')}
+                                      </div>
+                                  </div>
+                              )}
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>{t('app.theme.font_family.title')}</div>
+                                  <div style={{ display: 'grid', gap: 14 }}>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.font_family.ui_title')}</div>
+                                          <Select
+                                              allowClear
+                                              showSearch
+                                              optionFilterProp="label"
+                                              loading={isFontFamiliesLoading}
+                                              placeholder={DEFAULT_UI_FONT_FAMILY}
+                                              value={appearance.customUIFontFamily ?? undefined}
+                                              onChange={(value) => setAppearance({
+                                                  customUIFontFamily: sanitizeFontFamilyInput(value),
+                                              })}
+                                              onClear={() => setAppearance({ customUIFontFamily: null })}
+                                              options={uiFontOptions.map((option) => ({
+                                                  value: option.value,
+                                                  label: option.label,
+                                              }))}
+                                              filterOption={filterFontOption}
+                                              popupMatchSelectWidth
+                                              style={{ width: '100%' }}
+                                              optionRender={(option) => renderFontOptionLabel({
+                                                  value: String(option.data.value),
+                                                  label: String(option.data.label),
+                                              })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 6 }}>
+                                              {fontFamiliesLoadError
+                                                  ? t('app.theme.font_family.load_failed_fallback', { error: fontFamiliesLoadError })
+                                                  : (installedFontFamilies.length > 0
+                                                      ? t('app.theme.font_family.loaded_ui_hint', { count: installedFontFamilies.length })
+                                                      : t('app.theme.font_family.loading_ui_hint'))}
+                                          </div>
+                                          {linuxCJKFontInstallHint && hasLoadedInstalledFontsRef.current && !isFontFamiliesLoading && !fontFamiliesLoadError && (
+                                              <div
+                                                  style={{
+                                                      marginTop: 8,
+                                                      padding: '9px 10px',
+                                                      borderRadius: 8,
+                                                      border: darkMode ? '1px solid rgba(250,204,21,0.28)' : '1px solid rgba(217,119,6,0.22)',
+                                                      background: darkMode ? 'rgba(250,204,21,0.08)' : 'rgba(251,191,36,0.12)',
+                                                      color: darkMode ? 'rgba(254,249,195,0.92)' : '#92400e',
+                                                      fontSize: 12,
+                                                      lineHeight: 1.7,
+                                                  }}
+                                              >
+                                                  {t('app.theme.font_family.linux_cjk_install_prefix')}
+                                                  <span style={{ fontFamily: 'var(--gn-font-mono)', marginLeft: 6 }}>{linuxCJKFontInstallHint}</span>
+                                                  {t('app.theme.font_family.linux_cjk_install_suffix')}
+                                              </div>
+                                          )}
+                                      </div>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.font_family.mono_title')}</div>
+                                          <Select
+                                              allowClear
+                                              showSearch
+                                              optionFilterProp="label"
+                                              loading={isFontFamiliesLoading}
+                                              placeholder={DEFAULT_MONO_FONT_FAMILY}
+                                              value={appearance.customMonoFontFamily ?? undefined}
+                                              onChange={(value) => setAppearance({
+                                                  customMonoFontFamily: sanitizeFontFamilyInput(value),
+                                              })}
+                                              onClear={() => setAppearance({ customMonoFontFamily: null })}
+                                              options={monoFontOptions.map((option) => ({
+                                                  value: option.value,
+                                                  label: option.label,
+                                              }))}
+                                              filterOption={filterFontOption}
+                                              popupMatchSelectWidth
+                                              style={{ width: '100%' }}
+                                              optionRender={(option) => renderFontOptionLabel({
+                                                  value: String(option.data.value),
+                                                  label: String(option.data.label),
+                                              })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 6 }}>
+                                              {fontFamiliesLoadError
+                                                  ? t('app.theme.font_family.mono_fallback_hint')
+                                                  : t('app.theme.font_family.mono_hint')}
+                                          </div>
+                                      </div>
+                                  </div>
+                              </div>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>{t('app.theme.query_template.title')}</div>
+                                  <div style={{ display: 'grid', gap: 10 }}>
+                                      <div style={utilityMutedTextStyle}>
+                                          {t('app.theme.query_template.description')}
+                                      </div>
+                                      <Input.TextArea
+                                          value={newQuerySqlTemplate}
+                                          autoSize={{ minRows: 3, maxRows: 8 }}
+                                          spellCheck={false}
+                                          onChange={(event) => setAppearance({ newQuerySqlTemplate: event.target.value })}
+                                          style={{ fontFamily: 'var(--gn-font-mono)' }}
+                                      />
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                                          <div style={utilityMutedTextStyle}>
+                                              {t('app.theme.query_template.hint')}
+                                          </div>
+                                          <Button
+                                              size="small"
+                                              disabled={appearance.newQuerySqlTemplate === null}
+                                              onClick={() => setAppearance({ newQuerySqlTemplate: null })}
+                                          >
+                                              {t('app.theme.query_template.reset_default')}
+                                          </Button>
+                                      </div>
+                                  </div>
+                              </div>
+                              <div ref={tabDisplaySettingsPanelRef} style={utilityPanelStyle}>
+                                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                                      <div style={{ minWidth: 0 }}>
+                                          <div style={{ fontWeight: 500 }}>{t('app.theme.tab_display.title')}</div>
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
+                                              {t('app.theme.tab_display.description')}
+                                          </div>
+                                      </div>
+                                      <Segmented
+                                          size="small"
+                                          options={[
+                                              { label: t('app.theme.tab_display.layout.single'), value: 'single' },
+                                              { label: t('app.theme.tab_display.layout.double'), value: 'double' },
+                                          ]}
+                                          value={tabDisplaySettings.layout}
+                                          onChange={(value) => setTabDisplayLayout(value as TabDisplayLayout)}
+                                      />
+                                  </div>
+                                  <div style={{ display: 'grid', gap: 8 }}>
+                                      {tabDisplayElementOrder.map((key) => {
+                                          const checked = visibleTabDisplayElementKeys.has(key);
+                                          const row = tabDisplaySettings.secondaryElements.includes(key) ? 'secondary' : 'primary';
+                                          const currentRowElements = row === 'secondary'
+                                              ? tabDisplaySettings.secondaryElements
+                                              : tabDisplaySettings.primaryElements;
+                                          const indexInRow = currentRowElements.indexOf(key);
+                                          const canMoveUp = checked && indexInRow > 0;
+                                          const canMoveDown = checked && indexInRow >= 0 && indexInRow < currentRowElements.length - 1;
+                                          const isFocused = focusedTabDisplayElementKey === key;
+                                          return (
+                                              <div
+                                                  key={key}
+                                                  role="button"
+                                                  tabIndex={0}
+                                                  onClick={() => setFocusedTabDisplayElementKey(key)}
+                                                  onKeyDown={(event) => {
+                                                      if (event.key === 'Enter' || event.key === ' ') {
+                                                          event.preventDefault();
+                                                          setFocusedTabDisplayElementKey(key);
+                                                      }
+                                                  }}
+                                                  style={{
+                                                      display: 'grid',
+                                                      gridTemplateColumns: 'minmax(0, 1fr) auto',
+                                                      gap: 10,
+                                                      alignItems: 'center',
+                                                      padding: '9px 10px',
+                                                      borderRadius: 10,
+                                                      border: `1px solid ${isFocused
+                                                          ? (isV2Ui
+                                                              ? v2AntPrimaryBorderHoverColor
+                                                              : (darkMode ? 'rgba(255,214,102,0.54)' : 'rgba(24,144,255,0.54)'))
+                                                          : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
+                                                      boxShadow: isFocused
+                                                          ? (isV2Ui
+                                                              ? `0 0 0 2px ${v2AntControlActiveBg}`
+                                                              : (darkMode ? '0 0 0 2px rgba(255,214,102,0.14)' : '0 0 0 2px rgba(24,144,255,0.12)'))
+                                                          : 'none',
+                                                      background: isFocused
+                                                          ? (isV2Ui
+                                                              ? `linear-gradient(90deg, ${v2AntPrimaryBgHoverColor} 0%, rgba(255,255,255,0.045) 100%)`
+                                                              : (darkMode ? 'linear-gradient(90deg, rgba(255,214,102,0.12) 0%, rgba(255,255,255,0.045) 100%)' : 'linear-gradient(90deg, rgba(24,144,255,0.10) 0%, rgba(255,255,255,0.78) 100%)'))
+                                                          : checked
+                                                          ? (darkMode ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.62)')
+                                                          : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(16,24,40,0.025)'),
+                                                      cursor: 'pointer',
+                                                      transition: 'border-color 140ms ease, box-shadow 140ms ease, background 140ms ease',
+                                                  }}
+                                              >
+                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                                      <span style={{
+                                                          width: 22,
+                                                          height: 22,
+                                                          borderRadius: 999,
+                                                          display: 'inline-flex',
+                                                          alignItems: 'center',
+                                                          justifyContent: 'center',
+                                                          flexShrink: 0,
+                                                          fontFamily: resolvedMonoFontFamily,
+                                                          fontSize: 11,
+                                                          fontWeight: 800,
+                                                          background: isFocused
+                                                              ? (isV2Ui ? v2AntPrimaryBgHoverColor : (darkMode ? 'rgba(255,214,102,0.22)' : 'rgba(24,144,255,0.14)'))
+                                                              : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(16,24,40,0.05)'),
+                                                          color: isFocused
+                                                              ? (isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'))
+                                                              : (darkMode ? 'rgba(255,255,255,0.56)' : 'rgba(16,24,40,0.5)'),
+                                                      }}>
+                                                          {checked && indexInRow >= 0 ? indexInRow + 1 : '-'}
+                                                      </span>
+                                                      <Switch
+                                                          size="small"
+                                                          checked={checked}
+                                                          onClick={(_, event) => event.stopPropagation()}
+                                                          onChange={(nextChecked) => updateTabDisplayElementVisibility(key, nextChecked)}
+                                                      />
+                                                      <div style={{ minWidth: 0 }}>
+                                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                                              <span style={{ fontWeight: 600 }}>{getTabDisplayElementLabel(key)}</span>
+                                                              {isFocused ? (
+                                                                  <span style={{
+                                                                      fontSize: 10,
+                                                                      lineHeight: '16px',
+                                                                      padding: '0 6px',
+                                                                      borderRadius: 999,
+                                                                      background: isV2Ui ? v2AntPrimaryBgColor : (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.10)'),
+                                                                      color: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'),
+                                                                  }}>
+                                                                      {t('app.theme.tab_display.badge.current')}
+                                                                  </span>
+                                                              ) : null}
+                                                              {checked && tabDisplaySettings.layout === 'double' ? (
+                                                                  <span style={{
+                                                                      fontSize: 10,
+                                                                      lineHeight: '16px',
+                                                                      padding: '0 6px',
+                                                                      borderRadius: 999,
+                                                                      background: row === 'secondary'
+                                                                          ? (darkMode ? 'rgba(56,189,248,0.14)' : 'rgba(2,132,199,0.08)')
+                                                                          : (darkMode ? 'rgba(34,197,94,0.14)' : 'rgba(22,163,74,0.08)'),
+                                                                      color: row === 'secondary'
+                                                                          ? (darkMode ? '#7dd3fc' : '#0369a1')
+                                                                          : (darkMode ? '#86efac' : '#15803d'),
+                                                                  }}>
+                                                                      {row === 'secondary'
+                                                                          ? t('app.theme.tab_display.row.secondary')
+                                                                          : t('app.theme.tab_display.row.primary')}
+                                                                  </span>
+                                                              ) : null}
+                                                          </div>
+                                                          <div style={{ ...utilityMutedTextStyle, marginTop: 2 }}>{getTabDisplayElementDescription(key)}</div>
+                                                      </div>
+                                                  </div>
+                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                      {tabDisplaySettings.layout === 'double' && checked ? (
+                                                          <Segmented
+                                                              size="small"
+                                                              options={[
+                                                                  { label: t('app.theme.tab_display.row.primary'), value: 'primary' },
+                                                                  { label: t('app.theme.tab_display.row.secondary'), value: 'secondary' },
+                                                              ]}
+                                                              value={row}
+                                                              onChange={(value) => setTabDisplayElementRow(key, value as 'primary' | 'secondary')}
+                                                              onClick={(event) => event.stopPropagation()}
+                                                          />
+                                                      ) : null}
+                                                      <Button
+                                                          size="small"
+                                                          disabled={!canMoveUp}
+                                                          onClick={(event) => {
+                                                              event.stopPropagation();
+                                                              moveTabDisplayElement(key, -1);
+                                                          }}
+                                                      >
+                                                          {t('app.theme.tab_display.action.move_up')}
+                                                      </Button>
+                                                      <Button
+                                                          size="small"
+                                                          disabled={!canMoveDown}
+                                                          onClick={(event) => {
+                                                              event.stopPropagation();
+                                                              moveTabDisplayElement(key, 1);
+                                                          }}
+                                                      >
+                                                          {t('app.theme.tab_display.action.move_down')}
+                                                      </Button>
+                                                  </div>
+                                              </div>
+                                          );
+                                      })}
+                                  </div>
+                                  <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
+                                      {t('app.theme.tab_display.preview.prefix')}
+                                      {tabDisplaySettings.layout === 'double' ? `${t('app.theme.tab_display.row.primary')} ` : ''}
+                                      {tabDisplaySettings.primaryElements.map(getTabDisplayElementLabel).join(' / ') || t('app.theme.tab_display.preview.default_label')}
+                                      {tabDisplaySettings.layout === 'double' && tabDisplaySettings.secondaryElements.length > 0
+                                          ? t('app.theme.tab_display.preview.secondary', {
+                                              labels: tabDisplaySettings.secondaryElements.map(getTabDisplayElementLabel).join(' / '),
+                                          })
+                                          : ''}
+                                      {focusedTabDisplayElementKey
+                                          ? t('app.theme.tab_display.preview.focused', {
+                                              label: getTabDisplayElementLabel(focusedTabDisplayElementKey),
+                                          })
+                                          : ''}
+                                  </div>
+                              </div>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>{t('app.theme.appearance.transparency_blur_title')}</div>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                                      <div>
+                                          <div style={{ fontWeight: 500 }}>{t('app.theme.appearance.enable_transparency_blur')}</div>
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>{t('app.theme.appearance.enable_transparency_blur_hint')}</div>
+                                      </div>
+                                      <Switch checked={appearance.enabled !== false} onChange={(checked) => setAppearance({ enabled: checked })} />
+                                  </div>
+                                  <div style={{ display: 'grid', gap: 14, opacity: appearance.enabled !== false ? 1 : 0.6 }}>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.opacity_title')}</div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                              <Slider
+                                                min={0.1}
+                                                max={1.0}
+                                                step={0.05}
+                                                disabled={appearance.enabled === false}
+                                                value={appearance.opacity ?? 1.0}
+                                                onChange={(v) => setAppearance({ opacity: v })}
+                                                style={{ flex: 1 }}
+                                              />
+                                              <span style={{ width: 40 }}>{Math.round((appearance.opacity ?? 1.0) * 100)}%</span>
+                                          </div>
+                                      </div>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.blur_title')}</div>
+                                          {isWindowsPlatform() ? (
+                                              <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
+                                                  {t('app.theme.appearance.windows_acrylic_hint')}
+                                              </div>
+                                          ) : (
+                                              <>
+                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                                      <Slider
+                                                        min={0}
+                                                        max={20}
+                                                        disabled={appearance.enabled === false}
+                                                        value={appearance.blur ?? 0}
+                                                        onChange={(v) => setAppearance({ blur: v })}
+                                                        style={{ flex: 1 }}
+                                                      />
+                                                      <span style={{ width: 40 }}>{appearance.blur}px</span>
+                                                  </div>
+                                                  <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 4 }}>
+                                                      {t('app.theme.appearance.blur_hint')}
+                                                  </div>
+                                              </>
+                                          )}
+                                      </div>
+                                  </div>
+                              </div>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>{t('app.theme.data_table.title')}</div>
+                                  <div style={{ display: 'grid', gap: 14 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                                          <div>
+                                              <div style={{ fontWeight: 500 }}>{t('app.theme.data_table.vertical_borders')}</div>
+                                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>{t('app.theme.data_table.vertical_borders_hint')}</div>
+                                          </div>
+                                          <Switch
+                                              checked={appearance.showDataTableVerticalBorders === true}
+                                              onChange={(checked) => setAppearance({ showDataTableVerticalBorders: checked })}
+                                          />
+                                      </div>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.data_table.table_double_click_action')}</div>
+                                          <Segmented
+                                              block
+                                              options={[
+                                                  { label: t('app.theme.data_table.table_double_click_action.open_data'), value: 'open-data' },
+                                                  { label: t('app.theme.data_table.table_double_click_action.open_design'), value: 'open-design' },
+                                              ]}
+                                              value={tableDoubleClickAction}
+                                              onChange={(value) => setAppearance({ tableDoubleClickAction: value as 'open-data' | 'open-design' })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
+                                              {t('app.theme.data_table.table_double_click_action_hint')}
+                                          </div>
+                                      </div>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.data_table.density')}</div>
+                                          <Segmented
+                                              block
+                                              options={DENSITY_OPTIONS.map((option) => ({
+                                                  ...option,
+                                                  label: t(`app.theme.data_table.density.${option.value}`),
+                                              }))}
+                                              value={appearance.dataTableDensity}
+                                              onChange={(value) => setAppearance({ dataTableDensity: sanitizeDataTableDensity(value) })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
+                                              {t('app.theme.data_table.density_hint')}
+                                          </div>
+                                      </div>
+                                      <div>
+                                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                                              <div style={{ fontWeight: 500 }}>{t('app.theme.data_table.font_size')}</div>
+                                              <Button
+                                                  size="small"
+                                                  type={dataTableFontSizeFollowsGlobal ? 'primary' : 'default'}
+                                                  onClick={() => setAppearance({
+                                                      dataTableFontSizeFollowGlobal: !dataTableFontSizeFollowsGlobal,
+                                                      dataTableFontSize: dataTableFontSizeFollowsGlobal
+                                                          ? sanitizeDataTableFontSize(appearance.dataTableFontSize)
+                                                          : null,
+                                                  })}
+                                              >
+                                                  {t('app.theme.data_table.follow_global')}
+                                              </Button>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                              <Slider
+                                                  min={10}
+                                                  max={18}
+                                                  step={1}
+                                                  disabled={dataTableFontSizeFollowsGlobal}
+                                                  value={effectiveDataTableFontSize}
+                                                  onChange={(value) => setAppearance({
+                                                      dataTableFontSize: sanitizeDataTableFontSize(value),
+                                                      dataTableFontSizeFollowGlobal: false,
+                                                  })}
+                                                  style={{ flex: 1 }}
+                                              />
+                                              <span style={{ width: 56 }}>{effectiveDataTableFontSize}px</span>
+                                          </div>
+                                      </div>
+                                      <div>
+                                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                                              <div style={{ fontWeight: 500 }}>{t('app.theme.data_table.sidebar_tree_font_size')}</div>
+                                              <Button
+                                                  size="small"
+                                                  type={sidebarTreeFontSizeFollowsGlobal ? 'primary' : 'default'}
+                                                  onClick={() => setAppearance({
+                                                      sidebarTreeFontSizeFollowGlobal: !sidebarTreeFontSizeFollowsGlobal,
+                                                      sidebarTreeFontSize: sidebarTreeFontSizeFollowsGlobal
+                                                          ? sanitizeSidebarTreeFontSize(appearance.sidebarTreeFontSize)
+                                                          : null,
+                                                  })}
+                                              >
+                                                  {t('app.theme.data_table.follow_global')}
+                                              </Button>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                              <Slider
+                                                  min={10}
+                                                  max={18}
+                                                  step={1}
+                                                  disabled={sidebarTreeFontSizeFollowsGlobal}
+                                                  value={effectiveSidebarTreeFontSize}
+                                                  onChange={(value) => setAppearance({
+                                                      sidebarTreeFontSize: sanitizeSidebarTreeFontSize(value),
+                                                      sidebarTreeFontSizeFollowGlobal: false,
+                                                  })}
+                                                  style={{ flex: 1 }}
+                                              />
+                                              <span style={{ width: 56 }}>{effectiveSidebarTreeFontSize}px</span>
+                                          </div>
+                                      </div>
+                                  </div>
+                              </div>
+                              {isMacRuntime ? (
+                                  <div style={utilityPanelStyle}>
+                                      <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.mac_window.title')}</div>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                                          <div>
+                                              <div style={{ fontWeight: 500 }}>{t('app.theme.mac_window.use_native_controls')}</div>
+                                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>{t('app.theme.mac_window.use_native_controls_hint')}</div>
+                                          </div>
+                                          <Switch
+                                              checked={appearance.useNativeMacWindowControls === true}
+                                              onChange={(checked) => setAppearance({ useNativeMacWindowControls: checked })}
+                                          />
+                                      </div>
+                                      <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 8 }}>
+                                          {t('app.theme.mac_window.restart_hint')}
+                                      </div>
+                                  </div>
+                              ) : null}
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.startup_window.title')}</div>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                                      <span>{isWindowsRuntime ? t('app.theme.startup_window.fullscreen_windows') : t('app.theme.startup_window.fullscreen')}</span>
+                                      <Switch checked={startupFullscreen} onChange={(checked) => setStartupFullscreen(checked)} />
+                                  </div>
+                                  <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 4 }}>
+                                      {isWindowsRuntime ? t('app.theme.startup_window.windows_hint') : t('app.theme.startup_window.hint')}
+                                  </div>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, paddingTop: 8, paddingBottom: 12 }}>
+                                  <Button
+                                       onClick={() => {
+                                           setUiScale(DEFAULT_UI_SCALE);
+                                           setFontSize(DEFAULT_FONT_SIZE);
+                                           setAppearance({ ...DEFAULT_APPEARANCE });
+                                       }}
+                                   >
+                                       {t('app.theme.action.restore_defaults')}
+                                  </Button>
+                              </div>
+                          </div>
+                      )}
+                  </div>
+              </div>
+  );
+
   const settingsCenterGroups = [
       {
           key: 'preferences' as const,
@@ -3426,9 +4942,8 @@ function App() {
                   title: t('app.settings.entry.theme.title'),
                   description: t('app.settings.entry.theme.description'),
                   onClick: () => {
-                      setIsSettingsModalOpen(false);
                       setThemeModalSection('theme');
-                      setIsThemeModalOpen(true);
+                      handleOpenSettingsCenterPane('preferences', 'theme');
                   },
               },
               {
@@ -3466,8 +4981,9 @@ function App() {
                   title: t('app.settings.entry.ai.title'),
                   description: t('app.settings.entry.ai.description'),
                   onClick: () => {
-                      setIsSettingsModalOpen(false);
-                      handleOpenAISettings();
+                      setSecurityUpdateRepairSource(null);
+                      setFocusedAIProviderId(undefined);
+                      handleOpenSettingsCenterPane('services', 'ai');
                   },
               },
           ],
@@ -3483,10 +4999,7 @@ function App() {
                   icon: <InfoCircleOutlined />,
                   title: t('app.settings.entry.about.title'),
                   description: t('app.settings.entry.about.description'),
-                  onClick: () => {
-                      setIsSettingsModalOpen(false);
-                      setIsAboutOpen(true);
-                  },
+                  onClick: () => handleOpenSettingsCenterPane('about', 'about-go-navi'),
               },
           ],
       },
@@ -3497,6 +5010,16 @@ function App() {
           .find((group) => group.key === activeSettingsCenterPane.group)
           ?.items.find((item) => item.key === activeSettingsCenterPane.key)
       : null;
+  const isSettingsCenterContainedScrollPane =
+      activeSettingsCenterPane?.key === 'theme' || activeSettingsCenterPane?.key === 'ai';
+  const settingsCenterDetailBodyStyle: React.CSSProperties = isSettingsCenterContainedScrollPane
+      ? {
+          ...toolCenterDetailBodyStyle,
+          overflowY: 'hidden',
+          overflowX: 'hidden',
+          paddingRight: 0,
+      }
+      : toolCenterDetailBodyStyle;
   const renderSettingsCenterPane = () => {
       if (!activeSettingsCenterPane) {
           return null;
@@ -3507,6 +5030,13 @@ function App() {
                   <div style={utilityPanelStyle}>
                       <LanguageSettingsPanel />
                   </div>
+              </div>
+          );
+      }
+      if (activeSettingsCenterPane.key === 'theme') {
+          return (
+              <div style={{ height: '100%', minHeight: 0 }}>
+                  {renderThemeSettingsContent()}
               </div>
           );
       }
@@ -3526,6 +5056,24 @@ function App() {
               />
           );
       }
+      if (activeSettingsCenterPane.key === 'ai') {
+          return (
+              <div style={{ height: '100%', minHeight: 0 }}>
+                  <AISettingsContent
+                    active={isSettingsModalOpen && activeSettingsCenterPane.key === 'ai'}
+                    darkMode={darkMode}
+                    overlayTheme={overlayTheme}
+                    focusProviderId={focusedAIProviderId}
+                    onBeforeExternalMCPUse={handlePrepareExternalMCPUse}
+                  />
+              </div>
+          );
+      }
+      if (activeSettingsCenterPane.key === 'about-go-navi') {
+          return (
+              renderSettingsCenterAboutPane()
+          );
+      }
       return null;
   };
 
@@ -3535,10 +5083,10 @@ function App() {
         componentSize={appComponentSize}
         theme={antdTheme}
     >
-        <Layout style={{ 
-            height: '100vh', 
-            overflow: 'hidden', 
-            display: 'flex', 
+        <Layout style={{
+            height: '100vh',
+            overflow: 'hidden',
+            display: 'flex',
             flexDirection: 'column',
             background: 'transparent',
             borderRadius: showLinuxResizeHandles ? 0 : 'var(--gonavi-border-radius)',
@@ -3591,24 +5139,24 @@ function App() {
                     onDoubleClick={(e) => e.stopPropagation()}
                     style={{ display: 'flex', height: '100%', WebkitAppRegion: 'no-drag', '--wails-draggable': 'no-drag' } as any}
                   >
-                      <Button 
-                        type="text" 
-                        icon={<MinusOutlined />} 
-                        style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
-                        onClick={WindowMinimise} 
+                      <Button
+                        type="text"
+                        icon={<MinusOutlined />}
+                        style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }}
+                        onClick={WindowMinimise}
                       />
-                      <Button 
-                        type="text" 
-                        icon={titleBarToggleIconKey === 'restore' ? <SwitcherOutlined /> : <BorderOutlined />} 
-                        style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
-                        onClick={() => { void handleTitleBarWindowToggle(); }} 
+                      <Button
+                        type="text"
+                        icon={titleBarToggleIconKey === 'restore' ? <SwitcherOutlined /> : <BorderOutlined />}
+                        style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }}
+                        onClick={() => { void handleTitleBarWindowToggle(); }}
                       />
-                      <Button 
-                        type="text" 
-                        icon={<CloseOutlined />} 
+                      <Button
+                        type="text"
+                        icon={<CloseOutlined />}
                         danger
                         className="titlebar-close-btn"
-                        style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
+                        style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }}
                         onClick={() => { void handleApplicationQuitRequest(); }}
                       />
                   </div>
@@ -3628,11 +5176,11 @@ function App() {
           )}
 
           <Layout style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
-          <Sider 
+          <Sider
             ref={siderRef}
-            width={sidebarWidth} 
+            width={sidebarWidth}
             className={isV2Ui ? 'gn-v2-app-sider' : undefined}
-            style={{ 
+            style={{
                 borderRight: isV2Ui ? 'none' : '1px solid rgba(128,128,128,0.2)',
                 position: 'relative',
                 background: isV2Ui ? 'var(--gn-bg-panel-2)' : bgMain
@@ -3662,7 +5210,7 @@ function App() {
                 </div>
                 </>
                 )}
-                
+
                 <div style={{ flex: 1, overflow: 'hidden', paddingBottom: isV2Ui ? 0 : 58, paddingRight: sidebarResizeHandleWidth, position: 'relative' }}>
                     <div style={{ height: '100%', opacity: connectionWorkbenchState.ready ? 1 : 0.72, pointerEvents: connectionWorkbenchState.ready ? 'auto' : 'none' }}>
                         <Sidebar
@@ -3919,15 +5467,15 @@ function App() {
                   <LogPanel
                      height={logPanelHeight}
                      onClose={handleCloseLogPanel}
-                    onResizeStart={handleLogResizeStart} 
+                    onResizeStart={handleLogResizeStart}
                 />
             )}
           </Content>
           </Layout>
           {isConnectionModalMounted && (
           <ConnectionModal
-            open={isModalOpen} 
-            onClose={handleCloseModal} 
+            open={isModalOpen}
+            onClose={handleCloseModal}
             initialValues={editingConnection}
             onOpenDriverManager={handleOpenDriverManagerFromConnection}
             onSaved={handleConnectionSaved}
@@ -4714,8 +6262,33 @@ function App() {
                           </div>
                         </div>
                       </div>
-                      <div style={toolCenterDetailBodyStyle}>
+                      <div style={settingsCenterDetailBodyStyle}>
                         {renderSettingsCenterPane()}
+                      </div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: activeSettingsCenterPane.key === 'about-go-navi' ? 'space-between' : 'flex-end',
+                          alignItems: 'center',
+                          gap: activeSettingsCenterPane.key === 'about-go-navi' ? 16 : 8,
+                          paddingTop: 10,
+                          marginTop: 10,
+                          borderTop: `1px solid ${overlayTheme.divider}`,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {activeSettingsCenterPane.key === 'about-go-navi' ? (
+                          renderSettingsCenterAboutFooter()
+                        ) : (
+                          <>
+                            <Button onClick={handleCancelSettingsCenterPane}>
+                              {t('common.cancel')}
+                            </Button>
+                            <Button type="primary" onClick={handleBackFromSettingsCenterPane}>
+                              {t('common.back_to_previous')}
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </div>
                   ) : (
@@ -4963,104 +6536,11 @@ function App() {
             open={isAboutOpen}
             onCancel={() => setIsAboutOpen(false)}
             styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10, display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end' } }}
-            footer={[
-                isBackgroundProgressForLatestUpdate && !isLatestUpdateDownloaded ? (
-                    <Button key="progress" icon={<DownloadOutlined />} onClick={showUpdateDownloadProgress}>{t('app.about.action.download_progress')}</Button>
-                ) : null,
-                lastUpdateInfo?.hasUpdate && !isLatestUpdateDownloaded && !isBackgroundProgressForLatestUpdate ? (
-                    <Button key="mute" onClick={muteLatestUpdate}>{t('app.about.action.mute_this_version')}</Button>
-                ) : null,
-                <Button key="check" icon={<CloudDownloadOutlined />} onClick={() => checkForUpdates(false)}>{t('app.about.action.check_updates')}</Button>,
+            footer={renderAboutUpdateActions(
                 <Button key="close" onClick={() => setIsAboutOpen(false)}>{t('common.close')}</Button>,
-                lastUpdateInfo?.hasUpdate && !isLatestUpdateDownloaded && !isBackgroundProgressForLatestUpdate ? (
-                <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={() => downloadUpdate(lastUpdateInfo, false)}>{t('app.about.action.download_update')}</Button>
-                ) : null,
-                isLatestUpdateDownloaded ? (
-                    <Button key="open-install-directory" onClick={openDownloadedUpdateDirectory}>
-                        {t('app.about.action.open_install_directory')}
-                    </Button>
-                ) : null,
-                isLatestUpdateDownloaded ? (
-                    <Button key="install-direct" type="primary" icon={<DownloadOutlined />} onClick={handleInstallFromProgress}>
-                        {t('app.about.action.install_update')}
-                    </Button>
-                ) : null,
-            ].filter(Boolean)}
-          >
-            {aboutLoading ? (
-                <div style={{ padding: '16px 0', textAlign: 'center' }}>
-                    <Spin />
-                </div>
-            ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    <div style={utilityPanelStyle}>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
-                            <div>
-                                <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.version')}</div>
-                                <div style={utilityMutedTextStyle}>{aboutDisplayVersion}</div>
-                            </div>
-                            <div>
-                                <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.author')}</div>
-                                <div style={utilityMutedTextStyle}>{aboutInfo?.author || t('common.unknown')}</div>
-                            </div>
-                            <div style={{ gridColumn: '1 / -1' }}>
-                                <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.update_status')}</div>
-                                <div style={utilityMutedTextStyle}>{aboutUpdateStatus || t('app.about.update_status.not_checked')}</div>
-                            </div>
-                            <div style={{ gridColumn: '1 / -1' }}>
-                                <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.update_channel')}</div>
-                                <Select
-                                    value={updateChannel}
-                                    options={[
-                                        { value: 'latest', label: t('app.about.update_channel.latest') },
-                                        { value: 'dev', label: t('app.about.update_channel.dev') },
-                                    ]}
-                                    onChange={(value) => {
-                                        void changeUpdateChannel(String(value));
-                                    }}
-                                    loading={isUpdateChannelLoading}
-                                    disabled={
-                                        isUpdateChannelLoading
-                                        || isUpdateChannelSaving
-                                        || updateDownloadProgress.status === 'start'
-                                        || updateDownloadProgress.status === 'downloading'
-                                    }
-                                    style={{ width: 220, maxWidth: '100%' }}
-                                />
-                            </div>
-                            {aboutInfo?.communityUrl ? (
-                                <div style={{ gridColumn: '1 / -1' }}>
-                                    <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.community')}</div>
-                                    <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.communityUrl) BrowserOpenURL(aboutInfo.communityUrl); }} href={aboutInfo.communityUrl}>{t('app.about.community.ai_book')}</a>
-                                </div>
-                            ) : null}
-                        </div>
-                    </div>
-                    <div style={utilityPanelStyle}>
-                        <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.about.project_links')}</div>
-                        <div style={{ display: 'grid', gap: 10 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <GithubOutlined />
-                                {aboutInfo?.repoUrl ? (
-                                    <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.repoUrl) BrowserOpenURL(aboutInfo.repoUrl); }} href={aboutInfo.repoUrl}>{aboutInfo.repoUrl}</a>
-                                ) : t('common.unknown')}
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <BugOutlined />
-                                {aboutInfo?.issueUrl ? (
-                                    <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.issueUrl) BrowserOpenURL(aboutInfo.issueUrl); }} href={aboutInfo.issueUrl}>{aboutInfo.issueUrl}</a>
-                                ) : t('common.unknown')}
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <CloudDownloadOutlined />
-                                {aboutInfo?.releaseUrl ? (
-                                    <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.releaseUrl) BrowserOpenURL(aboutInfo.releaseUrl); }} href={aboutInfo.releaseUrl}>{aboutInfo.releaseUrl}</a>
-                                ) : t('common.unknown')}
-                            </div>
-                        </div>
-                    </div>
-                </div>
             )}
+          >
+            {renderAboutSettingsContent()}
           </Modal>
 
           {isThemeModalOpen && (
@@ -5078,766 +6558,7 @@ function App() {
               width={820}
               styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8, height: 620, overflow: 'hidden' }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
           >
-              <div style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0', height: '100%', minHeight: 0, overflow: 'hidden', alignItems: 'stretch' }}>
-                  <div style={{ ...utilityPanelStyle, padding: 12, height: 'fit-content' }}>
-                      <div style={{ marginBottom: 12, fontWeight: 600 }}>{t('app.theme.navigation_title')}</div>
-                      <div style={{ display: 'grid', gap: 10 }}>
-                          {[
-                              { key: 'theme', title: t('app.theme.nav.theme.title'), description: t('app.theme.nav.theme.description'), icon: <SkinOutlined /> },
-                              { key: 'appearance', title: t('app.theme.nav.appearance.title'), description: t('app.theme.nav.appearance.description'), icon: <BgColorsOutlined /> },
-                          ].map((item) => {
-                              const active = themeModalSection === item.key;
-                              return (
-                                  <button
-                                      key={item.key}
-                                      type="button"
-                                      onClick={() => setThemeModalSection(item.key as 'theme' | 'appearance')}
-                                      style={{
-                                          textAlign: 'left',
-                                          padding: '12px 12px',
-                                          borderRadius: 12,
-                                          border: `1px solid ${active
-                                              ? (isV2Ui
-                                                  ? v2AntPrimaryBorderColor
-                                                  : (darkMode ? 'rgba(255,214,102,0.3)' : 'rgba(24,144,255,0.24)'))
-                                              : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
-                                          background: active
-                                              ? (isV2Ui
-                                                  ? `linear-gradient(180deg, ${v2AntPrimaryBgHoverColor} 0%, ${v2AntPrimaryBgColor} 100%)`
-                                                  : (darkMode ? 'linear-gradient(180deg, rgba(255,214,102,0.12) 0%, rgba(255,214,102,0.06) 100%)' : 'linear-gradient(180deg, rgba(24,144,255,0.10) 0%, rgba(24,144,255,0.05) 100%)'))
-                                              : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
-                                          color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
-                                          cursor: 'pointer',
-                                      }}
-                                  >
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                          <span>{item.icon}</span>
-                                          <span style={{ fontWeight: 700 }}>{item.title}</span>
-                                      </div>
-                                      <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: active ? (darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(22,32,51,0.68)') : utilityMutedTextStyle.color }}>
-                                          {item.description}
-                                      </div>
-                                  </button>
-                              );
-                          })}
-                      </div>
-                  </div>
-                  <div style={{ minWidth: 0, minHeight: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', paddingRight: 8, paddingBottom: 28 }}>
-                      {themeModalSection === 'theme' ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                              <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 10, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                      <span>{t('app.theme.ui_version.title')}</span>
-                                      <span style={{
-                                          fontSize: 10,
-                                          fontWeight: 700,
-                                          padding: '1px 6px',
-                                          background: darkMode ? 'rgba(56,189,248,0.18)' : 'rgba(2,132,199,0.10)',
-                                          color: darkMode ? '#7dd3fc' : '#0284c7',
-                                          borderRadius: 4,
-                                      }}>
-                                          {t('app.theme.ui_version.badge.new')}
-                                      </span>
-                                  </div>
-                                  <div style={{ ...utilityMutedTextStyle, marginBottom: 12 }}>
-                                      {t('app.theme.ui_version.description')}
-                                  </div>
-                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
-                                      {[
-                                          { key: 'legacy', label: t('app.theme.ui_version.legacy.label'), description: t('app.theme.ui_version.legacy.description'), badge: t('app.theme.ui_version.legacy.badge') },
-                                          { key: 'v2', label: t('app.theme.ui_version.v2.label'), description: t('app.theme.ui_version.v2.description'), badge: t('app.theme.ui_version.v2.badge') },
-                                      ].map((item) => {
-                                          const active = (appearance.uiVersion ?? 'legacy') === item.key;
-                                          return (
-                                              <button
-                                                  key={item.key}
-                                                  type="button"
-                                                  onClick={() => setAppearance({ uiVersion: item.key as 'legacy' | 'v2' })}
-                                                  style={{
-                                                      textAlign: 'left',
-                                                      padding: '14px 14px',
-                                                      borderRadius: 14,
-                                                      border: `1px solid ${active
-                                                          ? (darkMode ? 'rgba(34,197,94,0.36)' : 'rgba(22,163,74,0.32)')
-                                                          : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
-                                                      background: active
-                                                          ? (darkMode ? 'linear-gradient(180deg, rgba(34,197,94,0.14) 0%, rgba(34,197,94,0.06) 100%)' : 'linear-gradient(180deg, rgba(22,163,74,0.10) 0%, rgba(22,163,74,0.05) 100%)')
-                                                          : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
-                                                      color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
-                                                      cursor: 'pointer',
-                                                  }}
-                                              >
-                                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                                                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                                                          <span style={{ fontSize: 14, fontWeight: 700 }}>{item.label}</span>
-                                                          <span style={{
-                                                              fontSize: 10,
-                                                              fontWeight: 600,
-                                                              padding: '1px 6px',
-                                                              background: item.key === 'v2'
-                                                                  ? (darkMode ? 'rgba(56,189,248,0.18)' : 'rgba(2,132,199,0.10)')
-                                                                  : (darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(16,24,40,0.06)'),
-                                                              color: item.key === 'v2'
-                                                                  ? (darkMode ? '#7dd3fc' : '#0284c7')
-                                                                  : (darkMode ? 'rgba(255,255,255,0.7)' : 'rgba(16,24,40,0.6)'),
-                                                              borderRadius: 4,
-                                                          }}>
-                                                              {item.badge}
-                                                          </span>
-                                                      </span>
-                                                      {active ? <CheckOutlined style={{ color: darkMode ? '#4ade80' : '#16a34a' }} /> : null}
-                                                  </div>
-                                                  <div style={{
-                                                      marginTop: 6,
-                                                      fontSize: 12,
-                                                      lineHeight: 1.6,
-                                                      color: active ? (darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(22,32,51,0.68)') : utilityMutedTextStyle.color,
-                                                  }}>
-                                                      {item.description}
-                                                  </div>
-                                              </button>
-                                          );
-                                      })}
-                                  </div>
-                                  <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
-                                      {t('app.theme.ui_version.platform_hint')}
-                                  </div>
-                                  {appearance.uiVersion === 'v2' && (
-                                      <div style={{
-                                          marginTop: 10,
-                                          padding: '8px 10px',
-                                          background: darkMode ? 'rgba(245,158,11,0.10)' : 'rgba(245,158,11,0.08)',
-                                          border: `1px solid ${darkMode ? 'rgba(245,158,11,0.24)' : 'rgba(245,158,11,0.22)'}`,
-                                          borderRadius: 8,
-                                          fontSize: 11.5,
-                                          color: darkMode ? 'rgba(252,211,77,0.92)' : 'rgba(120,53,15,0.85)',
-                                          lineHeight: 1.55,
-                                      }}>
-                                          {t('app.theme.ui_version.beta_warning')}
-                                      </div>
-                                  )}
-                                  {appearance.uiVersion === 'v2' && (
-                                      <div style={{ marginTop: 14 }}>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.ui_version.sidebar_search.title')}</div>
-                                          <Segmented
-                                              block
-                                              options={[
-                                                  { label: t('app.theme.ui_version.sidebar_search.command'), value: 'command' },
-                                                  { label: t('app.theme.ui_version.sidebar_search.filter'), value: 'filter' },
-                                              ]}
-                                              value={appearance.v2SidebarSearchMode ?? 'command'}
-                                              onChange={(value) => setAppearance({ v2SidebarSearchMode: value as 'command' | 'filter' })}
-                                          />
-                                          <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
-                                              {t('app.theme.ui_version.sidebar_search.hint')}
-                                          </div>
-                                      </div>
-                                  )}
-                              </div>
-                              <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.theme.mode_title')}</div>
-                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
-                                      {[
-                                          { key: 'light', label: t('app.theme.mode.light.label'), description: t('app.theme.mode.light.description') },
-                                          { key: 'dark', label: t('app.theme.mode.dark.label'), description: t('app.theme.mode.dark.description') },
-                                          { key: 'system', label: t('app.theme.mode.system.label'), description: t('app.theme.mode.system.description') },
-                                      ].map((item) => {
-                                          const active = themePreference === item.key;
-                                          return (
-                                              <button
-                                                  key={item.key}
-                                                  type="button"
-                                                  onClick={() => setThemePreference(item.key as 'light' | 'dark' | 'system')}
-                                                  style={{
-                                                      textAlign: 'left',
-                                                      padding: '14px 14px',
-                                                      borderRadius: 14,
-                                                      border: `1px solid ${active
-                                                          ? (isV2Ui
-                                                              ? v2AntPrimaryBorderColor
-                                                              : (darkMode ? 'rgba(255,214,102,0.3)' : 'rgba(24,144,255,0.24)'))
-                                                          : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
-                                                      background: active
-                                                          ? (isV2Ui
-                                                              ? `linear-gradient(180deg, ${v2AntPrimaryBgHoverColor} 0%, ${v2AntPrimaryBgColor} 100%)`
-                                                              : (darkMode ? 'linear-gradient(180deg, rgba(255,214,102,0.12) 0%, rgba(255,214,102,0.06) 100%)' : 'linear-gradient(180deg, rgba(24,144,255,0.10) 0%, rgba(24,144,255,0.05) 100%)'))
-                                                          : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
-                                                      color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
-                                                      cursor: 'pointer',
-                                                  }}
-                                              >
-                                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                                                      <span style={{ fontSize: 14, fontWeight: 700 }}>{item.label}</span>
-                                                      {active ? <CheckOutlined style={{ color: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff') }} /> : null}
-                                                  </div>
-                                                  <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: active ? (darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(22,32,51,0.68)') : utilityMutedTextStyle.color }}>
-                                                      {item.description}
-                                                  </div>
-                                              </button>
-                                          );
-                                      })}
-                                  </div>
-                              </div>
-                          </div>
-                      ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                              <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.ui_scale_title')}</div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                      <Slider
-                                        min={MIN_UI_SCALE}
-                                        max={MAX_UI_SCALE}
-                                        step={0.05}
-                                        value={effectiveUiScale}
-                                        onChange={(v) => setUiScale(Number(v))}
-                                        style={{ flex: 1 }}
-                                      />
-                                      <span style={{ width: 56 }}>{Math.round(effectiveUiScale * 100)}%</span>
-                                  </div>
-                                  <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 4 }}>
-                                      {t('app.theme.appearance.ui_scale_hint')}
-                                  </div>
-                              </div>
-                              <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.font_size_title')}</div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                      <Slider
-                                        min={MIN_FONT_SIZE}
-                                        max={MAX_FONT_SIZE}
-                                        step={1}
-                                        value={effectiveFontSize}
-                                        onChange={(v) => setFontSize(Number(v))}
-                                        style={{ flex: 1 }}
-                                      />
-                                      <span style={{ width: 56 }}>{effectiveFontSize}px</span>
-                                  </div>
-                              </div>
-                              {appearance.uiVersion === 'v2' && (
-                                  <div style={utilityPanelStyle}>
-                                      <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.sidebar_rail_scale_title')}</div>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                          <Slider
-                                            min={MIN_V2_SIDEBAR_RAIL_SCALE}
-                                            max={MAX_V2_SIDEBAR_RAIL_SCALE}
-                                            step={0.05}
-                                            value={effectiveSidebarRailScale}
-                                            onChange={(value) => setAppearance({
-                                                v2SidebarRailScale: sanitizeV2SidebarRailScale(value),
-                                            })}
-                                            style={{ flex: 1 }}
-                                          />
-                                          <span style={{ width: 56 }}>{Math.round(effectiveSidebarRailScale * 100)}%</span>
-                                      </div>
-                                      <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
-                                          {t('app.theme.appearance.sidebar_rail_scale_hint')}
-                                      </div>
-                                  </div>
-                              )}
-                              <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>{t('app.theme.font_family.title')}</div>
-                                  <div style={{ display: 'grid', gap: 14 }}>
-                                      <div>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.font_family.ui_title')}</div>
-                                          <Select
-                                              allowClear
-                                              showSearch
-                                              optionFilterProp="label"
-                                              loading={isFontFamiliesLoading}
-                                              placeholder={DEFAULT_UI_FONT_FAMILY}
-                                              value={appearance.customUIFontFamily ?? undefined}
-                                              onChange={(value) => setAppearance({
-                                                  customUIFontFamily: sanitizeFontFamilyInput(value),
-                                              })}
-                                              onClear={() => setAppearance({ customUIFontFamily: null })}
-                                              options={uiFontOptions.map((option) => ({
-                                                  value: option.value,
-                                                  label: option.label,
-                                              }))}
-                                              filterOption={filterFontOption}
-                                              popupMatchSelectWidth
-                                              style={{ width: '100%' }}
-                                              optionRender={(option) => renderFontOptionLabel({
-                                                  value: String(option.data.value),
-                                                  label: String(option.data.label),
-                                              })}
-                                          />
-                                          <div style={{ ...utilityMutedTextStyle, marginTop: 6 }}>
-                                              {fontFamiliesLoadError
-                                                  ? t('app.theme.font_family.load_failed_fallback', { error: fontFamiliesLoadError })
-                                                  : (installedFontFamilies.length > 0
-                                                      ? t('app.theme.font_family.loaded_ui_hint', { count: installedFontFamilies.length })
-                                                      : t('app.theme.font_family.loading_ui_hint'))}
-                                          </div>
-                                          {linuxCJKFontInstallHint && hasLoadedInstalledFontsRef.current && !isFontFamiliesLoading && !fontFamiliesLoadError && (
-                                              <div
-                                                  style={{
-                                                      marginTop: 8,
-                                                      padding: '9px 10px',
-                                                      borderRadius: 8,
-                                                      border: darkMode ? '1px solid rgba(250,204,21,0.28)' : '1px solid rgba(217,119,6,0.22)',
-                                                      background: darkMode ? 'rgba(250,204,21,0.08)' : 'rgba(251,191,36,0.12)',
-                                                      color: darkMode ? 'rgba(254,249,195,0.92)' : '#92400e',
-                                                      fontSize: 12,
-                                                      lineHeight: 1.7,
-                                                  }}
-                                              >
-                                                  {t('app.theme.font_family.linux_cjk_install_prefix')}
-                                                  <span style={{ fontFamily: 'var(--gn-font-mono)', marginLeft: 6 }}>{linuxCJKFontInstallHint}</span>
-                                                  {t('app.theme.font_family.linux_cjk_install_suffix')}
-                                              </div>
-                                          )}
-                                      </div>
-                                      <div>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.font_family.mono_title')}</div>
-                                          <Select
-                                              allowClear
-                                              showSearch
-                                              optionFilterProp="label"
-                                              loading={isFontFamiliesLoading}
-                                              placeholder={DEFAULT_MONO_FONT_FAMILY}
-                                              value={appearance.customMonoFontFamily ?? undefined}
-                                              onChange={(value) => setAppearance({
-                                                  customMonoFontFamily: sanitizeFontFamilyInput(value),
-                                              })}
-                                              onClear={() => setAppearance({ customMonoFontFamily: null })}
-                                              options={monoFontOptions.map((option) => ({
-                                                  value: option.value,
-                                                  label: option.label,
-                                              }))}
-                                              filterOption={filterFontOption}
-                                              popupMatchSelectWidth
-                                              style={{ width: '100%' }}
-                                              optionRender={(option) => renderFontOptionLabel({
-                                                  value: String(option.data.value),
-                                                  label: String(option.data.label),
-                                              })}
-                                          />
-                                          <div style={{ ...utilityMutedTextStyle, marginTop: 6 }}>
-                                              {fontFamiliesLoadError
-                                                  ? t('app.theme.font_family.mono_fallback_hint')
-                                                  : t('app.theme.font_family.mono_hint')}
-                                          </div>
-                                      </div>
-                                  </div>
-                              </div>
-                              <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>{t('app.theme.query_template.title')}</div>
-                                  <div style={{ display: 'grid', gap: 10 }}>
-                                      <div style={utilityMutedTextStyle}>
-                                          {t('app.theme.query_template.description')}
-                                      </div>
-                                      <Input.TextArea
-                                          value={newQuerySqlTemplate}
-                                          autoSize={{ minRows: 3, maxRows: 8 }}
-                                          spellCheck={false}
-                                          onChange={(event) => setAppearance({ newQuerySqlTemplate: event.target.value })}
-                                          style={{ fontFamily: 'var(--gn-font-mono)' }}
-                                      />
-                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                                          <div style={utilityMutedTextStyle}>
-                                              {t('app.theme.query_template.hint')}
-                                          </div>
-                                          <Button
-                                              size="small"
-                                              disabled={appearance.newQuerySqlTemplate === null}
-                                              onClick={() => setAppearance({ newQuerySqlTemplate: null })}
-                                          >
-                                              {t('app.theme.query_template.reset_default')}
-                                          </Button>
-                                      </div>
-                                  </div>
-                              </div>
-                              <div ref={tabDisplaySettingsPanelRef} style={utilityPanelStyle}>
-                                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
-                                      <div style={{ minWidth: 0 }}>
-                                          <div style={{ fontWeight: 500 }}>{t('app.theme.tab_display.title')}</div>
-                                          <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
-                                              {t('app.theme.tab_display.description')}
-                                          </div>
-                                      </div>
-                                      <Segmented
-                                          size="small"
-                                          options={[
-                                              { label: t('app.theme.tab_display.layout.single'), value: 'single' },
-                                              { label: t('app.theme.tab_display.layout.double'), value: 'double' },
-                                          ]}
-                                          value={tabDisplaySettings.layout}
-                                          onChange={(value) => setTabDisplayLayout(value as TabDisplayLayout)}
-                                      />
-                                  </div>
-                                  <div style={{ display: 'grid', gap: 8 }}>
-                                      {tabDisplayElementOrder.map((key) => {
-                                          const checked = visibleTabDisplayElementKeys.has(key);
-                                          const row = tabDisplaySettings.secondaryElements.includes(key) ? 'secondary' : 'primary';
-                                          const currentRowElements = row === 'secondary'
-                                              ? tabDisplaySettings.secondaryElements
-                                              : tabDisplaySettings.primaryElements;
-                                          const indexInRow = currentRowElements.indexOf(key);
-                                          const canMoveUp = checked && indexInRow > 0;
-                                          const canMoveDown = checked && indexInRow >= 0 && indexInRow < currentRowElements.length - 1;
-                                          const isFocused = focusedTabDisplayElementKey === key;
-                                          return (
-                                              <div
-                                                  key={key}
-                                                  role="button"
-                                                  tabIndex={0}
-                                                  onClick={() => setFocusedTabDisplayElementKey(key)}
-                                                  onKeyDown={(event) => {
-                                                      if (event.key === 'Enter' || event.key === ' ') {
-                                                          event.preventDefault();
-                                                          setFocusedTabDisplayElementKey(key);
-                                                      }
-                                                  }}
-                                                  style={{
-                                                      display: 'grid',
-                                                      gridTemplateColumns: 'minmax(0, 1fr) auto',
-                                                      gap: 10,
-                                                      alignItems: 'center',
-                                                      padding: '9px 10px',
-                                                      borderRadius: 10,
-                                                      border: `1px solid ${isFocused
-                                                          ? (isV2Ui
-                                                              ? v2AntPrimaryBorderHoverColor
-                                                              : (darkMode ? 'rgba(255,214,102,0.54)' : 'rgba(24,144,255,0.54)'))
-                                                          : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
-                                                      boxShadow: isFocused
-                                                          ? (isV2Ui
-                                                              ? `0 0 0 2px ${v2AntControlActiveBg}`
-                                                              : (darkMode ? '0 0 0 2px rgba(255,214,102,0.14)' : '0 0 0 2px rgba(24,144,255,0.12)'))
-                                                          : 'none',
-                                                      background: isFocused
-                                                          ? (isV2Ui
-                                                              ? `linear-gradient(90deg, ${v2AntPrimaryBgHoverColor} 0%, rgba(255,255,255,0.045) 100%)`
-                                                              : (darkMode ? 'linear-gradient(90deg, rgba(255,214,102,0.12) 0%, rgba(255,255,255,0.045) 100%)' : 'linear-gradient(90deg, rgba(24,144,255,0.10) 0%, rgba(255,255,255,0.78) 100%)'))
-                                                          : checked
-                                                          ? (darkMode ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.62)')
-                                                          : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(16,24,40,0.025)'),
-                                                      cursor: 'pointer',
-                                                      transition: 'border-color 140ms ease, box-shadow 140ms ease, background 140ms ease',
-                                                  }}
-                                              >
-                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                                                      <span style={{
-                                                          width: 22,
-                                                          height: 22,
-                                                          borderRadius: 999,
-                                                          display: 'inline-flex',
-                                                          alignItems: 'center',
-                                                          justifyContent: 'center',
-                                                          flexShrink: 0,
-                                                          fontFamily: resolvedMonoFontFamily,
-                                                          fontSize: 11,
-                                                          fontWeight: 800,
-                                                          background: isFocused
-                                                              ? (isV2Ui ? v2AntPrimaryBgHoverColor : (darkMode ? 'rgba(255,214,102,0.22)' : 'rgba(24,144,255,0.14)'))
-                                                              : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(16,24,40,0.05)'),
-                                                          color: isFocused
-                                                              ? (isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'))
-                                                              : (darkMode ? 'rgba(255,255,255,0.56)' : 'rgba(16,24,40,0.5)'),
-                                                      }}>
-                                                          {checked && indexInRow >= 0 ? indexInRow + 1 : '-'}
-                                                      </span>
-                                                      <Switch
-                                                          size="small"
-                                                          checked={checked}
-                                                          onClick={(_, event) => event.stopPropagation()}
-                                                          onChange={(nextChecked) => updateTabDisplayElementVisibility(key, nextChecked)}
-                                                      />
-                                                      <div style={{ minWidth: 0 }}>
-                                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                                                              <span style={{ fontWeight: 600 }}>{getTabDisplayElementLabel(key)}</span>
-                                                              {isFocused ? (
-                                                                  <span style={{
-                                                                      fontSize: 10,
-                                                                      lineHeight: '16px',
-                                                                      padding: '0 6px',
-                                                                      borderRadius: 999,
-                                                                      background: isV2Ui ? v2AntPrimaryBgColor : (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.10)'),
-                                                                      color: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'),
-                                                                  }}>
-                                                                      {t('app.theme.tab_display.badge.current')}
-                                                                  </span>
-                                                              ) : null}
-                                                              {checked && tabDisplaySettings.layout === 'double' ? (
-                                                                  <span style={{
-                                                                      fontSize: 10,
-                                                                      lineHeight: '16px',
-                                                                      padding: '0 6px',
-                                                                      borderRadius: 999,
-                                                                      background: row === 'secondary'
-                                                                          ? (darkMode ? 'rgba(56,189,248,0.14)' : 'rgba(2,132,199,0.08)')
-                                                                          : (darkMode ? 'rgba(34,197,94,0.14)' : 'rgba(22,163,74,0.08)'),
-                                                                      color: row === 'secondary'
-                                                                          ? (darkMode ? '#7dd3fc' : '#0369a1')
-                                                                          : (darkMode ? '#86efac' : '#15803d'),
-                                                                  }}>
-                                                                      {row === 'secondary'
-                                                                          ? t('app.theme.tab_display.row.secondary')
-                                                                          : t('app.theme.tab_display.row.primary')}
-                                                                  </span>
-                                                              ) : null}
-                                                          </div>
-                                                          <div style={{ ...utilityMutedTextStyle, marginTop: 2 }}>{getTabDisplayElementDescription(key)}</div>
-                                                      </div>
-                                                  </div>
-                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                                      {tabDisplaySettings.layout === 'double' && checked ? (
-                                                          <Segmented
-                                                              size="small"
-                                                              options={[
-                                                                  { label: t('app.theme.tab_display.row.primary'), value: 'primary' },
-                                                                  { label: t('app.theme.tab_display.row.secondary'), value: 'secondary' },
-                                                              ]}
-                                                              value={row}
-                                                              onChange={(value) => setTabDisplayElementRow(key, value as 'primary' | 'secondary')}
-                                                              onClick={(event) => event.stopPropagation()}
-                                                          />
-                                                      ) : null}
-                                                      <Button
-                                                          size="small"
-                                                          disabled={!canMoveUp}
-                                                          onClick={(event) => {
-                                                              event.stopPropagation();
-                                                              moveTabDisplayElement(key, -1);
-                                                          }}
-                                                      >
-                                                          {t('app.theme.tab_display.action.move_up')}
-                                                      </Button>
-                                                      <Button
-                                                          size="small"
-                                                          disabled={!canMoveDown}
-                                                          onClick={(event) => {
-                                                              event.stopPropagation();
-                                                              moveTabDisplayElement(key, 1);
-                                                          }}
-                                                      >
-                                                          {t('app.theme.tab_display.action.move_down')}
-                                                      </Button>
-                                                  </div>
-                                              </div>
-                                          );
-                                      })}
-                                  </div>
-                                  <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
-                                      {t('app.theme.tab_display.preview.prefix')}
-                                      {tabDisplaySettings.layout === 'double' ? `${t('app.theme.tab_display.row.primary')} ` : ''}
-                                      {tabDisplaySettings.primaryElements.map(getTabDisplayElementLabel).join(' / ') || t('app.theme.tab_display.preview.default_label')}
-                                      {tabDisplaySettings.layout === 'double' && tabDisplaySettings.secondaryElements.length > 0
-                                          ? t('app.theme.tab_display.preview.secondary', {
-                                              labels: tabDisplaySettings.secondaryElements.map(getTabDisplayElementLabel).join(' / '),
-                                          })
-                                          : ''}
-                                      {focusedTabDisplayElementKey
-                                          ? t('app.theme.tab_display.preview.focused', {
-                                              label: getTabDisplayElementLabel(focusedTabDisplayElementKey),
-                                          })
-                                          : ''}
-                                  </div>
-                              </div>
-                              <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>{t('app.theme.appearance.transparency_blur_title')}</div>
-                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
-                                      <div>
-                                          <div style={{ fontWeight: 500 }}>{t('app.theme.appearance.enable_transparency_blur')}</div>
-                                          <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>{t('app.theme.appearance.enable_transparency_blur_hint')}</div>
-                                      </div>
-                                      <Switch checked={appearance.enabled !== false} onChange={(checked) => setAppearance({ enabled: checked })} />
-                                  </div>
-                                  <div style={{ display: 'grid', gap: 14, opacity: appearance.enabled !== false ? 1 : 0.6 }}>
-                                      <div>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.opacity_title')}</div>
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                              <Slider 
-                                                min={0.1} 
-                                                max={1.0} 
-                                                step={0.05} 
-                                                disabled={appearance.enabled === false}
-                                                value={appearance.opacity ?? 1.0} 
-                                                onChange={(v) => setAppearance({ opacity: v })} 
-                                                style={{ flex: 1 }}
-                                              />
-                                              <span style={{ width: 40 }}>{Math.round((appearance.opacity ?? 1.0) * 100)}%</span>
-                                          </div>
-                                      </div>
-                                      <div>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.blur_title')}</div>
-                                          {isWindowsPlatform() ? (
-                                              <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
-                                                  {t('app.theme.appearance.windows_acrylic_hint')}
-                                              </div>
-                                          ) : (
-                                              <>
-                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                                      <Slider
-                                                        min={0}
-                                                        max={20}
-                                                        disabled={appearance.enabled === false}
-                                                        value={appearance.blur ?? 0}
-                                                        onChange={(v) => setAppearance({ blur: v })}
-                                                        style={{ flex: 1 }}
-                                                      />
-                                                      <span style={{ width: 40 }}>{appearance.blur}px</span>
-                                                  </div>
-                                                  <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 4 }}>
-                                                      {t('app.theme.appearance.blur_hint')}
-                                                  </div>
-                                              </>
-                                          )}
-                                      </div>
-                                  </div>
-                              </div>
-                              <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>{t('app.theme.data_table.title')}</div>
-                                  <div style={{ display: 'grid', gap: 14 }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                                          <div>
-                                              <div style={{ fontWeight: 500 }}>{t('app.theme.data_table.vertical_borders')}</div>
-                                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>{t('app.theme.data_table.vertical_borders_hint')}</div>
-                                          </div>
-                                          <Switch
-                                              checked={appearance.showDataTableVerticalBorders === true}
-                                              onChange={(checked) => setAppearance({ showDataTableVerticalBorders: checked })}
-                                          />
-                                      </div>
-                                      <div>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.data_table.table_double_click_action')}</div>
-                                          <Segmented
-                                              block
-                                              options={[
-                                                  { label: t('app.theme.data_table.table_double_click_action.open_data'), value: 'open-data' },
-                                                  { label: t('app.theme.data_table.table_double_click_action.open_design'), value: 'open-design' },
-                                              ]}
-                                              value={tableDoubleClickAction}
-                                              onChange={(value) => setAppearance({ tableDoubleClickAction: value as 'open-data' | 'open-design' })}
-                                          />
-                                          <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
-                                              {t('app.theme.data_table.table_double_click_action_hint')}
-                                          </div>
-                                      </div>
-                                      <div>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.data_table.density')}</div>
-                                          <Segmented
-                                              block
-                                              options={DENSITY_OPTIONS.map((option) => ({
-                                                  ...option,
-                                                  label: t(`app.theme.data_table.density.${option.value}`),
-                                              }))}
-                                              value={appearance.dataTableDensity}
-                                              onChange={(value) => setAppearance({ dataTableDensity: sanitizeDataTableDensity(value) })}
-                                          />
-                                          <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
-                                              {t('app.theme.data_table.density_hint')}
-                                          </div>
-                                      </div>
-                                      <div>
-                                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
-                                              <div style={{ fontWeight: 500 }}>{t('app.theme.data_table.font_size')}</div>
-                                              <Button
-                                                  size="small"
-                                                  type={dataTableFontSizeFollowsGlobal ? 'primary' : 'default'}
-                                                  onClick={() => setAppearance({
-                                                      dataTableFontSizeFollowGlobal: !dataTableFontSizeFollowsGlobal,
-                                                      dataTableFontSize: dataTableFontSizeFollowsGlobal
-                                                          ? sanitizeDataTableFontSize(appearance.dataTableFontSize)
-                                                          : null,
-                                                  })}
-                                              >
-                                                  {t('app.theme.data_table.follow_global')}
-                                              </Button>
-                                          </div>
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                              <Slider
-                                                  min={10}
-                                                  max={18}
-                                                  step={1}
-                                                  disabled={dataTableFontSizeFollowsGlobal}
-                                                  value={effectiveDataTableFontSize}
-                                                  onChange={(value) => setAppearance({
-                                                      dataTableFontSize: sanitizeDataTableFontSize(value),
-                                                      dataTableFontSizeFollowGlobal: false,
-                                                  })}
-                                                  style={{ flex: 1 }}
-                                              />
-                                              <span style={{ width: 56 }}>{effectiveDataTableFontSize}px</span>
-                                          </div>
-                                      </div>
-                                      <div>
-                                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
-                                              <div style={{ fontWeight: 500 }}>{t('app.theme.data_table.sidebar_tree_font_size')}</div>
-                                              <Button
-                                                  size="small"
-                                                  type={sidebarTreeFontSizeFollowsGlobal ? 'primary' : 'default'}
-                                                  onClick={() => setAppearance({
-                                                      sidebarTreeFontSizeFollowGlobal: !sidebarTreeFontSizeFollowsGlobal,
-                                                      sidebarTreeFontSize: sidebarTreeFontSizeFollowsGlobal
-                                                          ? sanitizeSidebarTreeFontSize(appearance.sidebarTreeFontSize)
-                                                          : null,
-                                                  })}
-                                              >
-                                                  {t('app.theme.data_table.follow_global')}
-                                              </Button>
-                                          </div>
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                              <Slider
-                                                  min={10}
-                                                  max={18}
-                                                  step={1}
-                                                  disabled={sidebarTreeFontSizeFollowsGlobal}
-                                                  value={effectiveSidebarTreeFontSize}
-                                                  onChange={(value) => setAppearance({
-                                                      sidebarTreeFontSize: sanitizeSidebarTreeFontSize(value),
-                                                      sidebarTreeFontSizeFollowGlobal: false,
-                                                  })}
-                                                  style={{ flex: 1 }}
-                                              />
-                                              <span style={{ width: 56 }}>{effectiveSidebarTreeFontSize}px</span>
-                                          </div>
-                                      </div>
-                                  </div>
-                              </div>
-                              {isMacRuntime ? (
-                                  <div style={utilityPanelStyle}>
-                                      <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.mac_window.title')}</div>
-                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                                          <div>
-                                              <div style={{ fontWeight: 500 }}>{t('app.theme.mac_window.use_native_controls')}</div>
-                                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>{t('app.theme.mac_window.use_native_controls_hint')}</div>
-                                          </div>
-                                          <Switch
-                                              checked={appearance.useNativeMacWindowControls === true}
-                                              onChange={(checked) => setAppearance({ useNativeMacWindowControls: checked })}
-                                          />
-                                      </div>
-                                      <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 8 }}>
-                                          {t('app.theme.mac_window.restart_hint')}
-                                      </div>
-                                  </div>
-                              ) : null}
-                              <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.startup_window.title')}</div>
-                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                                      <span>{isWindowsRuntime ? t('app.theme.startup_window.fullscreen_windows') : t('app.theme.startup_window.fullscreen')}</span>
-                                      <Switch checked={startupFullscreen} onChange={(checked) => setStartupFullscreen(checked)} />
-                                  </div>
-                                  <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 4 }}>
-                                      {isWindowsRuntime ? t('app.theme.startup_window.windows_hint') : t('app.theme.startup_window.hint')}
-                                  </div>
-                              </div>
-                              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, paddingTop: 8, paddingBottom: 12 }}>
-                                  <Button
-                                       onClick={() => {
-                                           setUiScale(DEFAULT_UI_SCALE);
-                                           setFontSize(DEFAULT_FONT_SIZE);
-                                           setAppearance({ ...DEFAULT_APPEARANCE });
-                                       }}
-                                   >
-                                       {t('app.theme.action.restore_defaults')}
-                                  </Button>
-                              </div>
-                          </div>
-                      )}
-                  </div>
-              </div>
+              {renderThemeSettingsContent()}
           </Modal>
           )}
 
@@ -5984,7 +6705,7 @@ function App() {
               open={isProxyModalOpen}
               onCancel={handleCloseGlobalProxySettings}
               footer={null}
-              width={520}
+              width={680}
               styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
           >
               {renderProxySettingsContent()}
@@ -6050,9 +6771,9 @@ function App() {
                   <div style={{ ...linuxResizeHandleStyleBase, bottom: 0, right: 0, width: 14, height: 14, cursor: 'nwse-resize' }} />
               </>
           )}
-          
+
           {/* Ghost Resize Line for Sidebar */}
-          <div 
+          <div
               ref={ghostRef}
               style={{
                   position: 'fixed',
@@ -6066,9 +6787,9 @@ function App() {
                   display: 'none'
               }}
           />
-          
+
           {/* Ghost Resize Line for Log Panel */}
-          <div 
+          <div
               ref={logGhostRef}
               style={{
                   position: 'fixed',
