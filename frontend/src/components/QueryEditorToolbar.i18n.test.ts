@@ -33,7 +33,6 @@ const requiredKeys = [
   'query_editor.placeholder.connection',
   'query_editor.placeholder.database',
   'query_editor.max_rows.tooltip',
-  'query_editor.max_rows.option_100',
   'query_editor.max_rows.option_500',
   'query_editor.max_rows.option_1000',
   'query_editor.max_rows.option_5000',
@@ -66,6 +65,7 @@ describe('QueryEditorToolbar i18n', () => {
     expect(source).toContain("import { useOptionalI18n } from '../i18n/provider';");
     expect(source).toContain('const i18n = useOptionalI18n();');
     expect(source).toContain('const t = i18n?.t ?? defaultTranslate;');
+    expect(source).toContain("{ label: '100', value: 100 }");
 
     for (const key of requiredKeys) {
       expect(source).toContain(key);
