@@ -245,6 +245,42 @@ describe('useAppUpdateManager', () => {
     expect(hook?.lastUpdateInfo?.releaseNotesUrl).toBe('https://github.com/Syngnat/GoNavi/releases/tag/dev-latest');
   });
 
+  it('keeps official about metadata usable when backend app info is incomplete', async () => {
+    backendApp.GetAppInfo.mockResolvedValue({
+      success: true,
+      data: {
+        version: '',
+        author: 'Unknown',
+      },
+    });
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: false,
+        currentVersion: '0.8.5',
+        latestVersion: '0.8.5',
+      },
+    });
+
+    renderHook();
+
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+    await act(async () => {
+      hook?.setIsAboutOpen(true);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(hook?.aboutDisplayVersion).toBe('0.8.5');
+    expect(hook?.aboutInfo?.author).toBe('Syngnat');
+    expect(hook?.aboutInfo?.repoUrl).toBe('https://github.com/Syngnat/GoNavi');
+    expect(hook?.aboutInfo?.issueUrl).toBe('https://github.com/Syngnat/GoNavi/issues');
+    expect(hook?.aboutInfo?.releaseUrl).toBe('https://github.com/Syngnat/GoNavi/releases');
+    expect(messageApi.error).not.toHaveBeenCalled();
+  });
+
   it('opens the downloaded update directory when a package is already downloaded', async () => {
     backendApp.CheckForUpdates.mockResolvedValue({
       success: true,

@@ -45,6 +45,25 @@ type UseAppUpdateManagerOptions = {
   t: Translator;
 };
 
+type AboutInfo = {
+  version: string;
+  author: string;
+  buildTime?: string;
+  repoUrl?: string;
+  issueUrl?: string;
+  releaseUrl?: string;
+  communityUrl?: string;
+};
+
+const DEFAULT_ABOUT_INFO: AboutInfo = {
+  version: '',
+  author: 'Syngnat',
+  repoUrl: 'https://github.com/Syngnat/GoNavi',
+  issueUrl: 'https://github.com/Syngnat/GoNavi/issues',
+  releaseUrl: 'https://github.com/Syngnat/GoNavi/releases',
+  communityUrl: 'https://aibook.ren',
+};
+
 const createEmptyDownloadProgress = () => ({
   open: false,
   version: '',
@@ -63,6 +82,44 @@ const buildUpdateKey = (info: Pick<UpdateInfo, 'channel' | 'latestVersion'> | nu
   info?.latestVersion
     ? `${normalizeUpdateChannel(info.channel)}:${String(info.latestVersion || '').trim()}`
     : '';
+
+const isUnknownAboutValue = (value: string): boolean => {
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'unknown' || normalized === '未知' || normalized === 'common.unknown';
+};
+
+const normalizeAboutText = (value: unknown): string =>
+  String(value || '').trim();
+
+const normalizeAboutVersion = (value: unknown): string => {
+  const text = normalizeAboutText(value);
+  if (!text || text === '0.0.0' || isUnknownAboutValue(text)) {
+    return '';
+  }
+  return text;
+};
+
+const normalizeAboutInfo = (value: unknown): AboutInfo => {
+  const source = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+  const version = normalizeAboutVersion(source.version);
+  const author = normalizeAboutText(source.author);
+  const buildTime = normalizeAboutText(source.buildTime);
+  const repoUrl = normalizeAboutText(source.repoUrl);
+  const issueUrl = normalizeAboutText(source.issueUrl);
+  const releaseUrl = normalizeAboutText(source.releaseUrl);
+  const communityUrl = normalizeAboutText(source.communityUrl);
+
+  return {
+    ...DEFAULT_ABOUT_INFO,
+    version,
+    author: author && !isUnknownAboutValue(author) ? author : DEFAULT_ABOUT_INFO.author,
+    buildTime: buildTime || undefined,
+    repoUrl: repoUrl || DEFAULT_ABOUT_INFO.repoUrl,
+    issueUrl: issueUrl || DEFAULT_ABOUT_INFO.issueUrl,
+    releaseUrl: releaseUrl || DEFAULT_ABOUT_INFO.releaseUrl,
+    communityUrl: communityUrl || DEFAULT_ABOUT_INFO.communityUrl,
+  };
+};
 
 const shouldAutoInstallDownloadedUpdate = (resultData: UpdateDownloadResultData | null | undefined): boolean => {
   const platform = String(resultData?.platform || '').trim().toLowerCase();
@@ -87,19 +144,14 @@ export const useAppUpdateManager = ({
   const [updateChannel, setUpdateChannelState] = useState<UpdateChannel>('latest');
   const [isUpdateChannelLoading, setIsUpdateChannelLoading] = useState(false);
   const [isUpdateChannelSaving, setIsUpdateChannelSaving] = useState(false);
-  const [aboutInfo, setAboutInfo] = useState<{
-    version: string;
-    author: string;
-    buildTime?: string;
-    repoUrl?: string;
-    issueUrl?: string;
-    releaseUrl?: string;
-    communityUrl?: string;
-  } | null>(null);
-  const aboutDisplayVersion = resolveAboutDisplayVersion(runtimeBuildType, aboutInfo?.version);
+  const [aboutInfo, setAboutInfo] = useState<AboutInfo>(() => DEFAULT_ABOUT_INFO);
   const [aboutUpdateStatus, setAboutUpdateStatus] = useState<string>('');
   const [lastUpdateInfo, setLastUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState(createEmptyDownloadProgress);
+  const aboutDisplayVersion = resolveAboutDisplayVersion(
+    runtimeBuildType,
+    normalizeAboutVersion(aboutInfo.version) || normalizeAboutVersion(lastUpdateInfo?.currentVersion),
+  );
   const lastUpdateKey = buildUpdateKey(lastUpdateInfo);
 
   const formatAboutUpdateStatus = useCallback((info: UpdateInfo | null): string => {
@@ -404,13 +456,26 @@ export const useAppUpdateManager = ({
 
   const loadAboutInfo = useCallback(async () => {
     setAboutLoading(true);
-    const res = await (window as any).go.app.App.GetAppInfo();
-    if (res?.success) {
-      setAboutInfo(res.data);
-    } else {
-      void message.error(t('app.about.message.load_failed', { error: res?.message || t('common.unknown') }));
+    try {
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.GetAppInfo !== 'function') {
+        setAboutInfo(DEFAULT_ABOUT_INFO);
+        return;
+      }
+      const res = await backendApp.GetAppInfo();
+      if (res?.success) {
+        setAboutInfo(normalizeAboutInfo(res.data));
+      } else {
+        setAboutInfo(DEFAULT_ABOUT_INFO);
+        void message.error(t('app.about.message.load_failed', { error: res?.message || t('common.unknown') }));
+      }
+    } catch (e: any) {
+      setAboutInfo(DEFAULT_ABOUT_INFO);
+      const error = e?.message || t('common.unknown');
+      void message.error(t('app.about.message.load_failed', { error }));
+    } finally {
+      setAboutLoading(false);
     }
-    setAboutLoading(false);
   }, [t]);
 
   const loadUpdateChannel = useCallback(async () => {
