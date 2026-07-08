@@ -51,18 +51,19 @@ type updateState struct {
 }
 
 type UpdateInfo struct {
-	HasUpdate       bool   `json:"hasUpdate"`
-	Channel         string `json:"channel"`
-	CurrentVersion  string `json:"currentVersion"`
-	LatestVersion   string `json:"latestVersion"`
-	ReleaseName     string `json:"releaseName"`
-	ReleaseNotesURL string `json:"releaseNotesUrl"`
-	AssetName       string `json:"assetName"`
-	AssetURL        string `json:"assetUrl"`
-	AssetSize       int64  `json:"assetSize"`
-	SHA256          string `json:"sha256"`
-	Downloaded      bool   `json:"downloaded"`
-	DownloadPath    string `json:"downloadPath,omitempty"`
+	HasUpdate          bool   `json:"hasUpdate"`
+	Channel            string `json:"channel"`
+	CurrentVersion     string `json:"currentVersion"`
+	LatestVersion      string `json:"latestVersion"`
+	ReleaseName        string `json:"releaseName"`
+	ReleasePublishedAt string `json:"releasePublishedAt,omitempty"`
+	ReleaseNotesURL    string `json:"releaseNotesUrl"`
+	AssetName          string `json:"assetName"`
+	AssetURL           string `json:"assetUrl"`
+	AssetSize          int64  `json:"assetSize"`
+	SHA256             string `json:"sha256"`
+	Downloaded         bool   `json:"downloaded"`
+	DownloadPath       string `json:"downloadPath,omitempty"`
 }
 
 type AppInfo struct {
@@ -108,11 +109,12 @@ type updatePathCandidate struct {
 }
 
 type githubRelease struct {
-	TagName    string        `json:"tag_name"`
-	Name       string        `json:"name"`
-	HTMLURL    string        `json:"html_url"`
-	Prerelease bool          `json:"prerelease"`
-	Assets     []githubAsset `json:"assets"`
+	TagName     string        `json:"tag_name"`
+	Name        string        `json:"name"`
+	HTMLURL     string        `json:"html_url"`
+	PublishedAt string        `json:"published_at"`
+	Prerelease  bool          `json:"prerelease"`
+	Assets      []githubAsset `json:"assets"`
 }
 
 type githubAsset struct {
@@ -458,12 +460,13 @@ func fetchLatestUpdateInfo(channel updateChannel) (UpdateInfo, error) {
 	}
 	if !hasUpdate {
 		return UpdateInfo{
-			HasUpdate:       false,
-			Channel:         string(channel),
-			CurrentVersion:  currentVersion,
-			LatestVersion:   latestVersion,
-			ReleaseName:     release.Name,
-			ReleaseNotesURL: release.HTMLURL,
+			HasUpdate:          false,
+			Channel:            string(channel),
+			CurrentVersion:     currentVersion,
+			LatestVersion:      latestVersion,
+			ReleaseName:        release.Name,
+			ReleasePublishedAt: strings.TrimSpace(release.PublishedAt),
+			ReleaseNotesURL:    release.HTMLURL,
 		}, nil
 	}
 
@@ -492,16 +495,17 @@ func fetchLatestUpdateInfo(channel updateChannel) (UpdateInfo, error) {
 		return UpdateInfo{}, localizedUpdateError{key: "app.update.backend.error.sha256_missing_current_package"}
 	}
 	return UpdateInfo{
-		HasUpdate:       hasUpdate,
-		Channel:         string(channel),
-		CurrentVersion:  currentVersion,
-		LatestVersion:   latestVersion,
-		ReleaseName:     release.Name,
-		ReleaseNotesURL: release.HTMLURL,
-		AssetName:       asset.Name,
-		AssetURL:        asset.BrowserDownloadURL,
-		AssetSize:       asset.Size,
-		SHA256:          sha256Value,
+		HasUpdate:          hasUpdate,
+		Channel:            string(channel),
+		CurrentVersion:     currentVersion,
+		LatestVersion:      latestVersion,
+		ReleaseName:        release.Name,
+		ReleasePublishedAt: strings.TrimSpace(release.PublishedAt),
+		ReleaseNotesURL:    release.HTMLURL,
+		AssetName:          asset.Name,
+		AssetURL:           asset.BrowserDownloadURL,
+		AssetSize:          asset.Size,
+		SHA256:             sha256Value,
 	}, nil
 }
 

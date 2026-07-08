@@ -743,3 +743,63 @@ body[data-ui-version="legacy"] .ant-layout-sider {
   min-width: 232px !important;
   max-width: min(960px, calc(100vw - 360px)) !important;
 }
+
+body .gonavi-about-update-channel.ant-segmented.ant-segmented {
+  height: 42px !important;
+  padding: 4px !important;
+  border: 1px solid rgba(15, 23, 42, 0.10) !important;
+  border-radius: 12px !important;
+  background: rgba(15, 23, 42, 0.035) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
+}
+
+body .gonavi-about-update-channel .ant-segmented-group {
+  gap: 3px;
+}
+
+body .gonavi-about-update-channel .ant-segmented-item {
+  border-radius: 9px !important;
+}
+
+body .gonavi-about-update-channel .ant-segmented-item-label {
+  min-height: 32px !important;
+  padding: 0 14px !important;
+  color: rgba(15, 23, 42, 0.62) !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  line-height: 32px !important;
+}
+
+body .gonavi-about-update-channel .ant-segmented-item-selected,
+body .gonavi-about-update-channel .ant-segmented-thumb {
+  background: rgba(255, 255, 255, 0.98) !important;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12) !important;
+}
+
+body .gonavi-about-update-channel .ant-segmented-item-selected .ant-segmented-item-label {
+  color: #0f172a !important;
+}
+
+body .gonavi-about-update-channel.ant-segmented-disabled {
+  opacity: 0.58;
+}
+
+body[data-theme='dark'] .gonavi-about-update-channel.ant-segmented.ant-segmented {
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  background: rgba(15, 23, 42, 0.55) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+body[data-theme='dark'] .gonavi-about-update-channel .ant-segmented-item-label {
+  color: rgba(226, 232, 240, 0.62) !important;
+}
+
+body[data-theme='dark'] .gonavi-about-update-channel .ant-segmented-item-selected,
+body[data-theme='dark'] .gonavi-about-update-channel .ant-segmented-thumb {
+  background: rgba(30, 41, 59, 0.98) !important;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.26) !important;
+}
+
+body[data-theme='dark'] .gonavi-about-update-channel .ant-segmented-item-selected .ant-segmented-item-label {
+  color: #f8fafc !important;
+}

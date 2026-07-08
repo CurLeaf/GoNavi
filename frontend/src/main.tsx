@@ -106,6 +106,18 @@ if (
     let mockSkills: any[] = [];
     let mockGlobalProxy: any = { enabled: false, type: 'socks5', host: '', port: 1080, user: '', password: '', hasPassword: false };
     let mockUpdateChannel: 'latest' | 'dev' = 'latest';
+    const mockReleasePublishedAt = '2026-07-08T11:15:00Z';
+    const buildMockUpdateInfo = () => ({
+        hasUpdate: false,
+        channel: mockUpdateChannel,
+        currentVersion: '0.0.0',
+        latestVersion: mockUpdateChannel === 'dev' ? 'dev-browser-mock' : '0.0.0',
+        releaseName: mockUpdateChannel === 'dev' ? 'Dev Build (dev-browser-mock)' : 'Browser Mock Release',
+        releasePublishedAt: mockReleasePublishedAt,
+        releaseNotesUrl: mockUpdateChannel === 'dev'
+            ? 'https://github.com/Syngnat/GoNavi/releases/tag/dev-latest'
+            : 'https://github.com/Syngnat/GoNavi/releases/latest',
+    });
     let mockDataRootInfo: any = {
         path: 'C:/mock/.gonavi',
         defaultPath: 'C:/mock/.gonavi',
@@ -350,21 +362,11 @@ if (
                 GetDataRootDirectoryInfo: async () => ({ success: true, data: cloneBrowserMockValue(mockDataRootInfo) }),
                 CheckForUpdates: async () => ({
                     success: true,
-                    data: {
-                        hasUpdate: false,
-                        channel: mockUpdateChannel,
-                        currentVersion: '0.0.0',
-                        latestVersion: mockUpdateChannel === 'dev' ? 'dev-browser-mock' : '0.0.0',
-                    },
+                    data: buildMockUpdateInfo(),
                 }),
                 CheckForUpdatesSilently: async () => ({
                     success: true,
-                    data: {
-                        hasUpdate: false,
-                        channel: mockUpdateChannel,
-                        currentVersion: '0.0.0',
-                        latestVersion: mockUpdateChannel === 'dev' ? 'dev-browser-mock' : '0.0.0',
-                    },
+                    data: buildMockUpdateInfo(),
                 }),
                 GetUpdateChannel: async () => ({ success: true, data: { channel: mockUpdateChannel } }),
                 OpenDownloadedUpdateDirectory: async () => ({ success: false }),

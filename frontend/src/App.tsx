@@ -226,6 +226,10 @@ type SettingsCenterPaneState = {
   group: SettingsCenterGroupKey;
 };
 
+const resolveSettingsCenterGroupInitialPane = (group: SettingsCenterGroupKey): SettingsCenterPaneState | null => (
+  group === 'about' ? { key: 'about-go-navi', group: 'about' } : null
+);
+
 const DEFAULT_GLOBAL_PROXY_TEST_URL = 'https://api.github.com/';
 
 type GlobalProxyTestResultState = {
@@ -269,6 +273,18 @@ const areGlobalProxyDraftsEqual = (
 const formatAboutCheckedAt = (value: Date): string => {
   const pad = (input: number) => String(input).padStart(2, '0');
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}`;
+};
+
+const formatAboutReleaseTime = (value: string | undefined): string => {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '-';
+  }
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+  return formatAboutCheckedAt(date);
 };
 
 type ConnectionPackageDialogState = {
@@ -2592,7 +2608,7 @@ function App() {
   }, []);
   const handleOpenSettingsModal = useCallback((group: SettingsCenterGroupKey = 'preferences') => {
       setActiveSettingsCenterGroupKey(group);
-      setActiveSettingsCenterPane(null);
+      setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(group));
       setIsSettingsModalOpen(true);
   }, []);
   const handleOpenSettingsCenterPane = useCallback((group: SettingsCenterGroupKey, key: SettingsCenterPaneKey) => {
@@ -3975,6 +3991,7 @@ function App() {
           : (lastUpdateInfo ? t('app.about.hero.no_update') : t('app.about.update_status.not_checked'));
       const currentVersionText = lastUpdateInfo?.currentVersion || aboutDisplayVersion;
       const releaseNotesText = lastUpdateInfo?.releaseName || (hasUpdate ? t('app.about.release_notes.fallback') : '-');
+      const releaseTimeText = formatAboutReleaseTime(lastUpdateInfo?.releasePublishedAt);
       const cardBorder = darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(16,24,40,0.11)';
       const cardBg = darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.82)';
       const mutedText = utilityMutedTextStyle.color;
@@ -3982,7 +3999,7 @@ function App() {
       const versionRows = [
           [t('app.about.version.current'), currentVersionText],
           [t('app.about.version.latest'), latestVersionText],
-          [t('app.about.version.release_time'), '-'],
+          [t('app.about.version.release_time'), releaseTimeText],
           [t('app.about.version.release_notes'), releaseNotesText],
       ];
 
@@ -4071,36 +4088,37 @@ function App() {
                           {t('app.about.version_update.title')}
                       </div>
                       <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 24px' }}>
-                          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 210px', alignItems: 'center', gap: 16 }}>
-                              <div>
+                          <div style={{ display: 'grid', gap: 8 }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(220px, 260px)', alignItems: 'center', gap: 16 }}>
                                   <div style={{ fontSize: 15, fontWeight: 600, color: overlayTheme.titleText }}>{t('app.about.field.update_channel')}</div>
-                                  <div style={{ ...utilityMutedTextStyle, marginTop: 6 }}>{t('app.about.version_update.channel_hint')}</div>
+                                  <Segmented
+                                    className="gonavi-about-update-channel"
+                                    value={updateChannel}
+                                    options={[
+                                        { value: 'latest', label: t('app.about.update_channel.latest') },
+                                        { value: 'dev', label: t('app.about.update_channel.dev') },
+                                    ]}
+                                    onChange={(value) => {
+                                        void changeUpdateChannel(String(value));
+                                    }}
+                                    disabled={
+                                        isUpdateChannelLoading
+                                        || isUpdateChannelSaving
+                                        || updateDownloadProgress.status === 'start'
+                                        || updateDownloadProgress.status === 'downloading'
+                                    }
+                                    block
+                                    style={{ width: '100%' }}
+                                  />
                               </div>
-                              <Select
-                                value={updateChannel}
-                                options={[
-                                    { value: 'latest', label: t('app.about.update_channel.latest') },
-                                    { value: 'dev', label: t('app.about.update_channel.dev') },
-                                ]}
-                                onChange={(value) => {
-                                    void changeUpdateChannel(String(value));
-                                }}
-                                loading={isUpdateChannelLoading}
-                                disabled={
-                                    isUpdateChannelLoading
-                                    || isUpdateChannelSaving
-                                    || updateDownloadProgress.status === 'start'
-                                    || updateDownloadProgress.status === 'downloading'
-                                }
-                                style={{ width: '100%' }}
-                              />
+                              <div style={{ ...utilityMutedTextStyle, lineHeight: 1.55, maxWidth: 360 }}>{t('app.about.version_update.channel_hint')}</div>
                           </div>
                           <div style={{ height: 1, background: dividerColor, margin: '18px 0' }} />
                           <div style={{ display: 'grid', gap: 13 }}>
                               {versionRows.map(([label, value]) => (
-                                  <div key={label} style={{ display: 'grid', gridTemplateColumns: '150px minmax(0, 1fr)', gap: 16, alignItems: 'baseline' }}>
-                                      <div style={{ fontWeight: 600, color: overlayTheme.titleText }}>{label}</div>
-                                      <div style={{ color: label === t('app.about.version.latest') && hasUpdate ? (darkMode ? '#86efac' : '#16a34a') : mutedText, fontWeight: label === t('app.about.version.latest') && hasUpdate ? 700 : 500 }}>
+                                  <div key={label} style={{ display: 'grid', gridTemplateColumns: '150px minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
+                                      <div style={{ fontWeight: 600, color: overlayTheme.titleText, lineHeight: 1.45 }}>{label}</div>
+                                      <div style={{ color: label === t('app.about.version.latest') && hasUpdate ? (darkMode ? '#86efac' : '#16a34a') : mutedText, fontWeight: label === t('app.about.version.latest') && hasUpdate ? 700 : 500, lineHeight: 1.45, minWidth: 0, overflowWrap: 'anywhere' }}>
                                           {value}
                                       </div>
                                   </div>
@@ -6165,7 +6183,7 @@ function App() {
                           title={`${group.title} - ${group.description}`}
                           onClick={() => {
                             setActiveSettingsCenterGroupKey(group.key);
-                            setActiveSettingsCenterPane(null);
+                            setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(group.key));
                           }}
                           style={{
                             position: 'relative',

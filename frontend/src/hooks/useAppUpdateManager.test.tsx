@@ -221,6 +221,30 @@ describe('useAppUpdateManager', () => {
     expect(hook?.lastUpdateInfo?.channel).toBe('dev');
   });
 
+  it('keeps release metadata from the backend update response', async () => {
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        releaseName: 'Dev Build (dev-22fab86)',
+        releasePublishedAt: '2026-07-08T11:15:00Z',
+        releaseNotesUrl: 'https://github.com/Syngnat/GoNavi/releases/tag/dev-latest',
+      },
+    });
+
+    renderHook();
+
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+
+    expect(hook?.lastUpdateInfo?.releaseName).toBe('Dev Build (dev-22fab86)');
+    expect(hook?.lastUpdateInfo?.releasePublishedAt).toBe('2026-07-08T11:15:00Z');
+    expect(hook?.lastUpdateInfo?.releaseNotesUrl).toBe('https://github.com/Syngnat/GoNavi/releases/tag/dev-latest');
+  });
+
   it('opens the downloaded update directory when a package is already downloaded', async () => {
     backendApp.CheckForUpdates.mockResolvedValue({
       success: true,

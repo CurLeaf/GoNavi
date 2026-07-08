@@ -87,6 +87,13 @@ describe('settings center layout', () => {
     expect(appSource).toContain('renderSettingsCenterAboutPane()');
   });
 
+  it('opens the about group directly instead of showing a one-item list', () => {
+    expect(appSource).toContain('const resolveSettingsCenterGroupInitialPane = (group: SettingsCenterGroupKey): SettingsCenterPaneState | null => (');
+    expect(appSource).toContain("group === 'about' ? { key: 'about-go-navi', group: 'about' } : null");
+    expect(appSource).toContain('setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(group));');
+    expect(appSource).toContain('setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(group.key));');
+  });
+
   it('renders the settings center about page with the reference card layout', () => {
     expect(appSource).toContain('const renderSettingsCenterAboutPane = () => {');
     expect(appSource).toContain('const renderSettingsCenterAboutProjectEntry = ({');
@@ -94,6 +101,14 @@ describe('settings center layout', () => {
     expect(appSource).toContain('width: 64');
     expect(appSource).toContain('height: 64');
     expect(appSource).toContain('minWidth: 260');
+    expect(appSource).toContain('const releaseTimeText = formatAboutReleaseTime(lastUpdateInfo?.releasePublishedAt);');
+    expect(appSource).toContain("[t('app.about.version.release_time'), releaseTimeText]");
+    expect(appSource).toContain("gridTemplateColumns: 'minmax(0, 1fr) minmax(220px, 260px)'");
+    expect(appSource).toContain('className="gonavi-about-update-channel"');
+    expect(appSource).toContain('<Segmented');
+    expect(appSource).toContain('maxWidth: 360');
+    expect(appSource).toContain("alignItems: 'start'");
+    expect(appSource).toContain("overflowWrap: 'anywhere'");
     expect(appSource).toContain("t('app.about.version_update.title')");
     expect(appSource).toContain("t('app.about.project.github.title')");
     expect(appSource).toContain("t('app.about.project.issues.title')");

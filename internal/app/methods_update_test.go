@@ -30,9 +30,10 @@ func TestFetchLatestUpdateInfoSkipsChecksumWhenCurrentVersionIsAlreadyLatest(t *
 	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
 		releaseCalled = true
 		return &githubRelease{
-			TagName: "v0.6.5",
-			Name:    "v0.6.5",
-			HTMLURL: "https://github.com/Syngnat/GoNavi/releases/tag/v0.6.5",
+			TagName:     "v0.6.5",
+			Name:        "v0.6.5",
+			HTMLURL:     "https://github.com/Syngnat/GoNavi/releases/tag/v0.6.5",
+			PublishedAt: "2026-07-08T11:15:00Z",
 			Assets: []githubAsset{
 				{
 					Name:               assetName,
@@ -84,9 +85,10 @@ func TestFetchLatestUpdateInfoUsesAssetDigestWhenUpdateIsAvailable(t *testing.T)
 
 	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
 		return &githubRelease{
-			TagName: "v0.6.5",
-			Name:    "v0.6.5",
-			HTMLURL: "https://github.com/Syngnat/GoNavi/releases/tag/v0.6.5",
+			TagName:     "v0.6.5",
+			Name:        "v0.6.5",
+			HTMLURL:     "https://github.com/Syngnat/GoNavi/releases/tag/v0.6.5",
+			PublishedAt: "2026-07-08T11:15:00Z",
 			Assets: []githubAsset{
 				{
 					Name:               assetName,
@@ -118,6 +120,9 @@ func TestFetchLatestUpdateInfoUsesAssetDigestWhenUpdateIsAvailable(t *testing.T)
 	}
 	if info.SHA256 != strings.ToLower(digest) || info.AssetName != assetName {
 		t.Fatalf("unexpected update info: %#v", info)
+	}
+	if info.ReleasePublishedAt != "2026-07-08T11:15:00Z" {
+		t.Fatalf("expected release published time to be preserved, got %#v", info)
 	}
 }
 
