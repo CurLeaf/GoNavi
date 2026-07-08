@@ -26,6 +26,25 @@ describe('queryResultPagination', () => {
     });
   });
 
+  it('treats query-editor injected LIMIT as a capped page rather than an uncounted total', () => {
+    const page = createInitialQueryResultPagination({
+      executedSql: 'SELECT id, name FROM users LIMIT 500',
+      exportSql: 'SELECT id, name FROM users',
+      dbType: 'mysql',
+      returnedRowCount: 500,
+      fallbackPageSize: 500,
+    });
+
+    expect(page).toMatchObject({
+      current: 1,
+      pageSize: 500,
+      total: 500,
+      totalKnown: true,
+      baseSql: 'SELECT id, name FROM users',
+      exportAllSql: 'SELECT id, name FROM users',
+    });
+  });
+
   it('builds the next page SQL with one lookahead row', () => {
     expect(buildQueryResultPageSql({
       baseSql: 'SELECT id FROM users',
