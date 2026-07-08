@@ -47,26 +47,12 @@ func (a *App) saveGlobalProxy(input connection.SaveGlobalProxyInput) (connection
 	bundle := globalProxySecretBundle{}
 	if strings.TrimSpace(input.Password) != "" {
 		bundle.Password = input.Password
-	} else if existing.HasPassword {
+	} else if existing.HasPassword && !input.ClearPassword {
 		existingBundle, loadErr := a.loadGlobalProxySecretBundle(existing)
 		if loadErr != nil {
 			return connection.GlobalProxyView{}, loadErr
 		}
 		bundle = existingBundle
-	}
-
-	if !view.Enabled {
-		if deleteErr := a.dailySecretStore().DeleteGlobalProxy(); deleteErr != nil {
-			return connection.GlobalProxyView{}, deleteErr
-		}
-		view = connection.GlobalProxyView{Enabled: false}
-		if err := a.persistGlobalProxyView(view); err != nil {
-			return connection.GlobalProxyView{}, err
-		}
-		if _, err := setGlobalProxyConfig(false, connection.ProxyConfig{}); err != nil {
-			return connection.GlobalProxyView{}, err
-		}
-		return view, nil
 	}
 
 	if strings.TrimSpace(bundle.Password) != "" {
@@ -85,6 +71,12 @@ func (a *App) saveGlobalProxy(input connection.SaveGlobalProxyInput) (connection
 
 	if err := a.persistGlobalProxyView(view); err != nil {
 		return connection.GlobalProxyView{}, err
+	}
+	if !view.Enabled {
+		if _, err := setGlobalProxyConfig(false, connection.ProxyConfig{}); err != nil {
+			return connection.GlobalProxyView{}, err
+		}
+		return sanitizeGlobalProxyView(view), nil
 	}
 	if _, err := setGlobalProxyConfig(true, connection.ProxyConfig{
 		Type:     view.Type,
@@ -137,6 +129,28 @@ func (a *App) loadGlobalProxySecretBundle(view connection.GlobalProxyView) (glob
 		return fromDailyGlobalProxyBundle(bundle), nil
 	}
 	return globalProxySecretBundle{}, os.ErrNotExist
+}
+
+func (a *App) resolveStoredGlobalProxyRuntimeConfig(view connection.GlobalProxyView) (connection.ProxyConfig, error) {
+	proxyConfig := connection.ProxyConfig{
+		Type: view.Type,
+		Host: view.Host,
+		Port: view.Port,
+		User: view.User,
+	}
+	if !view.HasPassword {
+		return proxyConfig, nil
+	}
+	bundle, err := a.loadGlobalProxySecretBundle(view)
+	if err != nil {
+		if os.IsNotExist(err) {
+			logger.Warnf("全局代理标记了已保存密码，但密文不存在，将尝试按无认证代理恢复")
+			return proxyConfig, nil
+		}
+		return connection.ProxyConfig{}, err
+	}
+	proxyConfig.Password = bundle.Password
+	return proxyConfig, nil
 }
 
 func (a *App) loadGlobalProxySecretBundleFromStore(view connection.GlobalProxyView) (globalProxySecretBundle, error) {
@@ -195,20 +209,17 @@ func (a *App) loadPersistedGlobalProxy() {
 		}
 		return
 	}
-
-	proxyConfig := connection.ProxyConfig{
-		Type: view.Type,
-		Host: view.Host,
-		Port: view.Port,
-		User: view.User,
-	}
-	if view.HasPassword {
-		bundle, loadErr := a.loadGlobalProxySecretBundle(view)
-		if loadErr != nil {
-			logger.Error(loadErr, "加载全局代理密码失败")
-			return
+	if !view.Enabled {
+		if _, err := setGlobalProxyConfig(false, connection.ProxyConfig{}); err != nil {
+			logger.Error(err, "恢复全局代理关闭状态失败")
 		}
-		proxyConfig.Password = bundle.Password
+		return
+	}
+
+	proxyConfig, err := a.resolveStoredGlobalProxyRuntimeConfig(view)
+	if err != nil {
+		logger.Error(err, "加载全局代理密码失败")
+		return
 	}
 	if _, err := setGlobalProxyConfig(view.Enabled, proxyConfig); err != nil {
 		logger.Error(err, "恢复全局代理配置失败")

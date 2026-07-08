@@ -42,12 +42,28 @@ type SavedConnectionView struct {
 type LegacySavedConnection = SavedConnectionInput
 
 type SaveGlobalProxyInput struct {
-	Enabled  bool   `json:"enabled"`
-	Type     string `json:"type"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	User     string `json:"user,omitempty"`
-	Password string `json:"password,omitempty"`
+	Enabled       bool   `json:"enabled"`
+	Type          string `json:"type"`
+	Host          string `json:"host"`
+	Port          int    `json:"port"`
+	User          string `json:"user,omitempty"`
+	Password      string `json:"password,omitempty"`
+	ClearPassword bool   `json:"clearPassword,omitempty"`
+}
+
+type TestGlobalProxyInput struct {
+	Proxy          SaveGlobalProxyInput `json:"proxy"`
+	URL            string               `json:"url"`
+	TimeoutSeconds int                  `json:"timeoutSeconds,omitempty"`
+}
+
+type GlobalProxyTestResult struct {
+	URL        string `json:"url"`
+	FinalURL   string `json:"finalUrl,omitempty"`
+	StatusCode int    `json:"statusCode,omitempty"`
+	Status     string `json:"status,omitempty"`
+	DurationMs int64  `json:"durationMs"`
+	ViaProxy   bool   `json:"viaProxy"`
 }
 
 type GlobalProxyView struct {

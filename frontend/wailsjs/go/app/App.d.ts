@@ -372,6 +372,8 @@ export function StartSecurityUpdate(arg1:app.StartSecurityUpdateRequest):Promise
 
 export function TestConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
+export function TestGlobalProxyConnection(arg1:connection.TestGlobalProxyInput):Promise<connection.QueryResult>;
+
 export function TestJVMConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
 export function TruncateTables(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;

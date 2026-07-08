@@ -734,6 +734,10 @@ export function TestConnection(arg1) {
   return window['go']['app']['App']['TestConnection'](arg1);
 }
 
+export function TestGlobalProxyConnection(arg1) {
+  return window['go']['app']['App']['TestGlobalProxyConnection'](arg1);
+}
+
 export function TestJVMConnection(arg1) {
   return window['go']['app']['App']['TestJVMConnection'](arg1);
 }

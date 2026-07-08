@@ -1,5 +1,9 @@
 import { GlobalProxyConfig } from '../types';
 
+type SaveGlobalProxyDraft = Partial<GlobalProxyConfig> & {
+  clearPassword?: boolean;
+};
+
 const toTrimmedString = (value: unknown): string => {
   if (typeof value === 'string') {
     return value.trim();
@@ -53,10 +57,11 @@ export function toPersistedGlobalProxy(value: Partial<GlobalProxyConfig> = {}): 
   };
 }
 
-export function toSaveGlobalProxyInput(value: Partial<GlobalProxyConfig> = {}): GlobalProxyConfig {
+export function toSaveGlobalProxyInput(value: SaveGlobalProxyDraft = {}): GlobalProxyConfig & { clearPassword?: boolean } {
   const draft = createGlobalProxyDraft(value);
   return {
     ...draft,
     password: typeof value.password === 'string' ? value.password : '',
+    clearPassword: value.clearPassword === true || undefined,
   };
 }

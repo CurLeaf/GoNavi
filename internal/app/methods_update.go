@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	urlpkg "net/url"
 	"os"
@@ -31,6 +32,7 @@ const (
 	updateDevAPIURL             = "https://api.github.com/repos/" + updateRepo + "/releases/tags/" + updateDevReleaseTag
 	updateChecksumAsset         = "SHA256SUMS"
 	updateDownloadProgressEvent = "update:download-progress"
+	updateNetworkRetryDelay     = 250 * time.Millisecond
 )
 
 var (
@@ -150,6 +152,7 @@ func (a *App) CheckForUpdatesSilently() connection.QueryResult {
 }
 
 func (a *App) checkForUpdates(logFailure bool) connection.QueryResult {
+	a.ensurePersistedGlobalProxyRuntime()
 	channel := a.currentUpdateChannel()
 	info, err := fetchLatestUpdateInfo(channel)
 	if err != nil {
@@ -477,11 +480,14 @@ func fetchLatestUpdateInfo(channel updateChannel) (UpdateInfo, error) {
 		return UpdateInfo{}, err
 	}
 
-	hashMap, err := updateFetchReleaseSHA256(release.Assets)
-	if err != nil {
-		return UpdateInfo{}, err
+	sha256Value := normalizeGitHubAssetSHA256(asset.Digest)
+	if sha256Value == "" {
+		hashMap, err := updateFetchReleaseSHA256(release.Assets)
+		if err != nil {
+			return UpdateInfo{}, err
+		}
+		sha256Value = strings.TrimSpace(hashMap[assetName])
 	}
-	sha256Value := strings.TrimSpace(hashMap[assetName])
 	if sha256Value == "" {
 		return UpdateInfo{}, localizedUpdateError{key: "app.update.backend.error.sha256_missing_current_package"}
 	}
@@ -566,7 +572,7 @@ func fetchReleaseByURL(apiURL string) (*githubRelease, error) {
 	req.Header.Set("User-Agent", "GoNavi-Updater")
 	req.Header.Set("Accept", "application/vnd.github+json")
 
-	resp, err := client.Do(req)
+	resp, err := doUpdateRequest(client, req)
 	if err != nil {
 		return nil, err
 	}
@@ -581,7 +587,7 @@ func fetchReleaseByURL(apiURL string) (*githubRelease, error) {
 
 	var release githubRelease
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, err
+		return nil, wrapUpdateNetworkError(err)
 	}
 	return &release, nil
 }
@@ -662,6 +668,20 @@ func findReleaseAsset(assets []githubAsset, name string) (*githubAsset, error) {
 	}
 }
 
+func normalizeGitHubAssetSHA256(digest string) string {
+	digest = strings.TrimSpace(digest)
+	if digest == "" {
+		return ""
+	}
+	if algorithm, value, ok := strings.Cut(digest, ":"); ok {
+		if !strings.EqualFold(strings.TrimSpace(algorithm), "sha256") {
+			return ""
+		}
+		digest = strings.TrimSpace(value)
+	}
+	return strings.ToLower(digest)
+}
+
 func fetchReleaseSHA256(assets []githubAsset) (map[string]string, error) {
 	var checksumURL string
 	for _, asset := range assets {
@@ -680,7 +700,7 @@ func fetchReleaseSHA256(assets []githubAsset) (map[string]string, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "GoNavi-Updater")
-	resp, err := client.Do(req)
+	resp, err := doUpdateRequest(client, req)
 	if err != nil {
 		return nil, err
 	}
@@ -695,7 +715,7 @@ func fetchReleaseSHA256(assets []githubAsset) (map[string]string, error) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, wrapUpdateNetworkError(err)
 	}
 
 	return parseSHA256Sums(string(body)), nil
@@ -765,7 +785,7 @@ func downloadFileWithHashWithTimeout(url, filePath string, onProgress func(downl
 		req.Header.Set("Accept", "application/octet-stream")
 	}
 
-	resp, err := client.Do(req)
+	resp, err := doUpdateRequest(client, req)
 	if err != nil {
 		return "", err
 	}
@@ -810,7 +830,7 @@ func downloadFileWithHashWithTimeout(url, filePath string, onProgress func(downl
 	}
 	if _, err := io.Copy(io.MultiWriter(writers...), resp.Body); err != nil {
 		out.Close()
-		return "", err
+		return "", wrapUpdateNetworkError(err)
 	}
 	if onProgress != nil {
 		onProgress(progressWriter.written, total)
@@ -826,6 +846,76 @@ func downloadFileWithHashWithTimeout(url, filePath string, onProgress func(downl
 	}
 
 	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func doUpdateRequest(client *http.Client, req *http.Request) (*http.Response, error) {
+	resp, err := client.Do(req)
+	if err == nil {
+		return resp, nil
+	}
+	if !shouldRetryUpdateNetworkError(err) {
+		return nil, wrapUpdateNetworkError(err)
+	}
+	time.Sleep(updateNetworkRetryDelay)
+	retryReq := req.Clone(req.Context())
+	resp, err = client.Do(retryReq)
+	if err != nil {
+		return nil, wrapUpdateNetworkError(err)
+	}
+	return resp, nil
+}
+
+func shouldRetryUpdateNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if isUpdateEOFError(err) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "connection reset by peer") ||
+		strings.Contains(lower, "connection refused") ||
+		strings.Contains(lower, "server closed idle connection")
+}
+
+func wrapUpdateNetworkError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		host := strings.TrimSpace(dnsErr.Name)
+		if host == "" {
+			host = "api.github.com"
+		}
+		return localizedUpdateError{
+			key: "app.update.backend.error.network_dns",
+			params: map[string]any{
+				"host":   host,
+				"detail": err.Error(),
+			},
+		}
+	}
+	if isUpdateEOFError(err) {
+		return localizedUpdateError{
+			key:    "app.update.backend.error.network_eof",
+			params: map[string]any{"detail": err.Error()},
+		}
+	}
+	return localizedUpdateError{
+		key:    "app.update.backend.error.network_failed",
+		params: map[string]any{"detail": err.Error()},
+	}
+}
+
+func isUpdateEOFError(err error) bool {
+	return errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		strings.Contains(strings.ToLower(err.Error()), "eof")
 }
 
 func isGitHubReleaseAssetAPIURL(urlText string) bool {

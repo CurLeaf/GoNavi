@@ -212,11 +212,13 @@ if (
 
     const saveMockGlobalProxy = (input: any) => {
         const nextPassword = String(input?.password ?? '');
+        const clearPassword = input?.clearPassword === true;
         mockGlobalProxy = {
             ...mockGlobalProxy,
             ...input,
             password: '',
-            hasPassword: nextPassword !== '' ? true : !!mockGlobalProxy.hasPassword,
+            hasPassword: clearPassword ? false : (nextPassword !== '' ? true : !!mockGlobalProxy.hasPassword),
+            clearPassword: undefined,
         };
         return cloneBrowserMockValue(mockGlobalProxy);
     };
@@ -432,6 +434,21 @@ if (
                 },
                 SaveGlobalProxy: async (input: any) => saveMockGlobalProxy(input),
                 ImportLegacyGlobalProxy: async (input: any) => saveMockGlobalProxy(input),
+                TestGlobalProxyConnection: async (input: any) => {
+                    const url = String(input?.url || 'https://api.github.com/').trim();
+                    return {
+                        success: true,
+                        message: t('app.proxy.backend.message.test_success', { status: 200, duration: 18, url }),
+                        data: {
+                            url,
+                            finalUrl: url,
+                            statusCode: 200,
+                            status: '200 OK',
+                            durationMs: 18,
+                            viaProxy: input?.proxy?.enabled === true,
+                        },
+                    };
+                },
                 SelectDataRootDirectory: async (currentPath: string) => ({ success: true, data: { ...mockDataRootInfo, path: currentPath || mockDataRootInfo.path } }),
                 ApplyDataRootDirectory: async (path: string) => {
                     const nextPath = String(path || mockDataRootInfo.defaultPath);

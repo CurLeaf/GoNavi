@@ -1,12 +1,17 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	stdRuntime "runtime"
 	"strings"
 	"testing"
+
+	"GoNavi-Wails/internal/connection"
 )
 
 func TestFetchLatestUpdateInfoSkipsChecksumWhenCurrentVersionIsAlreadyLatest(t *testing.T) {
@@ -64,7 +69,59 @@ func TestFetchLatestUpdateInfoSkipsChecksumWhenCurrentVersionIsAlreadyLatest(t *
 	}
 }
 
-func TestFetchLatestUpdateInfoFetchesChecksumWhenUpdateIsAvailable(t *testing.T) {
+func TestFetchLatestUpdateInfoUsesAssetDigestWhenUpdateIsAvailable(t *testing.T) {
+	assetName, err := expectedAssetName(stdRuntime.GOOS, stdRuntime.GOARCH, "v0.6.5")
+	if err != nil {
+		t.Fatalf("expectedAssetName returned error: %v", err)
+	}
+	digest := strings.Repeat("A", 64)
+
+	originalVersion := AppVersion
+	AppVersion = "0.6.4"
+	defer func() {
+		AppVersion = originalVersion
+	}()
+
+	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
+		return &githubRelease{
+			TagName: "v0.6.5",
+			Name:    "v0.6.5",
+			HTMLURL: "https://github.com/Syngnat/GoNavi/releases/tag/v0.6.5",
+			Assets: []githubAsset{
+				{
+					Name:               assetName,
+					BrowserDownloadURL: "https://example.com/" + assetName,
+					Digest:             "sha256:" + digest,
+					Size:               4096,
+				},
+			},
+		}, nil
+	})
+	defer restoreRelease()
+
+	checksumCalled := false
+	restoreChecksum := swapUpdateFetchReleaseSHA256(func([]githubAsset) (map[string]string, error) {
+		checksumCalled = true
+		return nil, errors.New("checksum should not be fetched when asset digest is available")
+	})
+	defer restoreChecksum()
+
+	info, err := fetchLatestUpdateInfo(updateChannelLatest)
+	if err != nil {
+		t.Fatalf("fetchLatestUpdateInfo returned error: %v", err)
+	}
+	if checksumCalled {
+		t.Fatal("expected SHA256SUMS fetch to be skipped when asset digest is available")
+	}
+	if !info.HasUpdate {
+		t.Fatalf("expected HasUpdate=true, got %#v", info)
+	}
+	if info.SHA256 != strings.ToLower(digest) || info.AssetName != assetName {
+		t.Fatalf("unexpected update info: %#v", info)
+	}
+}
+
+func TestFetchLatestUpdateInfoFallsBackToChecksumFileWhenAssetDigestMissing(t *testing.T) {
 	assetName, err := expectedAssetName(stdRuntime.GOOS, stdRuntime.GOARCH, "v0.6.5")
 	if err != nil {
 		t.Fatalf("expectedAssetName returned error: %v", err)
@@ -106,7 +163,7 @@ func TestFetchLatestUpdateInfoFetchesChecksumWhenUpdateIsAvailable(t *testing.T)
 		t.Fatalf("fetchLatestUpdateInfo returned error: %v", err)
 	}
 	if !checksumCalled {
-		t.Fatal("expected SHA256SUMS fetch when update is available")
+		t.Fatal("expected SHA256SUMS fetch when asset digest is missing")
 	}
 	if !info.HasUpdate {
 		t.Fatalf("expected HasUpdate=true, got %#v", info)
@@ -117,7 +174,7 @@ func TestFetchLatestUpdateInfoFetchesChecksumWhenUpdateIsAvailable(t *testing.T)
 }
 
 func TestCheckForUpdatesLogsFailuresForManualChecks(t *testing.T) {
-	app := &App{}
+	app := &App{configDir: t.TempDir()}
 
 	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
 		return nil, errors.New("request timed out")
@@ -140,7 +197,7 @@ func TestCheckForUpdatesLogsFailuresForManualChecks(t *testing.T) {
 }
 
 func TestCheckForUpdatesSilentlySkipsFailureLogs(t *testing.T) {
-	app := &App{}
+	app := &App{configDir: t.TempDir()}
 
 	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
 		return nil, errors.New("request timed out")
@@ -159,6 +216,73 @@ func TestCheckForUpdatesSilentlySkipsFailureLogs(t *testing.T) {
 	}
 	if logged != 0 {
 		t.Fatalf("expected silent check to skip error logging, got %d", logged)
+	}
+}
+
+func TestCheckForUpdatesRestoresPersistedGlobalProxyRuntime(t *testing.T) {
+	previousProxy := currentGlobalProxyConfig()
+	t.Cleanup(func() {
+		_, _ = setGlobalProxyConfig(previousProxy.Enabled, previousProxy.Proxy)
+	})
+
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+
+	proxyCalled := false
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyCalled = true
+		if !r.URL.IsAbs() {
+			t.Fatalf("expected update request through HTTP proxy to use absolute URL, got %q", r.URL.String())
+		}
+		if r.URL.Host != "api.github.invalid" {
+			t.Fatalf("expected proxied GitHub API host api.github.invalid, got %q", r.URL.Host)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(githubRelease{
+			TagName: updateDevReleaseTag,
+			Name:    "Dev Build (dev-proxy123)",
+			HTMLURL: "https://github.com/Syngnat/GoNavi/releases/tag/dev-latest",
+		}); err != nil {
+			t.Fatalf("Encode returned error: %v", err)
+		}
+	}))
+	defer proxyServer.Close()
+
+	host, port := parseTestServerHostPort(t, proxyServer.URL)
+	if _, err := app.saveGlobalProxy(connection.SaveGlobalProxyInput{
+		Enabled: true,
+		Type:    "http",
+		Host:    host,
+		Port:    port,
+	}); err != nil {
+		t.Fatalf("saveGlobalProxy returned error: %v", err)
+	}
+	if _, err := setGlobalProxyConfig(false, connection.ProxyConfig{}); err != nil {
+		t.Fatalf("setGlobalProxyConfig reset returned error: %v", err)
+	}
+
+	originalVersion := AppVersion
+	AppVersion = "dev-proxy123"
+	defer func() {
+		AppVersion = originalVersion
+	}()
+
+	restoreRelease := swapUpdateFetchDevRelease(func() (*githubRelease, error) {
+		return fetchReleaseByURL("http://api.github.invalid/repos/Syngnat/GoNavi/releases/tags/dev-latest")
+	})
+	defer restoreRelease()
+
+	setChannelResult := app.SetUpdateChannel(string(updateChannelDev))
+	if !setChannelResult.Success {
+		t.Fatalf("SetUpdateChannel returned failure: %#v", setChannelResult)
+	}
+
+	result := app.CheckForUpdates()
+	if !result.Success {
+		t.Fatalf("expected update check through restored proxy to succeed, got %#v", result)
+	}
+	if !proxyCalled {
+		t.Fatal("expected persisted global proxy to receive the update check request")
 	}
 }
 

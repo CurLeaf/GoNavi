@@ -1161,6 +1161,7 @@ export namespace connection {
 	    port: number;
 	    user?: string;
 	    password?: string;
+	    clearPassword?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new SaveGlobalProxyInput(source);
@@ -1174,6 +1175,7 @@ export namespace connection {
 	        this.port = source["port"];
 	        this.user = source["user"];
 	        this.password = source["password"];
+	        this.clearPassword = source["clearPassword"];
 	    }
 	}
 	export class SavedConnectionInput {
@@ -1342,6 +1344,40 @@ export namespace connection {
 	        this.legacyConnections = this.convertValues(source["legacyConnections"], SavedConnectionInput);
 	    }
 	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class TestGlobalProxyInput {
+	    proxy: SaveGlobalProxyInput;
+	    url: string;
+	    timeoutSeconds?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new TestGlobalProxyInput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.proxy = this.convertValues(source["proxy"], SaveGlobalProxyInput);
+	        this.url = source["url"];
+	        this.timeoutSeconds = source["timeoutSeconds"];
+	    }
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1555,4 +1591,3 @@ export namespace sync {
 	}
 
 }
-
