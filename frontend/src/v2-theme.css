@@ -2635,6 +2635,7 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-list-holder {
   box-sizing: border-box;
   height: calc(100% - var(--gn-v2-tree-horizontal-scroll-reserve));
   max-height: calc(100% - var(--gn-v2-tree-horizontal-scroll-reserve)) !important;
+  overflow-x: hidden !important;
   scrollbar-width: thin;
 }
 
@@ -4712,6 +4713,20 @@ body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .ant-btn {
   box-shadow: none !important;
   line-height: 1 !important;
   vertical-align: top;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap [data-grid-pagination-total-count="true"].ant-btn {
+  width: auto !important;
+  min-width: max-content !important;
+  max-width: none !important;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 0 8px !important;
+  white-space: nowrap;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap [data-grid-pagination-total-count="true"].ant-btn .ant-btn-icon {
+  margin-inline-end: 3px !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-data-grid-page-find .ant-btn:hover,

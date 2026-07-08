@@ -996,6 +996,38 @@ describe('DataGrid layout', () => {
     }
   });
 
+  it('keeps the v2 pagination total-count action readable instead of icon-button width', () => {
+    const css = readV2ThemeCss();
+    const markup = renderToStaticMarkup(
+      <DataGridPaginationBar
+        isV2Ui
+        pagination={{
+          current: 1,
+          pageSize: 500,
+          total: 500,
+          totalKnown: false,
+        }}
+        paginationV2SummaryText="当前 500 条 / 未统计总数"
+        paginationSummaryText="当前 500 条 / 未统计总数"
+        paginationControlTotal={500}
+        paginationTotalPages={1}
+        paginationPageText="第 1 页"
+        paginationPageSizeOptions={['500']}
+        showKnownPageCount={false}
+        manualTotalCountAvailable
+        onPageChange={() => {}}
+        onPageSizeChange={() => {}}
+        onV2PageStep={() => {}}
+        onToggleTotalCount={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('data-grid-pagination-total-count="true"');
+    expect(markup).toContain('统计总数');
+    expect(css).toMatch(/\[data-grid-pagination-total-count="true"\]\.ant-btn \{[\s\S]*?width: auto !important;[\s\S]*?min-width: max-content !important;[\s\S]*?white-space: nowrap;/);
+    expect(css).toMatch(/\[data-grid-pagination-total-count="true"\]\.ant-btn \.ant-btn-icon \{[\s\S]*?margin-inline-end: 3px !important;/);
+  });
+
   it('hides current-page find in JSON and text record views', () => {
     const source = readDataGridSource();
 

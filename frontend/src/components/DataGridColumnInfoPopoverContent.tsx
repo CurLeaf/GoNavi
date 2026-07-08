@@ -34,12 +34,7 @@ export interface DataGridColumnInfoPopoverContentProps {
   onResetHidden: () => void;
 }
 
-const GLOBAL_HIDDEN_LABEL = 'Global hidden columns';
-const GLOBAL_HIDDEN_HELP = 'Column names listed here are hidden in query results wherever they appear. Separate names with comma or newline.';
 const GLOBAL_HIDDEN_PLACEHOLDER = 'id\ncreated_by\nupdated_at';
-const GLOBAL_HIDDEN_SAVE = 'Apply global';
-const GLOBAL_HIDDEN_ADD_LOCAL = 'Add current hidden';
-const GLOBAL_HIDDEN_CLEAR = 'Clear global';
 
 const DataGridColumnInfoPopoverContent: React.FC<DataGridColumnInfoPopoverContentProps> = ({
   darkMode,
@@ -132,8 +127,12 @@ const DataGridColumnInfoPopoverContent: React.FC<DataGridColumnInfoPopoverConten
       </div>
 
       <div style={{ height: 1, backgroundColor: darkMode ? '#424242' : '#f0f0f0', margin: '4px 0' }} />
-      <div style={{ fontWeight: 600, fontSize: 13, color: darkMode ? '#ddd' : '#666' }}>{GLOBAL_HIDDEN_LABEL}</div>
-      <div style={{ fontSize: 12, lineHeight: 1.5, color: darkMode ? '#aaa' : '#888' }}>{GLOBAL_HIDDEN_HELP}</div>
+      <div style={{ fontWeight: 600, fontSize: 13, color: darkMode ? '#ddd' : '#666' }}>
+        {translate('data_grid.column_settings.global_hidden_columns')}
+      </div>
+      <div style={{ fontSize: 12, lineHeight: 1.5, color: darkMode ? '#aaa' : '#888' }}>
+        {translate('data_grid.column_settings.global_hidden_columns_help')}
+      </div>
       <Input.TextArea
         autoSize={{ minRows: 2, maxRows: 4 }}
         placeholder={GLOBAL_HIDDEN_PLACEHOLDER}
@@ -141,10 +140,16 @@ const DataGridColumnInfoPopoverContent: React.FC<DataGridColumnInfoPopoverConten
         onChange={(event) => setGlobalHiddenText(event.target.value)}
       />
       <div style={{ display: 'flex', gap: 8 }}>
-        <Button size="small" style={{ flex: 1 }} onClick={saveGlobalHiddenText}>{GLOBAL_HIDDEN_SAVE}</Button>
-        <Button size="small" style={{ flex: 1 }} disabled={localHiddenColumns.length === 0} onClick={addCurrentHiddenColumnsToGlobal}>{GLOBAL_HIDDEN_ADD_LOCAL}</Button>
+        <Button size="small" style={{ flex: 1 }} onClick={saveGlobalHiddenText}>
+          {translate('data_grid.column_settings.global_hidden_columns_apply')}
+        </Button>
+        <Button size="small" style={{ flex: 1 }} disabled={localHiddenColumns.length === 0} onClick={addCurrentHiddenColumnsToGlobal}>
+          {translate('data_grid.column_settings.global_hidden_columns_add_current')}
+        </Button>
       </div>
-      <Button size="small" danger disabled={!globalHiddenText.trim()} onClick={clearGlobalHiddenColumns}>{GLOBAL_HIDDEN_CLEAR}</Button>
+      <Button size="small" danger disabled={!globalHiddenText.trim()} onClick={clearGlobalHiddenColumns}>
+        {translate('data_grid.column_settings.global_hidden_columns_clear')}
+      </Button>
 
       <div style={{ height: 1, backgroundColor: darkMode ? '#424242' : '#f0f0f0', margin: '4px 0' }} />
       <Checkbox checked={enableColumnOrderMemory} onChange={(e) => onEnableColumnOrderMemoryChange(e.target.checked)}>
