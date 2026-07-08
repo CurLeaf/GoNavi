@@ -417,9 +417,16 @@ func buildObjectSequenceMetadataQueries(dbType string, dbName string) []objectMe
 	switch dbType {
 	case "oracle", "dameng":
 		if strings.TrimSpace(dbName) == "" {
-			return []objectMetadataQuerySpec{{sql: "SELECT SEQUENCE_NAME AS sequence_name FROM USER_SEQUENCES ORDER BY SEQUENCE_NAME"}}
+			return []objectMetadataQuerySpec{
+				{sql: "SELECT * FROM USER_SEQUENCES ORDER BY SEQUENCE_NAME"},
+				{sql: "SELECT OBJECT_NAME AS sequence_name FROM USER_OBJECTS WHERE OBJECT_TYPE = 'SEQUENCE' ORDER BY OBJECT_NAME"},
+			}
 		}
-		return []objectMetadataQuerySpec{{sql: fmt.Sprintf("SELECT SEQUENCE_OWNER AS schema_name, SEQUENCE_NAME AS sequence_name FROM ALL_SEQUENCES WHERE SEQUENCE_OWNER = '%s' ORDER BY SEQUENCE_NAME", strings.ToUpper(safeDbName))}}
+		owner := strings.ToUpper(safeDbName)
+		return []objectMetadataQuerySpec{
+			{sql: fmt.Sprintf("SELECT * FROM ALL_SEQUENCES WHERE SEQUENCE_OWNER = '%s' ORDER BY SEQUENCE_NAME", owner)},
+			{sql: fmt.Sprintf("SELECT OWNER AS schema_name, OBJECT_NAME AS sequence_name FROM ALL_OBJECTS WHERE OWNER = '%s' AND OBJECT_TYPE = 'SEQUENCE' ORDER BY OBJECT_NAME", owner)},
+		}
 	default:
 		return nil
 	}
