@@ -22,6 +22,14 @@ const normalizePositiveInteger = (value: unknown): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 };
 
+const normalizeSqlForComparison = (sql: string): string => (
+  String(sql || '')
+    .replace(/\s+/g, ' ')
+    .replace(/;+\s*$/g, '')
+    .trim()
+    .toLowerCase()
+);
+
 const parseTopLevelLimit = (sql: string): LimitInfo | null => {
   const { main } = splitSqlTail(sql);
   const limitPos = findTopLevelKeyword(main, 'limit');
@@ -58,6 +66,14 @@ const stripExplicitLimitForExport = (sql: string): string => {
   const parsed = parseTopLevelLimit(sql);
   if (parsed?.baseSql) return parsed.baseSql;
   return splitSqlTail(sql).main.trim();
+};
+
+const wasLimitAppliedByQueryEditorCap = (executedSql: string, exportSql: string): boolean => {
+  const executed = String(executedSql || '').trim();
+  const exportable = String(exportSql || '').trim();
+  if (!executed || !exportable) return false;
+  if (normalizeSqlForComparison(executed) === normalizeSqlForComparison(exportable)) return false;
+  return normalizeSqlForComparison(stripExplicitLimitForExport(executed)) === normalizeSqlForComparison(stripExplicitLimitForExport(exportable));
 };
 
 const resolveWrappedBaseSql = (dbType: string, baseSql: string): string => {
@@ -146,11 +162,14 @@ export const createInitialQueryResultPagination = (params: {
   const exportAllSql = exportSql && getLeadingKeyword(exportSql) === 'select'
     ? stripExplicitLimitForExport(exportSql)
     : stripExplicitLimitForExport(executedSql);
-  const totalState = resolveQueryResultPaginationTotal({
-    current,
-    pageSize,
-    rowCount: returnedRowCount,
-  });
+  const autoLimitCap = current === 1 && wasLimitAppliedByQueryEditorCap(executedSql, exportSql);
+  const totalState = autoLimitCap
+    ? { total: returnedRowCount, totalKnown: true }
+    : resolveQueryResultPaginationTotal({
+      current,
+      pageSize,
+      rowCount: returnedRowCount,
+    });
 
   return {
     current,
