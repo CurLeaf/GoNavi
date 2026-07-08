@@ -126,10 +126,11 @@ const installOceanBaseOracleNavigationFallback = (editor: any) => {
     }
 
     const parts = splitSqlIdentifierPath(identifier.text);
-    if (parts.length !== 2) {
+    if (parts.length < 2) {
       return;
     }
-    const [schemaName, tableName] = parts;
+    const schemaName = parts[parts.length - 2];
+    const tableName = parts[parts.length - 1];
     if (!schemaName || !tableName) {
       return;
     }

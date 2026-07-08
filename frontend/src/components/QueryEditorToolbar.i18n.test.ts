@@ -14,6 +14,7 @@ const legacyLiterals = [
   '选择连接',
   '选择数据库',
   '最大返回行数',
+  '最大行数：100',
   '最大行数：500',
   '最大行数：1000',
   '最大行数：5000',
@@ -64,6 +65,7 @@ describe('QueryEditorToolbar i18n', () => {
     expect(source).toContain("import { useOptionalI18n } from '../i18n/provider';");
     expect(source).toContain('const i18n = useOptionalI18n();');
     expect(source).toContain('const t = i18n?.t ?? defaultTranslate;');
+    expect(source).toContain("{ label: '100', value: 100 }");
 
     for (const key of requiredKeys) {
       expect(source).toContain(key);
