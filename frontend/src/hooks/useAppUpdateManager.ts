@@ -63,6 +63,11 @@ const buildUpdateKey = (info: Pick<UpdateInfo, 'channel' | 'latestVersion'> | nu
     ? `${normalizeUpdateChannel(info.channel)}:${String(info.latestVersion || '').trim()}`
     : '';
 
+const shouldAutoInstallDownloadedUpdate = (resultData: UpdateDownloadResultData | null | undefined): boolean => {
+  const platform = String(resultData?.platform || '').trim().toLowerCase();
+  return platform === 'darwin' && resultData?.autoRelaunch !== false;
+};
+
 export const useAppUpdateManager = ({
   runtimeBuildType,
   t,
@@ -192,6 +197,21 @@ export const useAppUpdateManager = ({
         void message.success({ content: t('app.about.message.download_completed'), duration: 2 });
       }
       setAboutUpdateStatus(formatAboutUpdateStatus({ ...info, channel: normalizeUpdateChannel(info.channel), downloaded: true }));
+
+      if (shouldAutoInstallDownloadedUpdate(resultData)) {
+        let installRes: any = null;
+        try {
+          installRes = await (window as any).go?.app?.App?.InstallUpdateAndRestart?.();
+        } catch (error: any) {
+          installRes = { success: false, message: error?.message || t('common.unknown') };
+        }
+        if (!installRes?.success) {
+          void message.error(t('app.about.message.install_failed_with_error', { error: installRes?.message || t('common.unknown') }));
+          return;
+        }
+        updateInstallTriggeredVersionRef.current = targetKey || null;
+        setUpdateDownloadProgress((prev) => ({ ...prev, open: false }));
+      }
     } else {
       setUpdateDownloadProgress((prev) => ({
         ...prev,
