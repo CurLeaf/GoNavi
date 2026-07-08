@@ -76,6 +76,9 @@ const importMain = async () => {
             ExportConnectionsPackage: (options?: { includeSecrets?: boolean; filePassword?: string }) => Promise<{ success: boolean; message?: string }>;
             ApplyDataRootDirectory: (path: string) => Promise<{ success: boolean; message?: string; data?: { path?: string } }>;
             SaveQuery: (input: { id?: string; name?: string; sql?: string }) => Promise<{ name: string; sql: string }>;
+            CheckForUpdates: () => Promise<{ success: boolean; data?: Record<string, unknown> }>;
+            CheckForUpdatesSilently: () => Promise<{ success: boolean; data?: Record<string, unknown> }>;
+            SetUpdateChannel: (channel: string) => Promise<{ success: boolean; data?: { channel?: string } }>;
           };
         };
       };
@@ -123,6 +126,34 @@ describe('main browser mock', () => {
       message: t('app.browser_mock.export_connection_package_unsupported'),
     });
   }, 10000);
+
+  it('includes release metadata in browser mock update checks', async () => {
+    const app = await importMain();
+
+    await expect(app!.CheckForUpdates()).resolves.toMatchObject({
+      success: true,
+      data: {
+        channel: 'latest',
+        releaseName: 'Browser Mock Release',
+        releasePublishedAt: '2026-07-08T11:15:00Z',
+        releaseNotesUrl: 'https://github.com/Syngnat/GoNavi/releases/latest',
+      },
+    });
+
+    await expect(app!.SetUpdateChannel('dev')).resolves.toMatchObject({
+      success: true,
+      data: { channel: 'dev' },
+    });
+    await expect(app!.CheckForUpdatesSilently()).resolves.toMatchObject({
+      success: true,
+      data: {
+        channel: 'dev',
+        releaseName: 'Dev Build (dev-browser-mock)',
+        releasePublishedAt: '2026-07-08T11:15:00Z',
+        releaseNotesUrl: 'https://github.com/Syngnat/GoNavi/releases/tag/dev-latest',
+      },
+    });
+  });
 
   it('rejects non-array payloads with the localized browser mock import limitation', async () => {
     const app = await importMain();

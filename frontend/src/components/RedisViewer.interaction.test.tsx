@@ -30,6 +30,9 @@ const storeState = vi.hoisted(() => ({
 const redisBackend = vi.hoisted(() => ({
   RedisScanKeys: vi.fn(),
   RedisGetValue: vi.fn(),
+  RedisExportKeys: vi.fn(),
+  RedisPreviewImportKeys: vi.fn(),
+  RedisImportKeys: vi.fn(),
 }));
 
 const antdState = vi.hoisted(() => ({
@@ -109,7 +112,17 @@ vi.mock('antd', async () => {
     },
     Spin: ({ children }: any) => React.createElement(React.Fragment, null, children),
     message: antdState.message,
-    Modal: Object.assign(passthrough('div'), { confirm: vi.fn() }),
+    Modal: Object.assign(({ children, open, onOk, onCancel, okButtonProps, title, ...props }: any) => {
+      if (!open) {
+        return null;
+      }
+      return React.createElement('div', props, [
+        React.createElement('div', { key: 'title', 'data-modal-title': true }, title),
+        children,
+        onOk ? React.createElement('button', { key: 'ok', onClick: onOk, disabled: okButtonProps?.disabled }, 'modal-ok') : null,
+        onCancel ? React.createElement('button', { key: 'cancel', onClick: onCancel }, 'modal-cancel') : null,
+      ]);
+    }, { confirm: vi.fn() }),
     Form: FormComponent,
     InputNumber: ({ ...props }: any) => React.createElement('input', props),
     Popconfirm: passthrough('span'),
@@ -153,6 +166,24 @@ const countLeafNodes = (nodes: any[]): number => {
   }, 0);
 };
 
+const findFirstLeafNode = (nodes: any[]): any | null => {
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object') {
+      continue;
+    }
+    if (node.nodeType === 'leaf') {
+      return node;
+    }
+    if (Array.isArray(node.children)) {
+      const nested = findFirstLeafNode(node.children);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+  return null;
+};
+
 describe('RedisViewer tree interactions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -183,6 +214,26 @@ describe('RedisViewer tree interactions', () => {
     redisBackend.RedisGetValue.mockResolvedValue({
       success: true,
       data: { key: 'app:user:1', type: 'string', ttl: -1, value: 'demo' },
+    });
+    redisBackend.RedisExportKeys.mockResolvedValue({
+      success: true,
+      data: { exported: 2 },
+    });
+    redisBackend.RedisPreviewImportKeys.mockResolvedValue({
+      success: true,
+      data: {
+        file: 'C:\\tmp\\redis-keys.json',
+        database: 0,
+        total: 2,
+        keys: [
+          { key: 'app:user:1', type: 'string', ttl: -1 },
+          { key: 'app:user:2', type: 'string', ttl: 120 },
+        ],
+      },
+    });
+    redisBackend.RedisImportKeys.mockResolvedValue({
+      success: true,
+      data: { imported: 1, skipped: 0, total: 1 },
     });
     vi.stubGlobal('window', {
       innerWidth: 1280,
@@ -314,6 +365,119 @@ describe('RedisViewer tree interactions', () => {
 
     const renderedText = collectRenderedText(renderer!.toJSON());
     expect(renderedText).toContain('Loaded 3 Keys');
+
+    renderer!.unmount();
+  });
+
+  it('exports the current filtered key set when the export-all action is clicked', async () => {
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<RedisViewer connectionId="redis-1" redisDB={0} />);
+    });
+    await flushEffects();
+
+    const exportAllButton = findButtonByText(renderer!, 'Export all');
+    expect(exportAllButton).toBeTruthy();
+
+    await act(async () => {
+      exportAllButton!.props.onClick?.();
+    });
+    await flushEffects();
+
+    expect(redisBackend.RedisExportKeys).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'redis', host: '127.0.0.1', port: 6379, redisDB: 0 }),
+      { scope: 'all', keys: [], pattern: '*' },
+    );
+
+    renderer!.unmount();
+  });
+
+  it('exports checked leaf keys when the export-selected action is clicked', async () => {
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<RedisViewer connectionId="redis-1" redisDB={0} />);
+    });
+    await flushEffects();
+
+    const leafNode = findFirstLeafNode(antdState.treeProps.treeData);
+    expect(leafNode?.rawKey).toBe('app:user:1');
+
+    await act(async () => {
+      antdState.treeProps.onCheck?.(
+        { checked: [leafNode.key], halfChecked: [] },
+        { checked: true, node: leafNode },
+      );
+    });
+    await flushEffects();
+
+    const exportSelectedButton = findButtonByText(renderer!, 'Export selected');
+    expect(exportSelectedButton).toBeTruthy();
+    expect(exportSelectedButton?.props.disabled).toBe(false);
+
+    await act(async () => {
+      exportSelectedButton!.props.onClick?.();
+    });
+    await flushEffects();
+
+    expect(redisBackend.RedisExportKeys).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'redis', host: '127.0.0.1', port: 6379, redisDB: 0 }),
+      { scope: 'selected', keys: ['app:user:1'], pattern: '*' },
+    );
+
+    renderer!.unmount();
+  });
+
+  it('imports only the checked preview keys from the selected file', async () => {
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<RedisViewer connectionId="redis-1" redisDB={0} />);
+    });
+    await flushEffects();
+
+    const importButton = findButtonByText(renderer!, 'Import');
+    expect(importButton).toBeTruthy();
+
+    await act(async () => {
+      importButton!.props.onClick?.();
+    });
+    await flushEffects();
+
+    const chooseFileButton = findButtonByText(renderer!, 'Select import file');
+    expect(chooseFileButton).toBeTruthy();
+
+    await act(async () => {
+      chooseFileButton!.props.onClick?.();
+    });
+    await flushEffects();
+
+    expect(redisBackend.RedisPreviewImportKeys).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'redis', host: '127.0.0.1', port: 6379, redisDB: 0 }),
+    );
+
+    const secondCheckbox = renderer!.root.findByProps({ 'data-import-key': 'app:user:2' });
+    await act(async () => {
+      secondCheckbox.props.onChange?.({ target: { checked: false } });
+    });
+    await flushEffects();
+
+    const modalOkButton = findButtonByText(renderer!, 'modal-ok');
+    expect(modalOkButton).toBeTruthy();
+    expect(modalOkButton?.props.disabled).toBe(false);
+
+    await act(async () => {
+      modalOkButton!.props.onClick?.();
+    });
+    await flushEffects();
+
+    expect(redisBackend.RedisImportKeys).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'redis', host: '127.0.0.1', port: 6379, redisDB: 0 }),
+      {
+        conflictMode: 'overwrite',
+        file: 'C:\\tmp\\redis-keys.json',
+        scope: 'selected',
+        keys: ['app:user:1'],
+      },
+    );
 
     renderer!.unmount();
   });

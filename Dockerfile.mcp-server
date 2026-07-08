@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1.7
+
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS builder
+
+# Declared without defaults so BuildKit injects the real target platform;
+# a default like TARGETARCH=amd64 would win and ship amd64 binaries to arm64.
+ARG TARGETOS
+ARG TARGETARCH
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+COPY third_party/highgo-pq/go.mod ./third_party/highgo-pq/go.mod
+COPY third_party/go-irisnative/go.mod third_party/go-irisnative/go.sum ./third_party/go-irisnative/
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /out/gonavi-mcp-server ./cmd/gonavi-mcp-server
+
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --create-home --home-dir /var/lib/gonavi --uid 10001 gonavi \
+    && mkdir -p /data /var/lib/gonavi/logs \
+    && chown -R gonavi:gonavi /data /var/lib/gonavi
+
+COPY --from=builder /out/gonavi-mcp-server /usr/local/bin/gonavi-mcp-server
+
+ENV HOME=/var/lib/gonavi \
+    GONAVI_DATA_ROOT=/data \
+    GONAVI_LOG_DIR=/var/lib/gonavi/logs \
+    GONAVI_MCP_HTTP_ADDR=0.0.0.0:8765 \
+    GONAVI_MCP_HTTP_PATH=/mcp \
+    GONAVI_MCP_SCHEMA_ONLY=true
+
+VOLUME ["/data"]
+EXPOSE 8765
+
+USER gonavi
+
+ENTRYPOINT ["/usr/local/bin/gonavi-mcp-server"]
+CMD ["http"]

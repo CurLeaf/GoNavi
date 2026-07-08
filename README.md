@@ -34,9 +34,16 @@ GoNavi is designed for developers and DBAs who need a unified desktop experience
 | Category | Data Source | Driver Mode | Typical Capabilities |
 |---|---|---|---|
 | Relational | MySQL | Built-in | Schema browsing, SQL query, data editing, export/backup |
+| Domestic DB | GoldenDB | Built-in | MySQL-compatible query workflow and distributed transaction scenarios |
 | Relational | PostgreSQL | Built-in | Schema browsing, SQL query, data editing, object management |
 | Relational | Oracle | Built-in | Query execution, object browsing, data editing |
 | Cache | Redis | Built-in | Key browsing, command execution, encoding/view switch |
+| Vector Database | Chroma | Built-in | Collection browsing, vector retrieval, metadata filtering |
+| Vector Database | Qdrant | Built-in | Collection browsing, vector search, payload filtering |
+| Message Queue | RocketMQ | Built-in | Topic browsing, consumer-group inspection, message-oriented workflow |
+| Message Queue | MQTT | Built-in | Broker and topic-filter workflow with QoS-aware connection settings |
+| Message Queue | Kafka | Built-in | Topic browsing, broker metadata, consumer-group workflow |
+| Message Queue | RabbitMQ | Built-in | Queue/exchange browsing, virtual host inspection, management API workflow |
 | Relational | MariaDB | Optional driver agent | Querying, object management, data editing |
 | Relational | Doris | Optional driver agent | Querying, object browsing, SQL execution |
 | Columnar Analytics | StarRocks | Optional driver agent | Querying, object browsing, SQL execution |
@@ -44,12 +51,17 @@ GoNavi is designed for developers and DBAs who need a unified desktop experience
 | Relational | SQL Server | Optional driver agent | Schema browsing, SQL query, object management |
 | File-based | SQLite | Optional driver agent | Local DB browsing, editing, export |
 | File-based | DuckDB | Optional driver agent | Large-table query, pagination, file-DB workflow |
+| Domestic DB | OceanBase | Optional driver agent | MySQL / Oracle tenant access, object browsing, query workflow |
 | Domestic DB | Dameng | Optional driver agent | Querying, object browsing, data editing |
 | Domestic DB | Kingbase | Optional driver agent | Querying, object browsing, data editing |
 | Domestic DB | HighGo | Optional driver agent | Querying, object browsing, data editing |
 | Domestic DB | Vastbase | Optional driver agent | Querying, object browsing, data editing |
+| Domestic DB | OpenGauss | Optional driver agent | PostgreSQL-like schema browsing, SQL query, object management |
+| Domestic DB | GaussDB | Optional driver agent | PostgreSQL-like schema browsing, SQL query, object management |
+| Multi-model | InterSystems IRIS | Optional driver agent | Namespace browsing, SQL query, object management |
 | Document | MongoDB | Optional driver agent | Document query, collection browsing, connection management |
 | Time-series | TDengine | Optional driver agent | Time-series schema browsing and querying |
+| Time-series | Apache IoTDB | Optional driver agent | Storage group / device / timeseries browsing and querying |
 | Columnar Analytics | ClickHouse | Optional driver agent | Analytical query, object browsing, SQL execution |
 | Federated Query | Trino | Optional driver agent | Cross-source SQL via multiple catalogs, `catalog.schema` browsing, SQL execution |
 | Search | Elasticsearch | Optional driver agent | Index browsing, mapping inspection, JSON DSL / query_string search |
@@ -75,6 +87,9 @@ GoNavi is designed for developers and DBAs who need a unified desktop experience
 - **Multi-provider Support**: OpenAI, Google Gemini, Anthropic Claude, and custom API support.
 - **Context-Aware Chat**: Attach table schemas to the AI context for accurate SQL generation and assistance.
 - **Slash Commands**: Quick commands for generating SQL, explaining queries, optimizing performance, and reviewing schema designs.
+- **Built-in MCP Workflow**: Manage MCP servers in AI Settings, install GoNavi MCP to Claude Code / Codex, or expose Streamable HTTP for remote Agents.
+- **Remote-Agent Boundary**: Keep saved connections and database passwords on the host running GoNavi while cloud Agents consume schema tools over MCP.
+- **Safety Guardrails**: Remote `schema-only` mode omits `execute_sql`; when SQL execution is enabled, non-read-only statements still require explicit `allowMutating=true`.
 
 ### Performance
 - **Smooth interaction under load**: optimized table interaction (including column resize workflow on large datasets).
@@ -168,6 +183,82 @@ wails build -clean
 ```
 
 Artifacts are generated in `build/bin`.
+
+### Docker / Podman (MCP Server Only)
+
+The desktop GUI is not packaged as a container service. Current container support targets `gonavi-mcp-server` only.
+
+### Browser Access Mode (Experimental)
+
+The main GoNavi application now also exposes a `web-server` mode that reuses the same Go backend and React frontend for browser access:
+
+```powershell
+go build .
+.\GoNavi-Wails.exe web-server --addr 127.0.0.1:34116
+```
+
+The first browser visit is redirected to `/setup` to create the web admin password. Google Authenticator is optional but supported out of the box, together with `web_auth.json`, session cookies, recovery codes, and login rate limiting.
+
+Current scope already includes:
+
+- Browser-side Wails bridge (`window.go.*` / `window.runtime.*` -> HTTP / SSE)
+- First-run setup page, login page, and logout endpoint
+- Session idle timeout / absolute timeout / remember-login window
+- Google Authenticator TOTP plus recovery codes
+
+Still in progress:
+
+- Browser upload/download workbenches for external SQL and connection-package flows
+- More web capability gating for desktop-only features
+- Reverse-proxy / HTTPS / zero-trust deployment guidance
+
+```bash
+cp docker.mcp-server.env.example docker.mcp-server.env
+docker compose --env-file docker.mcp-server.env -f docker-compose.mcp-server.yml up -d
+```
+
+Mount the GoNavi active data root into the container. The mounted directory should contain `connections.json`, `daily_secrets.json`, and optional `drivers/` assets when optional driver agents are required.
+
+The default Compose file pulls the published GHCR image. For local source builds, add the override file:
+
+```bash
+docker compose --env-file docker.mcp-server.env \
+  -f docker-compose.mcp-server.yml \
+  -f docker-compose.mcp-server.local.yml \
+  up -d --build
+```
+
+For Podman, use the same published OCI image with `podman run`, or the native Quadlet example under [deploy/podman/gonavi-mcp-server](deploy/podman/gonavi-mcp-server). That path is intended for Linux servers / NAS hosts where rootless systemd services are preferred.
+
+Deployment matrix:
+
+- Docker Desktop / Linux server / NAS: `docker-compose.mcp-server.yml`
+- Podman / Quadlet: [deploy/podman/gonavi-mcp-server](deploy/podman/gonavi-mcp-server)
+- Kubernetes: [deploy/k8s/gonavi-mcp-server](deploy/k8s/gonavi-mcp-server) (`kustomization.yaml` + overlays)
+- Helm chart: [deploy/helm/gonavi-mcp-server](deploy/helm/gonavi-mcp-server)
+- Build-only Linux environment: `Dockerfile.build-env`
+
+See [cmd/gonavi-mcp-server/README.md](cmd/gonavi-mcp-server/README.md) for deployment details and security boundaries.
+
+### Docker / Podman (Build Environment Only)
+
+If you only need a reproducible Linux build environment for Wails, use `Dockerfile.build-env`:
+
+```bash
+docker build -f Dockerfile.build-env -t gonavi-build-env:local .
+docker run --rm -it -v "$PWD:/workspace" -w /workspace gonavi-build-env:local bash
+```
+
+The same Dockerfile also works with Podman, for example `podman build -f Dockerfile.build-env -t localhost/gonavi-build-env:local .` and `podman run --rm -it -v "$PWD:/workspace" -w /workspace localhost/gonavi-build-env:local bash`.
+
+The default image installs the WebKitGTK 4.0 build toolchain for broader Linux/NAS compatibility. The image bases are multi-arch, so `amd64` and `arm64` follow the target container platform.
+
+Published images are pushed to GHCR:
+
+- `ghcr.io/syngnat/gonavi-mcp-server:latest`
+- `ghcr.io/syngnat/gonavi-build-env:latest`
+
+This image is for building Linux artifacts only. It does not turn the Wails desktop GUI into a browser-accessible web application.
 
 ### Cross-Platform Release (GitHub Actions)
 

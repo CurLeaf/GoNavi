@@ -7,8 +7,13 @@ import {
   resolveSidebarRootOrderTokens,
 } from '../store';
 import type { ConnectionTag, SavedConnection } from '../types';
+import type { SidebarTableMetadataField } from '../utils/sidebarTableMetadata';
 import { t } from '../i18n';
 import { t as catalogTranslate } from '../i18n/catalog';
+import {
+  buildSidebarTableMetadataDisplayItems,
+  buildSidebarTableMetadataSnapshot,
+} from './sidebar/sidebarHelpers';
 
 type SidebarV2Translate = (key: string) => string;
 
@@ -327,12 +332,15 @@ const V2_TREE_HORIZONTAL_SCROLL_MAX_WIDTH = 2600;
 const V2_TREE_HORIZONTAL_SCROLL_BASE_WIDTH = 88;
 const V2_TREE_HORIZONTAL_SCROLL_INDENT_WIDTH = 24;
 const V2_TREE_HORIZONTAL_SCROLL_AVG_CHAR_WIDTH = 8;
+const V2_TREE_HORIZONTAL_SCROLL_ITEM_GAP_WIDTH = 5;
+const V2_TREE_HORIZONTAL_SCROLL_COMMENT_MAX_CHARS = 32;
 const V2_TREE_HORIZONTAL_SCROLL_VIEWPORT_BUFFER = 48;
 export const V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE = 32;
 
 export const estimateV2TreeHorizontalScrollWidth = (
   nodes: SidebarTreeNode[],
   viewportWidth: number,
+  sidebarTableMetadataFields: SidebarTableMetadataField[] = [],
 ): number | undefined => {
   const safeViewportWidth = Math.max(0, Math.ceil(viewportWidth || 0));
   let estimatedContentWidth = safeViewportWidth;
@@ -340,12 +348,30 @@ export const estimateV2TreeHorizontalScrollWidth = (
   const visit = (items: SidebarTreeNode[], depth: number) => {
     items.forEach((node) => {
       const title = String(node?.title || '');
-      const metaText = node?.dataRef?.groupKey === 'tables' && Array.isArray(node.children)
-        ? String(node.children.length)
-        : '';
+      const tableMetadataItems = node?.type === 'table'
+        ? buildSidebarTableMetadataDisplayItems(
+            sidebarTableMetadataFields,
+            buildSidebarTableMetadataSnapshot(node?.dataRef),
+          )
+        : [];
+      const metaText = tableMetadataItems.length > 0
+        ? tableMetadataItems
+          .map((item) => item.key === 'comment'
+            ? item.text.slice(0, V2_TREE_HORIZONTAL_SCROLL_COMMENT_MAX_CHARS)
+            : item.text)
+          .join('')
+        : node?.dataRef?.groupKey === 'tables' && Array.isArray(node.children)
+          ? String(node.children.length)
+          : '';
+      const metaItemCount = tableMetadataItems.length > 0
+        ? tableMetadataItems.length
+        : metaText
+          ? 1
+          : 0;
       const nodeWidth = V2_TREE_HORIZONTAL_SCROLL_BASE_WIDTH
         + (depth * V2_TREE_HORIZONTAL_SCROLL_INDENT_WIDTH)
-        + ((title.length + metaText.length) * V2_TREE_HORIZONTAL_SCROLL_AVG_CHAR_WIDTH);
+        + ((title.length + metaText.length) * V2_TREE_HORIZONTAL_SCROLL_AVG_CHAR_WIDTH)
+        + (metaItemCount * V2_TREE_HORIZONTAL_SCROLL_ITEM_GAP_WIDTH);
       estimatedContentWidth = Math.max(estimatedContentWidth, nodeWidth);
       if (node.children?.length) {
         visit(node.children, depth + 1);
@@ -825,7 +851,7 @@ export const shouldClearSidebarNodeChildrenOnCollapse = (
   if (!node || node.isLeaf === true || !node.children?.length) {
     return false;
   }
-  if (node.type !== 'connection' && node.type !== 'database' && node.type !== 'object-group') {
+  if (node.type !== 'connection' && node.type !== 'database') {
     return false;
   }
   return collectSidebarSubtreeKeys(node).length >= SIDEBAR_COLLAPSE_UNLOAD_SUBTREE_LIMIT;

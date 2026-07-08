@@ -1033,6 +1033,63 @@ func TestDBQueryMultiTransactionalUsesImplicitSessionTransactionForOracle(t *tes
 	}
 }
 
+func TestDBQueryMultiTransactionalKeepsOracleAnonymousBlockTransactionOpenUntilRollback(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	stmt := `BEGIN
+    UPDATE users SET name = 'new' WHERE id = 1;
+    DELETE FROM audit_logs WHERE user_id = 1;
+END;`
+	fakeDB := &fakeBatchWriteDB{
+		execAffected: map[string]int64{
+			stmt: 2,
+		},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "oracle", Host: "127.0.0.1", Port: 1521, User: "app"}
+
+	result := app.DBQueryMultiTransactional(config, "ORCLPDB1", stmt, "oracle-anonymous-block-tx-query")
+	if !result.Success {
+		t.Fatalf("expected Oracle anonymous block transactional query success, got failure: %s", result.Message)
+	}
+	if result.TransactionID == "" || !result.TransactionPending {
+		t.Fatalf("expected pending transaction metadata, got id=%q pending=%v", result.TransactionID, result.TransactionPending)
+	}
+	if fakeDB.session == nil {
+		t.Fatal("expected Oracle anonymous block to open a pinned session")
+	}
+	if fakeDB.session.closed {
+		t.Fatal("expected Oracle anonymous block transaction session to stay open before rollback")
+	}
+	if len(fakeDB.execQueries) != 1 || fakeDB.execQueries[0] != stmt {
+		t.Fatalf("expected Oracle anonymous block to execute as a single statement before rollback, got %#v", fakeDB.execQueries)
+	}
+
+	rollbackResult := app.DBRollbackTransaction(result.TransactionID)
+	if !rollbackResult.Success {
+		t.Fatalf("expected Oracle anonymous block rollback success, got failure: %s", rollbackResult.Message)
+	}
+	if !fakeDB.session.closed {
+		t.Fatal("expected Oracle anonymous block transaction session to close after rollback")
+	}
+	wantExecs := []string{stmt, "ROLLBACK"}
+	if len(fakeDB.execQueries) != len(wantExecs) {
+		t.Fatalf("expected Oracle anonymous block rollback on pinned session, got %#v", fakeDB.execQueries)
+	}
+	for i, want := range wantExecs {
+		if fakeDB.execQueries[i] != want {
+			t.Fatalf("expected exec query %d = %q, got %q", i, want, fakeDB.execQueries[i])
+		}
+	}
+}
+
 func TestDBQueryMultiTransactionalOraclePrefersTransactionProviderForFinish(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {
@@ -1616,7 +1673,7 @@ func TestDBQueryMultiRunsSQLServerStatisticsBatchNatively(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
 	}
-	if strings.Contains(result.Message, "不支持原生多语句执行") {
+	if strings.Contains(result.Message, "逐条执行") {
 		t.Fatalf("expected SQL Server statistics batch to avoid sequential fallback warning, got %q", result.Message)
 	}
 	if fakeDB.multiCalls != 1 {
@@ -1875,6 +1932,134 @@ func TestDBQueryMultiPrefersPlainQueryForKingbaseReadResults(t *testing.T) {
 	}
 	if got := resultSets[0].Rows[0]["work_order"]; got != "MO-20260629" {
 		t.Fatalf("expected plain query SELECT result work_order=MO-20260629, got %#v", got)
+	}
+}
+
+func TestDBQueryMultiPrefersPlainQueryForDamengReadResults(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := "SELECT * FROM PUB_TIMER"
+	nativeEmptyRowsResult := []connection.ResultSetData{{
+		Rows:    []map[string]interface{}{},
+		Columns: []string{"ID", "NAME"},
+	}}
+	baseDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {
+				{"ID": 1, "NAME": "timer_a"},
+			},
+		},
+		fieldMap: map[string][]string{
+			query: {"ID", "NAME"},
+		},
+		multiResult: map[string][]connection.ResultSetData{
+			query: nativeEmptyRowsResult,
+		},
+		queryErr: map[string]error{},
+	}
+	fakeDB := &fakeNativeMultiResultDB{fakeBatchWriteDB: baseDB}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "custom", Driver: "dm8", Host: "127.0.0.1", Port: 5236, User: "SYSDBA"}
+
+	result := app.DBQueryMulti(config, "SYSDBA", query, "dameng-plain-query-result-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.multiCalls != 0 {
+		t.Fatalf("expected dameng read query to skip top-level native multi-result path, got %d calls", fakeDB.multiCalls)
+	}
+	if baseDB.session == nil {
+		t.Fatal("expected DBQueryMulti to open a pinned session for dameng read query")
+	}
+	if baseDB.session.queryCalls != 1 {
+		t.Fatalf("expected dameng read query to use plain session query once, got %d calls", baseDB.session.queryCalls)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 1 {
+		t.Fatalf("expected one result set, got %#v", resultSets)
+	}
+	if !reflect.DeepEqual(resultSets[0].Columns, []string{"ID", "NAME"}) {
+		t.Fatalf("expected plain query columns, got %#v", resultSets[0].Columns)
+	}
+	if got := resultSets[0].Rows[0]["NAME"]; got != "timer_a" {
+		t.Fatalf("expected plain query SELECT result NAME=timer_a, got %#v", got)
+	}
+}
+
+func TestDBQueryMultiPrefersPlainQueryForOceanBaseOracleReadResults(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := "SELECT * FROM EINP_BASICINFO.AC01"
+	nativeEmptyRowsResult := []connection.ResultSetData{{
+		Rows:    []map[string]interface{}{},
+		Columns: []string{"AAC001", "AAC003"},
+	}}
+	baseDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {
+				{"AAC001": 1001, "AAC003": "张三"},
+			},
+		},
+		fieldMap: map[string][]string{
+			query: {"AAC001", "AAC003"},
+		},
+		multiResult: map[string][]connection.ResultSetData{
+			query: nativeEmptyRowsResult,
+		},
+		queryErr: map[string]error{},
+	}
+	fakeDB := &fakeNativeMultiResultDB{fakeBatchWriteDB: baseDB}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{
+		Type:              "oceanbase",
+		Host:              "127.0.0.1",
+		Port:              2881,
+		User:              "SBDEVREAD",
+		OceanBaseProtocol: "oracle",
+	}
+
+	result := app.DBQueryMulti(config, "SBDEV", query, "oceanbase-oracle-plain-query-result-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.multiCalls != 0 {
+		t.Fatalf("expected OceanBase Oracle read query to skip top-level native multi-result path, got %d calls", fakeDB.multiCalls)
+	}
+	if baseDB.session == nil {
+		t.Fatal("expected DBQueryMulti to open a pinned session for OceanBase Oracle read query")
+	}
+	if baseDB.session.queryCalls != 1 {
+		t.Fatalf("expected OceanBase Oracle read query to use plain session query once, got %d calls", baseDB.session.queryCalls)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 1 {
+		t.Fatalf("expected one result set, got %#v", resultSets)
+	}
+	if !reflect.DeepEqual(resultSets[0].Columns, []string{"AAC001", "AAC003"}) {
+		t.Fatalf("expected plain query columns, got %#v", resultSets[0].Columns)
+	}
+	if got := resultSets[0].Rows[0]["AAC003"]; got != "张三" {
+		t.Fatalf("expected plain query SELECT result AAC003=张三, got %#v", got)
 	}
 }
 
@@ -2263,5 +2448,95 @@ func TestDBQueryMultiTransactionalTreatsSelectIntoAsManagedWrite(t *testing.T) {
 		if fakeDB.execQueries[i] != want {
 			t.Fatalf("expected exec query %d = %q, got %q", i, want, fakeDB.execQueries[i])
 		}
+	}
+}
+
+func TestExecuteManagedSQLTransactionStatementsPrefersPlainQueryForDamengReadResults(t *testing.T) {
+	query := "SELECT * FROM PUB_TIMER"
+	baseDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {
+				{"ID": 1, "NAME": "timer_a"},
+			},
+		},
+		fieldMap: map[string][]string{
+			query: {"ID", "NAME"},
+		},
+		multiResult: map[string][]connection.ResultSetData{
+			query: {{
+				Rows:    []map[string]interface{}{},
+				Columns: []string{"ID", "NAME"},
+			}},
+		},
+		queryErr: map[string]error{},
+	}
+	session := &fakeBatchWriteSession{parent: baseDB}
+
+	results, err := executeManagedSQLTransactionStatements(
+		context.Background(),
+		session,
+		connection.ConnectionConfig{Type: "custom", Driver: "dm8"},
+		[]string{query},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("expected executeManagedSQLTransactionStatements success, got %v", err)
+	}
+	if session.queryCalls != 1 {
+		t.Fatalf("expected dameng managed read query to use plain query once, got %d calls", session.queryCalls)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one result set, got %#v", results)
+	}
+	if !reflect.DeepEqual(results[0].Columns, []string{"ID", "NAME"}) {
+		t.Fatalf("expected plain query columns, got %#v", results[0].Columns)
+	}
+	if got := results[0].Rows[0]["NAME"]; got != "timer_a" {
+		t.Fatalf("expected plain query SELECT result NAME=timer_a, got %#v", got)
+	}
+}
+
+func TestExecuteManagedSQLTransactionStatementsPrefersPlainQueryForOceanBaseOracleReadResults(t *testing.T) {
+	query := "SELECT * FROM EINP_BASICINFO.AC01"
+	baseDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {
+				{"AAC001": 1001, "AAC003": "张三"},
+			},
+		},
+		fieldMap: map[string][]string{
+			query: {"AAC001", "AAC003"},
+		},
+		multiResult: map[string][]connection.ResultSetData{
+			query: {{
+				Rows:    []map[string]interface{}{},
+				Columns: []string{"AAC001", "AAC003"},
+			}},
+		},
+		queryErr: map[string]error{},
+	}
+	session := &fakeBatchWriteSession{parent: baseDB}
+
+	results, err := executeManagedSQLTransactionStatements(
+		context.Background(),
+		session,
+		connection.ConnectionConfig{Type: "oceanbase", OceanBaseProtocol: "oracle"},
+		[]string{query},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("expected executeManagedSQLTransactionStatements success, got %v", err)
+	}
+	if session.queryCalls != 1 {
+		t.Fatalf("expected OceanBase Oracle managed read query to use plain query once, got %d calls", session.queryCalls)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one result set, got %#v", results)
+	}
+	if !reflect.DeepEqual(results[0].Columns, []string{"AAC001", "AAC003"}) {
+		t.Fatalf("expected plain query columns, got %#v", results[0].Columns)
+	}
+	if got := results[0].Rows[0]["AAC003"]; got != "张三" {
+		t.Fatalf("expected plain query SELECT result AAC003=张三, got %#v", got)
 	}
 }

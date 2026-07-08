@@ -51,6 +51,23 @@ if [[ ! -f "$manifest_path" ]]; then
   exit 1
 fi
 
+resolve_python_bin() {
+  local candidate
+  for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -V >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+PYTHON_BIN="$(resolve_python_bin || true)"
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "未找到 Python，请先安装 python3 或 python 并确保其在 PATH 中。" >&2
+  exit 1
+fi
+
 if ! git rev-parse --verify "${source_commit}^{commit}" >/dev/null 2>&1; then
   echo "无法解析源码提交：$source_commit" >&2
   exit 1
@@ -87,7 +104,7 @@ trap cleanup EXIT
 
 git worktree add --detach "$worktree" "${source_commit}^{commit}" >/dev/null
 
-python3 - "$manifest_path" "$worktree" <<'PY'
+"$PYTHON_BIN" - "$manifest_path" "$worktree" <<'PY'
 import json
 import subprocess
 import sys

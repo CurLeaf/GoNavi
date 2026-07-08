@@ -65,6 +65,9 @@ const readQueryEditorResultsPanelSource = (): string =>
 const readSqlDialectSource = (): string =>
   readFileSync(new URL("../utils/sqlDialect.ts", import.meta.url), "utf8");
 
+const readRowLocatorSource = (): string =>
+  readFileSync(new URL("../utils/rowLocator.ts", import.meta.url), "utf8");
+
 const sliceBetween = (source: string, start: string, end: string): string => {
   const startIndex = source.indexOf(start);
   const endIndex = source.indexOf(end, startIndex + start.length);
@@ -200,6 +203,10 @@ describe("i18n catalog", () => {
       "app.theme.nav.theme.description",
       "app.theme.nav.theme.title",
       "app.theme.navigation_title",
+      "app.theme.query_template.description",
+      "app.theme.query_template.hint",
+      "app.theme.query_template.reset_default",
+      "app.theme.query_template.title",
       "app.theme.theme_settings_description",
       "app.theme.theme_settings_title",
       "app.theme.ui_version.beta_warning",
@@ -232,6 +239,8 @@ describe("i18n catalog", () => {
       "app.shortcuts.action.openShortcutManager.description",
       "app.shortcuts.action.openShortcutManager.label",
       "app.shortcuts.action.record",
+      "app.shortcuts.action.duplicateCurrentLine.description",
+      "app.shortcuts.action.duplicateCurrentLine.label",
       "app.shortcuts.action.resetWindowZoom.description",
       "app.shortcuts.action.resetWindowZoom.label",
       "app.shortcuts.action.restore_defaults",
@@ -243,6 +252,8 @@ describe("i18n catalog", () => {
       "app.shortcuts.action.selectCurrentStatement.label",
       "app.shortcuts.action.sendAIChatMessage.description",
       "app.shortcuts.action.sendAIChatMessage.label",
+      "app.shortcuts.action.triggerSqlAiCompletion.description",
+      "app.shortcuts.action.triggerSqlAiCompletion.label",
       "app.shortcuts.action.switchToNextTab.description",
       "app.shortcuts.action.switchToNextTab.label",
       "app.shortcuts.action.switchToPreviousTab.description",
@@ -333,6 +344,11 @@ describe("i18n catalog", () => {
       "data_grid.column_settings.show_all",
       "data_grid.column_settings.hide_all",
       "data_grid.column_settings.search_columns_placeholder",
+      "data_grid.column_settings.global_hidden_columns",
+      "data_grid.column_settings.global_hidden_columns_help",
+      "data_grid.column_settings.global_hidden_columns_apply",
+      "data_grid.column_settings.global_hidden_columns_add_current",
+      "data_grid.column_settings.global_hidden_columns_clear",
       "data_grid.column_settings.remember_column_order",
       "data_grid.column_settings.remember_hidden_columns",
       "data_grid.column_settings.reset_order",
@@ -1006,13 +1022,15 @@ describe("i18n catalog", () => {
 
   it("keeps QueryEditor local editor interaction toasts in catalogs instead of source literals", () => {
     const toastKeys = [
-      "query_editor.message.no_selectable_sql",
+      "query_editor.message.current_line_no_copyable_content",
+      "data_grid.message.copied_to_clipboard",
+      "connection_modal.message.copy_failed",
       "query_editor.message.object_info_target_not_found",
     ] as const;
     const source = readQueryEditorSource();
     const selectStatementSource = sliceBetween(
       source,
-      "const handleSelectCurrentStatement = () => {",
+      "const handleSelectCurrentStatement = async () => {",
       "  const syncQueryToEditor = (sql: string) => {",
     );
     const objectInfoActionSource = sliceBetween(
@@ -1028,13 +1046,21 @@ describe("i18n catalog", () => {
       }
     }
 
-    expect(selectStatementSource).toContain("query_editor.message.no_selectable_sql");
+    expect(selectStatementSource).toContain("query_editor.message.current_line_no_copyable_content");
+    expect(selectStatementSource).toContain("data_grid.message.copied_to_clipboard");
+    expect(selectStatementSource).toContain("connection_modal.message.copy_failed");
     expect(objectInfoActionSource).toContain("query_editor.message.object_info_target_not_found");
 
-    expect(selectStatementSource).not.toContain("没有可选择的 SQL 语句。");
+    expect(selectStatementSource).not.toContain("当前行没有可复制内容。");
+    expect(selectStatementSource).not.toContain("已复制到剪贴板");
+    expect(selectStatementSource).not.toContain("复制失败");
     expect(objectInfoActionSource).not.toContain("当前光标未定位到可识别的表或字段。");
 
-    assertSourceDoesNotInlineCatalogValues(selectStatementSource, ["query_editor.message.no_selectable_sql"]);
+    assertSourceDoesNotInlineCatalogValues(selectStatementSource, [
+      "query_editor.message.current_line_no_copyable_content",
+      "data_grid.message.copied_to_clipboard",
+      "connection_modal.message.copy_failed",
+    ]);
     assertSourceDoesNotInlineCatalogValues(objectInfoActionSource, ["query_editor.message.object_info_target_not_found"]);
   });
 
@@ -1813,157 +1839,31 @@ describe("i18n catalog", () => {
     assertSourceDoesNotInlineCatalogValues(databaseSuggestionDetailSource, [databaseLabelKey]);
   });
 
-  it("keeps QueryEditor no-safe-locator read-only warning copy in catalogs instead of source literals", () => {
-    const noSafeLocatorReasonKey = "query_editor.message.read_only_no_safe_locator" as const;
-    const readOnlyWarningWrapperKey = "query_editor.message.read_only_warning_with_detail" as const;
-    const source = readQueryEditorHelpersSource();
-    const noSafeLocatorSource = sliceBetween(
-      source,
-      "                if (!resIndexes?.success) {",
-      "        const executableAppendExpressions = [",
+  it("keeps the all-columns edit hint in catalogs instead of source literals", () => {
+    const allColumnsHintKey = "data_viewer.edit_hint.all_columns_locator" as const;
+    const rowLocatorSource = readRowLocatorSource();
+    const helpersSource = readQueryEditorHelpersSource();
+    const buildAllColumnsLocatorSource = sliceBetween(
+      rowLocatorSource,
+      "export const buildAllColumnsLocator = (",
+      "export const resolveEditRowLocator = ({",
     );
 
     for (const language of SUPPORTED_LANGUAGES) {
-      expect(catalogs[language]).toHaveProperty(noSafeLocatorReasonKey);
-      expect(catalogs[language][noSafeLocatorReasonKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][noSafeLocatorReasonKey])).toEqual([]);
-
-      expect(catalogs[language]).toHaveProperty(readOnlyWarningWrapperKey);
-      expect(catalogs[language][readOnlyWarningWrapperKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][readOnlyWarningWrapperKey])).toEqual(["detail"]);
+      expect(catalogs[language]).toHaveProperty(allColumnsHintKey);
+      expect(catalogs[language][allColumnsHintKey]).toBeTruthy();
+      expect(getPlaceholders(catalogs[language][allColumnsHintKey])).toEqual([]);
     }
 
-    expect(t("zh-CN", noSafeLocatorReasonKey)).toBe("未检测到主键或可用唯一索引，无法安全提交修改。");
-    expect(t("en-US", noSafeLocatorReasonKey)).toBe("No primary key or usable unique index was detected, so changes cannot be committed safely.");
-    expect(t("zh-CN", readOnlyWarningWrapperKey, { detail: "main.users 未检测到主键或可用唯一索引，无法安全提交修改。" }))
-      .toBe("查询结果保持只读：main.users 未检测到主键或可用唯一索引，无法安全提交修改。");
-    expect(t("en-US", readOnlyWarningWrapperKey, { detail: "main.users No primary key or usable unique index was detected, so changes cannot be committed safely." }))
-      .toBe("Query results remain read-only: main.users No primary key or usable unique index was detected, so changes cannot be committed safely.");
+    expect(t("zh-CN", allColumnsHintKey)).toBe("未检测到主键或唯一索引，将使用全列匹配定位行，请谨慎编辑。");
+    expect(t("en-US", allColumnsHintKey)).toBe("No primary key or unique index was detected, so rows will be located by matching all columns. Edit with care.");
 
-    expect(noSafeLocatorSource).toContain(noSafeLocatorReasonKey);
-    expect(noSafeLocatorSource).toContain(readOnlyWarningWrapperKey);
-    expect(noSafeLocatorSource).not.toContain("未检测到主键或可用唯一索引，无法安全提交修改。");
+    expect(rowLocatorSource).toContain(allColumnsHintKey);
+    expect(buildAllColumnsLocatorSource).toContain("ALL_COLUMNS_LOCATOR_HINT_KEY");
+    expect(helpersSource).toContain("buildAllColumnsLocator");
 
-    assertSourceDoesNotInlineCatalogValues(noSafeLocatorSource, [noSafeLocatorReasonKey, readOnlyWarningWrapperKey]);
-  });
-
-  it("keeps QueryEditor index-metadata-unavailable read-only warning copy in catalogs instead of source literals", () => {
-    const indexMetadataUnavailableReasonKey = "query_editor.message.read_only_index_metadata_unavailable" as const;
-    const readOnlyWarningWrapperKey = "query_editor.message.read_only_warning_with_detail" as const;
-    const source = readQueryEditorHelpersSource();
-    const indexMetadataUnavailableSource = sliceBetween(
-      source,
-      "                if (!resIndexes?.success) {",
-      "        const executableAppendExpressions = [",
-    );
-
-    for (const language of SUPPORTED_LANGUAGES) {
-      expect(catalogs[language]).toHaveProperty(indexMetadataUnavailableReasonKey);
-      expect(catalogs[language][indexMetadataUnavailableReasonKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][indexMetadataUnavailableReasonKey])).toEqual([]);
-
-      expect(catalogs[language]).toHaveProperty(readOnlyWarningWrapperKey);
-      expect(catalogs[language][readOnlyWarningWrapperKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][readOnlyWarningWrapperKey])).toEqual(["detail"]);
-    }
-
-    expect(t("zh-CN", indexMetadataUnavailableReasonKey)).toBe("无法加载唯一索引元数据，无法安全提交修改。");
-    expect(t("en-US", indexMetadataUnavailableReasonKey)).toBe("Unable to load unique index metadata, so changes cannot be committed safely.");
-    expect(t("zh-CN", readOnlyWarningWrapperKey, { detail: "main.users 无法加载唯一索引元数据，无法安全提交修改。" }))
-      .toBe("查询结果保持只读：main.users 无法加载唯一索引元数据，无法安全提交修改。");
-    expect(t("en-US", readOnlyWarningWrapperKey, { detail: "main.users Unable to load unique index metadata, so changes cannot be committed safely." }))
-      .toBe("Query results remain read-only: main.users Unable to load unique index metadata, so changes cannot be committed safely.");
-
-    expect(indexMetadataUnavailableSource).toContain(indexMetadataUnavailableReasonKey);
-    expect(indexMetadataUnavailableSource).toContain(readOnlyWarningWrapperKey);
-    expect(indexMetadataUnavailableSource).not.toContain("无法加载唯一索引元数据，无法安全提交修改。");
-
-    assertSourceDoesNotInlineCatalogValues(indexMetadataUnavailableSource, [indexMetadataUnavailableReasonKey, readOnlyWarningWrapperKey]);
-  });
-
-  it("keeps QueryEditor table-locator-metadata-unavailable read-only warning copy in catalogs instead of source literals", () => {
-    const tableLocatorMetadataUnavailableReasonKey = "query_editor.message.read_only_table_locator_metadata_unavailable" as const;
-    const readOnlyWarningWrapperKey = "query_editor.message.read_only_warning_with_detail" as const;
-    const source = readQueryEditorHelpersSource();
-    const resolveQueryLocatorPlanSource = sliceBetween(
-      source,
-      "export const resolveQueryLocatorPlan = async ({",
-      "\n};",
-    );
-    const resColsFailureSource = sliceBetween(
-      resolveQueryLocatorPlanSource,
-      "        if (!resCols?.success || !Array.isArray(resCols.data)) {",
-      "            return plan;",
-    );
-    const catchFailureSource = sliceBetween(
-      resolveQueryLocatorPlanSource,
-      "    } catch {",
-      "        return plan;",
-    );
-
-    for (const language of SUPPORTED_LANGUAGES) {
-      expect(catalogs[language]).toHaveProperty(tableLocatorMetadataUnavailableReasonKey);
-      expect(catalogs[language][tableLocatorMetadataUnavailableReasonKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][tableLocatorMetadataUnavailableReasonKey])).toEqual(["table"]);
-
-      expect(catalogs[language]).toHaveProperty(readOnlyWarningWrapperKey);
-      expect(catalogs[language][readOnlyWarningWrapperKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][readOnlyWarningWrapperKey])).toEqual(["detail"]);
-    }
-
-    expect(t("zh-CN", tableLocatorMetadataUnavailableReasonKey, { table: "main.users" }))
-      .toBe("无法加载 main.users 的主键/唯一索引元数据，无法安全提交修改。");
-    expect(t("en-US", tableLocatorMetadataUnavailableReasonKey, { table: "main.users" }))
-      .toBe("Unable to load primary key/unique index metadata for main.users, so changes cannot be committed safely.");
-    expect(t("zh-CN", readOnlyWarningWrapperKey, { detail: "无法加载 main.users 的主键/唯一索引元数据，无法安全提交修改。" }))
-      .toBe("查询结果保持只读：无法加载 main.users 的主键/唯一索引元数据，无法安全提交修改。");
-    expect(t("en-US", readOnlyWarningWrapperKey, { detail: "Unable to load primary key/unique index metadata for main.users, so changes cannot be committed safely." }))
-      .toBe("Query results remain read-only: Unable to load primary key/unique index metadata for main.users, so changes cannot be committed safely.");
-
-    expect(resColsFailureSource).toContain(tableLocatorMetadataUnavailableReasonKey);
-    expect(resColsFailureSource).toContain(readOnlyWarningWrapperKey);
-    expect(resColsFailureSource).not.toContain("无法加载 main.users 的主键/唯一索引元数据，无法安全提交修改。");
-
-    expect(catchFailureSource).toContain(tableLocatorMetadataUnavailableReasonKey);
-    expect(catchFailureSource).toContain(readOnlyWarningWrapperKey);
-    expect(catchFailureSource).not.toContain("无法加载 main.users 的主键/唯一索引元数据，无法安全提交修改。");
-
-    assertSourceDoesNotInlineCatalogValues(resColsFailureSource, [tableLocatorMetadataUnavailableReasonKey, readOnlyWarningWrapperKey]);
-    assertSourceDoesNotInlineCatalogValues(catchFailureSource, [tableLocatorMetadataUnavailableReasonKey, readOnlyWarningWrapperKey]);
-  });
-
-  it("keeps QueryEditor Oracle ROWID fallback read-only warning copy in catalogs instead of source literals", () => {
-    const oracleRowIdFallbackReasonKey = "query_editor.message.read_only_oracle_rowid_injection_unavailable" as const;
-    const readOnlyWarningWrapperKey = "query_editor.message.read_only_warning_with_detail" as const;
-    const source = readQueryEditorHelpersSource();
-    const oracleRowIdFallbackSource = sliceBetween(
-      source,
-      "        if (executableAppendExpressions.length > 0 && isOracleLikeDialect(dbType) && selectInfo.selectsBareAll) {",
-      "        plan.executedSql = appendQuerySelectExpressions(executableStatement, executableAppendExpressions);",
-    );
-
-    for (const language of SUPPORTED_LANGUAGES) {
-      expect(catalogs[language]).toHaveProperty(oracleRowIdFallbackReasonKey);
-      expect(catalogs[language][oracleRowIdFallbackReasonKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][oracleRowIdFallbackReasonKey])).toEqual([]);
-
-      expect(catalogs[language]).toHaveProperty(readOnlyWarningWrapperKey);
-      expect(catalogs[language][readOnlyWarningWrapperKey]).toBeTruthy();
-      expect(getPlaceholders(catalogs[language][readOnlyWarningWrapperKey])).toEqual(["detail"]);
-    }
-
-    expect(t("zh-CN", oracleRowIdFallbackReasonKey)).toBe("Oracle 查询使用 * 时无法自动注入 ROWID 定位列，已保持只读。");
-    expect(t("en-US", oracleRowIdFallbackReasonKey)).toBe("The Oracle query uses *, so the ROWID locator column could not be injected automatically. Results remain read-only.");
-    expect(t("zh-CN", readOnlyWarningWrapperKey, { detail: "Oracle 查询使用 * 时无法自动注入 ROWID 定位列，已保持只读。" }))
-      .toBe("查询结果保持只读：Oracle 查询使用 * 时无法自动注入 ROWID 定位列，已保持只读。");
-    expect(t("en-US", readOnlyWarningWrapperKey, { detail: "The Oracle query uses *, so the ROWID locator column could not be injected automatically. Results remain read-only." }))
-      .toBe("Query results remain read-only: The Oracle query uses *, so the ROWID locator column could not be injected automatically. Results remain read-only.");
-
-    expect(oracleRowIdFallbackSource).toContain(oracleRowIdFallbackReasonKey);
-    expect(oracleRowIdFallbackSource).toContain(readOnlyWarningWrapperKey);
-    expect(oracleRowIdFallbackSource).not.toContain("Oracle 查询使用 * 时无法自动注入 ROWID 定位列，已保持只读。");
-
-    assertSourceDoesNotInlineCatalogValues(oracleRowIdFallbackSource, [oracleRowIdFallbackReasonKey, readOnlyWarningWrapperKey]);
+    assertSourceDoesNotInlineCatalogValues(rowLocatorSource, [allColumnsHintKey]);
+    assertSourceDoesNotInlineCatalogValues(helpersSource, [allColumnsHintKey]);
   });
 
   it("keeps QueryEditor AI context menu labels in catalogs instead of source literals", () => {
@@ -1995,6 +1895,47 @@ describe("i18n catalog", () => {
     expect(aiActionsSource).not.toContain("🤖 AI 优化 SQL");
 
     assertSourceDoesNotInlineCatalogValues(aiActionsSource, actionLabelKeys);
+  });
+
+  it("keeps QueryEditor SQL snippet picker copy in catalogs instead of source literals", () => {
+    const snippetPickerKeys = [
+      "query_editor.action.insert_sql_snippet",
+      "query_editor.snippet_picker.title",
+      "query_editor.snippet_picker.description",
+      "query_editor.snippet_picker.search_placeholder",
+      "query_editor.snippet_picker.empty",
+      "query_editor.snippet_picker.empty_filtered",
+      "query_editor.snippet_picker.manage",
+      "snippet_settings.tag.builtin",
+    ] as const;
+    const snippetPickerLiteralGuardKeys = [
+      "query_editor.action.insert_sql_snippet",
+      "query_editor.snippet_picker.title",
+      "query_editor.snippet_picker.description",
+      "query_editor.snippet_picker.search_placeholder",
+      "query_editor.snippet_picker.empty",
+      "query_editor.snippet_picker.empty_filtered",
+      "query_editor.snippet_picker.manage",
+    ] as const;
+    const source = readQueryEditorSource();
+
+    for (const language of SUPPORTED_LANGUAGES) {
+      for (const key of snippetPickerKeys) {
+        expect(catalogs[language]).toHaveProperty(key);
+        expect(catalogs[language][key]).toBeTruthy();
+      }
+    }
+
+    for (const key of snippetPickerKeys) {
+      expect(source).toContain(key);
+    }
+
+    expect(source).not.toContain("插入 SQL 片段");
+    expect(source).not.toContain("选择一个已有 SQL 片段并插入到当前光标位置。");
+    expect(source).not.toContain("搜索前缀、名称或内容");
+    expect(source).not.toContain("未找到匹配的 SQL 片段。");
+
+    assertSourceDoesNotInlineCatalogValues(source, snippetPickerLiteralGuardKeys);
   });
 
   it("keeps QueryEditor AI prompt context in catalogs instead of source literals", () => {
@@ -2171,6 +2112,8 @@ describe("i18n catalog", () => {
 
   it("keeps QueryEditor Monaco action labels in catalogs instead of source literals", () => {
     const actionLabelKeys = [
+      "app.shortcuts.action.duplicateCurrentLine.label",
+      "query_editor.action.insert_sql_snippet",
       "app.shortcuts.action.runQuery.label",
       "app.shortcuts.action.selectCurrentStatement.label",
       "app.shortcuts.action.saveQuery.label",
@@ -2182,6 +2125,11 @@ describe("i18n catalog", () => {
         source,
         "      objectHoverActionRef.current = editor.addAction({",
         "      editor.onDidChangeCursorPosition?.((event: any) => {",
+      ),
+      sliceBetween(
+        source,
+        "  const registerInsertSqlSnippetContextMenuAction = useCallback((editor: any) => {",
+        "  // SQL 诊断 / 慢 SQL 历史的快捷键监听（必须在 binding 声明之后）",
       ),
       sliceBetween(
         source,
@@ -2197,6 +2145,11 @@ describe("i18n catalog", () => {
         source,
         "      const binding = selectCurrentStatementShortcutBinding;",
         "  }, [languagePreference, selectCurrentStatementShortcutBinding, handleSelectCurrentStatement]);",
+      ),
+      sliceBetween(
+        source,
+        "      const binding = duplicateCurrentLineShortcutBinding;",
+        "  }, [duplicateCurrentLineShortcutBinding, handleDuplicateCurrentLine, languagePreference]);",
       ),
       sliceBetween(
         source,

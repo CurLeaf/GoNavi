@@ -8,6 +8,7 @@ import type { SupportedLanguage } from "./types";
 
 const appApi = () => (window as any)?.go?.app?.App;
 const aiApi = () => (window as any)?.go?.aiservice?.Service;
+const WEB_AUTH_LANGUAGE_COOKIE_NAME = "gonavi_web_lang";
 let lastSyncedLanguage: SupportedLanguage | null = null;
 let desiredLanguage: SupportedLanguage | null = null;
 let activeSyncLoop: Promise<void> | null = null;
@@ -24,8 +25,16 @@ export function applyDayjsLocale(language: SupportedLanguage): void {
   dayjs.locale(localeByLanguage[language] || "en");
 }
 
+function syncWebAuthLanguageCookie(language: SupportedLanguage): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+  document.cookie = `${WEB_AUTH_LANGUAGE_COOKIE_NAME}=${encodeURIComponent(language)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+}
+
 export async function syncLanguageRuntime(language: SupportedLanguage): Promise<void> {
   desiredLanguage = language;
+  syncWebAuthLanguageCookie(language);
   if (lastSyncedLanguage === language) {
     return;
   }

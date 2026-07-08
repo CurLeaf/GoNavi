@@ -330,6 +330,10 @@ export function GetUnboundSavedQueries() {
   return window['go']['app']['App']['GetUnboundSavedQueries']();
 }
 
+export function GetUpdateChannel() {
+  return window['go']['app']['App']['GetUpdateChannel']();
+}
+
 export function ImportConfigFile() {
   return window['go']['app']['App']['ImportConfigFile']();
 }
@@ -510,6 +514,10 @@ export function RedisExecuteCommand(arg1, arg2) {
   return window['go']['app']['App']['RedisExecuteCommand'](arg1, arg2);
 }
 
+export function RedisExportKeys(arg1, arg2) {
+  return window['go']['app']['App']['RedisExportKeys'](arg1, arg2);
+}
+
 export function RedisFlushDB(arg1) {
   return window['go']['app']['App']['RedisFlushDB'](arg1);
 }
@@ -526,6 +534,10 @@ export function RedisGetValue(arg1, arg2) {
   return window['go']['app']['App']['RedisGetValue'](arg1, arg2);
 }
 
+export function RedisImportKeys(arg1, arg2) {
+  return window['go']['app']['App']['RedisImportKeys'](arg1, arg2);
+}
+
 export function RedisKeyExists(arg1, arg2) {
   return window['go']['app']['App']['RedisKeyExists'](arg1, arg2);
 }
@@ -536,6 +548,10 @@ export function RedisListPush(arg1, arg2, arg3) {
 
 export function RedisListSet(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['RedisListSet'](arg1, arg2, arg3, arg4);
+}
+
+export function RedisPreviewImportKeys(arg1) {
+  return window['go']['app']['App']['RedisPreviewImportKeys'](arg1);
 }
 
 export function RedisRenameKey(arg1, arg2, arg3) {
@@ -682,6 +698,10 @@ export function SelectSQLDirectory(arg1) {
   return window['go']['app']['App']['SelectSQLDirectory'](arg1);
 }
 
+export function SelectSQLFileForExecution() {
+  return window['go']['app']['App']['SelectSQLFileForExecution']();
+}
+
 export function SelectSSHKeyFile(arg1) {
   return window['go']['app']['App']['SelectSSHKeyFile'](arg1);
 }
@@ -692,6 +712,10 @@ export function SetLanguage(arg1) {
 
 export function SetMacNativeWindowControls(arg1) {
   return window['go']['app']['App']['SetMacNativeWindowControls'](arg1);
+}
+
+export function SetUpdateChannel(arg1) {
+  return window['go']['app']['App']['SetUpdateChannel'](arg1);
 }
 
 export function SetWindowTranslucency(arg1, arg2) {
@@ -708,6 +732,10 @@ export function StartSecurityUpdate(arg1) {
 
 export function TestConnection(arg1) {
   return window['go']['app']['App']['TestConnection'](arg1);
+}
+
+export function TestGlobalProxyConnection(arg1) {
+  return window['go']['app']['App']['TestGlobalProxyConnection'](arg1);
 }
 
 export function TestJVMConnection(arg1) {

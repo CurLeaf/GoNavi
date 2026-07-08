@@ -333,15 +333,7 @@ func (d *DamengDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefin
 
 func (d *DamengDB) GetForeignKeys(dbName, tableName string) ([]connection.ForeignKeyDefinition, error) {
 	// Reusing Oracle style query as DM is highly compatible
-	query := fmt.Sprintf(`SELECT a.constraint_name, a.column_name, c_pk.table_name r_table_name, b.column_name r_column_name
-		FROM all_cons_columns a
-		JOIN all_constraints c ON a.owner = c.owner AND a.constraint_name = c.constraint_name
-		JOIN all_constraints c_pk ON c.r_owner = c_pk.owner AND c.r_constraint_name = c_pk.constraint_name
-		JOIN all_cons_columns b ON c_pk.owner = b.owner AND c_pk.constraint_name = b.constraint_name AND a.position = b.position
-		WHERE c.constraint_type = 'R' AND a.owner = '%s' AND a.table_name = '%s'`,
-		strings.ToUpper(dbName), strings.ToUpper(tableName))
-
-	data, _, err := d.Query(query)
+	data, _, err := d.Query(buildDamengForeignKeysQuery(dbName, tableName))
 	if err != nil {
 		return nil, err
 	}

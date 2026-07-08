@@ -24,8 +24,10 @@ type BackendAppMock = {
   CheckForUpdates: ReturnType<typeof vi.fn>;
   CheckForUpdatesSilently: ReturnType<typeof vi.fn>;
   DownloadUpdate: ReturnType<typeof vi.fn>;
+  GetUpdateChannel: ReturnType<typeof vi.fn>;
   InstallUpdateAndRestart: ReturnType<typeof vi.fn>;
   OpenDownloadedUpdateDirectory: ReturnType<typeof vi.fn>;
+  SetUpdateChannel: ReturnType<typeof vi.fn>;
   GetAppInfo: ReturnType<typeof vi.fn>;
 };
 
@@ -33,8 +35,10 @@ const createBackendAppMock = (): BackendAppMock => ({
   CheckForUpdates: vi.fn(),
   CheckForUpdatesSilently: vi.fn(),
   DownloadUpdate: vi.fn(),
+  GetUpdateChannel: vi.fn(async () => ({ success: true, data: { channel: 'latest' } })),
   InstallUpdateAndRestart: vi.fn(),
   OpenDownloadedUpdateDirectory: vi.fn(),
+  SetUpdateChannel: vi.fn(async (channel: string) => ({ success: true, data: { channel } })),
   GetAppInfo: vi.fn(async () => ({ success: true, data: { version: '0.8.1', author: 'Syngnat' } })),
 });
 
@@ -50,10 +54,9 @@ describe('useAppUpdateManager', () => {
     return key;
   };
 
-  const renderHook = (isMacRuntime: boolean) => {
+  const renderHook = () => {
     const Harness = () => {
       hook = useAppUpdateManager({
-        isMacRuntime,
         runtimeBuildType: 'release',
         t,
       });
@@ -109,7 +112,7 @@ describe('useAppUpdateManager', () => {
     backendApp.InstallUpdateAndRestart.mockResolvedValue({ success: true });
     backendApp.OpenDownloadedUpdateDirectory.mockResolvedValue({ success: true });
 
-    renderHook(true);
+    renderHook();
 
     await act(async () => {
       await hook?.checkForUpdates(false);
@@ -142,7 +145,7 @@ describe('useAppUpdateManager', () => {
     });
     backendApp.OpenDownloadedUpdateDirectory.mockResolvedValue({ success: true });
 
-    renderHook(true);
+    renderHook();
 
     await act(async () => {
       await hook?.checkForUpdates(false);
@@ -154,6 +157,121 @@ describe('useAppUpdateManager', () => {
 
     expect(backendApp.DownloadUpdate).toHaveBeenCalledTimes(1);
     expect(backendApp.OpenDownloadedUpdateDirectory).not.toHaveBeenCalled();
+    expect(backendApp.InstallUpdateAndRestart).not.toHaveBeenCalled();
     expect(hook?.lastUpdateInfo?.downloaded).toBe(true);
+  });
+
+  it('auto-installs a macOS update immediately after download when the backend reports auto relaunch support', async () => {
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        downloaded: false,
+        assetSize: 2048,
+      },
+    });
+    backendApp.DownloadUpdate.mockResolvedValue({
+      success: true,
+      data: {
+        platform: 'darwin',
+        autoRelaunch: true,
+        downloadPath: '/Users/test/Desktop/GoNavi-0.8.2/GoNavi-0.8.2-MacOS-Arm64.dmg',
+      },
+    });
+    backendApp.InstallUpdateAndRestart.mockResolvedValue({ success: true });
+
+    renderHook();
+
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+
+    await act(async () => {
+      await hook?.downloadUpdate(hook?.lastUpdateInfo!, false);
+    });
+
+    expect(backendApp.DownloadUpdate).toHaveBeenCalledTimes(1);
+    expect(backendApp.InstallUpdateAndRestart).toHaveBeenCalledTimes(1);
+    expect(backendApp.OpenDownloadedUpdateDirectory).not.toHaveBeenCalled();
+  });
+
+  it('switches update channel and re-checks against the selected channel', async () => {
+    backendApp.SetUpdateChannel.mockResolvedValue({ success: true, data: { channel: 'dev' } });
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: false,
+        channel: 'dev',
+        currentVersion: '0.8.1',
+        latestVersion: 'dev-a1b2c3d',
+      },
+    });
+
+    renderHook();
+
+    await act(async () => {
+      await hook?.changeUpdateChannel('dev');
+    });
+
+    expect(backendApp.SetUpdateChannel).toHaveBeenCalledWith('dev');
+    expect(backendApp.CheckForUpdates).toHaveBeenCalledTimes(1);
+    expect(hook?.updateChannel).toBe('dev');
+    expect(hook?.lastUpdateInfo?.channel).toBe('dev');
+  });
+
+  it('keeps release metadata from the backend update response', async () => {
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        releaseName: 'Dev Build (dev-22fab86)',
+        releasePublishedAt: '2026-07-08T11:15:00Z',
+        releaseNotesUrl: 'https://github.com/Syngnat/GoNavi/releases/tag/dev-latest',
+      },
+    });
+
+    renderHook();
+
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+
+    expect(hook?.lastUpdateInfo?.releaseName).toBe('Dev Build (dev-22fab86)');
+    expect(hook?.lastUpdateInfo?.releasePublishedAt).toBe('2026-07-08T11:15:00Z');
+    expect(hook?.lastUpdateInfo?.releaseNotesUrl).toBe('https://github.com/Syngnat/GoNavi/releases/tag/dev-latest');
+  });
+
+  it('opens the downloaded update directory when a package is already downloaded', async () => {
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        downloaded: true,
+        assetSize: 1024,
+      },
+    });
+    backendApp.OpenDownloadedUpdateDirectory.mockResolvedValue({
+      success: true,
+      message: 'opened-install-directory',
+    });
+
+    renderHook();
+
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+
+    await act(async () => {
+      await hook?.openDownloadedUpdateDirectory();
+    });
+
+    expect(backendApp.OpenDownloadedUpdateDirectory).toHaveBeenCalledTimes(1);
+    expect(messageApi.success).toHaveBeenCalledWith('opened-install-directory');
   });
 });

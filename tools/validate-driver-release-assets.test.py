@@ -32,6 +32,10 @@ class ValidateDriverReleaseAssetsTests(unittest.TestCase):
             MODULE.infer_asset_path("mongodb-driver-agent-v2-darwin-arm64"),
             "MacOS/mongodb-driver-agent-v2-darwin-arm64",
         )
+        self.assertEqual(
+            MODULE.infer_asset_path("clickhouse-driver-agent-linux-arm64"),
+            "Linux/clickhouse-driver-agent-linux-arm64",
+        )
         self.assertEqual(MODULE.infer_asset_path("duckdb.dll"), "Windows/duckdb.dll")
         self.assertIsNone(MODULE.infer_asset_path("duckdb-driver.zip"))
 

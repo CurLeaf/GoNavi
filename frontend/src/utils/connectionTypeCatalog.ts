@@ -242,8 +242,6 @@ export const getConnectionTypeHint = (
       return translateCatalogCopy(translate, 'connection_modal.step1.hint.file', 'Local file connection');
     case 'trino':
       return 'HTTP / HTTPS / catalog.schema';
-    case 'trino':
-      return 'HTTP / HTTPS / catalog.schema';
     default:
       return translateCatalogCopy(
         translate,

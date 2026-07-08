@@ -18,6 +18,8 @@ import QueryEditor, {
   resolveQueryEditorNavigationTarget,
 } from './QueryEditor';
 
+const queryEditorSource = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
+
 const storeState = vi.hoisted(() => ({
   connections: [
     {
@@ -49,7 +51,10 @@ const storeState = vi.hoisted(() => ({
   saveQuery: vi.fn(),
   theme: 'light',
   languagePreference: 'zh-CN' as 'zh-CN' | 'en-US',
-  appearance: { uiVersion: 'legacy' as 'legacy' | 'v2' },
+  appearance: {
+    uiVersion: 'legacy' as 'legacy' | 'v2',
+    newQuerySqlTemplate: null as string | null,
+  },
   sqlFormatOptions: { keywordCase: 'upper' as const },
   setSqlFormatOptions: vi.fn(),
   queryOptions: {
@@ -76,6 +81,10 @@ const storeState = vi.hoisted(() => ({
       mac: { enabled: false, combo: '' },
       windows: { enabled: false, combo: '' },
     },
+    duplicateCurrentLine: {
+      mac: { enabled: false, combo: '' },
+      windows: { enabled: false, combo: '' },
+    },
     saveQuery: {
       mac: { enabled: true, combo: 'Meta+S' },
       windows: { enabled: true, combo: 'Ctrl+S' },
@@ -92,6 +101,27 @@ const storeState = vi.hoisted(() => ({
 }));
 
 const storeSubscribers = vi.hoisted(() => new Set<() => void>());
+const runtimeEventListeners = vi.hoisted(() => new Map<string, Set<(...args: any[]) => void>>());
+
+const runtimeApi = vi.hoisted(() => ({
+  EventsOn: vi.fn((eventName: string, handler: (...args: any[]) => void) => {
+    const listeners = runtimeEventListeners.get(eventName) ?? new Set<(...args: any[]) => void>();
+    listeners.add(handler);
+    runtimeEventListeners.set(eventName, listeners);
+    return () => {
+      const current = runtimeEventListeners.get(eventName);
+      if (!current) {
+        return;
+      }
+      current.delete(handler);
+      if (current.size === 0) {
+        runtimeEventListeners.delete(eventName);
+      }
+    };
+  }),
+  ClipboardSetText: vi.fn(async () => true),
+  LogInfo: vi.fn(),
+}));
 
 const notifyStoreSubscribers = () => {
   storeSubscribers.forEach((subscriber) => subscriber());
@@ -135,11 +165,34 @@ const autoFetchState = vi.hoisted(() => ({
   visible: false,
 }));
 
+const monacoEditorMockState = vi.hoisted(() => ({
+  deferOnMount: false,
+}));
+
+const defaultEditorContributionResolver = (state: {
+  contentHoverCalls: any[];
+}) => (id: string) => {
+  if (id === 'editor.contrib.contentHover') {
+    return {
+      showContentHover: vi.fn((range: any, mode: any, source: any, focus: any) => {
+        state.contentHoverCalls.push({ range, mode, source, focus });
+      }),
+    };
+  }
+  return null;
+};
+
 const editorState = vi.hoisted(() => {
   const state = {
     value: '',
     editor: null as any,
-    domNode: { style: { cursor: '' }, addEventListener: vi.fn(), removeEventListener: vi.fn() },
+    domNode: {
+      style: { cursor: '' },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      appendChild: vi.fn(),
+      removeChild: vi.fn(),
+    },
     position: { lineNumber: 1, column: 1 },
     selection: null as any,
     providers: [] as any[],
@@ -147,6 +200,7 @@ const editorState = vi.hoisted(() => {
     contentChangeListeners: [] as Array<() => void>,
     cursorPositionListeners: [] as Array<(event: any) => void>,
     modelContentListeners: [] as Array<(event: any) => void>,
+    keyDownListeners: [] as Array<(event: any) => void>,
     mouseMoveListeners: [] as Array<(event: any) => void>,
     mouseDownListeners: [] as Array<(event: any) => void>,
     mouseLeaveListeners: [] as Array<() => void>,
@@ -215,16 +269,7 @@ const editorState = vi.hoisted(() => {
     }),
     getSelection: vi.fn(() => state.selection),
     getDomNode: vi.fn(() => state.domNode),
-    getContribution: vi.fn((id: string) => {
-      if (id === 'editor.contrib.contentHover') {
-        return {
-          showContentHover: vi.fn((range: any, mode: any, source: any, focus: any) => {
-            state.contentHoverCalls.push({ range, mode, source, focus });
-          }),
-        };
-      }
-      return null;
-    }),
+    getContribution: vi.fn(),
     setSelection: vi.fn((selection: any) => {
       state.selection = selection;
     }),
@@ -239,6 +284,7 @@ const editorState = vi.hoisted(() => {
       });
     }),
     addAction: vi.fn(),
+    addCommand: vi.fn(),
     onDidChangeModelContent: vi.fn((listener: (event?: any) => void) => {
       state.contentChangeListeners.push(listener);
       state.modelContentListeners.push(listener);
@@ -246,6 +292,10 @@ const editorState = vi.hoisted(() => {
     }),
     onDidChangeCursorPosition: vi.fn((listener: (event: any) => void) => {
       state.cursorPositionListeners.push(listener);
+      return { dispose: vi.fn() };
+    }),
+    onKeyDown: vi.fn((listener: (event: any) => void) => {
+      state.keyDownListeners.push(listener);
       return { dispose: vi.fn() };
     }),
     onMouseMove: vi.fn((listener: (event: any) => void) => {
@@ -260,6 +310,8 @@ const editorState = vi.hoisted(() => {
       state.mouseLeaveListeners.push(listener);
       return { dispose: vi.fn() };
     }),
+    onDidScrollChange: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidLayoutChange: vi.fn(() => ({ dispose: vi.fn() })),
     deltaDecorations: vi.fn((oldDecorations: string[], newDecorations: any[]) => {
       state.decorationIds = newDecorations.map((_: any, index: number) => `decoration-${index + 1}`);
       return state.decorationIds;
@@ -273,6 +325,13 @@ const editorState = vi.hoisted(() => {
     layout: vi.fn(),
     focus: vi.fn(),
     trigger: vi.fn(),
+    createContextKey: vi.fn((_key: string, initialValue: boolean) => ({
+      set: vi.fn(),
+      get: vi.fn(() => initialValue),
+      reset: vi.fn(),
+    })),
+    getScrolledVisiblePosition: vi.fn(() => ({ left: 0, top: 0, height: 20 })),
+    getOption: vi.fn(() => null),
   };
   return state;
 });
@@ -294,6 +353,8 @@ vi.mock('../store', () => {
   return { useStore };
 });
 
+vi.mock('../../wailsjs/runtime', () => runtimeApi);
+
 vi.mock('../../wailsjs/go/app/App', () => backendApp);
 
 vi.mock('../utils/autoFetchVisibility', () => ({
@@ -305,10 +366,10 @@ vi.mock('@monaco-editor/react', () => ({
     React.useEffect(() => {
       editorState.value = String(defaultValue || '');
       editorState.latestOnChange = onChange;
-      onMount?.(editorState.editor, {
+      const mountEditor = () => onMount?.(editorState.editor, {
         editor: { setTheme: vi.fn() },
         KeyMod: { CtrlCmd: 2048, WinCtrl: 256, Alt: 512, Shift: 1024 },
-        KeyCode: { KeyF: 70, KeyM: 77, KeyQ: 81, KeyS: 83 },
+        KeyCode: { KeyD: 68, KeyE: 69, KeyF: 70, KeyM: 77, KeyQ: 81, KeyS: 83, RightArrow: 39 },
         languages: {
           CompletionItemKind: { Keyword: 1, Function: 2, Field: 3 },
           CompletionItemInsertTextRule: { InsertAsSnippet: 1 },
@@ -348,6 +409,11 @@ vi.mock('@monaco-editor/react', () => ({
           }
         },
       });
+      if (monacoEditorMockState.deferOnMount) {
+        const timer = setTimeout(mountEditor, 0);
+        return () => clearTimeout(timer);
+      }
+      mountEditor();
     }, []);
     return <textarea data-editor value={editorState.value} readOnly />;
   },
@@ -396,7 +462,9 @@ vi.mock('@ant-design/icons', () => {
     CloseOutlined: Icon,
     StopOutlined: Icon,
     RobotOutlined: Icon,
+    SearchOutlined: Icon,
     DatabaseOutlined: Icon,
+    DownOutlined: Icon,
     EyeOutlined: Icon,
     EyeInvisibleOutlined: Icon,
   };
@@ -432,6 +500,10 @@ vi.mock('antd', () => {
   );
   const Empty = ({ description }: { description?: React.ReactNode }) => <div>{description}</div>;
   (Empty as any).PRESENTED_IMAGE_SIMPLE = 'simple';
+  const Input: any = ({ value, onChange, placeholder }: any) => <input value={value} onChange={onChange} placeholder={placeholder} />;
+  Input.TextArea = ({ value, onChange, placeholder, disabled }: any) => (
+    <textarea value={value} onChange={onChange} placeholder={placeholder} disabled={disabled} />
+  );
 
   return {
     Button,
@@ -446,7 +518,7 @@ vi.mock('antd', () => {
         <button type="button" onClick={onOk}>{okText}</button>
       </section>
     ) : null),
-    Input: ({ value, onChange, placeholder }: any) => <input value={value} onChange={onChange} placeholder={placeholder} />,
+    Input,
     Form,
     Dropdown: ({ children, menu }: any) => (
       <>
@@ -460,6 +532,24 @@ vi.mock('antd', () => {
     ),
     Tooltip: ({ children }: any) => <>{children}</>,
     Select: () => null,
+    Segmented: ({ value, onChange, options }: any) => (
+      <div>
+        {(options || []).map((option: any) => {
+          const optionValue = typeof option === 'object' ? option.value : option;
+          const label = typeof option === 'object' ? option.label : option;
+          return (
+            <button
+              key={String(optionValue)}
+              type="button"
+              aria-pressed={value === optionValue}
+              onClick={() => onChange?.(optionValue)}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    ),
     Tabs: ({ activeKey, items, onChange, tabBarExtraContent }: any) => {
       const resolvedActiveKey = tabsState.activeKey ?? activeKey ?? items?.[0]?.key;
       const activeItem = items?.find((item: any) => item.key === resolvedActiveKey) || items?.[0];
@@ -584,6 +674,12 @@ const createDefaultConnections = () => ([
 
 const createQueryEditorSplitNodeMock = (element: any) => {
   const className = String(element?.props?.className || '');
+  if (className.includes('gn-v2-query-monaco-stage')) {
+    return {
+      style: {},
+      getBoundingClientRect: () => ({ height: 300 }),
+    };
+  }
   if (className.includes('gn-v2-query-monaco-shell')) {
     return {
       style: {},
@@ -616,6 +712,8 @@ describe('QueryEditor external SQL save', () => {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
       requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;
@@ -626,6 +724,26 @@ describe('QueryEditor external SQL save', () => {
     vi.stubGlobal('document', {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
+      body: { nodeName: 'BODY', appendChild: vi.fn() },
+      documentElement: { nodeName: 'HTML' },
+      execCommand: vi.fn(() => true),
+      createElement: vi.fn((tagName: string) => ({
+        tagName: String(tagName || '').toUpperCase(),
+        className: '',
+        style: {},
+        setAttribute: vi.fn(),
+        focus: vi.fn(),
+        select: vi.fn(),
+        setSelectionRange: vi.fn(),
+        remove: vi.fn(),
+      })),
+    });
+    vi.stubGlobal('navigator', {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+      platform: 'MacIntel',
+      userAgent: 'Vitest',
     });
     setCurrentLanguage('zh-CN');
     storeState.languagePreference = 'zh-CN';
@@ -633,8 +751,12 @@ describe('QueryEditor external SQL save', () => {
     storeState.shortcutOptions.runQuery.windows = { enabled: false, combo: '' };
     storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: false, combo: '' };
     storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: false, combo: '' };
+    storeState.shortcutOptions.duplicateCurrentLine.mac = { enabled: false, combo: '' };
+    storeState.shortcutOptions.duplicateCurrentLine.windows = { enabled: false, combo: '' };
     storeState.shortcutOptions.saveQuery.mac = { enabled: true, combo: 'Meta+S' };
     storeState.shortcutOptions.saveQuery.windows = { enabled: true, combo: 'Ctrl+S' };
+    runtimeApi.EventsOn.mockClear();
+    runtimeEventListeners.clear();
     storeState.addTab.mockReset();
     storeState.setActiveContext.mockReset();
     storeState.saveQuery.mockReset();
@@ -644,6 +766,7 @@ describe('QueryEditor external SQL save', () => {
     storeState.aiPanelVisible = false;
     storeState.setAIPanelVisible.mockReset();
     storeState.appearance.uiVersion = 'legacy';
+    storeState.appearance.newQuerySqlTemplate = null;
     storeState.queryOptions = {
       maxRows: 5000,
       showColumnComment: true,
@@ -661,6 +784,10 @@ describe('QueryEditor external SQL save', () => {
         windows: { enabled: false, combo: '' },
       },
       selectCurrentStatement: {
+        mac: { enabled: false, combo: '' },
+        windows: { enabled: false, combo: '' },
+      },
+      duplicateCurrentLine: {
         mac: { enabled: false, combo: '' },
         windows: { enabled: false, combo: '' },
       },
@@ -712,6 +839,7 @@ describe('QueryEditor external SQL save', () => {
     backendApp.GenerateQueryID.mockResolvedValue('query-1');
     storeState.connections = createDefaultConnections();
     storeState.sqlLogs = [];
+    storeState.sqlSnippets = [];
     storeState.clearSqlLogs.mockReset();
     storeState.connections[0].config.type = 'mysql';
     storeState.connections[0].config.database = 'main';
@@ -728,6 +856,7 @@ describe('QueryEditor external SQL save', () => {
     editorState.contentChangeListeners = [];
     editorState.cursorPositionListeners = [];
     editorState.modelContentListeners = [];
+    editorState.keyDownListeners = [];
     editorState.mouseMoveListeners = [];
     editorState.mouseDownListeners = [];
     editorState.mouseLeaveListeners = [];
@@ -744,14 +873,19 @@ describe('QueryEditor external SQL save', () => {
     editorState.editor.updateOptions.mockClear();
     editorState.editor.pushUndoStop.mockClear();
     editorState.editor.addAction.mockClear();
+    editorState.editor.onKeyDown.mockClear();
+    editorState.editor.getContribution.mockReset();
+    editorState.editor.getContribution.mockImplementation(defaultEditorContributionResolver(editorState));
     storeState.updateQueryTabDraft.mockReset();
     storeSubscribers.clear();
     editorState.editor.layout.mockClear();
+    editorState.editor.trigger.mockClear();
     clearQueryTabDraft('tab-1');
     clearQueryTabDraft('tab-2');
     clearSQLFileTabDraft('tab-1');
     clearSQLFileTabDraft('tab-2');
     setGlobalImeCompositionActive(false);
+    monacoEditorMockState.deferOnMount = false;
   });
 
   afterEach(() => {
@@ -765,6 +899,26 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(editorState.value).toBe('SELECT * FROM ');
+  });
+
+  it('uses the customized new query template for a fresh blank query tab', async () => {
+    storeState.appearance.newQuerySqlTemplate = 'SELECT id,\n       name\nFROM users;';
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: '' })} />);
+    });
+
+    expect(editorState.value).toBe('SELECT id,\n       name\nFROM users;');
+  });
+
+  it('allows a blank new query template when the default content is cleared', async () => {
+    storeState.appearance.newQuerySqlTemplate = '';
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: '' })} />);
+    });
+
+    expect(editorState.value).toBe('');
   });
 
   it('keeps the query results panel hidden by default on first entry', async () => {
@@ -898,6 +1052,8 @@ describe('QueryEditor external SQL save', () => {
       }),
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
       requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;
@@ -950,6 +1106,952 @@ describe('QueryEditor external SQL save', () => {
     expect(textContent(renderer.toJSON())).not.toContain('等待执行 SQL');
   });
 
+  it('captures the manual SQL AI completion shortcut before Monaco inserts a backslash', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ' })} />);
+    });
+
+    editorState.editor.focus.mockClear();
+    const shortcutEvent = {
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      key: 'Process',
+      code: 'Backslash',
+      keyCode: 220,
+      which: 220,
+      isComposing: false,
+      nativeEvent: {
+        code: 'Backslash',
+        keyCode: 220,
+        which: 220,
+        isComposing: false,
+      },
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const monacoShortcutEvent = {
+      browserEvent: shortcutEvent,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      editorState.keyDownListeners.forEach((listener) => listener(monacoShortcutEvent));
+    });
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(shortcutEvent));
+    });
+
+    expect(monacoShortcutEvent.preventDefault).toHaveBeenCalled();
+    expect(monacoShortcutEvent.stopPropagation).toHaveBeenCalled();
+    expect(shortcutEvent.preventDefault).toHaveBeenCalled();
+    expect(shortcutEvent.stopPropagation).toHaveBeenCalled();
+    expect(editorState.editor.focus).toHaveBeenCalled();
+    expect(editorState.value).toBe('SELECT * FROM ');
+  });
+
+  it('treats a sticky Alt modifier plus Backslash as the manual SQL AI completion shortcut', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ' })} />);
+    });
+
+    const altDownEvent = {
+      type: 'keydown',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      key: 'Alt',
+      code: 'AltLeft',
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const backslashEvent = {
+      type: 'keydown',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      key: '\\',
+      code: 'Backslash',
+      keyCode: 220,
+      which: 220,
+      nativeEvent: {
+        code: 'Backslash',
+        keyCode: 220,
+        which: 220,
+      },
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(altDownEvent));
+      windowListeners.keydown?.forEach((listener) => listener(backslashEvent));
+    });
+
+    expect(backslashEvent.preventDefault).toHaveBeenCalled();
+    expect(backslashEvent.stopPropagation).toHaveBeenCalled();
+    expect(editorState.value).toBe('SELECT * FROM ');
+  });
+
+  it('treats a sticky Alt modifier plus IntlBackslash layout event as the manual SQL AI completion shortcut', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ' })} />);
+    });
+
+    const altDownEvent = {
+      type: 'keydown',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      key: 'Alt',
+      code: 'AltLeft',
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const backslashEvent = {
+      type: 'keydown',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      key: 'Process',
+      code: 'IntlBackslash',
+      keyCode: 226,
+      which: 226,
+      nativeEvent: {
+        code: 'IntlBackslash',
+        keyCode: 226,
+        which: 226,
+      },
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(altDownEvent));
+      windowListeners.keydown?.forEach((listener) => listener(backslashEvent));
+    });
+
+    expect(backslashEvent.preventDefault).toHaveBeenCalled();
+    expect(backslashEvent.stopPropagation).toHaveBeenCalled();
+    expect(editorState.value).toBe('SELECT * FROM ');
+  });
+
+  it('recovers a missed manual SQL AI completion keystroke by removing the inserted backslash', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ' })} />);
+    });
+
+    editorState.editor.focus.mockClear();
+    editorState.editor.executeEdits.mockClear();
+
+    const altDownEvent = {
+      type: 'keydown',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      key: 'Alt',
+      code: 'AltLeft',
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const unmatchedMonacoShortcutEvent = {
+      browserEvent: {
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        key: 'Process',
+        code: '',
+        keyCode: 0,
+        which: 0,
+        isComposing: false,
+        nativeEvent: {
+          code: '',
+          keyCode: 0,
+          which: 0,
+          isComposing: false,
+        },
+        target: null,
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      },
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(altDownEvent));
+      editorState.keyDownListeners.forEach((listener) => listener(unmatchedMonacoShortcutEvent));
+    });
+
+    editorState.value = 'SELECT * FROM \\';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM \\'.length + 1 };
+
+    await act(async () => {
+      editorState.modelContentListeners.forEach((listener) => listener({
+        changes: [{
+          text: '\\',
+        }],
+      }));
+      for (let i = 0; i < 4; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+      'gonavi-trigger-sql-ai-completion-fallback',
+      [expect.objectContaining({
+        text: '',
+      })],
+    );
+    expect(editorState.value).toBe('SELECT * FROM ');
+    expect(editorState.editor.focus).toHaveBeenCalled();
+  });
+
+  it('recovers a stray backslash in table completion context even when the desktop keydown is not observable', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ' })} />);
+    });
+
+    editorState.editor.executeEdits.mockClear();
+    editorState.editor.focus.mockClear();
+
+    editorState.value = 'SELECT * FROM \\';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM \\'.length + 1 };
+
+    await act(async () => {
+      editorState.modelContentListeners.forEach((listener) => listener({
+        changes: [{
+          text: '\\',
+          rangeOffset: 'SELECT * FROM '.length,
+          rangeLength: 0,
+        }],
+      }));
+      for (let i = 0; i < 4; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+      'gonavi-trigger-sql-ai-completion-fallback',
+      [expect.objectContaining({
+        text: '',
+      })],
+    );
+    expect(editorState.value).toBe('SELECT * FROM ');
+    expect(editorState.editor.focus).toHaveBeenCalled();
+  });
+
+  it('recovers a stray backslash from content-change range data even when the cursor is still stale', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ' })} />);
+    });
+
+    editorState.editor.executeEdits.mockClear();
+    editorState.editor.focus.mockClear();
+
+    editorState.value = 'SELECT * FROM \\';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM '.length + 1 };
+
+    await act(async () => {
+      editorState.modelContentListeners.forEach((listener) => listener({
+        changes: [{
+          text: '\\',
+          range: {
+            startLineNumber: 1,
+            startColumn: 'SELECT * FROM '.length + 1,
+            endLineNumber: 1,
+            endColumn: 'SELECT * FROM '.length + 1,
+          },
+        }],
+      }));
+      for (let i = 0; i < 4; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+      'gonavi-trigger-sql-ai-completion-fallback',
+      [expect.objectContaining({
+        text: '',
+      })],
+    );
+    expect(editorState.value).toBe('SELECT * FROM ');
+  });
+
+  it('does not fall back to structured SQL suggestions when manual AI completion is triggered in table-name context', async () => {
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { TABLE_NAME: 'videos' },
+        { TABLE_NAME: 'visits' },
+      ],
+    });
+
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ', dbName: 'main' })} />);
+    });
+
+    editorState.value = 'SELECT * FROM ';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM '.length + 1 };
+    editorState.editor.trigger.mockClear();
+
+    const shortcutEvent = {
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      key: 'Process',
+      code: 'Backslash',
+      keyCode: 220,
+      which: 220,
+      isComposing: false,
+      nativeEvent: {
+        code: 'Backslash',
+        keyCode: 220,
+        which: 220,
+        isComposing: false,
+      },
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const monacoShortcutEvent = {
+      browserEvent: shortcutEvent,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      editorState.keyDownListeners.forEach((listener) => listener(monacoShortcutEvent));
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(editorState.editor.trigger).not.toHaveBeenCalledWith(
+      'gonavi-ai-inline-manual',
+      'editor.action.triggerSuggest',
+      undefined,
+    );
+  });
+
+  it('uses grounded AI inline ghost when manual completion is triggered in table-name context and inline AI is available', async () => {
+    const inlineAiService = {
+      AIGetProviders: vi.fn(async () => [{
+        id: 'openai-main',
+        type: 'openai',
+        name: 'OpenAI',
+        apiKey: '',
+        hasSecret: true,
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-5-mini',
+        maxTokens: 2048,
+        temperature: 0.2,
+      }]),
+      AIGetActiveProvider: vi.fn(async () => 'openai-main'),
+      AIGetUserPromptSettings: vi.fn(async () => ({
+        global: '',
+        database: '',
+        jvm: '',
+        jvmDiagnostic: '',
+      })),
+      AIChatSend: vi.fn(async () => ({ success: true, content: 'videos' })),
+    };
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { TABLE_NAME: 'videos' },
+        { TABLE_NAME: 'visits' },
+      ],
+    });
+
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+      go: {
+        aiservice: {
+          Service: inlineAiService,
+        },
+      },
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ', dbName: 'main' })} />);
+    });
+
+    editorState.value = 'SELECT * FROM ';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM '.length + 1 };
+    editorState.editor.trigger.mockClear();
+    editorState.domNode.appendChild.mockClear();
+
+    const shortcutEvent = {
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      key: 'Process',
+      code: 'Backslash',
+      keyCode: 220,
+      which: 220,
+      isComposing: false,
+      nativeEvent: {
+        code: 'Backslash',
+        keyCode: 220,
+        which: 220,
+        isComposing: false,
+      },
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const monacoShortcutEvent = {
+      browserEvent: shortcutEvent,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      editorState.keyDownListeners.forEach((listener) => listener(monacoShortcutEvent));
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(inlineAiService.AIChatSend).toHaveBeenCalledTimes(1);
+    expect(editorState.domNode.appendChild).toHaveBeenCalled();
+    const ghostOverlay = editorState.domNode.appendChild.mock.calls[
+      editorState.domNode.appendChild.mock.calls.length - 1
+    ]?.[0];
+    expect(ghostOverlay?.className).toBe('gonavi-query-editor-ai-inline-ghost-overlay');
+    expect(ghostOverlay?.textContent).toBe('videos');
+    expect(editorState.editor.trigger).not.toHaveBeenCalledWith(
+      'gonavi-ai-inline-manual',
+      'editor.action.triggerSuggest',
+      undefined,
+    );
+  });
+
+  it('uses local SQL memory for manual inline completion in an empty editor', async () => {
+    storeState.sqlLogs = [{
+      id: 'sql-log-1',
+      timestamp: Date.now(),
+      sql: 'SELECT * FROM videos WHERE code = ?;',
+      status: 'success',
+      duration: 12,
+      dbName: 'main',
+    } as any];
+
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: '', dbName: 'main' })} />);
+    });
+
+    editorState.value = '';
+    editorState.position = { lineNumber: 1, column: 1 };
+    editorState.editor.trigger.mockClear();
+    editorState.domNode.appendChild.mockClear();
+
+    const shortcutEvent = {
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      key: 'Process',
+      code: 'Backslash',
+      keyCode: 220,
+      which: 220,
+      isComposing: false,
+      nativeEvent: {
+        code: 'Backslash',
+        keyCode: 220,
+        which: 220,
+        isComposing: false,
+      },
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    const monacoShortcutEvent = {
+      browserEvent: shortcutEvent,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      editorState.keyDownListeners.forEach((listener) => listener(monacoShortcutEvent));
+      for (let i = 0; i < 4; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(editorState.value).toBe('');
+    expect(editorState.domNode.appendChild).toHaveBeenCalled();
+    const ghostOverlay = editorState.domNode.appendChild.mock.calls[
+      editorState.domNode.appendChild.mock.calls.length - 1
+    ]?.[0];
+    expect(ghostOverlay?.className).toBe('gonavi-query-editor-ai-inline-ghost-overlay');
+    expect(ghostOverlay?.textContent).toBe('SELECT * FROM videos WHERE code = ?;');
+    expect(editorState.editor.trigger).not.toHaveBeenCalledWith(
+      'gonavi-ai-inline-manual',
+      'editor.action.triggerSuggest',
+      undefined,
+    );
+  });
+
+  it('uses local SQL memory for automatic inline completion in update table context', async () => {
+    vi.useFakeTimers();
+    try {
+      storeState.sqlLogs = [{
+        id: 'sql-log-2',
+        timestamp: Date.now(),
+        sql: 'UPDATE videos SET status = 1 WHERE id = ?;',
+        status: 'success',
+        duration: 9,
+        dbName: 'main',
+      } as any];
+
+      const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+      vi.stubGlobal('window', {
+        addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+          windowListeners[type] ||= [];
+          windowListeners[type].push(listener);
+        }),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        setTimeout,
+        clearTimeout,
+        requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+          callback(0);
+          return 1;
+        }),
+        cancelAnimationFrame: vi.fn(),
+        innerHeight: 900,
+      });
+
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: 'UPDAT', dbName: 'main' })} />);
+      });
+
+      editorState.value = 'UPDATE';
+      editorState.position = { lineNumber: 1, column: 'UPDATE'.length + 1 };
+      editorState.editor.trigger.mockClear();
+      editorState.domNode.appendChild.mockClear();
+
+      await act(async () => {
+        editorState.latestOnChange?.('UPDATE');
+        editorState.modelContentListeners.forEach((listener) => listener({
+          changes: [{ text: 'E' }],
+        }));
+        vi.advanceTimersByTime(120);
+        for (let i = 0; i < 8; i += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(editorState.domNode.appendChild).toHaveBeenCalled();
+      const ghostOverlay = editorState.domNode.appendChild.mock.calls[
+        editorState.domNode.appendChild.mock.calls.length - 1
+      ]?.[0];
+      expect(ghostOverlay?.className).toBe('gonavi-query-editor-ai-inline-ghost-overlay');
+      expect(ghostOverlay?.textContent).toBe(' videos SET status = 1 WHERE id = ?;');
+      expect(editorState.editor.trigger).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('continues accepted inline SQL ghost with grounded table AI completion', async () => {
+    vi.useFakeTimers();
+    try {
+      const inlineAiService = {
+        AIGetProviders: vi.fn(async () => [{
+          id: 'openai-main',
+          type: 'openai',
+          name: 'OpenAI',
+          apiKey: '',
+          hasSecret: true,
+          baseUrl: 'https://api.openai.com/v1',
+          model: 'gpt-5-mini',
+          maxTokens: 2048,
+          temperature: 0.2,
+        }]),
+        AIGetActiveProvider: vi.fn(async () => 'openai-main'),
+        AIGetUserPromptSettings: vi.fn(async () => ({
+          global: '',
+          database: '',
+          jvm: '',
+          jvmDiagnostic: '',
+        })),
+        AIChatSend: vi.fn(async () => ({ success: true, content: 'videos' })),
+      };
+      backendApp.DBGetTables.mockResolvedValueOnce({
+        success: true,
+        data: [
+          { TABLE_NAME: 'videos' },
+          { TABLE_NAME: 'visits' },
+        ],
+      });
+
+      const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+      vi.stubGlobal('window', {
+        addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+          windowListeners[type] ||= [];
+          windowListeners[type].push(listener);
+        }),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        setTimeout,
+        clearTimeout,
+        requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+          callback(0);
+          return 1;
+        }),
+        cancelAnimationFrame: vi.fn(),
+        innerHeight: 900,
+        go: {
+          aiservice: {
+            Service: inlineAiService,
+          },
+        },
+      });
+
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: 'SELECT', dbName: 'main' })} />);
+      });
+
+      editorState.value = 'SELECT';
+      editorState.position = { lineNumber: 1, column: 'SELECT'.length + 1 };
+      editorState.editor.executeEdits.mockClear();
+      editorState.editor.trigger.mockClear();
+      editorState.domNode.appendChild.mockClear();
+
+      await act(async () => {
+        editorState.latestOnChange?.('SELECT');
+        editorState.modelContentListeners.forEach((listener) => listener({
+          changes: [{ text: 'T' }],
+        }));
+        vi.advanceTimersByTime(120);
+        for (let i = 0; i < 8; i += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      const acceptInlineGhostCall = editorState.editor.addCommand.mock.calls.find(
+        (call: any[]) => call[2] === 'gonaviAiInlineSuggestionVisible',
+      );
+      expect(acceptInlineGhostCall).toBeTruthy();
+
+      await act(async () => {
+        acceptInlineGhostCall?.[1]?.();
+        vi.advanceTimersByTime(1);
+        for (let i = 0; i < 8; i += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+        'gonavi-ai-inline-sql-completion',
+        [expect.objectContaining({
+          text: ' * FROM ',
+        })],
+      );
+      expect(editorState.value).toBe('SELECT * FROM ');
+      expect(inlineAiService.AIChatSend).toHaveBeenCalledTimes(1);
+      expect(editorState.domNode.appendChild).toHaveBeenCalled();
+      const ghostOverlay = editorState.domNode.appendChild.mock.calls[
+        editorState.domNode.appendChild.mock.calls.length - 1
+      ]?.[0];
+      expect(ghostOverlay?.className).toBe('gonavi-query-editor-ai-inline-ghost-overlay');
+      expect(ghostOverlay?.textContent).toBe('videos');
+      expect(editorState.editor.trigger).not.toHaveBeenCalledWith(
+        'gonavi-ai-inline-auto',
+        'editor.action.triggerSuggest',
+        undefined,
+      );
+
+      editorState.editor.executeEdits.mockClear();
+      editorState.editor.trigger.mockClear();
+
+      await act(async () => {
+        acceptInlineGhostCall?.[1]?.();
+        vi.advanceTimersByTime(1);
+        for (let i = 0; i < 8; i += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+        'gonavi-ai-inline-sql-completion',
+        [expect.objectContaining({
+          text: 'videos',
+        })],
+      );
+      expect(editorState.value).toBe('SELECT * FROM videos');
+      expect(inlineAiService.AIChatSend).toHaveBeenCalledTimes(1);
+      expect(editorState.editor.trigger).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('strips a stray backslash before keeping manual toolbar AI completion on the AI path', async () => {
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { TABLE_NAME: 'videos' },
+        { TABLE_NAME: 'visits' },
+      ],
+    });
+
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'SELECT * FROM \\', dbName: 'main' })} />);
+    });
+
+    editorState.value = 'SELECT * FROM \\';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM \\'.length + 1 };
+    editorState.editor.executeEdits.mockClear();
+    editorState.editor.trigger.mockClear();
+
+    await act(async () => {
+      findButton(renderer!, 'AI').props.onClick();
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+      'gonavi-manual-sql-ai-strip-marker',
+      [expect.objectContaining({
+        text: '',
+      })],
+    );
+    expect(editorState.value).toBe('SELECT * FROM ');
+    expect(editorState.editor.trigger).not.toHaveBeenCalledWith(
+      'gonavi-ai-inline-manual',
+      'editor.action.triggerSuggest',
+      undefined,
+    );
+  });
+
+  it('keeps the AI dropdown completion action on the AI path instead of opening plain suggestions', async () => {
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { TABLE_NAME: 'videos' },
+        { TABLE_NAME: 'visits' },
+      ],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'SELECT * FROM ', dbName: 'main' })} />);
+    });
+
+    editorState.value = 'SELECT * FROM ';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM '.length + 1 };
+    editorState.editor.trigger.mockClear();
+
+    await act(async () => {
+      findButton(renderer!, '触发 SQL AI 自动补全').props.onClick();
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(editorState.editor.trigger).not.toHaveBeenCalledWith(
+      'gonavi-ai-inline-manual',
+      'editor.action.triggerSuggest',
+      undefined,
+    );
+  });
+
   it('shows the query results panel with the shortcut after manually hiding it', async () => {
     storeState.appearance.uiVersion = 'v2';
 
@@ -961,6 +2063,8 @@ describe('QueryEditor external SQL save', () => {
       }),
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
       requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;
@@ -1033,6 +2137,8 @@ describe('QueryEditor external SQL save', () => {
       }),
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
       requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;
@@ -1087,6 +2193,8 @@ describe('QueryEditor external SQL save', () => {
       }),
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
       requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;
@@ -1373,12 +2481,66 @@ describe('QueryEditor external SQL save', () => {
     });
   });
 
+  it('does not suggest tables from other databases for unqualified FROM completion', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.database = 'mkefu_ai_dev';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({
+      success: true,
+      data: [{ Database: 'mkefu_ai_dev' }, { Database: 'mkefu_dev' }],
+    });
+    backendApp.DBGetTables.mockImplementation(async (_config: any, dbName: string) => {
+      if (dbName === 'mkefu_ai_dev') {
+        return { success: true, data: [{ Tables_in_mkefu_ai_dev: 'ai_conversation' }] };
+      }
+      if (dbName === 'mkefu_dev') {
+        return { success: true, data: [{ Tables_in_mkefu_dev: 'wechat_visitor_id_bak' }] };
+      }
+      return { success: true, data: [] };
+    });
+    backendApp.DBGetAllColumns.mockResolvedValue({ success: true, data: [] });
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '', dbName: 'mkefu_ai_dev' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const sqlProvider = editorState.providers.find((provider) => Array.isArray(provider.triggerCharacters) && provider.triggerCharacters.includes('.'));
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.value = 'SELECT * FROM wechat';
+    editorState.latestOnChange?.(editorState.value);
+    const result = await sqlProvider.provideCompletionItems(editorState.editor.getModel(), { lineNumber: 1, column: editorState.value.length + 1 });
+    const labels = result.suggestions.map((item: any) => item.label);
+
+    expect(labels).not.toContain('wechat_visitor_id_bak');
+    expect(labels).not.toContain('mkefu_dev.wechat_visitor_id_bak');
+    expect(backendApp.DBGetTables.mock.calls.map((call: any[]) => call[1])).toEqual(
+      expect.arrayContaining(['mkefu_ai_dev']),
+    );
+    expect(backendApp.DBGetTables.mock.calls.map((call: any[]) => call[1])).not.toContain('mkefu_dev');
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
   it('lazy loads current database tables for FROM completion when metadata is not preloaded', async () => {
     let renderer!: ReactTestRenderer;
     autoFetchState.visible = false;
     backendApp.DBGetTables.mockResolvedValueOnce({
       success: true,
       data: [{ Table: 'fs_org_auth_application' }],
+    });
+    backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+      if (/table_comment|information_schema\.tables/i.test(sql)) {
+        return { success: true, data: [{ table_name: 'fs_org_auth_application', table_comment: '认证申请表' }] };
+      }
+      return { success: true, data: [] };
     });
 
     await act(async () => {
@@ -1392,9 +2554,11 @@ describe('QueryEditor external SQL save', () => {
     editorState.latestOnChange?.(editorState.value);
     const result = await sqlProvider.provideCompletionItems(editorState.editor.getModel(), { lineNumber: 1, column: editorState.value.length + 1 });
     const labels = result.suggestions.map((item: any) => item.label);
+    const tableSuggestion = result.suggestions.find((item: any) => item.label === 'fs_org_auth_application');
 
     expect(backendApp.DBGetTables).toHaveBeenCalledWith(expect.any(Object), 'front_end_sys');
     expect(labels).toContain('fs_org_auth_application');
+    expect(tableSuggestion?.detail).toBe('表 - 认证申请表');
     await act(async () => {
       renderer.unmount();
     });
@@ -1680,6 +2844,132 @@ describe('QueryEditor external SQL save', () => {
 
     expect(labels).toContain('node_id');
     expect(labels).toContain('node_name');
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
+  it('prioritizes SQL keywords for a new statement instead of leaking previous statement columns', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({
+      success: true,
+      data: [{ Database: 'main' }, { Database: 'analytics' }],
+    });
+    backendApp.DBGetTables.mockImplementation(async (_config: any, dbName: string) => {
+      if (dbName === 'main') {
+        return { success: true, data: [{ Tables_in_main: 'users' }] };
+      }
+      if (dbName === 'analytics') {
+        return { success: true, data: [{ Tables_in_analytics: 'events' }] };
+      }
+      return { success: true, data: [] };
+    });
+    backendApp.DBGetAllColumns.mockImplementation(async (_config: any, dbName: string) => {
+      if (dbName === 'main') {
+        return {
+          success: true,
+          data: [{ tableName: 'users', name: 'updated_by', type: 'varchar(32)' }],
+        };
+      }
+      if (dbName === 'analytics') {
+        return {
+          success: true,
+          data: [{ tableName: 'events', name: 'update_time', type: 'timestamp' }],
+        };
+      }
+      return { success: true, data: [] };
+    });
+
+    editorState.value = 'SELECT *\nFROM analytics.events;\nupdate';
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const sqlProvider = findSqlCompletionProvider();
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.latestOnChange?.(editorState.value);
+    const result = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 3, column: 'update'.length + 1 },
+    );
+    const labels = result.suggestions.map((item: any) => item.label);
+
+    expect(labels[0]).toBe('UPDATE');
+    expect(labels).not.toContain('update_time');
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
+  it('limits column completion to tables referenced before the cursor in the current statement', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({
+      success: true,
+      data: [{ Database: 'main' }, { Database: 'analytics' }],
+    });
+    backendApp.DBGetTables.mockImplementation(async (_config: any, dbName: string) => {
+      if (dbName === 'main') {
+        return { success: true, data: [{ Tables_in_main: 'users' }] };
+      }
+      if (dbName === 'analytics') {
+        return { success: true, data: [{ Tables_in_analytics: 'events' }] };
+      }
+      return { success: true, data: [] };
+    });
+    backendApp.DBGetAllColumns.mockImplementation(async (_config: any, dbName: string) => {
+      if (dbName === 'main') {
+        return {
+          success: true,
+          data: [{ tableName: 'users', name: 'updated_by', type: 'varchar(32)' }],
+        };
+      }
+      if (dbName === 'analytics') {
+        return {
+          success: true,
+          data: [{ tableName: 'events', name: 'update_time', type: 'timestamp' }],
+        };
+      }
+      return { success: true, data: [] };
+    });
+
+    editorState.value = 'SELECT * FROM analytics.events;\nSELECT * FROM main.users WHERE upd';
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const sqlProvider = findSqlCompletionProvider();
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.latestOnChange?.(editorState.value);
+    const result = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 2, column: 'SELECT * FROM main.users WHERE upd'.length + 1 },
+    );
+    const labels = result.suggestions.map((item: any) => item.label);
+
+    expect(labels).toContain('updated_by');
+    expect(labels).not.toContain('update_time');
 
     await act(async () => {
       renderer.unmount();
@@ -2713,6 +4003,9 @@ describe('QueryEditor external SQL save', () => {
     const initialOptions = editorState.editor.updateOptions.mock.calls[0]?.[0];
     expect(initialOptions).toMatchObject({
       fixedOverflowWidgets: true,
+      find: {
+        addExtraSpaceOnTop: true,
+      },
       hover: {
         enabled: true,
         delay: 1000,
@@ -2776,6 +4069,8 @@ describe('QueryEditor external SQL save', () => {
     storeState.shortcutOptions.runQuery.windows = { enabled: true, combo: 'Ctrl+Q' };
     storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+Q' };
     storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+Q' };
+    storeState.shortcutOptions.duplicateCurrentLine.mac = { enabled: true, combo: 'Meta+D' };
+    storeState.shortcutOptions.duplicateCurrentLine.windows = { enabled: true, combo: 'Ctrl+D' };
 
     await act(async () => {
       create(<QueryEditor tab={createTab()} />);
@@ -2787,8 +4082,14 @@ describe('QueryEditor external SQL save', () => {
     expect(findEditorAction('gonavi.runQuery')).toMatchObject({
       label: 'GoNavi: Run SQL',
     });
+    expect(findEditorAction('gonavi.insertSqlSnippet')).toMatchObject({
+      label: 'Insert SQL Snippet',
+    });
     expect(findEditorAction('gonavi.selectCurrentStatement')).toMatchObject({
-      label: 'GoNavi: Select Current Statement',
+      label: 'GoNavi: Select Current Line and Copy',
+    });
+    expect(findEditorAction('gonavi.duplicateCurrentLine')).toMatchObject({
+      label: 'GoNavi: Duplicate Current Line Below',
     });
     expect(findEditorAction('gonavi.saveQuery')).toMatchObject({
       label: 'GoNavi: Save Query',
@@ -2800,6 +4101,8 @@ describe('QueryEditor external SQL save', () => {
     storeState.shortcutOptions.runQuery.windows = { enabled: true, combo: 'Ctrl+Q' };
     storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+Q' };
     storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+Q' };
+    storeState.shortcutOptions.duplicateCurrentLine.mac = { enabled: true, combo: 'Meta+D' };
+    storeState.shortcutOptions.duplicateCurrentLine.windows = { enabled: true, combo: 'Ctrl+D' };
 
     await act(async () => {
       create(<QueryEditor tab={createTab()} />);
@@ -2811,8 +4114,14 @@ describe('QueryEditor external SQL save', () => {
     expect(findEditorAction('gonavi.runQuery')).toMatchObject({
       label: 'GoNavi: 执行 SQL',
     });
+    expect(findEditorAction('gonavi.insertSqlSnippet')).toMatchObject({
+      label: '插入 SQL 片段',
+    });
     expect(findEditorAction('gonavi.selectCurrentStatement')).toMatchObject({
-      label: 'GoNavi: 选择当前语句',
+      label: 'GoNavi: 选择当前行并复制',
+    });
+    expect(findEditorAction('gonavi.duplicateCurrentLine')).toMatchObject({
+      label: 'GoNavi: 复制当前行到下一行',
     });
     expect(findEditorAction('gonavi.saveQuery')).toMatchObject({
       label: 'GoNavi: 保存查询',
@@ -2826,7 +4135,9 @@ describe('QueryEditor external SQL save', () => {
 
     expect(findEditorActionLabels('gonavi.queryEditor.showObjectInfo')).toContain('GoNavi: Show Object Info');
     expect(findEditorActionLabels('gonavi.runQuery')).toContain('GoNavi: Run SQL');
-    expect(findEditorActionLabels('gonavi.selectCurrentStatement')).toContain('GoNavi: Select Current Statement');
+    expect(findEditorActionLabels('gonavi.insertSqlSnippet')).toContain('Insert SQL Snippet');
+    expect(findEditorActionLabels('gonavi.selectCurrentStatement')).toContain('GoNavi: Select Current Line and Copy');
+    expect(findEditorActionLabels('gonavi.duplicateCurrentLine')).toContain('GoNavi: Duplicate Current Line Below');
     expect(findEditorActionLabels('gonavi.saveQuery')).toContain('GoNavi: Save Query');
     expect(findEditorAction('gonavi.queryEditor.showObjectInfo')).toMatchObject({
       label: 'GoNavi: Show Object Info',
@@ -2834,11 +4145,32 @@ describe('QueryEditor external SQL save', () => {
     expect(findEditorAction('gonavi.runQuery')).toMatchObject({
       label: 'GoNavi: Run SQL',
     });
+    expect(findEditorAction('gonavi.insertSqlSnippet')).toMatchObject({
+      label: 'Insert SQL Snippet',
+    });
     expect(findEditorAction('gonavi.selectCurrentStatement')).toMatchObject({
-      label: 'GoNavi: Select Current Statement',
+      label: 'GoNavi: Select Current Line and Copy',
+    });
+    expect(findEditorAction('gonavi.duplicateCurrentLine')).toMatchObject({
+      label: 'GoNavi: Duplicate Current Line Below',
     });
     expect(findEditorAction('gonavi.saveQuery')).toMatchObject({
       label: 'GoNavi: Save Query',
+    });
+  });
+
+  it('registers the SQL snippet context-menu action even when Monaco onMount is deferred', async () => {
+    monacoEditorMockState.deferOnMount = true;
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab()} />);
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(findEditorAction('gonavi.insertSqlSnippet')).toMatchObject({
+      label: '插入 SQL 片段',
     });
   });
 
@@ -2964,7 +4296,7 @@ describe('QueryEditor external SQL save', () => {
     }
   });
 
-  it('shows "No selectable SQL statement." in English when selecting the current statement without selectable SQL', async () => {
+  it('shows "No copyable content on the current line." in English when selecting an empty current line', async () => {
     storeState.languagePreference = 'en-US';
     setCurrentLanguage('en-US');
     storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+Q' };
@@ -2982,11 +4314,11 @@ describe('QueryEditor external SQL save', () => {
       await selectCurrentStatementAction.run();
     });
 
-    expect(messageApi.info).toHaveBeenCalledWith('No selectable SQL statement.');
-    expect(messageApi.info).not.toHaveBeenCalledWith('没有可选择的 SQL 语句。');
+    expect(messageApi.info).toHaveBeenCalledWith('No copyable content on the current line.');
+    expect(messageApi.info).not.toHaveBeenCalledWith('当前行没有可复制内容。');
   });
 
-  it('selects only the current SQL statement when the editor content uses CRLF line endings', async () => {
+  it('selects and copies only the current line when the editor content uses CRLF line endings', async () => {
     storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+Q' };
     storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+Q' };
     const sql = [
@@ -3010,12 +4342,299 @@ describe('QueryEditor external SQL save', () => {
       await selectCurrentStatementAction.run();
     });
 
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    expect(messageApi.success).toHaveBeenCalledWith('已复制到剪贴板');
     expect(editorState.selection).toMatchObject({
       startLineNumber: 5,
       startColumn: 1,
       endLineNumber: 5,
-      endColumn: 'SELECT a.id, a.name FROM third_table a ORDER BY a.id;'.length,
+      endColumn: 'SELECT a.id, a.name FROM third_table a ORDER BY a.id;'.length + 1,
     });
+  });
+
+  it('falls back to the browser clipboard when the Monaco copy command is unavailable', async () => {
+    storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+Q' };
+    storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+Q' };
+    (document.execCommand as any).mockReturnValueOnce(false);
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'SELECT 1;\nSELECT 2 AS two;\nSELECT 3;',
+        readOnly: true,
+      })} />);
+    });
+    editorState.position = { lineNumber: 2, column: 8 };
+    editorState.selection = null;
+
+    const selectCurrentStatementAction = findEditorAction('gonavi.selectCurrentStatement');
+    expect(selectCurrentStatementAction).toBeTruthy();
+
+    await act(async () => {
+      await selectCurrentStatementAction.run();
+    });
+
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('SELECT 2 AS two;');
+    expect(messageApi.success).toHaveBeenCalledWith('已复制到剪贴板');
+    expect(messageApi.error).not.toHaveBeenCalled();
+    expect(editorState.selection).toMatchObject({
+      startLineNumber: 2,
+      startColumn: 1,
+      endLineNumber: 2,
+      endColumn: 'SELECT 2 AS two;'.length + 1,
+    });
+  });
+
+  it('duplicates the current line below and keeps the caret column', async () => {
+    storeState.shortcutOptions.duplicateCurrentLine.mac = { enabled: true, combo: 'Meta+D' };
+    storeState.shortcutOptions.duplicateCurrentLine.windows = { enabled: true, combo: 'Ctrl+D' };
+    editorState.position = { lineNumber: 2, column: 6 };
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'SELECT 1;\nFROM dual',
+        readOnly: true,
+      })} />);
+    });
+
+    const duplicateCurrentLineAction = findEditorAction('gonavi.duplicateCurrentLine');
+    expect(duplicateCurrentLineAction).toBeTruthy();
+
+    await act(async () => {
+      duplicateCurrentLineAction.run();
+    });
+
+    expect(editorState.value).toBe('SELECT 1;\nFROM dual\nFROM dual');
+    expect(editorState.position).toEqual({ lineNumber: 3, column: 6 });
+    expect(editorState.selection).toMatchObject({
+      startLineNumber: 3,
+      startColumn: 6,
+      endLineNumber: 3,
+      endColumn: 6,
+    });
+    expect(editorState.editor.pushUndoStop).toHaveBeenCalled();
+  });
+
+  it('intercepts Ctrl/Cmd+E at window level and copies the current line instead of leaking to host search', async () => {
+    storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+E' };
+    storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+E' };
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'SELECT 1;\nSELECT 2 AS two;\nSELECT 3;',
+        readOnly: true,
+      })} />);
+    });
+    editorState.position = { lineNumber: 2, column: 8 };
+    editorState.selection = null;
+    (window.dispatchEvent as any).mockClear();
+    (navigator.clipboard.writeText as any).mockClear();
+
+    const isMacRuntime = /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
+    const event = {
+      ctrlKey: !isMacRuntime,
+      metaKey: isMacRuntime,
+      altKey: false,
+      shiftKey: false,
+      key: 'e',
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(event));
+      await Promise.resolve();
+    });
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(messageApi.success).toHaveBeenCalledWith('已复制到剪贴板');
+    expect(editorState.editor.setSelections).not.toHaveBeenCalled();
+    expect(editorState.selection).toMatchObject({
+      startLineNumber: 2,
+      startColumn: 1,
+      endLineNumber: 2,
+      endColumn: 'SELECT 2 AS two;'.length + 1,
+    });
+    expect(
+      (window.dispatchEvent as any).mock.calls.map((call: any[]) => call[0]?.type),
+    ).not.toContain('gonavi:find-active-query');
+  });
+
+  it('keeps SQL editor search on Cmd+F only and suppresses Monaco Cmd+E find-with-selection', async () => {
+    storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: false, combo: '' };
+    storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: false, combo: '' };
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'SELECT 1;\nSELECT 2 AS two;\nSELECT 3;',
+        readOnly: true,
+      })} />);
+    });
+    (window.dispatchEvent as any).mockClear();
+    (document.execCommand as any).mockClear();
+
+    expect(findEditorAction('gonavi.findInEditor')).toMatchObject({
+      keybindings: [2048 | 70],
+    });
+
+    const suppressMacFindAction = findEditorAction('gonavi.suppressMacFindWithSelection');
+    expect(suppressMacFindAction).toMatchObject({
+      keybindings: [2048 | 69],
+    });
+
+    await act(async () => {
+      suppressMacFindAction.run();
+      await Promise.resolve();
+    });
+
+    expect(
+      (window.dispatchEvent as any).mock.calls.map((call: any[]) => call[0]?.type),
+    ).not.toContain('gonavi:find-active-query');
+    expect(document.execCommand).not.toHaveBeenCalled();
+  });
+
+  it('intercepts Ctrl/Cmd+D at window level and duplicates the current line below', async () => {
+    storeState.shortcutOptions.duplicateCurrentLine.mac = { enabled: true, combo: 'Meta+D' };
+    storeState.shortcutOptions.duplicateCurrentLine.windows = { enabled: true, combo: 'Ctrl+D' };
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'SELECT 1;\nSELECT 2 AS two;\nSELECT 3;',
+        readOnly: true,
+      })} />);
+    });
+    editorState.position = { lineNumber: 2, column: 8 };
+    editorState.selection = null;
+    (window.dispatchEvent as any).mockClear();
+
+    const isMacRuntime = /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
+    const event = {
+      ctrlKey: !isMacRuntime,
+      metaKey: isMacRuntime,
+      altKey: false,
+      shiftKey: false,
+      key: 'd',
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(event));
+      await Promise.resolve();
+    });
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(editorState.value).toBe('SELECT 1;\nSELECT 2 AS two;\nSELECT 2 AS two;\nSELECT 3;');
+    expect(editorState.position).toEqual({ lineNumber: 3, column: 8 });
+    expect(
+      (window.dispatchEvent as any).mock.calls.map((call: any[]) => call[0]?.type),
+    ).not.toContain('gonavi:find-active-query');
+  });
+
+  it('responds to the macOS native Cmd+E fallback event and copies the current line', async () => {
+    storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+E' };
+    storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+E' };
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'SELECT 1;\nSELECT 2 AS two;\nSELECT 3;',
+        readOnly: true,
+      })} />);
+    });
+    editorState.position = { lineNumber: 2, column: 8 };
+    editorState.selection = null;
+    (document.execCommand as any).mockClear();
+
+    const nativeListeners = runtimeEventListeners.get('gonavi:native-select-current-line');
+    expect(nativeListeners?.size ?? 0).toBeGreaterThan(0);
+
+    await act(async () => {
+      nativeListeners?.forEach((listener) => listener());
+      await Promise.resolve();
+    });
+
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(messageApi.success).toHaveBeenCalledWith('已复制到剪贴板');
+    expect(editorState.editor.setSelections).not.toHaveBeenCalled();
+    expect(editorState.selection).toMatchObject({
+      startLineNumber: 2,
+      startColumn: 1,
+      endLineNumber: 2,
+      endColumn: 'SELECT 2 AS two;'.length + 1,
+    });
+  });
+
+  it('uses the last tracked cursor position for the macOS native Cmd+E fallback when the live cursor is unavailable', async () => {
+    storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+E' };
+    storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+E' };
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'SELECT 1;\nSELECT 2 AS two;\nSELECT 3;',
+        readOnly: true,
+      })} />);
+    });
+
+    await act(async () => {
+      editorState.cursorPositionListeners.forEach((listener) => listener({
+        position: { lineNumber: 2, column: 8 },
+      }));
+    });
+    editorState.position = null as any;
+    editorState.selection = null;
+    (document.execCommand as any).mockClear();
+
+    const nativeListeners = runtimeEventListeners.get('gonavi:native-select-current-line');
+    expect(nativeListeners?.size ?? 0).toBeGreaterThan(0);
+
+    await act(async () => {
+      nativeListeners?.forEach((listener) => listener());
+      await Promise.resolve();
+    });
+
+    expect(editorState.editor.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 8 });
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(messageApi.success).toHaveBeenCalledWith('已复制到剪贴板');
   });
 
   it('shows the object info miss toast in English when the cursor is not on a recognized table or column', async () => {
@@ -3065,6 +4684,106 @@ describe('QueryEditor external SQL save', () => {
     expect(findEditorActionLabels('ai.generateSQL')).not.toContain('🤖 AI 生成 SQL');
     expect(findEditorActionLabels('ai.explainSQL')).not.toContain('🤖 AI 解释 SQL');
     expect(findEditorActionLabels('ai.optimizeSQL')).not.toContain('🤖 AI 优化 SQL');
+  });
+
+  it('opens the SQL snippet picker from the context menu action and inserts the selected snippet', async () => {
+    storeState.appearance.newQuerySqlTemplate = '';
+    storeState.sqlSnippets = [
+      {
+        id: 'snippet-select-user',
+        prefix: 'selu',
+        name: 'Select User',
+        description: 'Select rows from the user table',
+        body: 'SELECT ${1:id} FROM ${2:user_table}$0;',
+        isBuiltin: false,
+        createdAt: 1,
+      },
+    ];
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '' })} />);
+    });
+
+    await act(async () => {
+      await findEditorAction('gonavi.insertSqlSnippet').run();
+    });
+
+    expect(renderer.root.findByProps({ 'data-query-editor-snippet-picker': 'true' })).toBeTruthy();
+
+    await act(async () => {
+      renderer.root.findByProps({
+        'data-query-editor-snippet-item': 'snippet-select-user',
+      }).props.onClick();
+    });
+
+    expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+      'gonavi-insert-sql-snippet',
+      [expect.objectContaining({
+        text: 'SELECT id FROM user_table;',
+      })],
+    );
+    expect(editorState.value).toBe('SELECT id FROM user_table;');
+    expect(renderer.root.findAllByProps({ 'data-query-editor-snippet-picker': 'true' })).toHaveLength(0);
+  });
+
+  it('prefers Monaco snippet controller insertion when the controller is available', async () => {
+    storeState.appearance.newQuerySqlTemplate = '';
+    storeState.sqlSnippets = [
+      {
+        id: 'snippet-alter-table',
+        prefix: 'alt',
+        name: 'ALTER TABLE',
+        description: 'ALTER TABLE add column template',
+        body: 'ALTER TABLE ${1:table_name}\\nADD COLUMN ${2:column_name} VARCHAR(255);$0',
+        isBuiltin: true,
+        createdAt: 1,
+      },
+    ];
+
+    const snippetController = {
+      insert: vi.fn((body: string) => {
+        expect(body).toBe('ALTER TABLE ${1:table_name}\\nADD COLUMN ${2:column_name} VARCHAR(255);$0');
+        editorState.value = 'ALTER TABLE demo_table\nADD COLUMN user_name VARCHAR(255);';
+      }),
+    };
+    editorState.editor.getContribution.mockImplementation((id: string) => {
+      if (id === 'snippetController2') {
+        return snippetController;
+      }
+      return defaultEditorContributionResolver(editorState)(id);
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '' })} />);
+    });
+
+    await act(async () => {
+      await findEditorAction('gonavi.insertSqlSnippet').run();
+    });
+
+    await act(async () => {
+      renderer.root.findByProps({
+        'data-query-editor-snippet-item': 'snippet-alter-table',
+      }).props.onClick();
+    });
+
+    expect(snippetController.insert).toHaveBeenCalledTimes(1);
+    expect(editorState.editor.trigger).not.toHaveBeenCalledWith(
+      'gonavi.insertSqlSnippet',
+      'editor.action.insertSnippet',
+      expect.anything(),
+    );
+    expect(editorState.editor.executeEdits).not.toHaveBeenCalled();
+    expect(editorState.value).toBe('ALTER TABLE demo_table\nADD COLUMN user_name VARCHAR(255);');
+    expect(renderer.root.findAllByProps({ 'data-query-editor-snippet-picker': 'true' })).toHaveLength(0);
+  });
+
+  it('keeps the SQL snippet picker modal non-mask-closable to avoid immediate close after context-menu click', () => {
+    expect(queryEditorSource).toMatch(
+      /title=\{translate\('query_editor\.snippet_picker\.title'\)\}[\s\S]*?mask=\{false\}[\s\S]*?maskClosable=\{false\}/,
+    );
   });
 
   it('builds localized AI context prefix for QueryEditor prompt injection', async () => {
@@ -3883,13 +5602,26 @@ describe('QueryEditor external SQL save', () => {
         data: [{ Tables_in_main: 'users' }, { Tables_in_main: 'reporting.events' }],
       });
       backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+      backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+        if (/table_comment|information_schema\.tables/i.test(sql)) {
+          return {
+            success: true,
+            data: [
+              { table_name: 'users', table_comment: '用户表' },
+              { table_name: 'reporting.events', table_comment: '事件表' },
+            ],
+          };
+        }
+        return { success: true, data: [] };
+      });
 
       await act(async () => {
         create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
       });
       await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
+        for (let i = 0; i < 6; i += 1) {
+          await Promise.resolve();
+        }
       });
 
       const completionProvider = editorState.providers[0];
@@ -3906,7 +5638,7 @@ describe('QueryEditor external SQL save', () => {
       expect(tableSuggestion.detail).not.toContain('Table (main.reporting)');
     });
 
-    it('localizes global cross-db table completion detail in zh-CN while preserving the raw database name', async () => {
+    it('keeps database-qualified table completion from leaking into unqualified FROM suggestions', async () => {
       storeState.languagePreference = 'zh-CN';
       setCurrentLanguage('zh-CN');
       editorState.value = 'select * from ';
@@ -3931,10 +5663,15 @@ describe('QueryEditor external SQL save', () => {
       expect(completionProvider).toBeTruthy();
 
       editorState.value = 'select * from analytics.';
-      await completionProvider.provideCompletionItems(
+      const qualifiedCompletionItems = await completionProvider.provideCompletionItems(
         editorState.editor.getModel(),
         { lineNumber: 1, column: editorState.value.length + 1 },
       );
+      const qualifiedTableSuggestion = qualifiedCompletionItems?.suggestions?.find((item: any) => item?.label === 'events');
+
+      expect(qualifiedTableSuggestion).toBeTruthy();
+      expect(qualifiedTableSuggestion.detail).toContain('表 (analytics)');
+      expect(qualifiedTableSuggestion.detail).not.toContain('Table (analytics)');
 
       editorState.value = 'select * from ';
       const completionItems = await completionProvider.provideCompletionItems(
@@ -3943,9 +5680,7 @@ describe('QueryEditor external SQL save', () => {
       );
       const tableSuggestion = completionItems?.suggestions?.find((item: any) => item?.label === 'analytics.events');
 
-      expect(tableSuggestion).toBeTruthy();
-      expect(tableSuggestion.detail).toContain('表 (analytics)');
-      expect(tableSuggestion.detail).not.toContain('Table (analytics)');
+      expect(tableSuggestion).toBeFalsy();
     });
 
     it('localizes current-db table completion detail in zh-CN for plain and schema-qualified tables', async () => {
@@ -3959,6 +5694,18 @@ describe('QueryEditor external SQL save', () => {
         data: [{ Tables_in_main: 'users' }, { Tables_in_main: 'reporting.events' }],
       });
       backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+      backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+        if (/table_comment|information_schema\.tables/i.test(sql)) {
+          return {
+            success: true,
+            data: [
+              { table_name: 'users', table_comment: '用户表' },
+              { table_name: 'reporting.events', table_comment: '事件表' },
+            ],
+          };
+        }
+        return { success: true, data: [] };
+      });
 
       await act(async () => {
         create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
@@ -3979,11 +5726,11 @@ describe('QueryEditor external SQL save', () => {
       const schemaTableSuggestion = completionItems?.suggestions?.find((item: any) => item?.label === 'events');
 
       expect(plainTableSuggestion).toBeTruthy();
-      expect(plainTableSuggestion.detail).toBe('表');
+      expect(plainTableSuggestion.detail).toBe('表 - 用户表');
       expect(plainTableSuggestion.detail).not.toContain('Table');
 
       expect(schemaTableSuggestion).toBeTruthy();
-      expect(schemaTableSuggestion.detail).toContain('表 (reporting)');
+      expect(schemaTableSuggestion.detail).toBe('表 (reporting) - 事件表');
       expect(schemaTableSuggestion.detail).not.toContain('Table (reporting)');
     });
 
@@ -4052,8 +5799,43 @@ describe('QueryEditor external SQL save', () => {
       const idSuggestion = completionItems?.suggestions?.find((item: any) => item?.label === 'id');
 
       expect(idSuggestion).toBeTruthy();
-      expect(idSuggestion.documentation).toBe('Comment: 主键ID');
+      expect(idSuggestion.documentation).toContain('Comment: 主键ID');
       expect(idSuggestion.documentation).not.toBe('备注：主键ID');
+    });
+
+    it('shows column type table and comment in SQL completion metadata', async () => {
+      editorState.value = 'select * from users where u';
+      autoFetchState.visible = true;
+      backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+      backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'users' }] });
+      backendApp.DBGetAllColumns.mockResolvedValueOnce({
+        success: true,
+        data: [{ tableName: 'users', name: 'user_id', type: 'varchar(32)', comment: '用户ID' }],
+      });
+
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const completionProvider = editorState.providers[0];
+      expect(completionProvider).toBeTruthy();
+
+      const completionItems = await completionProvider.provideCompletionItems(
+        editorState.editor.getModel(),
+        { lineNumber: 1, column: editorState.value.length + 1 },
+      );
+      const columnSuggestion = completionItems?.suggestions?.find((item: any) => item?.label === 'user_id');
+
+      expect(columnSuggestion).toBeTruthy();
+      expect(columnSuggestion.detail).toBe('users [varchar(32)] - 用户ID');
+      expect(columnSuggestion.documentation).toContain('类型: varchar(32)');
+      expect(columnSuggestion.documentation).toContain('库: main');
+      expect(columnSuggestion.documentation).toContain('表: users');
+      expect(columnSuggestion.documentation).toContain('备注：用户ID');
     });
   });
 
@@ -6423,6 +8205,10 @@ describe('QueryEditor external SQL save', () => {
     (storeState.connections[0].config as any).readOnly = true;
     backendApp.DBGetTables.mockResolvedValueOnce({
       success: true,
+      data: [],
+    });
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
       data: [{ Table: 'SBDEV.PERSON_INFO' }],
     });
     backendApp.DBQueryMulti.mockResolvedValueOnce({
@@ -6444,7 +8230,8 @@ describe('QueryEditor external SQL save', () => {
     });
 
     const executedSql = String(backendApp.DBQueryMulti.mock.calls[0][2]);
-    expect(backendApp.DBGetTables).toHaveBeenCalledWith(expect.anything(), 'SBDEV');
+    expect(backendApp.DBGetTables).toHaveBeenNthCalledWith(1, expect.anything(), 'SBDEVREAD');
+    expect(backendApp.DBGetTables).toHaveBeenNthCalledWith(2, expect.anything(), 'SBDEV');
     expect(backendApp.DBGetColumns).not.toHaveBeenCalled();
     expect(executedSql).toMatch(/from\s+"SBDEV"\."PERSON_INFO"\s+where\s+zjjhm=''/i);
     expect(executedSql).not.toContain('SBDEVREAD.PERSON_INFO');
@@ -6453,6 +8240,46 @@ describe('QueryEditor external SQL save', () => {
       sql: "select * from person_info where zjjhm=''",
       status: 'success',
     }));
+    renderer?.unmount();
+  });
+
+  it('keeps qualifying OceanBase Oracle read-only queries when config.database already equals the selected schema', async () => {
+    storeState.connections[0].config.type = 'oceanbase';
+    (storeState.connections[0].config as any).oceanBaseProtocol = 'oracle';
+    storeState.connections[0].config.user = 'SBDEVREAD';
+    storeState.connections[0].config.database = 'SBDEV';
+    (storeState.connections[0].config as any).readOnly = true;
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [],
+    });
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [{ Table: 'SBDEV.SYSM_USER' }],
+    });
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['USER_ID'], rows: [{ USER_ID: '0001477884' }] }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'SBDEV', query: "select * from sysm_user where user_id='0001477884'" })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const executedSql = String(backendApp.DBQueryMulti.mock.calls[0][2]);
+    expect(backendApp.DBGetTables).toHaveBeenNthCalledWith(1, expect.anything(), 'SBDEVREAD');
+    expect(backendApp.DBGetTables).toHaveBeenNthCalledWith(2, expect.anything(), 'SBDEV');
+    expect(executedSql).toMatch(/from\s+"SBDEV"\."SYSM_USER"\s+where\s+user_id='0001477884'/i);
+    expect(executedSql).not.toContain('SBDEVREAD.SYSM_USER');
     renderer?.unmount();
   });
 
@@ -6876,7 +8703,7 @@ describe('QueryEditor external SQL save', () => {
     expect(dataGridState.latestProps?.data).not.toEqual(expect.arrayContaining([expect.objectContaining({ name: 'master' })]));
   });
 
-  it('localizes the non-Oracle no-safe-locator read-only warning in English while preserving the raw table name', async () => {
+  it('falls back to all-columns editing when no safe locator exists for non-Oracle results', async () => {
     storeState.languagePreference = 'en-US';
     setCurrentLanguage('en-US');
     backendApp.DBQueryMulti.mockResolvedValueOnce({
@@ -6904,12 +8731,12 @@ describe('QueryEditor external SQL save', () => {
     expect(dataGridState.latestProps?.tableName).toBe('users');
     expect(dataGridState.latestProps?.pkColumns).toEqual([]);
     expect(dataGridState.latestProps?.editLocator).toMatchObject({
-      strategy: 'none',
-      readOnly: true,
-      reason: 'No primary key or usable unique index was detected, so changes cannot be committed safely.',
+      strategy: 'all-columns',
+      readOnly: false,
+      reason: 'No primary key or unique index was detected, so rows will be located by matching all columns. Edit with care.',
     });
-    expect(dataGridState.latestProps?.readOnly).toBe(true);
-    expect(messageApi.warning).toHaveBeenCalledWith(
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalledWith(
       'Query results remain read-only: main.users No primary key or usable unique index was detected, so changes cannot be committed safely.',
     );
     expect(messageApi.warning).not.toHaveBeenCalledWith(
@@ -6917,7 +8744,7 @@ describe('QueryEditor external SQL save', () => {
     );
   });
 
-  it('localizes the non-Oracle index-metadata-unavailable read-only warning in English while preserving the raw table name', async () => {
+  it('falls back to all-columns editing when unique index metadata is unavailable', async () => {
     storeState.languagePreference = 'en-US';
     setCurrentLanguage('en-US');
     backendApp.DBQueryMulti.mockResolvedValueOnce({
@@ -6948,12 +8775,11 @@ describe('QueryEditor external SQL save', () => {
 
     expect(dataGridState.latestProps?.tableName).toBe('users');
     expect(dataGridState.latestProps?.editLocator).toMatchObject({
-      strategy: 'none',
-      readOnly: true,
-      reason: 'Unable to load unique index metadata, so changes cannot be committed safely.',
+      strategy: 'all-columns',
+      readOnly: false,
     });
-    expect(dataGridState.latestProps?.readOnly).toBe(true);
-    expect(messageApi.warning).toHaveBeenCalledWith(
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalledWith(
       'Query results remain read-only: main.users Unable to load unique index metadata, so changes cannot be committed safely.',
     );
     expect(messageApi.warning).not.toHaveBeenCalledWith(
@@ -6961,7 +8787,7 @@ describe('QueryEditor external SQL save', () => {
     );
   });
 
-  it('localizes the table-locator-metadata-unavailable read-only warning in English while preserving the raw table name', async () => {
+  it('falls back to all-columns editing when table locator metadata is unavailable', async () => {
     storeState.languagePreference = 'en-US';
     setCurrentLanguage('en-US');
     backendApp.DBQueryMulti.mockResolvedValueOnce({
@@ -6988,12 +8814,12 @@ describe('QueryEditor external SQL save', () => {
 
     expect(dataGridState.latestProps?.tableName).toBe('users');
     expect(dataGridState.latestProps?.editLocator).toMatchObject({
-      strategy: 'none',
-      readOnly: true,
-      reason: 'Unable to load primary key/unique index metadata for main.users, so changes cannot be committed safely.',
+      strategy: 'all-columns',
+      columns: [],
+      readOnly: false,
     });
-    expect(dataGridState.latestProps?.readOnly).toBe(true);
-    expect(messageApi.warning).toHaveBeenCalledWith(
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalledWith(
       'Query results remain read-only: Unable to load primary key/unique index metadata for main.users, so changes cannot be committed safely.',
     );
     expect(messageApi.warning).not.toHaveBeenCalledWith(
@@ -7272,6 +9098,86 @@ describe('QueryEditor external SQL save', () => {
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 1 as a');
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 3 as c');
     expect(messageApi.info).not.toHaveBeenCalledWith('没有可执行的 SQL。');
+  });
+
+  it('runs the statement at the cursor end from the keyboard shortcut when nothing is selected', async () => {
+    storeState.shortcutOptions.runQuery.mac = { enabled: true, combo: 'Meta+Enter' };
+    storeState.shortcutOptions.runQuery.windows = { enabled: true, combo: 'Ctrl+Enter' };
+    backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['affectedRows'], rows: [{ affectedRows: 1 }] }],
+    });
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({
+        dbName: 'main',
+        query: [
+          "SELECT * FROM uk_back_corp WHERE mobile = '18823406451';",
+          "UPDATE uk_user SET email = NULL WHERE email = 'liuzhen@mail.chat5188.com'",
+        ].join('\n'),
+      })} />);
+    });
+
+    editorState.selection = null;
+    editorState.position = {
+      lineNumber: 2,
+      column: "UPDATE uk_user SET email = NULL WHERE email = 'liuzhen@mail.chat5188.com'".length + 1,
+    };
+    editorState.cursorPositionListeners.forEach((listener) => {
+      listener({ position: editorState.position });
+    });
+
+    const isMacRuntime = /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
+    const event = {
+      ctrlKey: !isMacRuntime,
+      metaKey: isMacRuntime,
+      altKey: false,
+      shiftKey: false,
+      key: 'Enter',
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(event));
+      for (let i = 0; i < 6; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(backendApp.DBQueryMultiTransactional).toHaveBeenCalledWith(
+      expect.anything(),
+      'main',
+      "UPDATE uk_user SET email = NULL WHERE email = 'liuzhen@mail.chat5188.com'",
+      'query-1',
+    );
+    expect(String(backendApp.DBQueryMultiTransactional.mock.calls[0][2])).not.toContain('SELECT * FROM uk_back_corp');
+    expect(messageApi.info).not.toHaveBeenCalledWith('没有可选择的 SQL 语句。');
+
+    await act(async () => {
+      renderer!.unmount();
+    });
   });
 
   it('shows "No executable SQL." in English when the cursor is on a blank line', async () => {
@@ -8164,6 +10070,45 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-results .query-result-tab-text {');
   });
 
+  it('keeps Monaco find widget spacing scoped to the v2 query editor shell', () => {
+    const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
+    const css = readV2ThemeCss();
+
+    expect(source).toContain('addExtraSpaceOnTop: true');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-monaco-stage:has(.monaco-editor .find-widget.visible:not(.hiddenEditor)) {');
+    expect(css).toContain('padding-top: 24px;');
+    expect(css).toContain('overflow: visible;');
+    expect(css).not.toContain('body[data-ui-version="v2"] .gn-v2-query-monaco-stage .monaco-editor .find-widget {');
+  });
+
+  it('raises QueryEditor suggest docs height for SQL snippet completion without widening global Monaco defaults', () => {
+    const appCss = readFileSync(new URL('../App.css', import.meta.url), 'utf8');
+
+    expect(queryEditorSource).toContain('QUERY_EDITOR_SQL_SNIPPET_SUGGEST_DETAIL_MIN_HEIGHT = 260');
+    expect(queryEditorSource).toContain("editor.getContribution?.('editor.contrib.suggestController')");
+    expect(queryEditorSource).toContain('const originalSuggestDetailsLayout = suggestDetailsWidget.layout.bind(suggestDetailsWidget);');
+    expect(queryEditorSource).toContain('suggestDetailsWidget.layout = (width: number, height: number) => {');
+    expect(queryEditorSource).toContain('Math.max(height, QUERY_EDITOR_SQL_SNIPPET_SUGGEST_DETAIL_MIN_HEIGHT)');
+    expect(queryEditorSource).toContain("className={isV2Ui ? 'gn-v2-query-monaco-stage gn-query-monaco-stage' : 'gn-query-monaco-stage'}");
+    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-details-container {');
+    expect(appCss).toContain('min-height: 260px;');
+    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-details {');
+    expect(appCss).toContain('min-height: 260px;');
+    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main {');
+    expect(appCss).toContain('justify-content: flex-start;');
+    expect(appCss).toContain('gap: 6px;');
+    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .left {');
+    expect(appCss).toContain('flex: 0 1 auto;');
+    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .right {');
+    expect(appCss).toContain('flex: 1 1 auto;');
+    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row.string-label > .contents > .main > .right > .details-label {');
+    expect(appCss).toContain('display: inline !important;');
+    expect(appCss).toContain('margin-left: 0;');
+    expect(appCss).not.toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget {');
+    expect(appCss).not.toContain('width: 680px;');
+    expect(appCss).not.toContain('min-width: 560px;');
+  });
+
   it('keeps the v2 query editor toolbar grouped and compact', () => {
     const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
     const toolbarSource = readFileSync(new URL('./QueryEditorToolbar.tsx', import.meta.url), 'utf8');
@@ -8363,11 +10308,11 @@ describe('QueryEditor external SQL save', () => {
       );
     });
 
-    const editorShell = renderer.root.find((node) => {
+    const editorStage = renderer.root.find((node) => {
       const className = String(node.props?.className || '');
-      return className.includes('gn-v2-query-monaco-shell');
+      return className.includes('gn-v2-query-monaco-stage');
     });
-    expect(editorShell.props.style.height).toBe(525);
+    expect(editorStage.props.style.height).toBe(525);
   });
 
   it('inserts sidebar object text when dropped into the SQL editor', async () => {

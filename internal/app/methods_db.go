@@ -998,6 +998,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	}()
 
 	runConfig := normalizeRunConfig(config, dbName)
+	resolvedDBType := resolveDDLDBType(runConfig)
 	buildStatementExecutionFailedMessage := func(index int, err error, previousSuccessCount int) string {
 		message := a.appText("db.backend.error.multi_statement_execution_failed", map[string]any{
 			"index":  index,
@@ -1059,7 +1060,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 			break
 		}
 	}
-	useNativeMultiResult := shouldUseNativeMultiResultBatch(runConfig.Type, statements, allReadOnly)
+	useNativeMultiResult := shouldUseNativeMultiResultBatch(resolvedDBType, statements, allReadOnly)
 
 	runMultiQuery := func(inst db.Database) ([]connection.ResultSetData, []string, error) {
 		if !useNativeMultiResult {
@@ -1226,7 +1227,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		isReadStmt := isReadOnlySQLQuery(runConfig.Type, stmt)
 		tryQueryStmtFirst := shouldTryQueryResultFirst(runConfig.Type, stmt)
 		if isReadStmt || tryQueryStmtFirst {
-			preferPlainReadQuery := isReadStmt && shouldPreferPlainReadQueryResult(runConfig.Type)
+			preferPlainReadQuery := isReadStmt && shouldPreferPlainReadQueryResult(resolvedDBType)
 			var (
 				data             []map[string]interface{}
 				columns          []string
@@ -1417,8 +1418,14 @@ func shouldUseNativeMultiResultBatch(dbType string, statements []string, allRead
 }
 
 func shouldPreferPlainReadQueryResult(dbType string) bool {
-	switch resolveDDLDBType(connection.ConnectionConfig{Type: dbType}) {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
+	switch strings.ToLower(strings.TrimSpace(dbType)) {
+	case "postgres", "postgresql",
+		"oracle",
+		"kingbase", "kingbase8", "kingbasees", "kingbasev8",
+		"highgo", "vastbase",
+		"opengauss", "open_gauss", "open-gauss",
+		"gaussdb", "gauss_db", "gauss-db",
+		"dameng", "dm", "dm8":
 		return true
 	default:
 		return false
@@ -1760,6 +1767,9 @@ func resolveCreateStatementWithFallbackWithText(dbInst db.Database, config conne
 	sqlStr, sourceErr := dbInst.GetCreateStatement(metadataSchemaName, metadataTableName)
 	if sourceErr == nil && !shouldFallbackCreateStatement(dbType, sqlStr) {
 		if strings.TrimSpace(sqlStr) != "" {
+			if columns, err := loadCreateStatementCommentColumns(dbInst, dbType, metadataSchemaName, metadataTableName); err == nil {
+				sqlStr = appendCreateStatementColumnComments(dbType, ddlSchemaName, ddlTableName, sqlStr, columns)
+			}
 			return sqlStr, nil
 		}
 		if isOceanBaseOracleProtocol(config) {
@@ -1908,6 +1918,51 @@ func hasCreateTableOrViewHead(sqlText string) bool {
 
 func buildFallbackCreateStatement(dbType string, schemaName string, tableName string, columns []connection.ColumnDefinition) (string, error) {
 	return buildFallbackCreateStatementWithText(dbType, schemaName, tableName, columns, nil, defaultDBBackendText)
+}
+
+func loadCreateStatementCommentColumns(dbInst db.Database, dbType string, schemaName string, tableName string) ([]connection.ColumnDefinition, error) {
+	if !shouldAppendColumnCommentsToCreateStatement(dbType) {
+		return nil, nil
+	}
+	return dbInst.GetColumns(schemaName, tableName)
+}
+
+func shouldAppendColumnCommentsToCreateStatement(dbType string) bool {
+	switch dbType {
+	case "dameng":
+		return true
+	default:
+		return false
+	}
+}
+
+func appendCreateStatementColumnComments(dbType string, schemaName string, tableName string, ddl string, columns []connection.ColumnDefinition) string {
+	if !shouldAppendColumnCommentsToCreateStatement(dbType) || strings.TrimSpace(ddl) == "" || len(columns) == 0 {
+		return ddl
+	}
+
+	qualifiedTable := quoteTableIdentByType(dbType, schemaName, tableName)
+	existingDDLUpper := strings.ToUpper(ddl)
+	commentStatements := make([]string, 0, len(columns))
+	for _, col := range columns {
+		commentSQL := buildFallbackColumnCommentStatement(dbType, schemaName, tableName, qualifiedTable, col.Name, col.Comment)
+		if commentSQL == "" {
+			continue
+		}
+		if strings.Contains(existingDDLUpper, strings.ToUpper(commentSQL)) {
+			continue
+		}
+		commentStatements = append(commentStatements, commentSQL)
+	}
+	if len(commentStatements) == 0 {
+		return ddl
+	}
+
+	trimmedDDL := strings.TrimRight(ddl, " \t\r\n")
+	if !strings.HasSuffix(trimmedDDL, ";") {
+		trimmedDDL += ";"
+	}
+	return trimmedDDL + "\n" + strings.Join(commentStatements, "\n")
 }
 
 func buildFallbackCreateStatementWithText(dbType string, schemaName string, tableName string, columns []connection.ColumnDefinition, indexes []connection.IndexDefinition, text func(string, map[string]any) string) (string, error) {

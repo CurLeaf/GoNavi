@@ -55,7 +55,6 @@ type SidebarV2ContextMenuOptions = {
   };
   tableSortPreference: Record<string, any>;
   pinnedSidebarTables: any[];
-  showSidebarTableComment: boolean;
   getConnectionNodeForAction: (conn: SavedConnection) => TreeNode;
   buildRuntimeConfig: (conn: any, overrideDatabase?: string, clearDatabase?: boolean) => any;
   extractObjectName: (fullName: string) => string;
@@ -83,7 +82,6 @@ export const useSidebarV2ContextMenu = ({
   v2TreeMetrics,
   tableSortPreference,
   pinnedSidebarTables,
-  showSidebarTableComment,
   getConnectionNodeForAction,
   buildRuntimeConfig,
   extractObjectName,
@@ -313,7 +311,6 @@ export const useSidebarV2ContextMenu = ({
               dbName={String(groupData.dbName || '')}
               count={Array.isArray(node.children) ? node.children.length : 0}
               currentSort={currentSort}
-              showTableComments={showSidebarTableComment}
               onAction={(action) => {
                   setContextMenu(null);
                   handleV2TableGroupContextMenuAction(node, action);

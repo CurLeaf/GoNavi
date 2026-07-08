@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SIDEBAR_RESIZE_MAX_WIDTH } from './utils/sidebarLayout';
 
 class MemoryStorage implements Storage {
   private data = new Map<string, string>();
@@ -82,6 +83,7 @@ describe('store appearance persistence', () => {
     expect(appearance.sidebarTreeFontSizeFollowGlobal).toBe(true);
     expect(appearance.customUIFontFamily).toBeNull();
     expect(appearance.customMonoFontFamily).toBeNull();
+    expect(appearance.newQuerySqlTemplate).toBeNull();
     expect(appearance.tabDisplay).toEqual({
       layout: 'single',
       primaryElements: ['connection', 'kind', 'object'],
@@ -113,6 +115,37 @@ describe('store appearance persistence', () => {
     expect(appearance.dataTableDensity).toBe('compact');
     expect(appearance.tableDoubleClickAction).toBe('open-design');
     expect(appearance.v2SidebarRailScale).toBe(1.55);
+  });
+
+  it('migrates legacy sidebar table comment settings into metadata fields and persists explicit selections', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        queryOptions: {
+          showSidebarTableComment: true,
+        },
+      },
+      version: 13,
+    }));
+
+    const { useStore } = await importStore();
+    expect(useStore.getState().queryOptions.sidebarTableMetadataFields).toEqual(['comment', 'rows']);
+    expect(useStore.getState().queryOptions.showSidebarTableComment).toBe(true);
+
+    useStore.getState().setQueryOptions({
+      sidebarTableMetadataFields: ['size', 'updatedAt'],
+      sidebarTableMetadataFieldOrder: ['updatedAt', 'size', 'rows', 'comment', 'createdAt'],
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.queryOptions.sidebarTableMetadataFields).toEqual(['updatedAt', 'size']);
+    expect(persisted.state.queryOptions.sidebarTableMetadataFieldOrder).toEqual([
+      'updatedAt',
+      'size',
+      'rows',
+      'comment',
+      'createdAt',
+    ]);
+    expect(persisted.state.queryOptions.showSidebarTableComment).toBe(false);
   });
 
   it('restores query tabs from crash-recovery snapshots even when persisted tabs are missing', async () => {
@@ -260,6 +293,50 @@ describe('store appearance persistence', () => {
     expect(appearance.customMonoFontFamily).toBeNull();
   });
 
+  it('persists the new query SQL template while preserving blank and trailing-space overrides', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setAppearance({
+      newQuerySqlTemplate: 'SELECT * FROM ',
+    });
+    expect(useStore.getState().appearance.newQuerySqlTemplate).toBe('SELECT * FROM ');
+
+    useStore.getState().setAppearance({
+      newQuerySqlTemplate: 'SELECT id,\r\n       name\nFROM users;\r',
+    });
+
+    let persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.appearance.newQuerySqlTemplate).toBe('SELECT id,\n       name\nFROM users;\n');
+
+    vi.resetModules();
+    let reloaded = await importStore();
+    expect(reloaded.useStore.getState().appearance.newQuerySqlTemplate).toBe('SELECT id,\n       name\nFROM users;\n');
+
+    reloaded.useStore.getState().setAppearance({
+      newQuerySqlTemplate: '',
+    });
+
+    persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.appearance.newQuerySqlTemplate).toBe('');
+
+    vi.resetModules();
+    reloaded = await importStore();
+    expect(reloaded.useStore.getState().appearance.newQuerySqlTemplate).toBe('');
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        appearance: {
+          newQuerySqlTemplate: 123,
+        },
+      },
+      version: 13,
+    }));
+
+    vi.resetModules();
+    reloaded = await importStore();
+    expect(reloaded.useStore.getState().appearance.newQuerySqlTemplate).toBeNull();
+  });
+
   it('persists v2 sidebar search preferences and sanitizes filter text', async () => {
     const { useStore } = await importStore();
 
@@ -282,6 +359,30 @@ describe('store appearance persistence', () => {
     expect(appearance.v2SidebarSearchMode).toBe('filter');
     expect(appearance.v2CommandSearchPersistentFilterEnabled).toBe(true);
     expect(appearance.v2SidebarPersistedFilter).toHaveLength(120);
+  });
+
+  it('persists wider sidebar widths and clamps oversized restored values', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setSidebarWidth(880);
+    expect(useStore.getState().sidebarWidth).toBe(880);
+
+    let persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.sidebarWidth).toBe(880);
+
+    useStore.getState().setSidebarWidth(1200);
+    expect(useStore.getState().sidebarWidth).toBe(SIDEBAR_RESIZE_MAX_WIDTH);
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        sidebarWidth: 1200,
+      },
+      version: 13,
+    }));
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().sidebarWidth).toBe(SIDEBAR_RESIZE_MAX_WIDTH);
   });
 
   it('persists tab display appearance settings and sanitizes invalid elements', async () => {
@@ -950,6 +1051,67 @@ describe('store appearance persistence', () => {
     ]);
   });
 
+  it('keeps persisted sidebar root order until backend connections reload on startup', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        connectionTags: [
+          {
+            id: 'tag-redis',
+            name: 'Redis',
+            connectionIds: ['conn-b'],
+          },
+        ],
+        sidebarRootOrder: [
+          'connection:conn-a',
+          'connection:conn-c',
+          'tag:tag-redis',
+        ],
+      },
+      version: 13,
+    }));
+
+    const {
+      buildSidebarRootConnectionToken,
+      buildSidebarRootTagToken,
+      resolveSidebarRootOrderTokens,
+      useStore,
+    } = await importStore();
+
+    expect(useStore.getState().sidebarRootOrder).toEqual([
+      buildSidebarRootConnectionToken('conn-a'),
+      buildSidebarRootConnectionToken('conn-c'),
+      buildSidebarRootTagToken('tag-redis'),
+    ]);
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'conn-a',
+        name: 'A',
+        config: { id: 'conn-a', type: 'mysql', host: 'a.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'conn-b',
+        name: 'B',
+        config: { id: 'conn-b', type: 'redis', host: 'b.local', port: 6379, user: 'default' },
+      },
+      {
+        id: 'conn-c',
+        name: 'C',
+        config: { id: 'conn-c', type: 'mysql', host: 'c.local', port: 3306, user: 'root' },
+      },
+    ]);
+
+    expect(resolveSidebarRootOrderTokens(
+      useStore.getState().sidebarRootOrder,
+      useStore.getState().connectionTags,
+      useStore.getState().connections,
+    )).toEqual([
+      buildSidebarRootConnectionToken('conn-a'),
+      buildSidebarRootConnectionToken('conn-c'),
+      buildSidebarRootTagToken('tag-redis'),
+    ]);
+  });
+
   it('keeps legacy global proxy password during hydration until explicit cleanup', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {
@@ -1471,6 +1633,41 @@ describe('store appearance persistence', () => {
     useStore.getState().closeTab('query-edit-object');
 
     expect(useStore.getState().activeTabId).toBe('query-other');
+  });
+
+  it('reuses the current tab when the same id is reopened as an object-edit query', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'routine-def-conn-1-main-reporting.refresh_stats',
+      title: '函数: reporting.refresh_stats',
+      type: 'routine-def',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      routineName: 'reporting.refresh_stats',
+      routineType: 'FUNCTION',
+    });
+
+    useStore.getState().addTab({
+      id: 'routine-def-conn-1-main-reporting.refresh_stats',
+      title: '修改函数/存储过程: reporting.refresh_stats',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      query: 'CREATE OR REPLACE FUNCTION reporting.refresh_stats() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql;',
+      queryMode: 'object-edit',
+    });
+
+    const { tabs, activeTabId } = useStore.getState();
+    expect(tabs).toHaveLength(1);
+    expect(activeTabId).toBe('routine-def-conn-1-main-reporting.refresh_stats');
+    expect(tabs[0]).toEqual(expect.objectContaining({
+      id: 'routine-def-conn-1-main-reporting.refresh_stats',
+      type: 'query',
+      queryMode: 'object-edit',
+      title: '修改函数/存储过程: reporting.refresh_stats',
+      query: expect.stringContaining('CREATE OR REPLACE FUNCTION reporting.refresh_stats()'),
+    }));
   });
 
   it('reuses the same table-export tab for the same connection and table identity', async () => {

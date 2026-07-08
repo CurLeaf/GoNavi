@@ -3,17 +3,28 @@ import { Tooltip } from 'antd';
 import { StarFilled, StarOutlined } from '@ant-design/icons';
 import { t } from '../../i18n';
 import { SIDEBAR_SQL_EDITOR_DRAG_MIME, encodeSidebarSqlEditorDragPayload } from '../../utils/sidebarSqlDrag';
+import {
+  type SidebarTableMetadataField,
+  type SidebarTableMetadataSnapshot,
+} from '../../utils/sidebarTableMetadata';
 import { sanitizeRedisDbAlias } from '../../utils/redisDbAlias';
 import { resolveConnectionHostSummary } from '../../utils/tabDisplay';
 import { resolveSidebarObjectDragText } from '../sidebarCoreUtils';
-import { resolveV2ObjectGroupTitle } from './sidebarHelpers';
+import {
+  buildSidebarTableMetadataDisplayItems,
+  buildSidebarTableMetadataSnapshot,
+  formatSidebarRowCount,
+  formatSidebarTableSize,
+  formatSidebarTableTimestamp,
+  resolveV2ObjectGroupTitle,
+} from './sidebarHelpers';
 
 type SidebarV2TreeTitleOptions = {
   node: any;
   hoverTitle: string;
   statusBadge: React.ReactNode;
   getV2TreeMetaText: (node: any) => string;
-  showSidebarTableComment: boolean;
+  sidebarTableMetadataFields: SidebarTableMetadataField[];
   toggleSidebarTablePinned: (node: any) => void;
   snapshotTreeSelectionBeforeDrag: () => void;
   restoreTreeSelectionAfterDrag: () => void;
@@ -42,7 +53,7 @@ const clearSidebarTableNativeHoverTitle = (event: React.SyntheticEvent<HTMLEleme
 const renderSidebarTableHoverInfo = (
   node: any,
   displayTitle: string,
-  tableComment: string,
+  metadata: SidebarTableMetadataSnapshot,
 ): React.ReactNode => {
   const dataRef = node?.dataRef || {};
   const tableName = String(dataRef.tableName || displayTitle || node?.title || '').trim();
@@ -57,7 +68,11 @@ const renderSidebarTableHoverInfo = (
     [t('tab_manager.hover.label.database'), dbName || t('tab_manager.hover.fallback.database_not_specified')],
     ['Schema', schemaName],
     [t('tab_manager.hover.label.object'), tableName],
-    [t('table_designer.action.table_comment'), tableComment],
+    [t('table_designer.action.table_comment'), metadata.tableComment || ''],
+    [t('sidebar.v2_table_group_menu.display_table_rows'), metadata.rowCount !== undefined ? formatSidebarRowCount(metadata.rowCount) : ''],
+    [t('sidebar.v2_table_group_menu.display_table_size'), metadata.tableSize !== undefined ? formatSidebarTableSize(metadata.tableSize) : ''],
+    [t('sidebar.v2_table_group_menu.display_create_time'), metadata.createdAt ? formatSidebarTableTimestamp(metadata.createdAt) : ''],
+    [t('sidebar.v2_table_group_menu.display_update_time'), metadata.updatedAt ? formatSidebarTableTimestamp(metadata.updatedAt) : ''],
   ].filter(([, value]) => Boolean(value));
 
   return (
@@ -100,7 +115,7 @@ export const renderSidebarV2TreeTitle = ({
   hoverTitle,
   statusBadge,
   getV2TreeMetaText,
-  showSidebarTableComment,
+  sidebarTableMetadataFields,
   toggleSidebarTablePinned,
   snapshotTreeSelectionBeforeDrag,
   restoreTreeSelectionAfterDrag,
@@ -130,15 +145,17 @@ export const renderSidebarV2TreeTitle = ({
     }
     return rawTitle;
   })();
-  const tableComment = node.type === 'table'
-    ? String(node?.dataRef?.tableComment || '').trim()
-    : '';
-  const tableCommentSuffix = showSidebarTableComment && tableComment ? tableComment : '';
+  const tableMetadata = node.type === 'table'
+    ? buildSidebarTableMetadataSnapshot(node?.dataRef)
+    : null;
+  const tableMetadataItems = tableMetadata
+    ? buildSidebarTableMetadataDisplayItems(sidebarTableMetadataFields, tableMetadata)
+    : [];
   const effectiveHoverTitle = hoverTitle;
   const tableHoverInfo = node.type === 'table'
-    ? renderSidebarTableHoverInfo(node, displayTitle, tableComment)
+    ? renderSidebarTableHoverInfo(node, displayTitle, tableMetadata ?? {})
     : null;
-  const metaText = getV2TreeMetaText(node);
+  const metaText = node.type === 'table' ? '' : getV2TreeMetaText(node);
   const redisDbAlias = node.type === 'redis-db'
     ? sanitizeRedisDbAlias(node?.dataRef?.redisDbAlias)
     : '';
@@ -248,9 +265,9 @@ export const renderSidebarV2TreeTitle = ({
           </>
         ) : displayTitle}
       </span>
-      {tableCommentSuffix && (
-        <span className="gn-v2-tree-table-comment">{tableCommentSuffix}</span>
-      )}
+      {tableMetadataItems.map((item) => (
+        <span key={item.key} className={item.className}>{item.text}</span>
+      ))}
       {metaText && <span className="gn-v2-tree-count">{metaText}</span>}
     </span>
   );

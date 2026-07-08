@@ -27,8 +27,26 @@ type QueryTabDraftSnapshotTab = Pick<
 const persistedDrafts = new Map<string, PersistedQueryTabDraftEntry>();
 
 let persistedDraftsHydrated = false;
-let persistTimer: number | null = null;
+let persistTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
 let flushListenersBound = false;
+
+const getWindowTimerApi = (): {
+  setTimeout: typeof globalThis.setTimeout;
+  clearTimeout: typeof globalThis.clearTimeout;
+} | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  const setTimeoutImpl = typeof window.setTimeout === 'function' ? window.setTimeout.bind(window) : globalThis.setTimeout;
+  const clearTimeoutImpl = typeof window.clearTimeout === 'function' ? window.clearTimeout.bind(window) : globalThis.clearTimeout;
+  if (typeof setTimeoutImpl !== 'function' || typeof clearTimeoutImpl !== 'function') {
+    return null;
+  }
+  return {
+    setTimeout: setTimeoutImpl,
+    clearTimeout: clearTimeoutImpl,
+  };
+};
 
 const toTabId = (value: unknown): string => String(value ?? '').trim();
 
@@ -108,8 +126,9 @@ const ensurePersistedDraftsHydrated = (): void => {
 };
 
 const flushPersistedDrafts = (): void => {
-  if (persistTimer !== null && typeof window !== 'undefined') {
-    window.clearTimeout(persistTimer);
+  const timerApi = getWindowTimerApi();
+  if (persistTimer !== null && timerApi) {
+    timerApi.clearTimeout(persistTimer);
     persistTimer = null;
   }
   const storage = getDraftSnapshotStorage();
@@ -155,14 +174,15 @@ const bindFlushListeners = (): void => {
 
 const schedulePersistedDraftFlush = (): void => {
   bindFlushListeners();
-  if (typeof window === 'undefined') {
+  const timerApi = getWindowTimerApi();
+  if (!timerApi) {
     flushPersistedDrafts();
     return;
   }
   if (persistTimer !== null) {
-    window.clearTimeout(persistTimer);
+    timerApi.clearTimeout(persistTimer);
   }
-  persistTimer = window.setTimeout(() => {
+  persistTimer = timerApi.setTimeout(() => {
     flushPersistedDrafts();
   }, QUERY_TAB_DRAFT_SNAPSHOT_DEBOUNCE_MS);
 };

@@ -10,6 +10,8 @@ export function AIChatSend(arg1:Array<ai.Message>,arg2:Array<ai.Tool>):Promise<R
 
 export function AIChatSendInSession(arg1:string,arg2:Array<ai.Message>,arg3:Array<ai.Tool>):Promise<Record<string, any>>;
 
+export function AIChatSendWithOptions(arg1:Array<ai.Message>,arg2:Array<ai.Tool>,arg3:ai.ChatSendOptions):Promise<Record<string, any>>;
+
 export function AIChatStream(arg1:string,arg2:Array<ai.Message>,arg3:Array<ai.Tool>):Promise<void>;
 
 export function AICheckSQL(arg1:string):Promise<ai.SafetyResult>;

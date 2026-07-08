@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createGlobalProxyDraft, toPersistedGlobalProxy } from './globalProxyDraft';
+import { createGlobalProxyDraft, toPersistedGlobalProxy, toSaveGlobalProxyInput } from './globalProxyDraft';
 
 describe('global proxy draft', () => {
   it('hydrates a secretless draft from backend metadata while keeping password input blank', () => {
@@ -31,5 +31,19 @@ describe('global proxy draft', () => {
 
     expect('password' in persisted).toBe(false);
     expect(persisted.hasPassword).toBe(true);
+  });
+
+  it('passes explicit saved password clearing intent to the backend save payload', () => {
+    const input = toSaveGlobalProxyInput({
+      enabled: true,
+      type: 'socks5',
+      host: '127.0.0.1',
+      port: 7890,
+      hasPassword: true,
+      clearPassword: true,
+    });
+
+    expect(input.password).toBe('');
+    expect(input.clearPassword).toBe(true);
   });
 });

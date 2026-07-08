@@ -48,6 +48,7 @@ def required_assets():
                 ("MacOS", f"{driver}-driver-agent-darwin-amd64"),
                 ("MacOS", f"{driver}-driver-agent-darwin-arm64"),
                 ("Linux", f"{driver}-driver-agent-linux-amd64"),
+                ("Linux", f"{driver}-driver-agent-linux-arm64"),
             ]
         )
         if driver == "duckdb":

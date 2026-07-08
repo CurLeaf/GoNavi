@@ -24,12 +24,14 @@ describe("syncLanguageRuntime", () => {
   it("syncs dayjs, app, and AI service language", async () => {
     const appSetLanguage = vi.fn(async () => undefined);
     const aiSetLanguage = vi.fn(async () => undefined);
+    const documentStub = { cookie: "" };
     vi.stubGlobal("window", {
       go: {
         app: { App: { SetLanguage: appSetLanguage } },
         aiservice: { Service: { AISetLanguage: aiSetLanguage } },
       },
     });
+    vi.stubGlobal("document", documentStub);
 
     const { syncLanguageRuntime } = await import("./runtime");
     await syncLanguageRuntime("zh-CN");
@@ -37,6 +39,7 @@ describe("syncLanguageRuntime", () => {
     expect(dayjsLocaleMock).toHaveBeenCalledWith("zh-cn");
     expect(appSetLanguage).toHaveBeenCalledWith("zh-CN");
     expect(aiSetLanguage).toHaveBeenCalledWith("zh-CN");
+    expect(documentStub.cookie).toContain("gonavi_web_lang=zh-CN");
   });
 
   it("applies dayjs locales for every supported language", async () => {

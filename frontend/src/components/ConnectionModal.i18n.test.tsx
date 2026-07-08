@@ -162,6 +162,8 @@ vi.mock("@ant-design/icons", () => {
     GatewayOutlined: Icon,
     SafetyCertificateOutlined: Icon,
     ThunderboltOutlined: Icon,
+    DownOutlined: Icon,
+    RightOutlined: Icon,
   };
 });
 
@@ -526,7 +528,24 @@ describe("ConnectionModal i18n", () => {
         findClickableCard(renderer!, sourceLabel).props.onClick();
       });
 
-      const pageText = textContent(renderer!.toJSON());
+      let pageText = textContent(renderer!.toJSON());
+      expect(pageText).toContain(expectations[0]);
+      expect(pageText).toContain(
+        language === "zh-CN" ? "未限制" : "No restrictions",
+      );
+      expect(pageText).not.toContain(expectations[1]);
+      expect(pageText).not.toContain(expectations[2]);
+
+      const protectionToggle = renderer!.root.findAll(
+        (node) => node.props?.["data-connection-config-section-toggle"] === "readOnly",
+      )[0];
+      expect(protectionToggle.props["aria-expanded"]).toBe(false);
+
+      await act(async () => {
+        protectionToggle.props.onClick({ stopPropagation: vi.fn() });
+      });
+
+      pageText = textContent(renderer!.toJSON());
       expectations.forEach((expected) => {
         expect(pageText).toContain(expected);
       });

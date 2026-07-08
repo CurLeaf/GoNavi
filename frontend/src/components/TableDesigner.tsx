@@ -429,7 +429,11 @@ const TableDesigner: React.FC<{ tab: TabData; embedded?: boolean }> = ({ tab, em
   const [starRocksExternalEngine, setStarRocksExternalEngine] = useState('hive');
   const [starRocksExternalProperties, setStarRocksExternalProperties] = useState('"resource" = "hive0"\n"database" = "raw_db"\n"table" = "raw_table"');
   
-  const [loading, setLoading] = useState(false);
+  const [columnsLoading, setColumnsLoading] = useState(false);
+  const [indexesLoading, setIndexesLoading] = useState(false);
+  const [foreignKeysLoading, setForeignKeysLoading] = useState(false);
+  const [triggersLoading, setTriggersLoading] = useState(false);
+  const [ddlLoading, setDdlLoading] = useState(false);
   const [previewSql, setPreviewSql] = useState<string>('');
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [activeKey, setActiveKey] = useState(tab.initialTab || "columns");
@@ -488,6 +492,7 @@ const TableDesigner: React.FC<{ tab: TabData; embedded?: boolean }> = ({ tab, em
   const designerTableTitle = tab.tableName || newTableName || t('table_designer.title.untitled_table', undefined, i18nLanguage);
   const designerDbTitle = tab.dbName || t('table_designer.title.default_database', undefined, i18nLanguage);
   const designerColumnSummary = t('table_designer.summary.columns', { count: columns.length }, i18nLanguage);
+  const metadataLoading = columnsLoading || indexesLoading || foreignKeysLoading || triggersLoading || ddlLoading;
   const charsetOptions = useMemo(() => getCharsetOptions(i18nLanguage), [i18nLanguage]);
   const collationOptions = useMemo(() => getCollationOptions(i18nLanguage), [i18nLanguage]);
   const panelRadius = 10;
@@ -502,6 +507,7 @@ const TableDesigner: React.FC<{ tab: TabData; embedded?: boolean }> = ({ tab, em
   const shellRef = useRef<HTMLDivElement>(null);
   const pendingFocusColumnKeyRef = useRef<string | null>(null);
   const focusHighlightTimerRef = useRef<number | null>(null);
+  const metadataLoadSeqRef = useRef(0);
   const [focusColumnKey, setFocusColumnKey] = useState('');
 
   const openCommentEditor = useCallback((record: EditableColumn) => {
@@ -869,14 +875,33 @@ const TableDesigner: React.FC<{ tab: TabData; embedded?: boolean }> = ({ tab, em
     };
   }, [cleanupResizeState, detachResizeListeners]);
 
-  const fetchData = async () => {
-    if (isNewTable) return; // Don't fetch for new table
+  const clearMetadataLoading = () => {
+    setColumnsLoading(false);
+    setIndexesLoading(false);
+    setForeignKeysLoading(false);
+    setTriggersLoading(false);
+    setDdlLoading(false);
+  };
 
-    setLoading(true);
+  const formatLoadError = (error: unknown): string => {
+    if (error instanceof Error) return error.message;
+    return String(error || '');
+  };
+
+  const fetchData = async () => {
+    const requestSeq = metadataLoadSeqRef.current + 1;
+    metadataLoadSeqRef.current = requestSeq;
+    const isCurrentRequest = () => metadataLoadSeqRef.current === requestSeq;
+
+    if (isNewTable) {
+        clearMetadataLoading();
+        return;
+    }
+
     const conn = connections.find(c => c.id === tab.connectionId);
     if (!conn) {
         message.error(t('table_designer.message.connection_not_found', undefined, i18nLanguage));
-        setLoading(false);
+        clearMetadataLoading();
         return;
     }
 
@@ -889,63 +914,96 @@ const TableDesigner: React.FC<{ tab: TabData; embedded?: boolean }> = ({ tab, em
         ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
     };
 
-    const promises: Promise<any>[] = [
-        DBGetColumns(buildRpcConnectionConfig(config) as any, tab.dbName || '', tab.tableName || ''),
-        DBGetIndexes(buildRpcConnectionConfig(config) as any, tab.dbName || '', tab.tableName || ''),
-        DBGetForeignKeys(buildRpcConnectionConfig(config) as any, tab.dbName || '', tab.tableName || ''),
-        DBGetTriggers(buildRpcConnectionConfig(config) as any, tab.dbName || '', tab.tableName || '')
-    ];
+    const rpcConfig = buildRpcConnectionConfig(config) as any;
+    const dbName = tab.dbName || '';
+    const tableName = tab.tableName || '';
 
-    if (!isNewTable) {
-        promises.push(DBShowCreateTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tab.tableName || ''));
-    }
+    setColumnsLoading(true);
+    setIndexesLoading(true);
+    setForeignKeysLoading(true);
+    setTriggersLoading(true);
+    setDdlLoading(true);
 
-    const results = await Promise.all(promises);
-    const colsRes = results[0];
-    const idxRes = results[1];
-    const fkRes = results[2];
-    const trigRes = results[3];
-    const ddlRes = !isNewTable ? results[4] : null;
+    const loadColumns = DBGetColumns(rpcConfig, dbName, tableName)
+        .then((colsRes) => {
+            if (!isCurrentRequest()) return;
+            if (colsRes.success) {
+                const colsWithKey = (colsRes.data as ColumnDefinition[]).map((c, index) => ({
+                    ...normalizeColumnDefinition(c),
+                    _key: `col-${index}-${Date.now()}`,
+                    isAutoIncrement: getColumnDefinitionExtra(c).toLowerCase().includes('auto_increment')
+                }));
+                setColumns(JSON.parse(JSON.stringify(colsWithKey)));
+                setOriginalColumns(JSON.parse(JSON.stringify(colsWithKey)));
+                setSelectedColumnRowKeys([]);
+            } else {
+                message.error(t('table_designer.message.load_columns_failed', { detail: colsRes.message }, i18nLanguage));
+            }
+        })
+        .catch((error: unknown) => {
+            if (!isCurrentRequest()) return;
+            message.error(t('table_designer.message.load_columns_failed', { detail: formatLoadError(error) }, i18nLanguage));
+        })
+        .finally(() => {
+            if (isCurrentRequest()) setColumnsLoading(false);
+        });
 
-    if (colsRes.success) {
-        const colsWithKey = (colsRes.data as ColumnDefinition[]).map((c, index) => ({
-            ...normalizeColumnDefinition(c),
-            _key: `col-${index}-${Date.now()}`,
-            isAutoIncrement: getColumnDefinitionExtra(c).toLowerCase().includes('auto_increment')
-        }));
-        setColumns(JSON.parse(JSON.stringify(colsWithKey)));
-        setOriginalColumns(JSON.parse(JSON.stringify(colsWithKey)));
-        setSelectedColumnRowKeys([]);
-    } else {
-        message.error(t('table_designer.message.load_columns_failed', { detail: colsRes.message }, i18nLanguage));
-    }
+    await loadColumns;
+    if (!isCurrentRequest()) return;
 
-    if (idxRes.success) {
-        setIndexes(Array.isArray(idxRes.data) ? idxRes.data : []);
-    } else {
-        setIndexes([]);
-    }
-    if (fkRes.success) {
-        setFks(Array.isArray(fkRes.data) ? fkRes.data : []);
-    } else {
-        setFks([]);
-    }
-    if (trigRes.success) {
-        setTriggers(Array.isArray(trigRes.data) ? trigRes.data : []);
-    } else {
-        setTriggers([]);
-    }
-    if (ddlRes && ddlRes.success) {
-        const ddlText = String(ddlRes.data || '');
-        setDdl(ddlText);
-        const parsedTableComment = parseTableCommentFromDDL(ddlText);
-        setTableComment(parsedTableComment);
-        if (!isTableCommentModalOpen) {
-            setTableCommentDraft(parsedTableComment);
-        }
-    }
-    
-    setLoading(false);
+    const loadIndexes = DBGetIndexes(rpcConfig, dbName, tableName)
+        .then((idxRes) => {
+            if (!isCurrentRequest()) return;
+            setIndexes(idxRes.success && Array.isArray(idxRes.data) ? idxRes.data : []);
+        })
+        .catch(() => {
+            if (isCurrentRequest()) setIndexes([]);
+        })
+        .finally(() => {
+            if (isCurrentRequest()) setIndexesLoading(false);
+        });
+
+    const loadForeignKeys = DBGetForeignKeys(rpcConfig, dbName, tableName)
+        .then((fkRes) => {
+            if (!isCurrentRequest()) return;
+            setFks(fkRes.success && Array.isArray(fkRes.data) ? fkRes.data : []);
+        })
+        .catch(() => {
+            if (isCurrentRequest()) setFks([]);
+        })
+        .finally(() => {
+            if (isCurrentRequest()) setForeignKeysLoading(false);
+        });
+
+    const loadTriggers = DBGetTriggers(rpcConfig, dbName, tableName)
+        .then((trigRes) => {
+            if (!isCurrentRequest()) return;
+            setTriggers(trigRes.success && Array.isArray(trigRes.data) ? trigRes.data : []);
+        })
+        .catch(() => {
+            if (isCurrentRequest()) setTriggers([]);
+        })
+        .finally(() => {
+            if (isCurrentRequest()) setTriggersLoading(false);
+        });
+
+    const loadDdl = DBShowCreateTable(rpcConfig, dbName, tableName)
+        .then((ddlRes) => {
+            if (!isCurrentRequest() || !ddlRes.success) return;
+            const ddlText = String(ddlRes.data || '');
+            setDdl(ddlText);
+            const parsedTableComment = parseTableCommentFromDDL(ddlText);
+            setTableComment(parsedTableComment);
+            if (!isTableCommentModalOpen) {
+                setTableCommentDraft(parsedTableComment);
+            }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+            if (isCurrentRequest()) setDdlLoading(false);
+        });
+
+    await Promise.allSettled([loadIndexes, loadForeignKeys, loadTriggers, loadDdl]);
   };
 
   useEffect(() => {
@@ -2676,7 +2734,7 @@ END;`;
             rowClassName={(record: EditableColumn) => record._key === focusColumnKey ? 'table-designer-focus-row' : ''}
             size="small" 
             pagination={false} 
-            loading={loading}
+            loading={columnsLoading}
             scroll={{ y: tableHeight }}
             bordered={false}
             components={{
@@ -2695,7 +2753,7 @@ END;`;
                 rowClassName={(record: EditableColumn) => record._key === focusColumnKey ? 'table-designer-focus-row' : ''}
                 size="small" 
                 pagination={false} 
-                loading={loading}
+                loading={columnsLoading}
                 scroll={{ y: tableHeight }}
                 bordered={false}
                 components={{
@@ -3073,7 +3131,7 @@ END;`;
                 </>
             )}
             {!readOnly && <Button size="small" icon={<SaveOutlined />} type="primary" onClick={generateDDL}>{t('table_designer.action.save', undefined, i18nLanguage)}</Button>}
-            {!isNewTable && <Button size="small" icon={<ReloadOutlined />} onClick={handleRefreshDesigner}>{t('table_designer.action.refresh', undefined, i18nLanguage)}</Button>}
+            {!isNewTable && <Button size="small" icon={<ReloadOutlined />} loading={metadataLoading} onClick={handleRefreshDesigner}>{t('table_designer.action.refresh', undefined, i18nLanguage)}</Button>}
             {!isNewTable && !readOnly && supportsTableCommentOps() && (
                 <Button size="small" icon={<EditOutlined />} onClick={openTableCommentModal}>{t('table_designer.action.table_comment', undefined, i18nLanguage)}</Button>
             )}
@@ -3160,7 +3218,7 @@ END;`;
                                     rowKey="key"
                                     size="small"
                                     pagination={false}
-                                    loading={loading}
+                                    loading={indexesLoading}
                                     scroll={{ x: 960, y: indexTableHeight }}
                                     components={{
                                         header: { cell: ResizableTitle },
@@ -3226,7 +3284,7 @@ END;`;
                                     rowKey="key" 
                                     size="small" 
                                     pagination={false} 
-                                    loading={loading}
+                                    loading={foreignKeysLoading}
                                     scroll={{ x: 980, y: tableHeight }}
                                     rowSelection={{
                                         type: 'radio',
@@ -3284,7 +3342,7 @@ END;`;
                                     rowKey="name"
                                     size="small"
                                     pagination={false}
-                                    loading={loading}
+                                    loading={triggersLoading}
                                     scroll={{ y: tableHeight }}
                                     locale={{ emptyText: <Empty description={t('table_designer.empty.triggers', undefined, i18nLanguage)} image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
                                     rowSelection={{

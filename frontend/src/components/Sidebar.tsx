@@ -31,7 +31,6 @@ import {
 export { formatSidebarDriverAgentUpdateWarning } from './sidebar/useSidebarTreeLoaders';
 import {
   ExternalSQLFileModal,
-  SQLFileExecutionModal,
   useSidebarExternalSqlWorkflow,
 } from './sidebar/SidebarExternalSqlWorkflow';
 export {
@@ -68,6 +67,7 @@ import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredVa
 import { createPortal } from 'react-dom';
 import { Tree, message, Dropdown, MenuProps, Input, Button, Form, Popover, Tooltip } from 'antd';
 	import {
+	  CaretDownFilled,
 	  DatabaseOutlined,
 	  TableOutlined,
 	  ConsoleSqlOutlined,
@@ -141,6 +141,7 @@ import {
 import { useExportProgressDialog } from './ExportProgressModal';
 import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLRootNode, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
+import { resolveSidebarTableMetadataFields } from '../utils/sidebarTableMetadata';
 import { t } from '../i18n';
 import MessagePublishModal from './MessagePublishModal';
 import {
@@ -208,6 +209,55 @@ export {
   sortSidebarTableEntries,
 };
 export type { V2CommandSearchItem, V2RailConnectionGroup } from './sidebarV2Utils';
+
+type SidebarTreeSwitcherNodeLike = {
+  key?: React.Key;
+  data?: TreeNode;
+  isLeaf?: boolean;
+  loading?: boolean;
+};
+
+export const resolveSidebarSwitcherLoadKey = (node: SidebarTreeSwitcherNodeLike | null | undefined): string | null => {
+  const treeNode = node?.data;
+  const dataRef = treeNode?.dataRef;
+  if (!treeNode) {
+    return null;
+  }
+
+  if (treeNode.type === 'connection') {
+    const connectionId = String(dataRef?.id || treeNode.key || node?.key || '').trim();
+    return connectionId ? `dbs-${connectionId}` : null;
+  }
+
+  if (treeNode.type === 'database') {
+    const connectionId = String(dataRef?.id || '').trim();
+    const dbName = String(dataRef?.dbName || '').trim();
+    return connectionId && dbName ? `tables-${connectionId}-${dbName}` : null;
+  }
+
+  if (treeNode.type === 'jvm-mode' || treeNode.type === 'jvm-resource') {
+    const connectionId = String(dataRef?.id || '').trim();
+    const providerMode = String(dataRef?.providerMode || '').trim().toLowerCase();
+    const parentPath = treeNode.type === 'jvm-resource' ? String(dataRef?.resourcePath || '').trim() : '';
+    return connectionId && providerMode ? `jvm-resources-${connectionId}-${providerMode}-${parentPath}` : null;
+  }
+
+  return null;
+};
+
+export const shouldKeepSidebarSwitcherCollapsedWhileLoading = (
+  node: SidebarTreeSwitcherNodeLike | null | undefined,
+  loadingKeys: ReadonlySet<string>,
+): boolean => {
+  if (!node || node.isLeaf) {
+    return false;
+  }
+  if (node.loading) {
+    return true;
+  }
+  const loadKey = resolveSidebarSwitcherLoadKey(node);
+  return !!loadKey && loadingKeys.has(loadKey);
+};
 
 const { Search } = Input;
 const SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS = 50;
@@ -431,7 +481,14 @@ const Sidebar: React.FC<{
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
-  const showSidebarTableComment = queryOptions?.showSidebarTableComment === true;
+  const sidebarTableMetadataFields = useMemo(
+      () => resolveSidebarTableMetadataFields(
+          queryOptions?.sidebarTableMetadataFields,
+          queryOptions?.showSidebarTableComment === true,
+          queryOptions?.sidebarTableMetadataFieldOrder,
+      ),
+      [queryOptions?.showSidebarTableComment, queryOptions?.sidebarTableMetadataFieldOrder, queryOptions?.sidebarTableMetadataFields],
+  );
   const { exportProgressModal, runExportWithProgress } = useExportProgressDialog();
   const disableLocalBackdropFilter = isMacLikePlatform();
   const autoFetchVisible = useAutoFetchVisibility();
@@ -457,8 +514,11 @@ const Sidebar: React.FC<{
   };
   const bgMain = getBg('#141414');
   const overlayTheme = useMemo(
-      () => buildOverlayWorkbenchTheme(darkMode, { disableBackdropFilter: disableLocalBackdropFilter }),
-      [darkMode, disableLocalBackdropFilter, appearance.uiVersion],
+      () => buildOverlayWorkbenchTheme(darkMode, {
+          disableBackdropFilter: disableLocalBackdropFilter,
+          uiVersion: isV2Ui ? 'v2' : 'legacy',
+      }),
+      [darkMode, disableLocalBackdropFilter, isV2Ui],
   );
   const modalPanelStyle = useMemo(() => ({
       background: overlayTheme.shellBg,
@@ -1158,7 +1218,6 @@ const Sidebar: React.FC<{
       handleRemoveExternalSQLDirectory,
       handleRefreshExternalSQLDirectory,
       externalSQLFileModalProps,
-      sqlFileExecutionModalProps,
   } = useSidebarExternalSqlWorkflow({
       connections,
       externalSQLDirectories,
@@ -1760,6 +1819,14 @@ const Sidebar: React.FC<{
           }
       }
   };
+
+  const renderSidebarSwitcherIcon = useCallback((node: SidebarTreeSwitcherNodeLike) => {
+      if (node.isLeaf) {
+          return null;
+      }
+      const keepCollapsed = shouldKeepSidebarSwitcherCollapsedWhileLoading(node, loadingNodesRef.current);
+      return <CaretDownFilled rotate={keepCollapsed ? -90 : undefined} />;
+  }, []);
   
 
   const buildRuntimeConfig = (conn: any, overrideDatabase?: string, clearDatabase: boolean = false) => {
@@ -2041,8 +2108,6 @@ const Sidebar: React.FC<{
       moveConnectionToTag,
       setSidebarTablePinned,
       setTableSortPreference,
-      setQueryOptions,
-      showSidebarTableComment,
       replaceTreeNodeChildren,
       loadDatabases,
       loadTables,
@@ -2105,6 +2170,7 @@ const Sidebar: React.FC<{
       v2CommandSearchValue,
       setV2CommandActiveIndex,
       v2ExplorerFilter,
+      sidebarTableMetadataFields,
       treeData,
       treeViewportWidth,
       treeHeight,
@@ -2170,7 +2236,6 @@ const Sidebar: React.FC<{
       v2TreeMetrics,
       tableSortPreference,
       pinnedSidebarTables,
-      showSidebarTableComment,
       getConnectionNodeForAction,
       buildRuntimeConfig,
       extractObjectName,
@@ -2195,7 +2260,7 @@ const Sidebar: React.FC<{
       hoverTitle,
       statusBadge,
       getV2TreeMetaText,
-      showSidebarTableComment,
+      sidebarTableMetadataFields,
       toggleSidebarTablePinned,
       snapshotTreeSelectionBeforeDrag,
       restoreTreeSelectionAfterDrag,
@@ -2920,6 +2985,7 @@ const Sidebar: React.FC<{
         >
             <div className="sidebar-tree-scroll-content">
                 <Tree
+                    key={isV2Ui ? `v2-tree-${v2ExplorerFilter}` : 'legacy-tree'}
                     ref={treeRef}
                     showIcon
                     draggable={{
@@ -2945,6 +3011,7 @@ const Sidebar: React.FC<{
                     onDoubleClick={onDoubleClick}
                     onSelect={onSelect}
                     titleRender={titleRender}
+                    switcherIcon={renderSidebarSwitcherIcon}
                     expandedKeys={expandedKeys}
                     onExpand={onExpand}
                     loadedKeys={loadedKeys}
@@ -3114,12 +3181,6 @@ const Sidebar: React.FC<{
             handleBatchDbDelete={handleBatchDbDelete}
             handleCheckAllDb={handleCheckAllDb}
             handleInvertSelectionDb={handleInvertSelectionDb}
-        />
-
-        <SQLFileExecutionModal
-            title={v2OpenExternalSqlFileLabel}
-            modalPanelStyle={modalPanelStyle}
-            {...sqlFileExecutionModalProps}
         />
         <FindInDatabaseModal
             open={findInDbContext.open}

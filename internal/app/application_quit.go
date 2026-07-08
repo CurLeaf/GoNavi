@@ -4,13 +4,14 @@ import (
 	"context"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/internal/uievents"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const applicationBeforeCloseRequestEvent = "app:before-close-request"
 
 var (
-	emitApplicationBeforeCloseRequest = wailsRuntime.EventsEmit
+	emitApplicationBeforeCloseRequest = uievents.Emit
 	quitApplicationRuntime            = wailsRuntime.Quit
 )
 

@@ -26,6 +26,10 @@ const appSidebarResizeSource = readFileSync(
   fileURLToPath(new globalThis.URL('./hooks/useAppSidebarResize.ts', import.meta.url)),
   'utf8',
 );
+const sidebarLayoutSource = readFileSync(
+  fileURLToPath(new globalThis.URL('./utils/sidebarLayout.ts', import.meta.url)),
+  'utf8',
+);
 
 const getGlobalShortcutCaseBlock = (action: string) => {
   const caseToken = `case '${action}':`;
@@ -161,6 +165,18 @@ describe('tool center menu entries', () => {
     expect(shortcutSource).not.toContain('renderUtilityModalTitle');
   });
 
+  it('does not render an extra top back button in the tool center detail header', () => {
+    const detailHeaderSource = appSource.slice(
+      appSource.indexOf("{activeToolCenterPane ? ("),
+      appSource.indexOf('<div style={toolCenterDetailBodyStyle}>', appSource.indexOf("{activeToolCenterPane ? (")),
+    );
+
+    expect(detailHeaderSource).toContain('activeToolCenterPaneItem?.title ?? activeToolCenterGroup.title');
+    expect(detailHeaderSource).toContain('activeToolCenterPaneItem?.description ?? activeToolCenterGroup.description');
+    expect(detailHeaderSource).not.toContain('<Button onClick={closeToolCenterPane}>');
+    expect(detailHeaderSource).not.toContain("{t('common.back_to_previous')}");
+  });
+
   it('keeps the v2 AI entry in the sidebar and the legacy AI entry on the content edge', () => {
     expect(appSource).toContain('onToggleAI={toggleAIPanel}');
     expect(appSource).toContain('renderLegacyAIEdgeHandle');
@@ -236,6 +252,17 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain("darkMode ? 'rgba(246, 196, 83, 0.55)' : 'rgba(24, 144, 255, 0.5)'");
   });
 
+  it('keeps tool center and settings v2 accents on the green palette instead of legacy yellow or blue tokens', () => {
+    expect(appSource).toContain("const v2AntPrimaryColor = darkMode ? '#22c55e' : '#16a34a';");
+    expect(appSource).toContain("colorPrimary: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#f6c453' : '#1677ff')");
+    expect(appSource).toContain("background: active\n                                  ? overlayTheme.selectedBg");
+    expect(appSource).toContain("background: active\n                                    ? overlayTheme.selectedText");
+    expect(appSource).toContain("background: active\n                                        ? overlayTheme.iconBg");
+    expect(appSource).toContain("color: active\n                                        ? overlayTheme.iconColor");
+    expect(appSource).toContain("background: isV2Ui ? v2AntPrimaryBgColor : (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.10)')");
+    expect(appSource).toContain("color: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff')");
+  });
+
   it('does not start sidebar resize from right-clicking the resize handle', () => {
     expect(appSidebarResizeSource).toContain('if (e.button !== 0)');
     expect(appSource).toContain('onContextMenu={(event) => {');
@@ -262,8 +289,12 @@ describe('tool center menu entries', () => {
     expect(appSidebarResizeSource).toContain('ghostRef.current.style.left = `${startGuideLeft + (newWidth - startWidth)}px`;');
   });
 
-  it('keeps legacy sidebar resize bounds aligned with the v2 sider CSS limits', () => {
-    expect(appCss).toMatch(/body\[data-ui-version="legacy"\]\s+\.ant-layout-sider\s*\{[^}]*min-width:\s*232px\s*!important;[^}]*max-width:\s*420px\s*!important;/s);
+  it('keeps sidebar resize bounds aligned across drag logic and sider CSS limits', () => {
+    expect(sidebarLayoutSource).toContain('export const SIDEBAR_RESIZE_MAX_WIDTH = 960;');
+    expect(sidebarLayoutSource).toContain('export const SIDEBAR_MIN_WORKBENCH_WIDTH = 360;');
+    expect(appSidebarResizeSource).toContain('resolveSidebarResizeMaxWidth(window.innerWidth, minWidth)');
+    expect(appCss).toMatch(/body\[data-ui-version="legacy"\]\s+\.ant-layout-sider\s*\{[^}]*min-width:\s*232px\s*!important;[^}]*max-width:\s*min\(960px,\s*calc\(100vw - 360px\)\)\s*!important;/s);
+    expect(v2ThemeCss).toMatch(/body\[data-ui-version="v2"\]\s+\.gn-v2-app-sider\s*\{[^}]*min-width:\s*232px\s*!important;[^}]*max-width:\s*min\(960px,\s*calc\(100vw - 360px\)\)\s*!important;/s);
   });
 
   it('keeps connection modal warm-mounted while leaving the other heavyweight modals conditional', () => {
@@ -451,8 +482,17 @@ describe('global appearance tokens', () => {
     expect(linuxCJKFontBannerSource).not.toContain('Font Settings');
     expect(appSource).toContain("t('app.theme.font_family.linux_cjk_install_prefix')");
     expect(appSource).toContain("t('app.theme.font_family.linux_cjk_install_suffix')");
+    expect(appSource).toContain("t('app.theme.query_template.title')");
+    expect(appSource).toContain("t('app.theme.query_template.description')");
+    expect(appSource).toContain("t('app.theme.query_template.hint')");
+    expect(appSource).toContain("t('app.theme.query_template.reset_default')");
+    expect(appSource).toContain("const newQuerySqlTemplate = appearance.newQuerySqlTemplate ?? DEFAULT_QUERY_TEMPLATE;");
+    expect(appSource).toContain("onChange={(event) => setAppearance({ newQuerySqlTemplate: event.target.value })}");
+    expect(appSource).toContain("onClick={() => setAppearance({ newQuerySqlTemplate: null })}");
     expect(appSource).not.toContain('Ubuntu/Linux 未检测到中文 CJK 字体');
     expect(appSource).not.toContain('，然后重启 GoNavi。');
+    expect(appSource).not.toContain('新建查询默认 SQL');
+    expect(appSource).not.toContain('清空后新建查询将保持空白');
     expect(appSource).toContain('setIsLinuxCJKFontBannerDismissed(true)');
     expect(appSource).toContain('matchFontFamilyOption');
     expect(appSource).toContain('showSearch');

@@ -1,0 +1,99 @@
+nameOverride: ""
+fullnameOverride: ""
+namespaceOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/syngnat/gonavi-mcp-server
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8765
+  annotations: {}
+
+mcp:
+  dataRoot: /data
+  logDir: /var/lib/gonavi/logs
+  httpAddr: 0.0.0.0:8765
+  httpPath: /mcp
+  schemaOnly: true
+  extraArgs: []
+  extraEnv: []
+
+secret:
+  create: false
+  name: gonavi-mcp-server-data
+  tokenKey: GONAVI_MCP_HTTP_TOKEN
+  connectionsJsonKey: connections.json
+  dailySecretsJsonKey: daily_secrets.json
+  stringData:
+    token: ""
+    connectionsJson: ""
+    dailySecretsJson: ""
+
+data:
+  mode: secret
+  mountPath: /data
+  hostPath:
+    path: /volume1/docker/gonavi/data
+    type: Directory
+  pvc:
+    claimName: ""
+
+drivers:
+  mode: none
+  mountPath: /data/drivers
+  pvc:
+    claimName: gonavi-drivers
+  hostPath:
+    path: /volume1/docker/gonavi/drivers
+    type: Directory
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  hosts:
+    - host: gonavi-mcp.example.com
+      paths:
+        - path: /mcp
+          pathType: Prefix
+        - path: /healthz
+          pathType: Prefix
+  tls:
+    - secretName: gonavi-mcp-server-tls
+      hosts:
+        - gonavi-mcp.example.com
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

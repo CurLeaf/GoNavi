@@ -20,9 +20,41 @@ const resolveDevHarnessMode = (): string => {
     }
 };
 
-if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window as any).go?.aiservice?.Service)) {
+if (
+    typeof window !== 'undefined'
+    && (
+        typeof (window as any).go?.app?.App?.GetSavedConnections !== 'function'
+        || typeof (window as any).go?.aiservice?.Service?.AIGetProviders !== 'function'
+    )
+) {
+    const existingRuntime = (window as any).runtime || {};
+    const existingEventsOnMultiple = existingRuntime.EventsOnMultiple;
+    (window as any).runtime = {
+        ...existingRuntime,
+        EventsOnMultiple: (...args: any[]) => {
+            const off = typeof existingEventsOnMultiple === 'function'
+                ? existingEventsOnMultiple(...args)
+                : undefined;
+            return typeof off === 'function' ? off : () => {};
+        },
+        EventsOff: typeof existingRuntime.EventsOff === 'function' ? existingRuntime.EventsOff : () => {},
+        EventsOffAll: typeof existingRuntime.EventsOffAll === 'function' ? existingRuntime.EventsOffAll : () => {},
+        EventsEmit: typeof existingRuntime.EventsEmit === 'function' ? existingRuntime.EventsEmit : () => {},
+    };
+
     const mockConnections: any[] = [];
     const mockSavedQueries: any[] = [];
+    const mockQueryTables = [
+        { table_name: 'videos', table_comment: 'sample video records' },
+        { table_name: 'users', table_comment: 'sample users' },
+    ];
+    const mockQueryColumns = [
+        { tableName: 'videos', name: 'id', type: 'bigint', comment: 'primary key' },
+        { tableName: 'videos', name: 'code', type: 'varchar', comment: 'video code' },
+        { tableName: 'videos', name: 'title', type: 'varchar', comment: 'video title' },
+        { tableName: 'users', name: 'id', type: 'bigint', comment: 'primary key' },
+        { tableName: 'users', name: 'name', type: 'varchar', comment: 'display name' },
+    ];
     const mockConnectionSecrets = new Map<string, any>();
     const mockProviders: any[] = [];
     const mockProviderSecrets = new Map<string, string>();
@@ -73,6 +105,19 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
     ];
     let mockSkills: any[] = [];
     let mockGlobalProxy: any = { enabled: false, type: 'socks5', host: '', port: 1080, user: '', password: '', hasPassword: false };
+    let mockUpdateChannel: 'latest' | 'dev' = 'latest';
+    const mockReleasePublishedAt = '2026-07-08T11:15:00Z';
+    const buildMockUpdateInfo = () => ({
+        hasUpdate: false,
+        channel: mockUpdateChannel,
+        currentVersion: '0.0.0',
+        latestVersion: mockUpdateChannel === 'dev' ? 'dev-browser-mock' : '0.0.0',
+        releaseName: mockUpdateChannel === 'dev' ? 'Dev Build (dev-browser-mock)' : 'Browser Mock Release',
+        releasePublishedAt: mockReleasePublishedAt,
+        releaseNotesUrl: mockUpdateChannel === 'dev'
+            ? 'https://github.com/Syngnat/GoNavi/releases/tag/dev-latest'
+            : 'https://github.com/Syngnat/GoNavi/releases/latest',
+    });
     let mockDataRootInfo: any = {
         path: 'C:/mock/.gonavi',
         defaultPath: 'C:/mock/.gonavi',
@@ -179,11 +224,13 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
 
     const saveMockGlobalProxy = (input: any) => {
         const nextPassword = String(input?.password ?? '');
+        const clearPassword = input?.clearPassword === true;
         mockGlobalProxy = {
             ...mockGlobalProxy,
             ...input,
             password: '',
-            hasPassword: nextPassword !== '' ? true : !!mockGlobalProxy.hasPassword,
+            hasPassword: clearPassword ? false : (nextPassword !== '' ? true : !!mockGlobalProxy.hasPassword),
+            clearPassword: undefined,
         };
         return cloneBrowserMockValue(mockGlobalProxy);
     };
@@ -274,6 +321,18 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                 GetTables: async () => [],
                 GetTableData: async () => ({ columns: [], rows: [], total: 0 }),
                 GetTableColumns: async () => [],
+                DBGetDatabases: async () => ({ success: true, data: ['missav_bot'] }),
+                DBGetTables: async () => ({ success: true, data: cloneBrowserMockValue(mockQueryTables) }),
+                DBGetAllColumns: async () => ({ success: true, data: cloneBrowserMockValue(mockQueryColumns) }),
+                DBGetColumns: async (_config: any, _dbName: string, tableName: string) => ({
+                    success: true,
+                    data: cloneBrowserMockValue(
+                        mockQueryColumns
+                            .filter((column) => String(column.tableName || '').toLowerCase() === String(tableName || '').toLowerCase())
+                            .map(({ tableName: _tableName, ...column }) => column),
+                    ),
+                }),
+                DBQuery: async () => ({ success: true, data: [], columns: [] }),
                 ExecuteQuery: async () => ({ columns: [], rows: [], time: 0 }),
                 GetSavedQueries: async () => cloneBrowserMockValue(mockSavedQueries),
                 SaveQuery: async (input: any) => saveMockQuery(input),
@@ -299,10 +358,17 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                         bindingStatus: 'active',
                     });
                 },
-                GetAppInfo: async () => ({}),
+                GetAppInfo: async () => ({ success: true, data: { version: '0.0.0', author: 'GoNavi' } }),
                 GetDataRootDirectoryInfo: async () => ({ success: true, data: cloneBrowserMockValue(mockDataRootInfo) }),
-                CheckForUpdates: async () => ({ success: false }),
-                CheckForUpdatesSilently: async () => ({ success: false }),
+                CheckForUpdates: async () => ({
+                    success: true,
+                    data: buildMockUpdateInfo(),
+                }),
+                CheckForUpdatesSilently: async () => ({
+                    success: true,
+                    data: buildMockUpdateInfo(),
+                }),
+                GetUpdateChannel: async () => ({ success: true, data: { channel: mockUpdateChannel } }),
                 OpenDownloadedUpdateDirectory: async () => ({ success: false }),
                 OpenDriverDownloadDirectory: async (path: string) => ({ success: true, data: { path } }),
                 OpenDataRootDirectory: async () => ({ success: true }),
@@ -364,8 +430,27 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                 ExportConnectionsPackage: async (_options?: { includeSecrets?: boolean; filePassword?: string }) => ({ success: false, message: t('app.browser_mock.export_connection_package_unsupported') }),
                 ExportData: async () => ({ success: false }),
                 GetGlobalProxyConfig: async () => ({ success: true, data: cloneBrowserMockValue(mockGlobalProxy) }),
+                SetUpdateChannel: async (channel: string) => {
+                    mockUpdateChannel = String(channel || '').trim().toLowerCase() === 'dev' ? 'dev' : 'latest';
+                    return { success: true, data: { channel: mockUpdateChannel } };
+                },
                 SaveGlobalProxy: async (input: any) => saveMockGlobalProxy(input),
                 ImportLegacyGlobalProxy: async (input: any) => saveMockGlobalProxy(input),
+                TestGlobalProxyConnection: async (input: any) => {
+                    const url = String(input?.url || 'https://api.github.com/').trim();
+                    return {
+                        success: true,
+                        message: t('app.proxy.backend.message.test_success', { status: 200, duration: 18, url }),
+                        data: {
+                            url,
+                            finalUrl: url,
+                            statusCode: 200,
+                            status: '200 OK',
+                            durationMs: 18,
+                            viaProxy: input?.proxy?.enabled === true,
+                        },
+                    };
+                },
                 SelectDataRootDirectory: async (currentPath: string) => ({ success: true, data: { ...mockDataRootInfo, path: currentPath || mockDataRootInfo.path } }),
                 ApplyDataRootDirectory: async (path: string) => {
                     const nextPath = String(path || mockDataRootInfo.defaultPath);
@@ -413,6 +498,21 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                 AIGetContextLevel: async () => mockAIContextLevel,
                 AIGetBuiltinPrompts: async () => ({}),
                 AIGetUserPromptSettings: async () => cloneBrowserMockValue(mockAIUserPromptSettings),
+                AIChatSend: async () => ({
+                    success: true,
+                    content: 'SELECT * FROM `videos` LIMIT 100;',
+                }),
+                AIChatSendWithOptions: async (messages: any[], tools: any[], options: any) => {
+                    (window as any).__gonaviLastAIChatSendWithOptions = {
+                        messages: cloneBrowserMockValue(messages),
+                        tools: cloneBrowserMockValue(tools),
+                        options: cloneBrowserMockValue(options),
+                    };
+                    return {
+                        success: true,
+                        content: 'SELECT * FROM `videos` LIMIT 100;',
+                    };
+                },
                 AISaveUserPromptSettings: async (input: any) => {
                     mockAIUserPromptSettings = {
                         global: String(input?.global || ''),

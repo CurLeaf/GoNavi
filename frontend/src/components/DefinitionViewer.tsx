@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Editor from './MonacoEditor';
 import { Button, Spin, Alert } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
@@ -10,6 +10,7 @@ import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 import { useI18n } from '../i18n/provider';
 import { splitQualifiedNameLast } from '../utils/qualifiedName';
 import { buildSqlServerObjectDefinitionQueries } from '../utils/sqlServerObjectDefinition';
+import { clearQueryTabDraft } from '../utils/sqlFileTabDrafts';
 
 interface DefinitionViewerProps {
     tab: TabData;
@@ -118,6 +119,46 @@ const buildEditableDefinitionSql = (
     return `${header}${ensureSqlStatementTerminator(normalizedDefinition)}`;
 };
 
+const buildDisplayDefinitionSql = (
+    tab: TabData,
+    definition: string,
+    objectName: string,
+): string => {
+    const normalizedDefinition = String(definition || '').trim();
+    if (!normalizedDefinition || isCommentOnlyDefinition(normalizedDefinition)) {
+        return normalizedDefinition;
+    }
+
+    if (tab.type === 'view-def' && !/^\s*create\b/i.test(normalizedDefinition)) {
+        if (/^\s*view\b/i.test(normalizedDefinition)) {
+            return ensureSqlStatementTerminator(normalizedDefinition.replace(/^\s*view\b/i, 'CREATE OR REPLACE VIEW'));
+        }
+        return `CREATE OR REPLACE VIEW ${objectName} AS\n${ensureSqlStatementTerminator(normalizedDefinition)}`;
+    }
+
+    if (tab.type === 'sequence-def' && !/^\s*create\b/i.test(normalizedDefinition)) {
+        return ensureSqlStatementTerminator(`CREATE SEQUENCE ${objectName}\n${normalizedDefinition}`);
+    }
+
+    if (
+        tab.type === 'package-def'
+        && !/^\s*create\b/i.test(normalizedDefinition)
+        && /^\s*package\b/i.test(normalizedDefinition)
+    ) {
+        return withCreateOrReplacePackageHeaders(normalizedDefinition);
+    }
+
+    if (
+        tab.type === 'routine-def'
+        && !/^\s*create\b/i.test(normalizedDefinition)
+        && /^\s*(function|procedure)\b/i.test(normalizedDefinition)
+    ) {
+        return ensureSqlStatementTerminator(`CREATE OR REPLACE ${normalizedDefinition}`);
+    }
+
+    return ensureSqlStatementTerminator(normalizedDefinition);
+};
+
 const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -125,6 +166,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     const [openingObjectEdit, setOpeningObjectEdit] = useState(false);
     const isMountedRef = useRef(true);
     const loadedDefinitionKeyRef = useRef('');
+    const editorRef = useRef<any>(null);
 
     const connections = useStore(state => state.connections);
     const theme = useStore(state => state.theme);
@@ -699,6 +741,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         let queries: string[];
         let extractFn: (dialect: string, data: any[]) => string;
         let resolvedObjectLabel: string;
+        let resolvedObjectName = '';
 
         if (tab.type === 'view-def') {
             const viewName = tab.viewName || '';
@@ -710,6 +753,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             resolvedObjectLabel = tab.viewKind === 'materialized'
                 ? t('definition_viewer.object.materialized_view')
                 : t('definition_viewer.object.view');
+            resolvedObjectName = viewName;
         } else if (tab.type === 'event-def') {
             const eventName = tab.eventName || '';
             if (!eventName) {
@@ -718,6 +762,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             queries = buildShowEventQueries(dialect, eventName, dbName);
             extractFn = extractEventDefinition;
             resolvedObjectLabel = t('definition_viewer.object.event');
+            resolvedObjectName = eventName;
         } else if (tab.type === 'sequence-def') {
             const sequenceName = tab.sequenceName || '';
             if (!sequenceName) {
@@ -726,6 +771,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             queries = buildShowSequenceQueries(dialect, sequenceName, dbName);
             extractFn = extractSequenceDefinition;
             resolvedObjectLabel = t('definition_viewer.object.sequence');
+            resolvedObjectName = sequenceName;
         } else if (tab.type === 'package-def') {
             const packageName = tab.packageName || '';
             if (!packageName) {
@@ -734,6 +780,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             queries = buildShowPackageQueries(dialect, packageName, dbName);
             extractFn = extractPackageDefinition;
             resolvedObjectLabel = t('definition_viewer.object.package');
+            resolvedObjectName = packageName;
         } else {
             const routineName = tab.routineName || '';
             const routineType = tab.routineType || 'FUNCTION';
@@ -743,6 +790,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             queries = buildShowRoutineQueries(dialect, routineName, routineType, dbName);
             extractFn = extractRoutineDefinition;
             resolvedObjectLabel = t('definition_viewer.object.routine');
+            resolvedObjectName = routineName;
         }
 
         if (!queries.length || String(queries[0] || '').startsWith('--')) {
@@ -769,7 +817,11 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 : await runQueryCandidates(config, dbName, queries);
 
             if (result.success && Array.isArray(result.data) && result.data.length > 0) {
-                return { success: true, definition: extractFn(dialect, result.data) };
+                const rawDefinition = extractFn(dialect, result.data);
+                return {
+                    success: true,
+                    definition: buildDisplayDefinitionSql(tab, rawDefinition, resolvedObjectName),
+                };
             }
 
             if (result.success) {
@@ -896,10 +948,93 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             name: normalizedObjectName,
         }),
     };
+    const editorModelPath = `gonavi-definition://${encodeURIComponent(objectIdentityKey)}`;
+    const currentDefinition = loadedDefinitionKeyRef.current === objectIdentityKey ? String(definition || '') : '';
+
+    const refreshEditorLayout = useCallback(() => {
+        const editor = editorRef.current;
+        if (!editor) {
+            return;
+        }
+
+        const run = () => {
+            editor.layout?.();
+            editor.render?.();
+            editor.setScrollTop?.(0);
+            editor.setScrollLeft?.(0);
+        };
+
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => run());
+            return;
+        }
+
+        setTimeout(run, 0);
+    }, []);
+
+    const handleEditorMount = useCallback((editor: any) => {
+        editorRef.current = editor;
+        refreshEditorLayout();
+    }, [refreshEditorLayout]);
+
+    useEffect(() => {
+        if (!displayedDefinition) {
+            return;
+        }
+        refreshEditorLayout();
+    }, [displayedDefinition, refreshEditorLayout]);
+
+    useEffect(() => () => {
+        editorRef.current = null;
+    }, []);
+
+    const openObjectEditTab = useCallback((sourceDefinition: string) => {
+        const dbName = String(tab.dbName || '').trim();
+        const latestDefinition = String(sourceDefinition || '');
+        loadedDefinitionKeyRef.current = objectIdentityKey;
+        setDefinition(latestDefinition);
+        const query = buildEditableDefinitionSql(tab, latestDefinition, normalizedObjectName, editableDefinitionCopy);
+        setActiveContext({ connectionId: tab.connectionId, dbName });
+        clearQueryTabDraft(tab.id);
+        addTab({
+            id: tab.id,
+            title: editTabTitle,
+            type: 'query',
+            connectionId: tab.connectionId,
+            dbName,
+            query,
+            queryMode: 'object-edit',
+            returnToTabId: undefined,
+            viewName: undefined,
+            viewKind: undefined,
+            eventName: undefined,
+            routineName: undefined,
+            routineType: undefined,
+            sequenceName: undefined,
+            packageName: undefined,
+            triggerName: undefined,
+            triggerTableName: undefined,
+            schemaName: undefined,
+            objectType: undefined,
+            tableName: undefined,
+            sidebarLocateKey: undefined,
+        });
+    }, [
+        addTab,
+        editTabTitle,
+        editableDefinitionCopy,
+        normalizedObjectName,
+        objectIdentityKey,
+        setActiveContext,
+        tab,
+    ]);
 
     const openObjectEditQuery = async () => {
         if (!normalizedObjectName || openingObjectEdit) return;
-        const dbName = String(tab.dbName || '').trim();
+        if (String(currentDefinition || '').trim()) {
+            openObjectEditTab(currentDefinition);
+            return;
+        }
         setOpeningObjectEdit(true);
         setError(null);
         try {
@@ -911,20 +1046,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 setError(result.error || t('definition_viewer.error.query_failed'));
                 return;
             }
-            const latestDefinition = String(result.definition || '');
-            loadedDefinitionKeyRef.current = objectIdentityKey;
-            setDefinition(latestDefinition);
-            const query = buildEditableDefinitionSql(tab, latestDefinition, normalizedObjectName, editableDefinitionCopy);
-            setActiveContext({ connectionId: tab.connectionId, dbName });
-            addTab({
-                id: `query-edit-object-${tab.connectionId}-${dbName}-${Date.now()}`,
-                title: editTabTitle,
-                type: 'query',
-                connectionId: tab.connectionId,
-                dbName,
-                query,
-                queryMode: 'object-edit',
-            });
+            openObjectEditTab(String(result.definition || ''));
         } finally {
             if (isMountedRef.current) {
                 setOpeningObjectEdit(false);
@@ -967,15 +1089,20 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             )}
             <div style={{ flex: 1, minHeight: 0 }}>
                 <Editor
+                    path={editorModelPath}
                     height="100%"
                     language="sql"
                     theme={darkMode ? 'transparent-dark' : 'transparent-light'}
                     value={displayedDefinition}
+                    onMount={handleEditorMount}
                     options={{
                         readOnly: true,
                         minimap: { enabled: false },
                         fontSize: 14,
+                        lineHeight: 24,
                         lineNumbers: 'on',
+                        lineNumbersMinChars: 4,
+                        stickyScroll: { enabled: false },
                         scrollBeyondLastLine: false,
                         wordWrap: 'on',
                         automaticLayout: true,

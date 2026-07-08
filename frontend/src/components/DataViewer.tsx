@@ -19,6 +19,7 @@ import {
 import {
   DUCKDB_ROWID_LOCATOR_COLUMN,
   ORACLE_ROWID_LOCATOR_COLUMN,
+  buildAllColumnsLocator,
   resolveEditRowLocator,
   type EditRowLocator,
 } from '../utils/rowLocator';
@@ -291,6 +292,9 @@ type ViewerScrollSnapshot = {
 const viewerFilterSnapshotsByTab = new Map<string, ViewerFilterSnapshot>();
 const MAX_VIEWER_FILTER_SNAPSHOTS = 64;
 const VIEWER_SCROLL_SNAPSHOT_PERSIST_DELAY_MS = 160;
+const shouldDeferInitialDataViewerFetch = (initialViewMode?: TabData['initialViewMode']): boolean => (
+  initialViewMode === 'fields'
+);
 
 const trimViewerFilterSnapshots = () => {
   while (viewerFilterSnapshotsByTab.size > MAX_VIEWER_FILTER_SNAPSHOTS) {
@@ -387,6 +391,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
   const scrollSnapshotPersistTimerRef = useRef<number | null>(null);
   const initialLoadRef = useRef(false);
   const skipNextAutoFetchRef = useRef(false);
+  const deferredInitialFetchRef = useRef(shouldDeferInitialDataViewerFetch(tab.initialViewMode));
 
   const [pagination, setPagination] = useState<ViewerPaginationState>({
       current: initialViewerSnapshot.currentPage,
@@ -474,6 +479,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
     latestCountKeyRef.current = '';
     scrollSnapshotRef.current = { top: snapshot.scrollTop, left: snapshot.scrollLeft };
     initialLoadRef.current = false;
+    deferredInitialFetchRef.current = shouldDeferInitialDataViewerFetch(tab.initialViewMode);
     skipNextAutoFetchRef.current = true;
     setPagination(prev => ({
       ...prev,
@@ -647,12 +653,12 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                 if (pkKeyRef.current !== locatorKey) return;
 
                 if (!resCols?.success || !Array.isArray(resCols.data)) {
-                    const nextLocator = buildDataViewerReadOnlyLocator(tr('data_viewer.read_only.reason.metadata_unavailable'));
+                    const nextLocator = buildAllColumnsLocator([], { translate: tr });
                     pkColumnsForQuery = [];
                     editLocatorForQuery = nextLocator;
                     setPkColumns([]);
                     setEditLocator(nextLocator);
-                    warnDataViewerReadOnly('table', formatDataViewerTableName(dbName, tableName), nextLocator.reason, tr);
+                    if (nextLocator.reason) message.info(nextLocator.reason);
                 } else {
                     const columnDefs = resCols.data as ColumnDefinition[];
                     const primaryKeys = columnDefs
@@ -668,7 +674,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                         : (String(dbType || '').trim().toLowerCase() === 'duckdb'
                             ? [...resultColumns, DUCKDB_ROWID_LOCATOR_COLUMN]
                             : resultColumns);
-                    let nextLocator = localizeDataViewerReadOnlyLocator(resolveEditRowLocator({
+                    const nextLocator = localizeDataViewerReadOnlyLocator(resolveEditRowLocator({
                         dbType,
                         resultColumns: locatorColumns,
                         primaryKeys,
@@ -678,28 +684,26 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                         translate: tr,
                     }), tr);
 
-                    if (nextLocator.readOnly && primaryKeys.length === 0 && !resIndexes?.success && !isOracleLikeDialect(dbType)) {
-                        nextLocator = buildDataViewerReadOnlyLocator(tr('data_viewer.read_only.reason.index_metadata_unavailable'));
-                    }
-
                     pkColumnsForQuery = primaryKeys;
                     editLocatorForQuery = nextLocator;
                     setPkColumns(primaryKeys);
                     setEditLocator(nextLocator);
                     if (nextLocator.readOnly) {
                         warnDataViewerReadOnly('table', formatDataViewerTableName(dbName, tableName), nextLocator.reason, tr);
+                    } else if (nextLocator.strategy === 'all-columns' && nextLocator.reason) {
+                        message.info(nextLocator.reason);
                     }
                 }
             } catch {
                 if (fetchSeqRef.current !== seq) return;
                 if (pkSeqRef.current !== locatorSeq) return;
                 if (pkKeyRef.current !== locatorKey) return;
-                const nextLocator = buildDataViewerReadOnlyLocator(tr('data_viewer.read_only.reason.metadata_unavailable'));
+                const nextLocator = buildAllColumnsLocator([], { translate: tr });
                 pkColumnsForQuery = [];
                 editLocatorForQuery = nextLocator;
                 setPkColumns([]);
                 setEditLocator(nextLocator);
-                warnDataViewerReadOnly('table', formatDataViewerTableName(dbName, tableName), nextLocator.reason, tr);
+                if (nextLocator.reason) message.info(nextLocator.reason);
             }
         }
     }
@@ -1129,6 +1133,12 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
   // 定位信息只会在表上下文变化后重新加载，避免循环查询。
 
   // Handlers memoized
+  const handleDataViewActivate = useCallback(() => {
+    if (!deferredInitialFetchRef.current || initialLoadRef.current) return;
+    deferredInitialFetchRef.current = false;
+    initialLoadRef.current = true;
+    void fetchData(pagination.current, pagination.pageSize);
+  }, [fetchData, pagination.current, pagination.pageSize]);
   const handleReload = useCallback(() => {
     fetchData(pagination.current, pagination.pageSize);
   }, [fetchData, pagination.current, pagination.pageSize]);
@@ -1200,6 +1210,9 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
   }, [tab.tableName, currentConnConfig?.type, currentConnConfig?.driver, filterConditions, quickWhereCondition, sortInfo, editLocator, pkColumns]);
 
   useEffect(() => {
+    if (deferredInitialFetchRef.current && !initialLoadRef.current) {
+      return;
+    }
     const action = resolveDataViewerAutoFetchAction({
       skipNextAutoFetch: skipNextAutoFetchRef.current,
       hasInitialLoad: initialLoadRef.current,
@@ -1251,6 +1264,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
           enableSqlLogEvent
           initialViewMode={tab.initialViewMode}
           initialViewModeRequestId={tab.initialViewModeRequestId}
+          onDataViewActivate={handleDataViewActivate}
       />
     </div>
   );

@@ -40,9 +40,9 @@ describe('applyQueryAutoLimit', () => {
     ['dameng'],
     ['dm'],
     ['dm8'],
-  ])('adds ROWNUM limit for %s connections', (dbType) => {
+  ])('adds FETCH FIRST limit for %s connections', (dbType) => {
     expect(applyQueryAutoLimit('SELECT * FROM MYCIMLED.EDC_LOG', dbType, 500).sql)
-      .toBe('SELECT * FROM (SELECT * FROM MYCIMLED.EDC_LOG) WHERE ROWNUM <= 500');
+      .toBe('SELECT * FROM MYCIMLED.EDC_LOG FETCH FIRST 500 ROWS ONLY');
   });
 
   it.each([
@@ -61,8 +61,8 @@ describe('applyQueryAutoLimit', () => {
   });
 
   it.each([
-    ['oracle', 'SELECT * FROM (SELECT * FROM users) WHERE ROWNUM <= 500'],
-    ['dm8', 'SELECT * FROM (SELECT * FROM users) WHERE ROWNUM <= 500'],
+    ['oracle', 'SELECT * FROM users FETCH FIRST 500 ROWS ONLY'],
+    ['dm8', 'SELECT * FROM users FETCH FIRST 500 ROWS ONLY'],
     ['mssql', 'SELECT TOP 500 * FROM users'],
     ['postgresql', 'SELECT * FROM users LIMIT 500'],
     ['gauss-db', 'SELECT * FROM users LIMIT 500'],
@@ -76,12 +76,17 @@ describe('applyQueryAutoLimit', () => {
 
   it('keeps trailing semicolon and comments after injected Oracle limit', () => {
     expect(applyQueryAutoLimit('SELECT * FROM MYCIMLED.EDC_LOG; -- preview', 'oracle', 500).sql)
-      .toBe('SELECT * FROM (SELECT * FROM MYCIMLED.EDC_LOG) WHERE ROWNUM <= 500; -- preview');
+      .toBe('SELECT * FROM MYCIMLED.EDC_LOG FETCH FIRST 500 ROWS ONLY; -- preview');
   });
 
-  it('uses Oracle 11g compatible ROWNUM limit for simple table queries', () => {
+  it('uses Oracle FETCH FIRST limit for simple table queries', () => {
     expect(applyQueryAutoLimit('select 1 from xxx', 'oracle', 500).sql)
-      .toBe('SELECT * FROM (select 1 from xxx) WHERE ROWNUM <= 500');
+      .toBe('select 1 from xxx FETCH FIRST 500 ROWS ONLY');
+  });
+
+  it('keeps ORDER BY semantics with Oracle FETCH FIRST', () => {
+    expect(applyQueryAutoLimit('SELECT * FROM users ORDER BY created_at DESC', 'oracle', 100).sql)
+      .toBe('SELECT * FROM users ORDER BY created_at DESC FETCH FIRST 100 ROWS ONLY');
   });
 
   it('does not add another generic limit when SQL already limits rows', () => {

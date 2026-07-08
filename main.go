@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"runtime/debug"
 	"strings"
 
@@ -11,13 +12,19 @@ import (
 	"GoNavi-Wails/internal/app"
 	"GoNavi-Wails/internal/logger"
 	"GoNavi-Wails/internal/mcpserver"
+	"GoNavi-Wails/internal/webserver"
 
 	"github.com/wailsapp/wails/v2"
+	"github.com/wailsapp/wails/v2/pkg/menu"
+	"github.com/wailsapp/wails/v2/pkg/menu/keys"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+const nativeSelectCurrentLineEvent = "gonavi:native-select-current-line"
 
 func main() {
 	// 大结果集导出（88W+ 行）时，JSON 编解码会产生 5-8 倍内存副本，
@@ -34,11 +41,21 @@ func main() {
 	application := app.NewApp()
 	aiService := aiservice.NewService()
 	lowMemoryMode := isLowMemoryMode()
+	var runtimeCtx context.Context
 	backgroundColour := &options.RGBA{R: 0, G: 0, B: 0, A: 0}
 	windowsBackdrop := windows.Acrylic
 	if lowMemoryMode {
 		backgroundColour = &options.RGBA{R: 255, G: 255, B: 255, A: 255}
 		windowsBackdrop = windows.None
+	}
+	var appMenu *menu.Menu
+	if strings.EqualFold(strings.TrimSpace(runtime.GOOS), "darwin") {
+		appMenu = buildMacApplicationMenu(func() {
+			if runtimeCtx == nil {
+				return
+			}
+			wailsRuntime.EventsEmit(runtimeCtx, nativeSelectCurrentLineEvent)
+		}, true)
 	}
 
 	// Create application with options
@@ -53,7 +70,9 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: backgroundColour,
+		Menu:             appMenu,
 		OnStartup: func(ctx context.Context) {
+			runtimeCtx = ctx
 			app.InitializeLifecycle(application, ctx)
 			aiservice.InitializeLifecycle(aiService, ctx)
 		},
@@ -85,15 +104,43 @@ func main() {
 	}
 }
 
+func buildMacApplicationMenu(onNativeSelectCurrentLine func(), frameless bool) *menu.Menu {
+	result := menu.NewMenuFromItems(
+		menu.AppMenu(),
+		menu.EditMenu(),
+	)
+	if !frameless {
+		result.Append(menu.WindowMenu())
+	}
+	queryEditorMenu := result.AddSubmenu("SQL")
+	queryEditorMenu.AddText("Copy Current Line", keys.CmdOrCtrl("e"), func(_ *menu.CallbackData) {
+		if onNativeSelectCurrentLine != nil {
+			onNativeSelectCurrentLine()
+		}
+	})
+	return result
+}
+
 func runSpecialMode(args []string) bool {
-	if !shouldRunMCPServerMode(args) {
+	if len(args) == 0 {
 		return false
 	}
 
-	if err := runMCPServerMode(context.Background(), args[1:]); err != nil {
-		logger.Error(err, "GoNavi MCP Server 退出")
+	mode := strings.ToLower(strings.TrimSpace(args[0]))
+	switch mode {
+	case "mcp-server", "--mcp-server":
+		if err := runMCPServerMode(context.Background(), args[1:]); err != nil {
+			logger.Error(err, "GoNavi MCP Server 退出")
+		}
+		return true
+	case "web-server", "--web-server":
+		if err := webserver.Run(context.Background(), assets, args[1:]); err != nil {
+			logger.Error(err, "GoNavi Web Server 退出")
+		}
+		return true
+	default:
+		return false
 	}
-	return true
 }
 
 func runMCPServerMode(ctx context.Context, args []string) error {
@@ -116,19 +163,6 @@ func runMCPServerMode(ctx context.Context, args []string) error {
 		return mcpserver.WriteRemoteMCPClientConfig(os.Stdout, args[1:])
 	default:
 		return fmt.Errorf("未知 MCP server 模式: %s（支持 stdio/http/remote-config）", args[0])
-	}
-}
-
-func shouldRunMCPServerMode(args []string) bool {
-	if len(args) == 0 {
-		return false
-	}
-
-	switch strings.ToLower(strings.TrimSpace(args[0])) {
-	case "mcp-server", "--mcp-server":
-		return true
-	default:
-		return false
 	}
 }
 

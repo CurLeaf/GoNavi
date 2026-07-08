@@ -27,3 +27,26 @@ func TestShouldUseManagedSQLTransaction_UnsupportedTypesUsePlainExecution(t *tes
 		})
 	}
 }
+
+func TestShouldUseManagedSQLTransaction_OracleAnonymousBlockWithDMLUsesManagedTransaction(t *testing.T) {
+	t.Parallel()
+
+	query := `BEGIN
+    UPDATE users SET name = 'new' WHERE id = 1;
+    DELETE FROM audit_logs WHERE user_id = 1;
+END;`
+	if !shouldUseManagedSQLTransaction("oracle", query) {
+		t.Fatal("expected Oracle anonymous block with DML to use SQL editor managed transaction")
+	}
+}
+
+func TestShouldUseManagedSQLTransaction_OracleReadOnlyAnonymousBlockStaysUnmanaged(t *testing.T) {
+	t.Parallel()
+
+	query := `BEGIN
+    NULL;
+END;`
+	if shouldUseManagedSQLTransaction("oracle", query) {
+		t.Fatal("expected Oracle read-only anonymous block to stay unmanaged")
+	}
+}

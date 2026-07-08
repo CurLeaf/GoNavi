@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Editor from './MonacoEditor';
 import { Button, Spin, Alert } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
@@ -110,6 +110,7 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
     const [openingObjectEdit, setOpeningObjectEdit] = useState(false);
     const isMountedRef = useRef(true);
     const loadedDefinitionKeyRef = useRef('');
+    const editorRef = useRef<any>(null);
 
     const connections = useStore(state => state.connections);
     const theme = useStore(state => state.theme);
@@ -465,6 +466,47 @@ LIMIT 1`];
         isMountedRef.current = false;
     }, []);
 
+    const displayedDefinition = loadedDefinitionKeyRef.current === objectIdentityKey ? triggerDefinition : '';
+    const hasDefinition = String(displayedDefinition || '').trim() !== '';
+    const editorModelPath = `gonavi-trigger://${encodeURIComponent(objectIdentityKey)}`;
+
+    const refreshEditorLayout = useCallback(() => {
+        const editor = editorRef.current;
+        if (!editor) {
+            return;
+        }
+
+        const run = () => {
+            editor.layout?.();
+            editor.render?.();
+            editor.setScrollTop?.(0);
+            editor.setScrollLeft?.(0);
+        };
+
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => run());
+            return;
+        }
+
+        setTimeout(run, 0);
+    }, []);
+
+    const handleEditorMount = useCallback((editor: any) => {
+        editorRef.current = editor;
+        refreshEditorLayout();
+    }, [refreshEditorLayout]);
+
+    useEffect(() => {
+        if (!displayedDefinition) {
+            return;
+        }
+        refreshEditorLayout();
+    }, [displayedDefinition, refreshEditorLayout]);
+
+    useEffect(() => () => {
+        editorRef.current = null;
+    }, []);
+
     if (loading) {
         return (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
@@ -472,9 +514,6 @@ LIMIT 1`];
             </div>
         );
     }
-
-    const displayedDefinition = loadedDefinitionKeyRef.current === objectIdentityKey ? triggerDefinition : '';
-    const hasDefinition = String(displayedDefinition || '').trim() !== '';
 
     if (error && !hasDefinition) {
         return (
@@ -537,15 +576,20 @@ LIMIT 1`];
             )}
             <div style={{ flex: 1, minHeight: 0 }}>
                 <Editor
+                    path={editorModelPath}
                     height="100%"
                     language="sql"
                     theme={darkMode ? 'transparent-dark' : 'transparent-light'}
                     value={displayedDefinition}
+                    onMount={handleEditorMount}
                     options={{
                         readOnly: true,
                         minimap: { enabled: false },
                         fontSize: 14,
+                        lineHeight: 24,
                         lineNumbers: 'on',
+                        lineNumbersMinChars: 4,
+                        stickyScroll: { enabled: false },
                         scrollBeyondLastLine: false,
                         wordWrap: 'on',
                         automaticLayout: true,

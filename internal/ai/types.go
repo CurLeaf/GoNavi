@@ -46,6 +46,13 @@ type ChatRequest struct {
 	ImageOmittedNotice  string    `json:"-"`
 }
 
+// ChatSendOptions 表示一次对话调用的临时覆盖选项，不写回 Provider 配置。
+type ChatSendOptions struct {
+	Model       string  `json:"model,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
+	MaxTokens   int     `json:"maxTokens,omitempty"`
+}
+
 // ChatResponse AI 对话响应
 type ChatResponse struct {
 	Content          string     `json:"content"`
@@ -73,19 +80,20 @@ type StreamChunk struct {
 
 // ProviderConfig AI Provider 配置
 type ProviderConfig struct {
-	ID          string            `json:"id"`
-	Type        string            `json:"type"` // openai | anthropic | gemini | custom
-	Name        string            `json:"name"`
-	APIKey      string            `json:"apiKey"`
-	SecretRef   string            `json:"secretRef,omitempty"`
-	HasSecret   bool              `json:"hasSecret,omitempty"`
-	BaseURL     string            `json:"baseUrl"`
-	Model       string            `json:"model"`
-	Models      []string          `json:"models,omitempty"`
-	APIFormat   string            `json:"apiFormat,omitempty"` // custom 专用: openai | anthropic | gemini | cursor-agent | claude-cli | codebuddy-cli
-	Headers     map[string]string `json:"headers,omitempty"`
-	MaxTokens   int               `json:"maxTokens"`
-	Temperature float64           `json:"temperature"`
+	ID                    string            `json:"id"`
+	Type                  string            `json:"type"` // openai | anthropic | gemini | custom
+	Name                  string            `json:"name"`
+	APIKey                string            `json:"apiKey"`
+	SecretRef             string            `json:"secretRef,omitempty"`
+	HasSecret             bool              `json:"hasSecret,omitempty"`
+	BaseURL               string            `json:"baseUrl"`
+	Model                 string            `json:"model"`
+	InlineCompletionModel string            `json:"inlineCompletionModel,omitempty"`
+	Models                []string          `json:"models,omitempty"`
+	APIFormat             string            `json:"apiFormat,omitempty"` // custom 专用: openai | anthropic | gemini | cursor-agent | claude-cli | codebuddy-cli
+	Headers               map[string]string `json:"headers,omitempty"`
+	MaxTokens             int               `json:"maxTokens"`
+	Temperature           float64           `json:"temperature"`
 }
 
 // UserPromptSettings 表示用户级自定义提示词配置

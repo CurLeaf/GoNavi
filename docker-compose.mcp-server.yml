@@ -1,0 +1,20 @@
+services:
+  gonavi-mcp-server:
+    image: ${GONAVI_MCP_IMAGE:-ghcr.io/syngnat/gonavi-mcp-server:latest}
+    pull_policy: ${GONAVI_MCP_PULL_POLICY:-missing}
+    container_name: gonavi-mcp-server
+    restart: unless-stopped
+    ports:
+      - "${GONAVI_MCP_HTTP_PORT:-8765}:8765"
+    environment:
+      GONAVI_DATA_ROOT: /data
+      GONAVI_LOG_DIR: /var/lib/gonavi/logs
+      GONAVI_MCP_HTTP_ADDR: 0.0.0.0:8765
+      GONAVI_MCP_HTTP_PATH: ${GONAVI_MCP_HTTP_PATH:-/mcp}
+      GONAVI_MCP_HTTP_TOKEN: ${GONAVI_MCP_HTTP_TOKEN}
+      GONAVI_MCP_SCHEMA_ONLY: ${GONAVI_MCP_SCHEMA_ONLY:-true}
+    volumes:
+      - type: bind
+        source: ${GONAVI_HOST_DATA_ROOT}
+        target: /data
+    command: ["http"]

@@ -44,6 +44,14 @@ interface AISettingsModalProps {
     onBeforeExternalMCPUse?: () => Promise<void>;
 }
 
+export interface AISettingsContentProps {
+    active: boolean;
+    darkMode: boolean;
+    overlayTheme: OverlayWorkbenchTheme;
+    focusProviderId?: string;
+    onBeforeExternalMCPUse?: () => Promise<void>;
+}
+
 const DEFAULT_MCP_HTTP_SERVER_STATUS: AIMCPHTTPServerStatus = {
     running: false,
     addr: '127.0.0.1:8765',
@@ -80,7 +88,7 @@ const normalizeMCPHTTPAuthorizationToken = (value: string): string => {
     return withoutHeaderName.replace(/^Bearer\s+/i, '').trim();
 };
 
-const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme, focusProviderId, onBeforeExternalMCPUse }) => {
+export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, darkMode, overlayTheme, focusProviderId, onBeforeExternalMCPUse }) => {
     const { t } = useI18n();
     const defaultMCPHTTPServerStatus = useMemo<AIMCPHTTPServerStatus>(() => ({
         ...DEFAULT_MCP_HTTP_SERVER_STATUS,
@@ -251,16 +259,16 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         } catch (e) { console.warn('Failed to load AI config', e); }
     }, [defaultMCPHTTPServerStatus, resolveAIService, syncMCPClientStatuses]);
 
-    useEffect(() => { if (open) void loadConfig(); }, [open, loadConfig]);
+    useEffect(() => { if (active) void loadConfig(); }, [active, loadConfig]);
 
     useEffect(() => {
-        if (open) {
+        if (active) {
             resetMCPClientSelectionTouched();
         }
-    }, [open, resetMCPClientSelectionTouched]);
+    }, [active, resetMCPClientSelectionTouched]);
 
     useEffect(() => {
-        if (!open || !focusProviderId) {
+        if (!active || !focusProviderId) {
             return;
         }
         if (!providers.some((provider) => provider.id === focusProviderId)) {
@@ -268,7 +276,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         }
         setActiveSection('providers');
         setActiveProviderId(focusProviderId);
-    }, [focusProviderId, open, providers]);
+    }, [active, focusProviderId, providers]);
 
     const applyProviderEditorSession = useCallback((session: ProviderEditorSession) => {
         setEditingProvider(session.editingProvider as AIProviderConfig | null);
@@ -285,16 +293,11 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         applyProviderEditorSession(buildClosedProviderEditorSession());
     }, [applyProviderEditorSession]);
 
-    const handleModalClose = useCallback(() => {
-        resetProviderEditorSession();
-        onClose();
-    }, [onClose, resetProviderEditorSession]);
-
     useEffect(() => {
-        if (!open) {
+        if (!active) {
             resetProviderEditorSession();
         }
-    }, [open, resetProviderEditorSession]);
+    }, [active, resetProviderEditorSession]);
     const handleAddProvider = () => {
         const preset = findPreset('openai');
         applyProviderEditorSession(buildAddProviderEditorSession({
@@ -374,6 +377,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 valuesModel: values.model,
                 customModels: values.models,
             });
+            const inlineCompletionModel = String(values.inlineCompletionModel || '').trim();
             // 内置供应商自动使用 preset label 作为名称
             const finalName = isCustomLike ? (values.name || localizedPreset.label) : localizedPreset.label;
             
@@ -398,6 +402,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 apiKey: secretDraft.apiKey,
                 hasSecret: secretDraft.hasSecret,
                 model: finalModel,
+                inlineCompletionModel,
                 models: resolvedModels,
                 baseUrl: finalBaseUrl,
                 apiFormat: resolvedTransport.apiFormat,
@@ -669,6 +674,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 hasSecret: secretDraft.hasSecret,
                 baseUrl: finalBaseUrl,
                 model: finalModel,
+                inlineCompletionModel: String(values.inlineCompletionModel || '').trim(),
                 models: resolvedModels,
                 maxTokens: Number(values.maxTokens) || 4096,
                 temperature: Number(values.temperature) ?? 0.7,
@@ -687,15 +693,165 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             presetFixedApiFormat: preset.fixedApiFormat,
             valuesApiFormat: form.getFieldValue('apiFormat'),
         });
+        const { model: presetModel, models: presetModels } = resolvePresetModelSelection({
+            presetKey,
+            presetDefaultModel: preset.defaultModel,
+            presetModels: preset.models,
+            customModels: preset.models,
+        });
         form.setFieldsValue({
             presetKey,
             type: resolvedTransport.type,
             apiFormat: resolvedTransport.apiFormat || 'openai',
             baseUrl: preset.defaultBaseUrl,
-            model: preset.defaultModel,
+            model: presetModel,
+            models: presetModels,
+            inlineCompletionModel: '',
         });
     };
 
+    return (
+        <div ref={modalBodyRef} className="ai-settings-body" style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0', height: '100%', minHeight: 0, overflow: 'hidden', alignItems: 'stretch', position: 'relative', boxSizing: 'border-box' }}>
+            {messageContextHolder}
+            <AISettingsSidebar
+                activeSection={activeSection}
+                darkMode={darkMode}
+                overlayTheme={overlayTheme}
+                onSelectSection={setActiveSection}
+            />
+            <div style={{ minWidth: 0, minHeight: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain', paddingRight: 8, paddingBottom: 28 }}>
+                {activeSection === 'providers' && (
+                    <AISettingsProvidersSection
+                        providers={providers}
+                        activeProviderId={activeProviderId}
+                        editingProvider={editingProvider}
+                        isEditing={isEditing}
+                        form={form}
+                        providerPresets={localizedProviderPresets}
+                        watchedPresetKey={watchedPresetKey}
+                        watchedApiFormat={watchedApiFormat}
+                        loading={loading}
+                        testStatus={testStatus}
+                        primaryPasswordVisible={primaryPasswordVisible}
+                        darkMode={darkMode}
+                        overlayTheme={overlayTheme}
+                        cardBg={cardBg}
+                        cardBorder={cardBorder}
+                        inputBg={inputBg}
+                        onPrimaryPasswordVisibleChange={setPrimaryPasswordVisible}
+                        resolveProviderPreset={matchLocalizedProviderPreset}
+                        resolvePresetByKey={findLocalizedPreset}
+                        onAddProvider={handleAddProvider}
+                        onEditProvider={handleEditProvider}
+                        onDeleteProvider={handleDeleteProvider}
+                        onSetActiveProvider={handleSetActive}
+                        onCancelEdit={resetProviderEditorSession}
+                        onPresetChange={handlePresetChange}
+                        onTestProvider={handleTestProvider}
+                        onSaveProvider={handleSaveProvider}
+                    />
+                )}
+                {activeSection === 'safety' && (
+                    <AISettingsSafetySection
+                        safetyLevel={safetyLevel}
+                        darkMode={darkMode}
+                        overlayTheme={overlayTheme}
+                        cardBg={cardBg}
+                        cardBorder={cardBorder}
+                        onChange={handleSafetyChange}
+                    />
+                )}
+                {activeSection === 'context' && (
+                    <AISettingsContextSection
+                        contextLevel={contextLevel}
+                        darkMode={darkMode}
+                        overlayTheme={overlayTheme}
+                        cardBg={cardBg}
+                        cardBorder={cardBorder}
+                        onChange={handleContextChange}
+                    />
+                )}
+                {activeSection === 'mcp' && (
+                    <AISettingsMCPSection
+                        mcpClientStatuses={mcpClientStatuses}
+                        selectedMCPClient={selectedMCPClient}
+                        selectedMCPClientStatus={selectedMCPClientStatus}
+                        selectedMCPClientCommandText={selectedMCPClientCommandText}
+                        mcpHTTPServerStatus={mcpHTTPServerStatus}
+                        mcpHTTPServerDraft={mcpHTTPServerDraft}
+                        mcpServers={mcpServers}
+                        mcpTools={mcpTools}
+                        darkMode={darkMode}
+                        overlayTheme={overlayTheme}
+                        cardBg={cardBg}
+                        cardBorder={cardBorder}
+                        inputBg={inputBg}
+                        loading={loading}
+                        mcpClientStatusLoading={mcpClientStatusLoading}
+                        mcpHTTPServerLoading={mcpHTTPServerLoading}
+                        onUpdateHTTPServerDraft={handleUpdateMCPHTTPServerDraft}
+                        onToggleHTTPServer={handleToggleMCPHTTPServer}
+                        onCopyHTTPServerURL={() => void handleCopyMCPHTTPServerURL()}
+                        onCopyHTTPServerAuthorization={() => void handleCopyMCPHTTPServerAuthorization()}
+                        onSelectClient={handleSelectMCPClient}
+                        onRefreshStatus={() => void loadMCPClientStatuses()}
+                        onCopyConfigPath={() => void handleCopySelectedMCPConfigPath()}
+                        onCopyLaunchCommand={() => void handleCopySelectedMCPLaunchCommand()}
+                        onInstallSelectedClient={handleInstallSelectedMCPClient}
+                        onAddServer={handleAddMCPServer}
+                        onUpdateServerDraft={updateMCPServerDraft}
+                        onTestServer={handleTestMCPServer}
+                        onSaveServer={handleSaveMCPServer}
+                        onDeleteServer={handleDeleteMCPServer}
+                    />
+                )}
+                {activeSection === 'skills' && (
+                    <AISettingsSkillsSection
+                        skills={skills}
+                        skillRequiredToolOptions={skillRequiredToolOptions}
+                        overlayTheme={overlayTheme}
+                        cardBg={cardBg}
+                        cardBorder={cardBorder}
+                        inputBg={inputBg}
+                        loading={loading}
+                        onAddSkill={handleAddSkill}
+                        onUpdateSkillDraft={updateSkillDraft}
+                        onSaveSkill={handleSaveSkill}
+                        onDeleteSkill={handleDeleteSkill}
+                    />
+                )}
+                {activeSection === 'tools' && (
+                    <AIBuiltinToolsCatalog
+                        darkMode={darkMode}
+                        overlayTheme={overlayTheme}
+                        cardBg={cardBg}
+                        cardBorder={cardBorder}
+                    />
+                )}
+                {activeSection === 'prompts' && (
+                    <AISettingsPromptsSection
+                        builtinPrompts={builtinPrompts}
+                        userPromptSettings={userPromptSettings}
+                        overlayTheme={overlayTheme}
+                        cardBg={cardBg}
+                        cardBorder={cardBorder}
+                        inputBg={inputBg}
+                        darkMode={darkMode}
+                        loading={loading}
+                        onChangeUserPrompt={(key, value) => setUserPromptSettings((prev) => ({
+                            ...prev,
+                            [key]: value,
+                        }))}
+                        onSave={handleSaveUserPromptSettings}
+                    />
+                )}
+            </div>
+        </div>
+    );
+};
+
+const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme, focusProviderId, onBeforeExternalMCPUse }) => {
+    const { t } = useI18n();
     const modalShellStyle = {
         background: overlayTheme.shellBg, border: overlayTheme.shellBorder,
         boxShadow: overlayTheme.shellShadow, backdropFilter: overlayTheme.shellBackdropFilter,
@@ -720,7 +876,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 </div>
             }
             open={open}
-            onCancel={handleModalClose}
+            onCancel={onClose}
             footer={null}
             width={820}
             styles={{
@@ -729,142 +885,13 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 body: { paddingTop: 8, height: 620, overflow: 'hidden' },
             }}
         >
-              <div ref={modalBodyRef} className="ai-settings-body" style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0', height: '100%', minHeight: 0, overflow: 'hidden', alignItems: 'stretch', position: 'relative' }}>
-                  {messageContextHolder}
-                  <AISettingsSidebar
-                      activeSection={activeSection}
-                      darkMode={darkMode}
-                      overlayTheme={overlayTheme}
-                      onSelectSection={setActiveSection}
-                  />
-                  <div style={{ minWidth: 0, minHeight: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', paddingRight: 8, paddingBottom: 28 }}>
-                      {activeSection === 'providers' && (
-                          <AISettingsProvidersSection
-                              providers={providers}
-                              activeProviderId={activeProviderId}
-                              editingProvider={editingProvider}
-                              isEditing={isEditing}
-                              form={form}
-                              providerPresets={localizedProviderPresets}
-                              watchedPresetKey={watchedPresetKey}
-                              watchedApiFormat={watchedApiFormat}
-                              loading={loading}
-                              testStatus={testStatus}
-                              primaryPasswordVisible={primaryPasswordVisible}
-                              darkMode={darkMode}
-                              overlayTheme={overlayTheme}
-                              cardBg={cardBg}
-                              cardBorder={cardBorder}
-                              inputBg={inputBg}
-                              onPrimaryPasswordVisibleChange={setPrimaryPasswordVisible}
-                              resolveProviderPreset={matchLocalizedProviderPreset}
-                              resolvePresetByKey={findLocalizedPreset}
-                              onAddProvider={handleAddProvider}
-                              onEditProvider={handleEditProvider}
-                              onDeleteProvider={handleDeleteProvider}
-                              onSetActiveProvider={handleSetActive}
-                              onCancelEdit={resetProviderEditorSession}
-                              onPresetChange={handlePresetChange}
-                              onTestProvider={handleTestProvider}
-                              onSaveProvider={handleSaveProvider}
-                          />
-                      )}
-                      {activeSection === 'safety' && (
-                          <AISettingsSafetySection
-                              safetyLevel={safetyLevel}
-                              darkMode={darkMode}
-                              overlayTheme={overlayTheme}
-                              cardBg={cardBg}
-                              cardBorder={cardBorder}
-                              onChange={handleSafetyChange}
-                          />
-                      )}
-                      {activeSection === 'context' && (
-                          <AISettingsContextSection
-                              contextLevel={contextLevel}
-                              darkMode={darkMode}
-                              overlayTheme={overlayTheme}
-                              cardBg={cardBg}
-                              cardBorder={cardBorder}
-                              onChange={handleContextChange}
-                          />
-                      )}
-                      {activeSection === 'mcp' && (
-                          <AISettingsMCPSection
-                              mcpClientStatuses={mcpClientStatuses}
-                              selectedMCPClient={selectedMCPClient}
-                              selectedMCPClientStatus={selectedMCPClientStatus}
-                              selectedMCPClientCommandText={selectedMCPClientCommandText}
-                              mcpHTTPServerStatus={mcpHTTPServerStatus}
-                              mcpHTTPServerDraft={mcpHTTPServerDraft}
-                              mcpServers={mcpServers}
-                              mcpTools={mcpTools}
-                              darkMode={darkMode}
-                              overlayTheme={overlayTheme}
-                              cardBg={cardBg}
-                              cardBorder={cardBorder}
-                              inputBg={inputBg}
-                              loading={loading}
-                              mcpClientStatusLoading={mcpClientStatusLoading}
-                              mcpHTTPServerLoading={mcpHTTPServerLoading}
-                              onUpdateHTTPServerDraft={handleUpdateMCPHTTPServerDraft}
-                              onToggleHTTPServer={handleToggleMCPHTTPServer}
-                              onCopyHTTPServerURL={() => void handleCopyMCPHTTPServerURL()}
-                              onCopyHTTPServerAuthorization={() => void handleCopyMCPHTTPServerAuthorization()}
-                              onSelectClient={handleSelectMCPClient}
-                              onRefreshStatus={() => void loadMCPClientStatuses()}
-                              onCopyConfigPath={() => void handleCopySelectedMCPConfigPath()}
-                              onCopyLaunchCommand={() => void handleCopySelectedMCPLaunchCommand()}
-                              onInstallSelectedClient={handleInstallSelectedMCPClient}
-                              onAddServer={handleAddMCPServer}
-                              onUpdateServerDraft={updateMCPServerDraft}
-                              onTestServer={handleTestMCPServer}
-                              onSaveServer={handleSaveMCPServer}
-                              onDeleteServer={handleDeleteMCPServer}
-                          />
-                      )}
-                      {activeSection === 'skills' && (
-                          <AISettingsSkillsSection
-                              skills={skills}
-                              skillRequiredToolOptions={skillRequiredToolOptions}
-                              overlayTheme={overlayTheme}
-                              cardBg={cardBg}
-                              cardBorder={cardBorder}
-                              inputBg={inputBg}
-                              loading={loading}
-                              onAddSkill={handleAddSkill}
-                              onUpdateSkillDraft={updateSkillDraft}
-                              onSaveSkill={handleSaveSkill}
-                              onDeleteSkill={handleDeleteSkill}
-                          />
-                      )}
-                      {activeSection === 'tools' && (
-                          <AIBuiltinToolsCatalog
-                              darkMode={darkMode}
-                              overlayTheme={overlayTheme}
-                              cardBg={cardBg}
-                              cardBorder={cardBorder}
-                          />
-                      )}
-                      {activeSection === 'prompts' && (
-                          <AISettingsPromptsSection
-                              builtinPrompts={builtinPrompts}
-                              userPromptSettings={userPromptSettings}
-                              overlayTheme={overlayTheme}
-                              cardBg={cardBg}
-                              cardBorder={cardBorder}
-                              inputBg={inputBg}
-                              darkMode={darkMode}
-                              loading={loading}
-                              onChangeUserPrompt={(key, value) => setUserPromptSettings((prev) => ({
-                                  ...prev,
-                                  [key]: value,
-                              }))}
-                              onSave={handleSaveUserPromptSettings}
-                          />
-                      )}
-                  </div>
-              </div>
+              <AISettingsContent
+                active={open}
+                darkMode={darkMode}
+                overlayTheme={overlayTheme}
+                focusProviderId={focusProviderId}
+                onBeforeExternalMCPUse={onBeforeExternalMCPUse}
+              />
         </Modal>
     );
 };

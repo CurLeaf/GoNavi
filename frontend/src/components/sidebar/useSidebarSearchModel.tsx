@@ -21,6 +21,7 @@ import { useStore } from '../../store';
 import type { SavedConnection } from '../../types';
 import { getCurrentLanguage, t } from '../../i18n';
 import { resolveShortcutDisplay } from '../../utils/shortcuts';
+import type { SidebarTableMetadataField } from '../../utils/sidebarTableMetadata';
 import { resolveConnectionHostSummary, resolveConnectionHostTokens } from '../../utils/tabDisplay';
 import { resolveConnectionAccentColor, resolveConnectionIconType } from '../../utils/connectionVisual';
 import { getDbIcon } from '../DatabaseIcons';
@@ -71,6 +72,7 @@ type SidebarSearchModelArgs = {
   v2CommandSearchValue: string;
   setV2CommandActiveIndex: Dispatch<SetStateAction<number>>;
   v2ExplorerFilter: V2ExplorerFilter;
+  sidebarTableMetadataFields: SidebarTableMetadataField[];
   treeData: TreeNode[];
   treeViewportWidth: number;
   treeHeight: number;
@@ -109,6 +111,7 @@ export const useSidebarSearchModel = ({
   v2CommandSearchValue,
   setV2CommandActiveIndex,
   v2ExplorerFilter,
+  sidebarTableMetadataFields,
   treeData,
   treeViewportWidth,
   treeHeight,
@@ -608,8 +611,12 @@ export const useSidebarSearchModel = ({
     return filterV2ExplorerTreeByKind(activeConnectionTreeData, v2ExplorerFilter);
   }, [activeConnectionTreeData, displayTreeData, v2ExplorerFilter]);
   const v2TreeHorizontalScrollWidth = useMemo(
-    () => estimateV2TreeHorizontalScrollWidth(v2VisibleTreeData, treeViewportWidth),
-    [treeViewportWidth, v2VisibleTreeData],
+    () => estimateV2TreeHorizontalScrollWidth(
+      v2VisibleTreeData,
+      treeViewportWidth,
+      sidebarTableMetadataFields,
+    ),
+    [sidebarTableMetadataFields, treeViewportWidth, v2VisibleTreeData],
   );
   const effectiveTreeHeight = treeHeight;
   const v2TreeMetrics = useMemo(() => {

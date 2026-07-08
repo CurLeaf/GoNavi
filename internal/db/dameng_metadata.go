@@ -110,31 +110,69 @@ func buildDamengColumnsQuery(dbName, tableName string) string {
 	upperDBName := strings.ToUpper(strings.TrimSpace(dbName))
 
 	if upperDBName == "" {
-		return fmt.Sprintf(`SELECT c.column_name, c.data_type, c.data_length, c.char_length, c.data_precision, c.data_scale, c.nullable, c.data_default,
+		return fmt.Sprintf(`SELECT c.column_name, c.data_type, c.data_length, c.char_length, c.data_precision, c.data_scale, c.nullable, c.data_default, cc.comments AS comment,
 		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key
 		FROM user_tab_columns c
+		LEFT JOIN user_col_comments cc
+		  ON cc.table_name = c.table_name AND cc.column_name = c.column_name
 		LEFT JOIN (
 			SELECT cols.table_name, cols.column_name
 			FROM user_constraints cons
 			JOIN user_cons_columns cols USING (constraint_name)
 			WHERE cons.constraint_type = 'P'
+			  AND cons.table_name = '%s'
+			  AND cols.table_name = '%s'
 		) pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name
 		WHERE c.table_name = '%s'
-		ORDER BY c.column_id`, upperTableName)
+		ORDER BY c.column_id`, upperTableName, upperTableName, upperTableName)
 	}
 
-	return fmt.Sprintf(`SELECT c.column_name, c.data_type, c.data_length, c.char_length, c.data_precision, c.data_scale, c.nullable, c.data_default,
+	return fmt.Sprintf(`SELECT c.column_name, c.data_type, c.data_length, c.char_length, c.data_precision, c.data_scale, c.nullable, c.data_default, cc.comments AS comment,
 		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key
 		FROM all_tab_columns c
+		LEFT JOIN all_col_comments cc
+		  ON cc.owner = c.owner AND cc.table_name = c.table_name AND cc.column_name = c.column_name
 		LEFT JOIN (
 			SELECT cols.owner, cols.table_name, cols.column_name
 			FROM all_constraints cons
 			JOIN all_cons_columns cols
 			  ON cons.owner = cols.owner AND cons.constraint_name = cols.constraint_name
 			WHERE cons.constraint_type = 'P'
+			  AND cons.owner = '%s'
+			  AND cons.table_name = '%s'
+			  AND cols.owner = '%s'
+			  AND cols.table_name = '%s'
 		) pk ON c.owner = pk.owner AND c.table_name = pk.table_name AND c.column_name = pk.column_name
 		WHERE c.owner = '%s' AND c.table_name = '%s'
-		ORDER BY c.column_id`, upperDBName, upperTableName)
+		ORDER BY c.column_id`, upperDBName, upperTableName, upperDBName, upperTableName, upperDBName, upperTableName)
+}
+
+func buildDamengForeignKeysQuery(dbName, tableName string) string {
+	upperDBName := strings.ToUpper(strings.TrimSpace(dbName))
+	upperTableName := strings.ToUpper(strings.TrimSpace(tableName))
+	if upperDBName == "" {
+		return fmt.Sprintf(`SELECT a.constraint_name, a.column_name, c_pk.table_name r_table_name, b.column_name r_column_name
+		FROM (
+			SELECT constraint_name, table_name, column_name, position
+			FROM user_cons_columns
+			WHERE table_name = '%s'
+		) a
+		JOIN user_constraints c ON a.constraint_name = c.constraint_name
+		JOIN user_constraints c_pk ON c.r_constraint_name = c_pk.constraint_name
+		JOIN user_cons_columns b ON c_pk.constraint_name = b.constraint_name AND a.position = b.position
+		WHERE c.constraint_type = 'R' AND c.table_name = '%s'`, upperTableName, upperTableName)
+	}
+	return fmt.Sprintf(`SELECT a.constraint_name, a.column_name, c_pk.table_name r_table_name, b.column_name r_column_name
+		FROM (
+			SELECT owner, constraint_name, table_name, column_name, position
+			FROM all_cons_columns
+			WHERE owner = '%s' AND table_name = '%s'
+		) a
+		JOIN all_constraints c ON a.owner = c.owner AND a.constraint_name = c.constraint_name
+		JOIN all_constraints c_pk ON c.r_owner = c_pk.owner AND c.r_constraint_name = c_pk.constraint_name
+		JOIN all_cons_columns b ON c_pk.owner = b.owner AND c_pk.constraint_name = b.constraint_name AND a.position = b.position
+		WHERE c.constraint_type = 'R' AND c.owner = '%s' AND c.table_name = '%s'`,
+		upperDBName, upperTableName, upperDBName, upperTableName)
 }
 
 func getDamengRowInt(row map[string]interface{}, keys ...string) (int, bool) {
@@ -209,6 +247,7 @@ func buildDamengColumnDefinitions(data []map[string]interface{}) []connection.Co
 			Type:     formatDamengColumnType(row),
 			Nullable: normalizeDamengNullable(getDamengRowString(row, "NULLABLE")),
 			Key:      getDamengRowString(row, "COLUMN_KEY"),
+			Comment:  getDamengRowString(row, "COMMENT", "COMMENTS"),
 		}
 
 		defaultValue := getDamengRowString(row, "DATA_DEFAULT")

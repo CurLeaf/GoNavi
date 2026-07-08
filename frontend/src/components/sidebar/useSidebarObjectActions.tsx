@@ -759,6 +759,7 @@ export const useSidebarObjectActions = ({
       connectionId: id,
       dbName,
       query: template,
+      queryMode: 'object-edit',
     });
   };
 
@@ -1177,6 +1178,7 @@ export const useSidebarObjectActions = ({
       connectionId: id,
       dbName,
       query: template,
+      queryMode: 'object-edit',
     });
   };
 

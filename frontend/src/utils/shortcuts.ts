@@ -5,8 +5,10 @@ import { getCurrentLanguage, t } from '../i18n';
 export type ShortcutAction =
   | 'runQuery'
   | 'selectCurrentStatement'
+  | 'duplicateCurrentLine'
   | 'saveQuery'
   | 'formatSql'
+  | 'triggerSqlAiCompletion'
   | 'toggleQueryResultsPanel'
   | 'sendAIChatMessage'
   | 'focusSidebarSearch'
@@ -43,6 +45,7 @@ export interface ShortcutActionMeta {
   requiredKey?: string;
   disallowShift?: boolean;
   platformOnly?: 'mac';
+  allowedReservedMonacoCommandIds?: string[];
 }
 
 interface ShortcutActionMetaDefinition extends Omit<ShortcutActionMeta, 'label' | 'description'> {
@@ -103,8 +106,10 @@ const KEY_ALIASES: Record<string, string> = {
 export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'runQuery',
   'selectCurrentStatement',
+  'duplicateCurrentLine',
   'saveQuery',
   'formatSql',
+  'triggerSqlAiCompletion',
   'toggleQueryResultsPanel',
   'sendAIChatMessage',
   'focusSidebarSearch',
@@ -139,6 +144,7 @@ const createShortcutActionMeta = (
   requiredKey: definition.requiredKey,
   disallowShift: definition.disallowShift,
   platformOnly: definition.platformOnly,
+  allowedReservedMonacoCommandIds: definition.allowedReservedMonacoCommandIds,
 });
 
 const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMetaDefinition> = {
@@ -151,6 +157,13 @@ const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMet
     descriptionKey: 'app.shortcuts.action.selectCurrentStatement.description',
     scope: 'queryEditor',
   },
+  duplicateCurrentLine: {
+    labelKey: 'app.shortcuts.action.duplicateCurrentLine.label',
+    descriptionKey: 'app.shortcuts.action.duplicateCurrentLine.description',
+    scope: 'queryEditor',
+    allowInEditable: true,
+    allowedReservedMonacoCommandIds: ['editor.action.addSelectionToNextFindMatch'],
+  },
   saveQuery: {
     labelKey: 'app.shortcuts.action.saveQuery.label',
     descriptionKey: 'app.shortcuts.action.saveQuery.description',
@@ -160,6 +173,12 @@ const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMet
   formatSql: {
     labelKey: 'app.shortcuts.action.formatSql.label',
     descriptionKey: 'app.shortcuts.action.formatSql.description',
+    scope: 'queryEditor',
+    allowInEditable: true,
+  },
+  triggerSqlAiCompletion: {
+    labelKey: 'app.shortcuts.action.triggerSqlAiCompletion.label',
+    descriptionKey: 'app.shortcuts.action.triggerSqlAiCompletion.description',
     scope: 'queryEditor',
     allowInEditable: true,
   },
@@ -259,6 +278,10 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
     mac: { combo: 'Meta+E', enabled: true },
     windows: { combo: 'Ctrl+E', enabled: true },
   },
+  duplicateCurrentLine: {
+    mac: { combo: 'Meta+D', enabled: true },
+    windows: { combo: 'Ctrl+D', enabled: true },
+  },
   saveQuery: {
     mac: { combo: 'Meta+S', enabled: true },
     windows: { combo: 'Ctrl+S', enabled: true },
@@ -266,6 +289,10 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   formatSql: {
     mac: { combo: 'Alt+Shift+F', enabled: true },
     windows: { combo: 'Alt+Shift+F', enabled: true },
+  },
+  triggerSqlAiCompletion: {
+    mac: { combo: 'Alt+\\', enabled: true },
+    windows: { combo: 'Alt+\\', enabled: true },
   },
   toggleQueryResultsPanel: {
     mac: { combo: 'Meta+Shift+M', enabled: true },
@@ -391,6 +418,54 @@ const normalizeKeyboardKey = (key: string): string => {
   return token.length > 1 ? token[0].toUpperCase() + token.slice(1) : token;
 };
 
+const KEYBOARD_CODE_ALIASES: Record<string, string> = {
+  Backslash: '\\',
+  IntlBackslash: '\\',
+  Slash: '/',
+  Comma: ',',
+  Period: '.',
+  Semicolon: ';',
+  Quote: "'",
+  BracketLeft: '[',
+  BracketRight: ']',
+  Minus: '-',
+  Equal: '=',
+  Backquote: '`',
+};
+
+const KEY_CODE_ALIASES: Record<number, string> = {
+  186: ';',
+  187: '=',
+  188: ',',
+  189: '-',
+  190: '.',
+  191: '/',
+  192: '`',
+  219: '[',
+  220: '\\',
+  226: '\\',
+  221: ']',
+  222: "'",
+};
+
+const normalizeKeyboardEventCode = (
+  event: (KeyboardEvent | ReactKeyboardEvent) & {
+    code?: string;
+    keyCode?: number;
+    which?: number;
+    nativeEvent?: { code?: string; keyCode?: number; which?: number };
+  },
+): string => {
+  const code = String(event.code || event.nativeEvent?.code || '').trim();
+  if (code) {
+    const alias = KEYBOARD_CODE_ALIASES[code];
+    if (alias) return alias;
+  }
+
+  const keyCode = Number(event.keyCode ?? event.nativeEvent?.keyCode ?? event.which ?? event.nativeEvent?.which ?? 0);
+  return KEY_CODE_ALIASES[keyCode] || '';
+};
+
 let globalImeCompositionActive = false;
 
 export const setGlobalImeCompositionActive = (active: boolean): void => {
@@ -475,41 +550,100 @@ export const isImeComposingKeyEvent = (
   const key = String(event.key || '').trim();
   const keyCode = Number(event.keyCode ?? nativeEvent?.keyCode ?? 0);
   const which = Number(event.which ?? nativeEvent?.which ?? 0);
+  const hasModifier = Boolean(event.ctrlKey || event.metaKey || event.altKey);
 
-  return Boolean(
+  // Primary IME indicators — reliable across all browsers/WebViews.
+  if (
     globalImeCompositionActive
     || event.isComposing
     || nativeEvent?.isComposing
-    || isMonacoImeInputTarget(event.target)
-    || key === 'Process'
     || keyCode === 229
-    || which === 229,
-  );
+    || which === 229
+    || (key === 'Process' && !hasModifier)
+  ) {
+    return true;
+  }
+
+  // Fallback: some WebViews (notably older Wails/macOS WKWebView builds) emit
+  // real key codes (e.g. keyCode 49 for digit "1") during IME candidate
+  // selection without setting isComposing or keyCode 229.  In that case the
+  // only observable signal is the `ime-input` CSS class on the Monaco
+  // textarea.  However, we must NOT use the CSS class alone for events that
+  // carry a modifier key (Ctrl / Meta / Alt), because the class can persist
+  // even when the user is pressing a shortcut (e.g. Cmd+E) while a CJK input
+  // method is simply *enabled* (not actively composing).  Blocking modifier-
+  // key combos would break all window-level shortcuts for CJK users.
+  if (!hasModifier && isMonacoImeInputTarget(event.target)) {
+    return true;
+  }
+
+  return false;
 };
 
-export const eventToShortcut = (event: KeyboardEvent | ReactKeyboardEvent): string => {
-  if (isImeComposingKeyEvent(event)) {
-    return '';
-  }
-  const key = normalizeKeyboardKey(event.key);
-  if (!key || MODIFIER_SET.has(key as typeof MODIFIER_ORDER[number])) {
-    return '';
-  }
-
+const resolveShortcutModifiersFromEvent = (event: KeyboardEvent | ReactKeyboardEvent): string[] => {
   const modifiers: string[] = [];
   if (event.ctrlKey) modifiers.push('Ctrl');
   if (event.metaKey) modifiers.push('Meta');
   if (event.altKey) modifiers.push('Alt');
   if (event.shiftKey) modifiers.push('Shift');
+  return modifiers;
+};
 
+const normalizeShortcutCandidate = (modifiers: string[], key: string): string => {
+  if (!key || MODIFIER_SET.has(key as typeof MODIFIER_ORDER[number])) {
+    return '';
+  }
   return normalizeShortcutCombo([...modifiers, key].join('+'));
+};
+
+const isUsableShortcutKey = (key: string): boolean => (
+  Boolean(key)
+  && !MODIFIER_SET.has(key as typeof MODIFIER_ORDER[number])
+  && key !== 'Process'
+  && key !== 'Unidentified'
+  && key !== 'Dead'
+);
+
+const eventToShortcutCandidates = (event: KeyboardEvent | ReactKeyboardEvent): string[] => {
+  if (isImeComposingKeyEvent(event)) {
+    return [];
+  }
+  const modifiers = resolveShortcutModifiersFromEvent(event);
+  const candidates: string[] = [];
+  const pushCandidate = (key: string) => {
+    const candidate = normalizeShortcutCandidate(modifiers, key);
+    if (candidate && !candidates.includes(candidate)) {
+      candidates.push(candidate);
+    }
+  };
+
+  const key = normalizeKeyboardKey(event.key);
+  if (isUsableShortcutKey(key)) {
+    pushCandidate(key);
+  }
+
+  const codeKey = normalizeKeyboardEventCode(event);
+  if (
+    codeKey
+    && (
+      !isUsableShortcutKey(key)
+      || key.length !== 1
+    )
+  ) {
+    pushCandidate(codeKey);
+  }
+
+  return candidates;
+};
+
+export const eventToShortcut = (event: KeyboardEvent | ReactKeyboardEvent): string => {
+  return eventToShortcutCandidates(event)[0] || '';
 };
 
 export const isShortcutMatch = (event: KeyboardEvent | ReactKeyboardEvent, combo: string): boolean => {
   const expected = normalizeShortcutCombo(combo);
   if (!expected) return false;
-  const actual = eventToShortcut(event);
-  return actual === expected;
+  return eventToShortcutCandidates(event).includes(expected);
 };
 
 export const getShortcutPlatform = (isMacRuntime?: boolean): ShortcutPlatform => (
@@ -802,6 +936,25 @@ export const findReservedConflicts = (normalizedCombo: string, platform?: Shortc
     .map((r) => ({ label: r.label, context: r.context, monacoCommandId: r.monacoCommandId }));
 };
 
+export const findReservedConflictsForAction = (
+  action: ShortcutAction,
+  normalizedCombo: string,
+  platform?: ShortcutPlatform,
+): ConflictInfo[] => {
+  const conflicts = findReservedConflicts(normalizedCombo, platform);
+  const allowedMonacoCommandIds = new Set(
+    SHORTCUT_ACTION_META[action].allowedReservedMonacoCommandIds || [],
+  );
+  if (allowedMonacoCommandIds.size === 0) {
+    return conflicts;
+  }
+  return conflicts.filter((conflict) => (
+    conflict.context !== 'monaco'
+    || !conflict.monacoCommandId
+    || !allowedMonacoCommandIds.has(conflict.monacoCommandId)
+  ));
+};
+
 export interface MonacoKeyBinding {
   keyMod: number;
   keyCode: number;
@@ -876,9 +1029,9 @@ export const comboToMonacoKeyBinding = (
 
   for (const piece of pieces) {
     if (piece === 'Ctrl') {
-      keyMod |= keyModEnum.CtrlCmd ?? 0;
-    } else if (piece === 'Meta') {
       keyMod |= keyModEnum.WinCtrl ?? 0;
+    } else if (piece === 'Meta') {
+      keyMod |= keyModEnum.CtrlCmd ?? 0;
     } else if (piece === 'Alt') {
       keyMod |= keyModEnum.Alt ?? 0;
     } else if (piece === 'Shift') {

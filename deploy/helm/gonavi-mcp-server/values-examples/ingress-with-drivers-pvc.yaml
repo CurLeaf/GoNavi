@@ -1,0 +1,19 @@
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: gonavi-mcp.example.com
+      paths:
+        - path: /mcp
+          pathType: Prefix
+        - path: /healthz
+          pathType: Prefix
+  tls:
+    - secretName: gonavi-mcp-server-tls
+      hosts:
+        - gonavi-mcp.example.com
+
+drivers:
+  mode: pvc
+  pvc:
+    claimName: gonavi-drivers

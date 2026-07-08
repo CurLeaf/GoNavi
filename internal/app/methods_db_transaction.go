@@ -265,6 +265,7 @@ func executeManagedSQLTransactionStatements(ctx context.Context, session db.Stat
 	if text == nil {
 		text = defaultDBBackendText
 	}
+	resolvedDBType := resolveDDLDBType(runConfig)
 	buildStatementExecutionFailedError := func(index int, err error) error {
 		return fmt.Errorf("%s", text("db.backend.error.multi_statement_execution_failed", map[string]any{
 			"index":  index,
@@ -298,7 +299,15 @@ func executeManagedSQLTransactionStatements(ctx context.Context, session db.Stat
 				usedMultiResult  bool
 				err              error
 			)
-			if sessionMultiQueryMessageTarget != nil {
+			if isReadStmt && shouldPreferPlainReadQueryResult(resolvedDBType) {
+				if sessionQueryMessageTarget != nil {
+					data, columns, messages, err = sessionQueryMessageTarget.QueryContextWithMessages(ctx, stmt)
+				} else if sessionQueryTarget != nil {
+					data, columns, err = sessionQueryTarget.QueryContext(ctx, stmt)
+				} else {
+					err = buildTransactionQueryUnsupportedError()
+				}
+			} else if sessionMultiQueryMessageTarget != nil {
 				statementResults, messages, err = sessionMultiQueryMessageTarget.QueryMultiContextWithMessages(ctx, stmt)
 				usedMultiResult = true
 			} else if sessionMultiQueryTarget != nil {
@@ -385,6 +394,10 @@ func shouldUseManagedSQLTransaction(dbType string, query string) bool {
 		if isReadOnlySQLQuery(dbType, stmt) {
 			continue
 		}
+		if isOracleLikeAnonymousBlockManagedWrite(dbType, stmt) {
+			hasManagedWrite = true
+			continue
+		}
 		if isBatchableWriteSQLStatement(dbType, stmt) {
 			hasManagedWrite = true
 			continue
@@ -416,11 +429,47 @@ func sqlEditorImplicitTransactionSQL(dbType string) (commitSQL string, rollbackS
 }
 
 func isSQLTransactionControlStatement(stmt string) bool {
-	switch leadingSQLKeyword(stmt) {
+	keyword, keywordEnd := nextSQLKeyword(stmt, 0)
+	switch keyword {
 	case "begin", "commit", "rollback", "savepoint", "release":
-		return true
+		if keyword != "begin" {
+			return true
+		}
+		return isBeginTransactionControlStatement(stmt, keywordEnd)
 	case "start":
 		return strings.Contains(strings.ToLower(stmt), "transaction")
+	default:
+		return false
+	}
+}
+
+func isBeginTransactionControlStatement(stmt string, keywordEnd int) bool {
+	switch nextSQLSignificantByte(stmt, keywordEnd) {
+	case 0, ';':
+		return true
+	}
+
+	switch nextSQLSignificantToken(stmt, keywordEnd) {
+	case "transaction", "tran", "work", "isolation", "read", "write", "deferred", "immediate", "exclusive", "distributed":
+		return true
+	default:
+		return false
+	}
+}
+
+func isOracleLikeAnonymousBlockManagedWrite(dbType string, stmt string) bool {
+	if !isOracleLikeDBType(dbType) {
+		return false
+	}
+
+	switch nextSQLSignificantToken(strings.TrimSpace(stmt), 0) {
+	case "begin", "declare":
+		return sqlContainsKeyword(stmt, "insert") ||
+			sqlContainsKeyword(stmt, "update") ||
+			sqlContainsKeyword(stmt, "delete") ||
+			sqlContainsKeyword(stmt, "merge") ||
+			sqlContainsKeyword(stmt, "replace") ||
+			sqlContainsKeyword(stmt, "upsert")
 	default:
 		return false
 	}

@@ -262,7 +262,9 @@ const buildSidebarTableStatusSQL = (
     case "mysql":
     case "starrocks":
       return [
-        "SELECT TABLE_NAME AS table_name, TABLE_COMMENT AS table_comment, TABLE_ROWS AS table_rows",
+        "SELECT TABLE_NAME AS table_name, TABLE_COMMENT AS table_comment, TABLE_ROWS AS table_rows,",
+        "COALESCE(DATA_LENGTH, 0) + COALESCE(INDEX_LENGTH, 0) AS table_size,",
+        "CREATE_TIME AS create_time, UPDATE_TIME AS update_time",
         "FROM information_schema.tables",
         `WHERE table_schema = '${safeDbName}'`,
         "AND table_type = 'BASE TABLE'",
@@ -275,7 +277,8 @@ const buildSidebarTableStatusSQL = (
     case "opengauss":
     case "gaussdb":
       return [
-        "SELECT n.nspname || '.' || c.relname AS table_name, obj_description(c.oid, 'pg_class') AS table_comment, c.reltuples::bigint AS table_rows",
+        "SELECT n.nspname || '.' || c.relname AS table_name, obj_description(c.oid, 'pg_class') AS table_comment, c.reltuples::bigint AS table_rows,",
+        "pg_total_relation_size(c.oid) AS table_size, NULL::text AS create_time, NULL::text AS update_time",
         "FROM pg_class c",
         "JOIN pg_namespace n ON n.oid = c.relnamespace",
         "WHERE c.relkind = 'r'",
@@ -286,19 +289,22 @@ const buildSidebarTableStatusSQL = (
     case "sqlserver": {
       const safeDb = quoteSqlServerIdentifier(dbName);
       return [
-        "SELECT s.name + '.' + t.name AS table_name, ep.value AS table_comment, SUM(p.rows) AS table_rows",
+        "SELECT s.name + '.' + t.name AS table_name, ep.value AS table_comment, SUM(p.rows) AS table_rows,",
+        "SUM(a.total_pages) * 8 * 1024 AS table_size, t.create_date AS create_time, t.modify_date AS update_time",
         `FROM ${safeDb}.sys.tables t`,
         `JOIN ${safeDb}.sys.schemas s ON t.schema_id = s.schema_id`,
         `LEFT JOIN ${safeDb}.sys.extended_properties ep ON ep.major_id = t.object_id AND ep.minor_id = 0 AND ep.name = 'MS_Description'`,
         `LEFT JOIN ${safeDb}.sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0, 1)`,
+        `LEFT JOIN ${safeDb}.sys.allocation_units a ON p.partition_id = a.container_id`,
         "WHERE t.type = 'U'",
-        "GROUP BY s.name, t.name, ep.value",
+        "GROUP BY s.name, t.name, ep.value, t.create_date, t.modify_date",
         "ORDER BY s.name, t.name",
       ].join("\n");
     }
     case "clickhouse":
       return [
-        "SELECT name AS table_name, comment AS table_comment, total_rows AS table_rows",
+        "SELECT name AS table_name, comment AS table_comment, total_rows AS table_rows,",
+        "total_bytes AS table_size, NULL AS create_time, metadata_modification_time AS update_time",
         "FROM system.tables",
         `WHERE database = '${safeDbName}'`,
         "AND engine NOT IN ('View', 'MaterializedView')",
@@ -308,10 +314,13 @@ const buildSidebarTableStatusSQL = (
     case "dm": {
       const owner = escapeSQLLiteral(dbName).toUpperCase();
       return [
-        "SELECT owner AS schema_name, table_name, comments AS table_comment, num_rows AS table_rows",
-        "FROM all_tab_comments JOIN all_tables USING (table_name, owner)",
-        `WHERE owner = '${owner}'`,
-        "ORDER BY table_name",
+        "SELECT c.owner AS schema_name, c.table_name, c.comments AS table_comment, t.num_rows AS table_rows,",
+        "COALESCE(t.blocks, 0) * 8192 AS table_size, o.created AS create_time, o.last_ddl_time AS update_time",
+        "FROM all_tab_comments c",
+        "JOIN all_tables t ON t.owner = c.owner AND t.table_name = c.table_name",
+        "LEFT JOIN all_objects o ON o.owner = t.owner AND o.object_name = t.table_name AND o.object_type = 'TABLE'",
+        `WHERE c.owner = '${owner}'`,
+        "ORDER BY c.table_name",
       ].join("\n");
     }
     default:

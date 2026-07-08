@@ -87,6 +87,15 @@ import {
   DEFAULT_QUERY_EDITOR_EDITOR_HEIGHT_RATIO,
   sanitizeQueryEditorEditorHeightRatio,
 } from "./utils/queryEditorSplitLayout";
+import { sanitizeSidebarWidth } from "./utils/sidebarLayout";
+import {
+  DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS,
+  applySidebarTableMetadataFieldOrder,
+  resolveSidebarTableMetadataFieldOrder,
+  resolveSidebarTableMetadataFields,
+  sanitizeSidebarTableMetadataFields,
+  type SidebarTableMetadataField,
+} from "./utils/sidebarTableMetadata";
 
 export type TableDoubleClickAction = "open-data" | "open-design";
 export type ThemeMode = "light" | "dark";
@@ -105,6 +114,7 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
   v2SidebarRailScale: number;
   customUIFontFamily: string | null;
   customMonoFontFamily: string | null;
+  newQuerySqlTemplate: string | null;
   tabDisplay: TabDisplaySettings;
   redisDbAliases: RedisDbAliasMap;
 }
@@ -126,6 +136,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   v2SidebarRailScale: DEFAULT_V2_SIDEBAR_RAIL_SCALE,
   customUIFontFamily: null,
   customMonoFontFamily: null,
+  newQuerySqlTemplate: null,
   tabDisplay: DEFAULT_TAB_DISPLAY_SETTINGS,
   redisDbAliases: DEFAULT_REDIS_DB_ALIASES,
   ...DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
@@ -140,6 +151,7 @@ const DEFAULT_STARTUP_FULLSCREEN = false;
 const LEGACY_DEFAULT_OPACITY = 0.95;
 const OPACITY_EPSILON = 1e-6;
 const MAX_SIDEBAR_PERSISTED_FILTER_LENGTH = 120;
+const MAX_NEW_QUERY_SQL_TEMPLATE_LENGTH = 32 * 1024;
 
 const sanitizeV2SidebarSearchMode = (
   value: unknown,
@@ -158,6 +170,19 @@ const sanitizeV2SidebarPersistedFilter = (value: unknown): string => {
     return DEFAULT_APPEARANCE.v2SidebarPersistedFilter;
   }
   return value.trim().slice(0, MAX_SIDEBAR_PERSISTED_FILTER_LENGTH);
+};
+
+const sanitizeNewQuerySqlTemplate = (value: unknown): string | null => {
+  if (value === null || value === undefined) {
+    return DEFAULT_APPEARANCE.newQuerySqlTemplate;
+  }
+  if (typeof value !== "string") {
+    return DEFAULT_APPEARANCE.newQuerySqlTemplate;
+  }
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .slice(0, MAX_NEW_QUERY_SQL_TEMPLATE_LENGTH);
 };
 
 export const sanitizeV2SidebarRailScale = (value: unknown): number => {
@@ -1151,6 +1176,18 @@ export const resolveSidebarRootOrderTokens = (
   return result;
 };
 
+const resolveHydratedSidebarRootOrderTokens = (
+  sidebarRootOrder: unknown,
+  connectionTags?: ConnectionTag[],
+  connections?: SavedConnection[],
+): string[] => {
+  const sanitized = sanitizeSidebarRootOrder(sidebarRootOrder);
+  if (!connectionTags || !connections) {
+    return sanitized;
+  }
+  return resolveSidebarRootOrderTokens(sanitized, connectionTags, connections);
+};
+
 const insertSidebarRootTokenBeforeUngrouped = (
   sidebarRootOrder: string[],
   token: string,
@@ -1259,6 +1296,8 @@ export interface QueryOptions {
   maxRows: number;
   showColumnComment: boolean;
   showSidebarTableComment?: boolean;
+  sidebarTableMetadataFields?: SidebarTableMetadataField[];
+  sidebarTableMetadataFieldOrder?: SidebarTableMetadataField[];
   showColumnType: boolean;
   showQueryResultsPanel: boolean;
   queryEditorEditorHeightRatio: number;
@@ -2034,6 +2073,17 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
     typeof raw.showSidebarTableComment === "boolean"
       ? raw.showSidebarTableComment
       : false;
+  const sidebarTableMetadataFields = Array.isArray(raw.sidebarTableMetadataFields)
+    ? sanitizeSidebarTableMetadataFields(raw.sidebarTableMetadataFields, [])
+    : resolveSidebarTableMetadataFields(undefined, showSidebarTableComment);
+  const sidebarTableMetadataFieldOrder = resolveSidebarTableMetadataFieldOrder(
+    raw.sidebarTableMetadataFieldOrder,
+  );
+  const orderedSidebarTableMetadataFields = applySidebarTableMetadataFieldOrder(
+    sidebarTableMetadataFields,
+    sidebarTableMetadataFieldOrder,
+  );
+  const derivedShowSidebarTableComment = orderedSidebarTableMetadataFields.includes("comment");
   const showColumnType =
     typeof raw.showColumnType === "boolean" ? raw.showColumnType : true;
   const showQueryResultsPanel =
@@ -2045,7 +2095,9 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
     return {
       maxRows: 5000,
       showColumnComment,
-      showSidebarTableComment,
+      showSidebarTableComment: derivedShowSidebarTableComment,
+      sidebarTableMetadataFields: orderedSidebarTableMetadataFields,
+      sidebarTableMetadataFieldOrder,
       showColumnType,
       showQueryResultsPanel,
       queryEditorEditorHeightRatio,
@@ -2054,7 +2106,9 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
   return {
     maxRows: Math.min(50000, Math.trunc(maxRows)),
     showColumnComment,
-    showSidebarTableComment,
+    showSidebarTableComment: derivedShowSidebarTableComment,
+    sidebarTableMetadataFields: orderedSidebarTableMetadataFields,
+    sidebarTableMetadataFieldOrder,
     showColumnType,
     showQueryResultsPanel,
     queryEditorEditorHeightRatio,
@@ -2214,6 +2268,7 @@ const sanitizeAppearance = (
     ),
     customUIFontFamily: sanitizeFontFamilyInput(appearance.customUIFontFamily),
     customMonoFontFamily: sanitizeFontFamilyInput(appearance.customMonoFontFamily),
+    newQuerySqlTemplate: sanitizeNewQuerySqlTemplate(appearance.newQuerySqlTemplate),
     tabDisplay: sanitizeTabDisplaySettings(appearance.tabDisplay),
     redisDbAliases: sanitizeRedisDbAliases(appearance.redisDbAliases),
     showDataTableVerticalBorders:
@@ -2286,12 +2341,6 @@ const sanitizeWindowState = (
 ): "normal" | "fullscreen" | "maximized" => {
   if (value === "fullscreen" || value === "maximized") return value;
   return "normal";
-};
-
-const sanitizeSidebarWidth = (value: unknown): number => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return 330;
-  return Math.max(200, Math.min(600, Math.trunc(parsed)));
 };
 
 const sanitizeWindowBounds = (
@@ -2490,6 +2539,8 @@ export const useStore = create<AppState>()(
         maxRows: 5000,
         showColumnComment: true,
         showSidebarTableComment: false,
+        sidebarTableMetadataFields: ["rows"],
+        sidebarTableMetadataFieldOrder: [...DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS],
         showColumnType: true,
         showQueryResultsPanel: false,
         queryEditorEditorHeightRatio: DEFAULT_QUERY_EDITOR_EDITOR_HEIGHT_RATIO,
@@ -3339,7 +3390,10 @@ export const useStore = create<AppState>()(
       setSqlFormatOptions: (options) => set({ sqlFormatOptions: options }),
       setQueryOptions: (options) =>
         set((state) => ({
-          queryOptions: { ...state.queryOptions, ...options },
+          queryOptions: sanitizeQueryOptions({
+            ...state.queryOptions,
+            ...options,
+          }),
         })),
       setDataEditTransactionOptions: (options) =>
         set((state) => ({
@@ -3554,7 +3608,7 @@ export const useStore = create<AppState>()(
       setWindowState: (state) => set({ windowState: state }),
 
       setSidebarWidth: (width) =>
-        set({ sidebarWidth: Math.max(200, Math.min(600, Math.trunc(width))) }),
+        set({ sidebarWidth: sanitizeSidebarWidth(width) }),
 
       // AI actions
       toggleAIPanel: () =>
@@ -3792,10 +3846,10 @@ export const useStore = create<AppState>()(
             state.connectionTags,
           );
         }
-        nextState.sidebarRootOrder = resolveSidebarRootOrderTokens(
+        nextState.sidebarRootOrder = resolveHydratedSidebarRootOrderTokens(
           state.sidebarRootOrder,
-          nextState.connectionTags,
-          nextState.connections,
+          state.connectionTags === undefined ? undefined : nextState.connectionTags,
+          state.connections === undefined ? undefined : nextState.connections,
         );
         delete nextState.savedQueries;
         nextState.externalSQLDirectories = sanitizeExternalSQLDirectories(
@@ -3889,10 +3943,12 @@ export const useStore = create<AppState>()(
         const persistedSidebarRootOrder =
           state.sidebarRootOrder === undefined
             ? currentState.sidebarRootOrder
-            : resolveSidebarRootOrderTokens(
+            : resolveHydratedSidebarRootOrderTokens(
                 state.sidebarRootOrder,
-                persistedConnectionTags,
-                persistedConnections,
+                state.connectionTags === undefined
+                  ? undefined
+                  : persistedConnectionTags,
+                state.connections === undefined ? undefined : persistedConnections,
               );
         return {
           ...currentState,

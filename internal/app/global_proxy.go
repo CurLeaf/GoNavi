@@ -5,9 +5,11 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -139,6 +141,18 @@ func currentGlobalProxyView() connection.GlobalProxyView {
 }
 
 func (a *App) GetGlobalProxyConfig() connection.QueryResult {
+	if strings.TrimSpace(a.configDir) == "" {
+		a.configDir = resolveAppConfigDir()
+	}
+	if view, err := a.loadStoredGlobalProxyView(); err == nil {
+		return connection.QueryResult{
+			Success: true,
+			Message: "OK",
+			Data:    sanitizeGlobalProxyView(view),
+		}
+	} else if !os.IsNotExist(err) {
+		logger.Error(err, "加载全局代理元数据失败")
+	}
 	return connection.QueryResult{
 		Success: true,
 		Message: "OK",
@@ -186,6 +200,33 @@ func newHTTPClientWithGlobalProxy(timeout time.Duration) *http.Client {
 	return client
 }
 
+func (a *App) ensurePersistedGlobalProxyRuntime() {
+	if currentGlobalProxyConfig().Enabled {
+		return
+	}
+	if strings.TrimSpace(a.configDir) == "" {
+		a.configDir = resolveAppConfigDir()
+	}
+	view, err := a.loadStoredGlobalProxyView()
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.Error(err, "加载全局代理元数据失败")
+		}
+		return
+	}
+	if !view.Enabled {
+		return
+	}
+	proxyConfig, err := a.resolveStoredGlobalProxyRuntimeConfig(view)
+	if err != nil {
+		logger.Error(err, "恢复全局代理运行时配置失败")
+		return
+	}
+	if _, err := setGlobalProxyConfig(true, proxyConfig); err != nil {
+		logger.Error(err, "恢复全局代理运行时配置失败")
+	}
+}
+
 func buildHTTPTransportWithGlobalProxy() http.RoundTripper {
 	baseTransport, ok := http.DefaultTransport.(*http.Transport)
 	if !ok || baseTransport == nil {
@@ -199,16 +240,29 @@ func buildHTTPTransportWithGlobalProxy() http.RoundTripper {
 		return transport
 	}
 
-	proxyURL, err := buildProxyURLFromConfig(snapshot.Proxy)
+	transportWithProxy, err := buildHTTPTransportForProxyConfig(snapshot.Proxy)
 	if err != nil {
 		logger.Warnf("全局代理配置无效，回退系统代理：%v", err)
 		transport.Proxy = http.ProxyFromEnvironment
 		return transport
 	}
+	return transportWithProxy
+}
 
+func buildHTTPTransportForProxyConfig(proxyConfig connection.ProxyConfig) (http.RoundTripper, error) {
+	baseTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok || baseTransport == nil {
+		return nil, fmt.Errorf("default HTTP transport unavailable")
+	}
+
+	transport := baseTransport.Clone()
+	proxyURL, err := buildProxyURLFromConfig(proxyConfig)
+	if err != nil {
+		return nil, err
+	}
 	transport.Proxy = http.ProxyURL(proxyURL)
-	if !isLoopbackProxyHost(snapshot.Proxy.Host) {
-		return transport
+	if !isLoopbackProxyHost(proxyConfig.Host) {
+		return transport, nil
 	}
 
 	fallbackTransport := transport.Clone()
@@ -217,7 +271,7 @@ func buildHTTPTransportWithGlobalProxy() http.RoundTripper {
 		primary:       transport,
 		fallback:      fallbackTransport,
 		proxyEndpoint: proxyURL.Redacted(),
-	}
+	}, nil
 }
 
 func (t *localProxyTLSFallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -328,3 +382,156 @@ func buildProxyURLFromConfig(proxyConfig connection.ProxyConfig) (*url.URL, erro
 	return proxyURL, nil
 }
 
+func (a *App) TestGlobalProxyConnection(input connection.TestGlobalProxyInput) connection.QueryResult {
+	started := time.Now()
+	targetURL, err := normalizeGlobalProxyTestURL(input.URL)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: a.localizedGlobalProxyTestError(err)}
+	}
+
+	timeoutSeconds := input.TimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 8
+	}
+	if timeoutSeconds > 30 {
+		timeoutSeconds = 30
+	}
+
+	client := &http.Client{Timeout: time.Duration(timeoutSeconds) * time.Second}
+	if input.Proxy.Enabled {
+		proxyPassword, err := a.resolveGlobalProxyPasswordForInput(input.Proxy)
+		if err != nil {
+			return connection.QueryResult{
+				Success: false,
+				Message: a.appText("app.proxy.backend.message.test_failed", map[string]any{
+					"url":    targetURL,
+					"detail": err.Error(),
+				}),
+			}
+		}
+		transport, err := buildHTTPTransportForProxyConfig(connection.ProxyConfig{
+			Type:     input.Proxy.Type,
+			Host:     input.Proxy.Host,
+			Port:     input.Proxy.Port,
+			User:     input.Proxy.User,
+			Password: proxyPassword,
+		})
+		if err != nil {
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+		client.Transport = transport
+	}
+
+	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	req.Header.Set("User-Agent", "GoNavi-Proxy-Test")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Range", "bytes=0-0")
+
+	resp, err := client.Do(req)
+	durationMs := time.Since(started).Milliseconds()
+	if err != nil {
+		return connection.QueryResult{
+			Success: false,
+			Message: a.appText("app.proxy.backend.message.test_failed", map[string]any{
+				"url":    targetURL,
+				"detail": err.Error(),
+			}),
+			Data: connection.GlobalProxyTestResult{
+				URL:        targetURL,
+				DurationMs: durationMs,
+				ViaProxy:   input.Proxy.Enabled,
+			},
+		}
+	}
+	defer resp.Body.Close()
+	_, _ = io.CopyN(io.Discard, resp.Body, 512)
+
+	result := connection.GlobalProxyTestResult{
+		URL:        targetURL,
+		FinalURL:   resp.Request.URL.String(),
+		StatusCode: resp.StatusCode,
+		Status:     resp.Status,
+		DurationMs: durationMs,
+		ViaProxy:   input.Proxy.Enabled,
+	}
+	messageKey := "app.proxy.backend.message.test_success"
+	if resp.StatusCode >= http.StatusBadRequest {
+		messageKey = "app.proxy.backend.message.test_http_status"
+	}
+	return connection.QueryResult{
+		Success: true,
+		Message: a.appText(messageKey, map[string]any{
+			"status":   resp.StatusCode,
+			"duration": durationMs,
+			"url":      targetURL,
+		}),
+		Data: result,
+	}
+}
+
+func (a *App) resolveGlobalProxyPasswordForInput(input connection.SaveGlobalProxyInput) (string, error) {
+	if strings.TrimSpace(input.Password) != "" {
+		return input.Password, nil
+	}
+	if input.ClearPassword {
+		return "", nil
+	}
+	if strings.TrimSpace(a.configDir) == "" {
+		a.configDir = resolveAppConfigDir()
+	}
+	existing, err := a.loadStoredGlobalProxyView()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	if !existing.HasPassword {
+		return "", nil
+	}
+	bundle, err := a.loadGlobalProxySecretBundle(existing)
+	if err != nil {
+		return "", err
+	}
+	return bundle.Password, nil
+}
+
+func normalizeGlobalProxyTestURL(rawURL string) (string, error) {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return "", localizedUpdateError{key: "app.proxy.backend.error.test_url_empty"}
+	}
+	if !strings.Contains(trimmed, "://") {
+		trimmed = "https://" + trimmed
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "", localizedUpdateError{
+			key:    "app.proxy.backend.error.test_url_invalid",
+			params: map[string]any{"detail": err.Error()},
+		}
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+	default:
+		return "", localizedUpdateError{
+			key:    "app.proxy.backend.error.test_scheme_unsupported",
+			params: map[string]any{"scheme": parsed.Scheme},
+		}
+	}
+	if strings.TrimSpace(parsed.Host) == "" {
+		return "", localizedUpdateError{key: "app.proxy.backend.error.test_host_missing"}
+	}
+	return parsed.String(), nil
+}
+
+func (a *App) localizedGlobalProxyTestError(err error) string {
+	var localized localizedUpdateError
+	if errors.As(err, &localized) {
+		return a.appText(localized.key, localized.params)
+	}
+	return err.Error()
+}

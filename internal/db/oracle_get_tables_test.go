@@ -112,6 +112,93 @@ func TestOracleGetColumnsIncludesColumnComments(t *testing.T) {
 	}
 }
 
+func TestOracleGetColumnsResolvesSynonymTargetComments(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	state.mu.Lock()
+	state.disableDefaultTabColumns = true
+	state.queryResults[buildOracleSynonymLookupQuery("SBDEV", "PERSON_INFO")] = oracleRecordingQueryResult{
+		columns: []string{"TABLE_OWNER", "TABLE_NAME"},
+		rows: [][]driver.Value{
+			{"DEV", "PERSON_INFO"},
+		},
+	}
+	state.queryResults[buildOracleColumnsQuery("DEV", "PERSON_INFO")] = oracleRecordingQueryResult{
+		columns: []string{"COLUMN_NAME", "DATA_TYPE", "NULLABLE", "DATA_DEFAULT", "COLUMN_KEY", "COMMENT"},
+		rows: [][]driver.Value{
+			{"PID", "CHAR", "NO", nil, "PRI", "个人标识"},
+			{"XM", "VARCHAR2", "YES", nil, "", "姓名"},
+		},
+	}
+	state.mu.Unlock()
+
+	oracleDB := &OracleDB{conn: dbConn}
+	columns, err := oracleDB.GetColumns("SBDEV", "PERSON_INFO")
+	if err != nil {
+		t.Fatalf("GetColumns 返回错误: %v", err)
+	}
+	if len(columns) != 2 {
+		t.Fatalf("expected synonym target columns, got %#v", columns)
+	}
+	if columns[0].Name != "PID" || columns[0].Comment != "个人标识" || columns[0].Key != "PRI" {
+		t.Fatalf("expected first synonym column metadata from DEV.PERSON_INFO, got %#v", columns[0])
+	}
+	if columns[1].Name != "XM" || columns[1].Comment != "姓名" {
+		t.Fatalf("expected second synonym column comment from DEV.PERSON_INFO, got %#v", columns[1])
+	}
+
+	queries := state.snapshotQueries()
+	if len(queries) < 3 {
+		t.Fatalf("expected direct metadata probe + synonym lookup + target metadata probe, got %v", queries)
+	}
+	if queries[0] != buildOracleColumnsQuery("SBDEV", "PERSON_INFO") {
+		t.Fatalf("expected first metadata probe to use synonym owner, got %v", queries)
+	}
+	if !slices.Contains(queries, buildOracleSynonymLookupQuery("SBDEV", "PERSON_INFO")) {
+		t.Fatalf("expected synonym lookup against all_synonyms, got %v", queries)
+	}
+	if !slices.Contains(queries, buildOracleColumnsQuery("DEV", "PERSON_INFO")) {
+		t.Fatalf("expected metadata probe against resolved target table, got %v", queries)
+	}
+	if slices.Contains(queries, `SELECT * FROM "SBDEV"."PERSON_INFO" WHERE 1 = 0`) {
+		t.Fatalf("expected synonym metadata to resolve before falling back to empty-select inference, got %v", queries)
+	}
+}
+
+func TestOracleColumnsQueryFiltersPrimaryKeyLookupByTargetTable(t *testing.T) {
+	t.Parallel()
+
+	query := buildOracleColumnsQuery("MYCIMLED", "EDC_LOG")
+	for _, want := range []string{
+		`AND cons.owner = 'MYCIMLED'`,
+		`AND cons.table_name = 'EDC_LOG'`,
+		`AND cols.owner = 'MYCIMLED'`,
+		`AND cols.table_name = 'EDC_LOG'`,
+		`WHERE c.owner = 'MYCIMLED' AND c.table_name = 'EDC_LOG'`,
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("expected Oracle columns query to contain %q, got: %s", want, query)
+		}
+	}
+}
+
+func TestOracleForeignKeysQueryPreFiltersLocalColumnsByTargetTable(t *testing.T) {
+	t.Parallel()
+
+	query := buildOracleForeignKeysQuery("MYCIMLED", "EDC_LOG")
+	for _, want := range []string{
+		`FROM (`,
+		`FROM all_cons_columns`,
+		`WHERE owner = 'MYCIMLED' AND table_name = 'EDC_LOG'`,
+		`WHERE c.constraint_type = 'R' AND c.owner = 'MYCIMLED' AND c.table_name = 'EDC_LOG'`,
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("expected Oracle foreign-key query to contain %q, got: %s", want, query)
+		}
+	}
+}
+
 func TestOracleGetColumnsPreservesMetadataNameCaseBeforeUppercaseFallback(t *testing.T) {
 	t.Parallel()
 

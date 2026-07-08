@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	urlpkg "net/url"
 	"os"
@@ -20,21 +21,27 @@ import (
 
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/logger"
+	"GoNavi-Wails/internal/uievents"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const (
 	updateRepo                  = "Syngnat/GoNavi"
-	updateAPIURL                = "https://api.github.com/repos/" + updateRepo + "/releases/latest"
+	updateLatestAPIURL          = "https://api.github.com/repos/" + updateRepo + "/releases/latest"
+	updateDevAPIURL             = "https://api.github.com/repos/" + updateRepo + "/releases/tags/" + updateDevReleaseTag
 	updateChecksumAsset         = "SHA256SUMS"
 	updateDownloadProgressEvent = "update:download-progress"
+	updateNetworkRetryDelay     = 250 * time.Millisecond
 )
 
 var (
-	updateFetchLatestRelease = fetchLatestRelease
-	updateFetchReleaseSHA256 = fetchReleaseSHA256
-	updateLogCheckError      = func(err error) { logger.Error(err, "检查更新失败") }
+	updateFetchLatestRelease   = fetchLatestRelease
+	updateFetchDevRelease      = fetchDevRelease
+	updateFetchReleaseSHA256   = fetchReleaseSHA256
+	updateLogCheckError        = func(err error) { logger.Error(err, "检查更新失败") }
+	updateResolveInstallTarget = resolveUpdateInstallTarget
+	updateLaunchInstallScript  = launchUpdateScript
 )
 
 type updateState struct {
@@ -44,17 +51,19 @@ type updateState struct {
 }
 
 type UpdateInfo struct {
-	HasUpdate       bool   `json:"hasUpdate"`
-	CurrentVersion  string `json:"currentVersion"`
-	LatestVersion   string `json:"latestVersion"`
-	ReleaseName     string `json:"releaseName"`
-	ReleaseNotesURL string `json:"releaseNotesUrl"`
-	AssetName       string `json:"assetName"`
-	AssetURL        string `json:"assetUrl"`
-	AssetSize       int64  `json:"assetSize"`
-	SHA256          string `json:"sha256"`
-	Downloaded      bool   `json:"downloaded"`
-	DownloadPath    string `json:"downloadPath,omitempty"`
+	HasUpdate          bool   `json:"hasUpdate"`
+	Channel            string `json:"channel"`
+	CurrentVersion     string `json:"currentVersion"`
+	LatestVersion      string `json:"latestVersion"`
+	ReleaseName        string `json:"releaseName"`
+	ReleasePublishedAt string `json:"releasePublishedAt,omitempty"`
+	ReleaseNotesURL    string `json:"releaseNotesUrl"`
+	AssetName          string `json:"assetName"`
+	AssetURL           string `json:"assetUrl"`
+	AssetSize          int64  `json:"assetSize"`
+	SHA256             string `json:"sha256"`
+	Downloaded         bool   `json:"downloaded"`
+	DownloadPath       string `json:"downloadPath,omitempty"`
 }
 
 type AppInfo struct {
@@ -85,6 +94,7 @@ type updateDownloadProgressPayload struct {
 }
 
 type stagedUpdate struct {
+	Channel        updateChannel
 	Version        string
 	AssetName      string
 	FilePath       string
@@ -92,12 +102,19 @@ type stagedUpdate struct {
 	InstallLogPath string
 }
 
+type updatePathCandidate struct {
+	workspaceDir string
+	stagedDir    string
+	assetPath    string
+}
+
 type githubRelease struct {
-	TagName    string        `json:"tag_name"`
-	Name       string        `json:"name"`
-	HTMLURL    string        `json:"html_url"`
-	Prerelease bool          `json:"prerelease"`
-	Assets     []githubAsset `json:"assets"`
+	TagName     string        `json:"tag_name"`
+	Name        string        `json:"name"`
+	HTMLURL     string        `json:"html_url"`
+	PublishedAt string        `json:"published_at"`
+	Prerelease  bool          `json:"prerelease"`
+	Assets      []githubAsset `json:"assets"`
 }
 
 type githubAsset struct {
@@ -137,7 +154,9 @@ func (a *App) CheckForUpdatesSilently() connection.QueryResult {
 }
 
 func (a *App) checkForUpdates(logFailure bool) connection.QueryResult {
-	info, err := fetchLatestUpdateInfo()
+	a.ensurePersistedGlobalProxyRuntime()
+	channel := a.currentUpdateChannel()
+	info, err := fetchLatestUpdateInfo(channel)
 	if err != nil {
 		if logFailure {
 			updateLogCheckError(err)
@@ -156,7 +175,7 @@ func (a *App) checkForUpdates(logFailure bool) connection.QueryResult {
 			info.Downloaded = true
 			info.DownloadPath = reusable.FilePath
 			currentStaged = reusable
-		} else if currentStaged != nil && currentStaged.Version != info.LatestVersion {
+		} else if currentStaged != nil && (currentStaged.Version != info.LatestVersion || currentStaged.Channel != updateChannel(info.Channel)) {
 			currentStaged = nil
 		}
 	} else {
@@ -238,7 +257,18 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.no_downloaded_package", nil)}
 	}
 
-	if err := launchUpdateScript(staged); err != nil {
+	if stdRuntime.GOOS == "windows" {
+		if err := ensureWindowsUpdateTargetWritable(updateResolveInstallTarget()); err != nil {
+			return connection.QueryResult{
+				Success: false,
+				Message: a.appText("app.update.backend.message.install_launch_failed", map[string]any{
+					"detail": a.localizedUpdateError(err),
+				}),
+			}
+		}
+	}
+
+	if err := updateLaunchInstallScript(staged); err != nil {
 		logger.Error(err, "启动更新脚本失败")
 		detail := a.localizedUpdateError(err)
 		msg := a.appText("app.update.backend.message.install_launch_failed", map[string]any{"detail": detail})
@@ -335,7 +365,8 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 	}
 
 	// 使用版本号命名的工作目录，便于识别和调试
-	stagedDir := filepath.Join(workspaceDir, fmt.Sprintf(".gonavi-update-%s-%s", stdRuntime.GOOS, info.LatestVersion))
+	stagedDir := resolveUpdateStagedDir(workspaceDir, info.Channel, info.LatestVersion)
+	stageBaseDir := filepath.Dir(stagedDir)
 	// 清理可能残留的旧目录（上次下载失败后未清理）
 	// Windows 上文件可能被杀毒软件/索引服务占用，需要重试
 	for retry := 0; retry < 5; retry++ {
@@ -347,7 +378,7 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 			time.Sleep(time.Duration(retry+1) * 500 * time.Millisecond)
 		} else {
 			// 最后一次仍然失败，换一个带时间戳的目录名避免冲突
-			stagedDir = filepath.Join(workspaceDir, fmt.Sprintf(".gonavi-update-%s-%s-%d", stdRuntime.GOOS, info.LatestVersion, time.Now().UnixNano()))
+			stagedDir = filepath.Join(stageBaseDir, fmt.Sprintf("%s-%d", buildUpdateStageDirName(info.Channel, info.LatestVersion), time.Now().UnixNano()))
 		}
 	}
 	if err := os.MkdirAll(stagedDir, 0o755); err != nil {
@@ -356,7 +387,7 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: errMsg}
 	}
 
-	// macOS 下载包放在桌面版本目录根级；其他平台继续放在 staging 目录。
+	// 安装包本体放在工作区根级，staging 目录只保留更新脚本和临时展开物。
 	assetPath := resolveUpdateAssetPath(workspaceDir, stagedDir, info.AssetName)
 	actualHash, err := downloadFileWithHash(info.AssetURL, assetPath, func(downloaded, total int64) {
 		reportTotal := total
@@ -389,6 +420,7 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 	}
 
 	staged := &stagedUpdate{
+		Channel:        updateChannel(info.Channel),
 		Version:        info.LatestVersion,
 		AssetName:      info.AssetName,
 		FilePath:       assetPath,
@@ -405,31 +437,41 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 	return connection.QueryResult{Success: true, Message: a.appText("app.update.backend.message.package_downloaded", nil), Data: buildUpdateDownloadResult(info, staged)}
 }
 
-func fetchLatestUpdateInfo() (UpdateInfo, error) {
-	release, err := updateFetchLatestRelease()
+func fetchLatestUpdateInfo(channel updateChannel) (UpdateInfo, error) {
+	if channel != updateChannelDev {
+		channel = updateChannelLatest
+	}
+	release, err := fetchReleaseForChannel(channel)
 	if err != nil {
 		return UpdateInfo{}, err
 	}
 
 	currentVersion := getCurrentVersion()
-	latestVersion := normalizeVersion(release.TagName)
+	latestVersion := resolveReleaseVersion(channel, release)
 	if latestVersion == "" {
 		return UpdateInfo{}, localizedUpdateError{key: "app.update.backend.error.latest_version_unparseable"}
 	}
 
-	hasUpdate := compareVersion(currentVersion, latestVersion) < 0
+	hasUpdate := false
+	if channel == updateChannelDev {
+		hasUpdate = normalizeVersion(currentVersion) != latestVersion
+	} else {
+		hasUpdate = compareVersion(currentVersion, latestVersion) < 0
+	}
 	if !hasUpdate {
 		return UpdateInfo{
-			HasUpdate:       false,
-			CurrentVersion:  currentVersion,
-			LatestVersion:   latestVersion,
-			ReleaseName:     release.Name,
-			ReleaseNotesURL: release.HTMLURL,
+			HasUpdate:          false,
+			Channel:            string(channel),
+			CurrentVersion:     currentVersion,
+			LatestVersion:      latestVersion,
+			ReleaseName:        release.Name,
+			ReleasePublishedAt: strings.TrimSpace(release.PublishedAt),
+			ReleaseNotesURL:    release.HTMLURL,
 		}, nil
 	}
 
 	assetVersion := strings.TrimSpace(release.TagName)
-	if assetVersion == "" {
+	if assetVersion == "" || strings.EqualFold(normalizeVersion(assetVersion), updateDevReleaseTag) {
 		assetVersion = latestVersion
 	}
 	assetName, err := expectedAssetName(stdRuntime.GOOS, stdRuntime.GOARCH, assetVersion)
@@ -441,25 +483,37 @@ func fetchLatestUpdateInfo() (UpdateInfo, error) {
 		return UpdateInfo{}, err
 	}
 
-	hashMap, err := updateFetchReleaseSHA256(release.Assets)
-	if err != nil {
-		return UpdateInfo{}, err
+	sha256Value := normalizeGitHubAssetSHA256(asset.Digest)
+	if sha256Value == "" {
+		hashMap, err := updateFetchReleaseSHA256(release.Assets)
+		if err != nil {
+			return UpdateInfo{}, err
+		}
+		sha256Value = strings.TrimSpace(hashMap[assetName])
 	}
-	sha256Value := strings.TrimSpace(hashMap[assetName])
 	if sha256Value == "" {
 		return UpdateInfo{}, localizedUpdateError{key: "app.update.backend.error.sha256_missing_current_package"}
 	}
 	return UpdateInfo{
-		HasUpdate:       hasUpdate,
-		CurrentVersion:  currentVersion,
-		LatestVersion:   latestVersion,
-		ReleaseName:     release.Name,
-		ReleaseNotesURL: release.HTMLURL,
-		AssetName:       asset.Name,
-		AssetURL:        asset.BrowserDownloadURL,
-		AssetSize:       asset.Size,
-		SHA256:          sha256Value,
+		HasUpdate:          hasUpdate,
+		Channel:            string(channel),
+		CurrentVersion:     currentVersion,
+		LatestVersion:      latestVersion,
+		ReleaseName:        release.Name,
+		ReleasePublishedAt: strings.TrimSpace(release.PublishedAt),
+		ReleaseNotesURL:    release.HTMLURL,
+		AssetName:          asset.Name,
+		AssetURL:           asset.BrowserDownloadURL,
+		AssetSize:          asset.Size,
+		SHA256:             sha256Value,
 	}, nil
+}
+
+func fetchReleaseForChannel(channel updateChannel) (*githubRelease, error) {
+	if channel == updateChannelDev {
+		return updateFetchDevRelease()
+	}
+	return updateFetchLatestRelease()
 }
 
 func swapUpdateFetchLatestRelease(next func() (*githubRelease, error)) func() {
@@ -467,6 +521,14 @@ func swapUpdateFetchLatestRelease(next func() (*githubRelease, error)) func() {
 	updateFetchLatestRelease = next
 	return func() {
 		updateFetchLatestRelease = original
+	}
+}
+
+func swapUpdateFetchDevRelease(next func() (*githubRelease, error)) func() {
+	original := updateFetchDevRelease
+	updateFetchDevRelease = next
+	return func() {
+		updateFetchDevRelease = original
 	}
 }
 
@@ -498,15 +560,23 @@ func getCurrentAuthor() string {
 }
 
 func fetchLatestRelease() (*githubRelease, error) {
+	return fetchReleaseByURL(updateLatestAPIURL)
+}
+
+func fetchDevRelease() (*githubRelease, error) {
+	return fetchReleaseByURL(updateDevAPIURL)
+}
+
+func fetchReleaseByURL(apiURL string) (*githubRelease, error) {
 	client := newHTTPClientWithGlobalProxy(15 * time.Second)
-	req, err := http.NewRequest(http.MethodGet, updateAPIURL, nil)
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "GoNavi-Updater")
 	req.Header.Set("Accept", "application/vnd.github+json")
 
-	resp, err := client.Do(req)
+	resp, err := doUpdateRequest(client, req)
 	if err != nil {
 		return nil, err
 	}
@@ -521,7 +591,7 @@ func fetchLatestRelease() (*githubRelease, error) {
 
 	var release githubRelease
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, err
+		return nil, wrapUpdateNetworkError(err)
 	}
 	return &release, nil
 }
@@ -566,6 +636,9 @@ func expectedAssetNameForExecutable(goos, goarch, version, executablePath string
 		if goarch == "amd64" {
 			return fmt.Sprintf("GoNavi-%s-Linux-Amd64%s.tar.gz", version, resolveLinuxReleaseArtifactSuffix(executablePath)), nil
 		}
+		if goarch == "arm64" {
+			return fmt.Sprintf("GoNavi-%s-Linux-Arm64%s.tar.gz", version, resolveLinuxReleaseArtifactSuffix(executablePath)), nil
+		}
 	}
 	return "", localizedUpdateError{
 		key:    "app.update.backend.error.online_update_unsupported",
@@ -599,6 +672,20 @@ func findReleaseAsset(assets []githubAsset, name string) (*githubAsset, error) {
 	}
 }
 
+func normalizeGitHubAssetSHA256(digest string) string {
+	digest = strings.TrimSpace(digest)
+	if digest == "" {
+		return ""
+	}
+	if algorithm, value, ok := strings.Cut(digest, ":"); ok {
+		if !strings.EqualFold(strings.TrimSpace(algorithm), "sha256") {
+			return ""
+		}
+		digest = strings.TrimSpace(value)
+	}
+	return strings.ToLower(digest)
+}
+
 func fetchReleaseSHA256(assets []githubAsset) (map[string]string, error) {
 	var checksumURL string
 	for _, asset := range assets {
@@ -617,7 +704,7 @@ func fetchReleaseSHA256(assets []githubAsset) (map[string]string, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "GoNavi-Updater")
-	resp, err := client.Do(req)
+	resp, err := doUpdateRequest(client, req)
 	if err != nil {
 		return nil, err
 	}
@@ -632,7 +719,7 @@ func fetchReleaseSHA256(assets []githubAsset) (map[string]string, error) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, wrapUpdateNetworkError(err)
 	}
 
 	return parseSHA256Sums(string(body)), nil
@@ -702,7 +789,7 @@ func downloadFileWithHashWithTimeout(url, filePath string, onProgress func(downl
 		req.Header.Set("Accept", "application/octet-stream")
 	}
 
-	resp, err := client.Do(req)
+	resp, err := doUpdateRequest(client, req)
 	if err != nil {
 		return "", err
 	}
@@ -747,7 +834,7 @@ func downloadFileWithHashWithTimeout(url, filePath string, onProgress func(downl
 	}
 	if _, err := io.Copy(io.MultiWriter(writers...), resp.Body); err != nil {
 		out.Close()
-		return "", err
+		return "", wrapUpdateNetworkError(err)
 	}
 	if onProgress != nil {
 		onProgress(progressWriter.written, total)
@@ -763,6 +850,76 @@ func downloadFileWithHashWithTimeout(url, filePath string, onProgress func(downl
 	}
 
 	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func doUpdateRequest(client *http.Client, req *http.Request) (*http.Response, error) {
+	resp, err := client.Do(req)
+	if err == nil {
+		return resp, nil
+	}
+	if !shouldRetryUpdateNetworkError(err) {
+		return nil, wrapUpdateNetworkError(err)
+	}
+	time.Sleep(updateNetworkRetryDelay)
+	retryReq := req.Clone(req.Context())
+	resp, err = client.Do(retryReq)
+	if err != nil {
+		return nil, wrapUpdateNetworkError(err)
+	}
+	return resp, nil
+}
+
+func shouldRetryUpdateNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if isUpdateEOFError(err) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "connection reset by peer") ||
+		strings.Contains(lower, "connection refused") ||
+		strings.Contains(lower, "server closed idle connection")
+}
+
+func wrapUpdateNetworkError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		host := strings.TrimSpace(dnsErr.Name)
+		if host == "" {
+			host = "api.github.com"
+		}
+		return localizedUpdateError{
+			key: "app.update.backend.error.network_dns",
+			params: map[string]any{
+				"host":   host,
+				"detail": err.Error(),
+			},
+		}
+	}
+	if isUpdateEOFError(err) {
+		return localizedUpdateError{
+			key:    "app.update.backend.error.network_eof",
+			params: map[string]any{"detail": err.Error()},
+		}
+	}
+	return localizedUpdateError{
+		key:    "app.update.backend.error.network_failed",
+		params: map[string]any{"detail": err.Error()},
+	}
+}
+
+func isUpdateEOFError(err error) bool {
+	return errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		strings.Contains(strings.ToLower(err.Error()), "eof")
 }
 
 func isGitHubReleaseAssetAPIURL(urlText string) bool {
@@ -802,6 +959,88 @@ func buildUpdateInstallLogPath(baseDir string) string {
 	return filepath.Join(logDir, fmt.Sprintf("gonavi-update-%s-%d.log", platform, time.Now().UnixNano()))
 }
 
+func buildUpdateStageDirName(channel string, version string) string {
+	return buildUpdateStageDirNameForPlatform(stdRuntime.GOOS, channel, version)
+}
+
+func buildUpdateStageDirNameForPlatform(goos string, channel string, version string) string {
+	normalizedChannel, err := normalizeUpdateChannel(channel)
+	if err != nil {
+		normalizedChannel = updateChannelLatest
+	}
+	return fmt.Sprintf(
+		".gonavi-update-%s-%s-%s",
+		strings.TrimSpace(strings.ToLower(goos)),
+		sanitizeVersionForPath(string(normalizedChannel)),
+		sanitizeVersionForPath(version),
+	)
+}
+
+func resolveReleaseVersion(channel updateChannel, release *githubRelease) string {
+	if release == nil {
+		return ""
+	}
+
+	tagVersion := normalizeVersion(release.TagName)
+	if channel != updateChannelDev && tagVersion != "" && !strings.EqualFold(tagVersion, updateDevReleaseTag) {
+		return tagVersion
+	}
+
+	if nameVersion := extractVersionFromReleaseName(release.Name); nameVersion != "" {
+		return nameVersion
+	}
+	if assetVersion := extractVersionFromReleaseAssets(release.Assets); assetVersion != "" {
+		return assetVersion
+	}
+	if tagVersion != "" && !strings.EqualFold(tagVersion, updateDevReleaseTag) {
+		return tagVersion
+	}
+	return ""
+}
+
+func extractVersionFromReleaseName(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(strings.ToLower(trimmed), "dev-") {
+		return normalizeVersion(trimmed)
+	}
+
+	if left := strings.LastIndex(trimmed, "("); left >= 0 && strings.HasSuffix(trimmed, ")") {
+		candidate := strings.TrimSpace(trimmed[left+1 : len(trimmed)-1])
+		if candidate != "" {
+			return normalizeVersion(candidate)
+		}
+	}
+	return ""
+}
+
+func extractVersionFromReleaseAssets(assets []githubAsset) string {
+	const assetPrefix = "GoNavi-"
+	osMarkers := []string{"-Windows-", "-MacOS-", "-Linux-"}
+
+	for _, asset := range assets {
+		name := strings.TrimSpace(asset.Name)
+		if !strings.HasPrefix(name, assetPrefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(name, assetPrefix)
+		for _, marker := range osMarkers {
+			index := strings.Index(rest, marker)
+			if index <= 0 {
+				continue
+			}
+			candidate := normalizeVersion(rest[:index])
+			if candidate != "" {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
 func sanitizeVersionForPath(version string) string {
 	trimmed := strings.TrimSpace(version)
 	if trimmed == "" {
@@ -835,8 +1074,7 @@ func resolveLegacyUpdateWorkspaceDir() string {
 }
 
 func resolveUpdateWorkspaceDir(version string) string {
-	// 默认使用系统临时目录作为更新工作区，避免目录权限与锁冲突。
-	// macOS 用户要求更新包默认保存在桌面：Desktop/GoNavi-<version>/。
+	// macOS 更新包继续保存在桌面版本目录根级，方便用户直接处理 DMG。
 	if stdRuntime.GOOS == "darwin" {
 		homeDir, err := os.UserHomeDir()
 		if err == nil && strings.TrimSpace(homeDir) != "" {
@@ -846,15 +1084,128 @@ func resolveUpdateWorkspaceDir(version string) string {
 			}
 		}
 	}
+
+	// Windows / Linux 更新包优先落到当前应用运行目录，方便用户直接找到下载产物。
+	targetPath := strings.TrimSpace(updateResolveInstallTarget())
+	if targetPath != "" {
+		targetDir := strings.TrimSpace(filepath.Dir(targetPath))
+		if targetDir != "" && targetDir != "." {
+			return targetDir
+		}
+	}
+
 	return resolveLegacyUpdateWorkspaceDir()
 }
 
 func resolveUpdateAssetPath(workspaceDir string, stagedDir string, assetName string) string {
 	name := strings.TrimSpace(assetName)
-	if stdRuntime.GOOS == "darwin" {
+	if shouldStoreUpdateAssetInWorkspaceRoot(stdRuntime.GOOS) {
 		return filepath.Join(workspaceDir, name)
 	}
 	return filepath.Join(stagedDir, name)
+}
+
+func shouldStoreUpdateAssetInWorkspaceRoot(goos string) bool {
+	switch strings.TrimSpace(strings.ToLower(goos)) {
+	case "darwin", "windows", "linux":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveUpdateStagedDir(workspaceDir string, channel string, version string) string {
+	return resolveUpdateStagedDirForPlatform(stdRuntime.GOOS, workspaceDir, channel, version)
+}
+
+func resolveUpdateStagedDirForPlatform(goos string, workspaceDir string, channel string, version string) string {
+	baseDir := strings.TrimSpace(workspaceDir)
+	if strings.EqualFold(strings.TrimSpace(goos), "windows") || baseDir == "" {
+		baseDir = resolveLegacyUpdateWorkspaceDir()
+	}
+	return filepath.Join(baseDir, buildUpdateStageDirNameForPlatform(goos, channel, version))
+}
+
+func shouldReuseUpdateAssetFromStagedDirForPlatform(goos string, assetName string) bool {
+	return !(strings.EqualFold(strings.TrimSpace(goos), "windows") &&
+		shouldWindowsUpdateLaunchDownloadedAssetDirectly(assetName))
+}
+
+func normalizeUpdatePathForPrefixCheck(path string) string {
+	normalized := strings.ReplaceAll(strings.TrimSpace(path), "\\", "/")
+	normalized = filepath.ToSlash(filepath.Clean(normalized))
+	if normalized == "." {
+		return ""
+	}
+	return strings.TrimRight(normalized, "/")
+}
+
+func isUpdateAssetPathInsideStagedDir(filePath string, stagedDir string) bool {
+	normalizedFilePath := normalizeUpdatePathForPrefixCheck(filePath)
+	normalizedStagedDir := normalizeUpdatePathForPrefixCheck(stagedDir)
+	if normalizedFilePath == "" || normalizedStagedDir == "" {
+		return false
+	}
+	return normalizedFilePath == normalizedStagedDir || strings.HasPrefix(normalizedFilePath, normalizedStagedDir+"/")
+}
+
+func buildReusableUpdatePathCandidatesForPlatform(goos string, preferredWorkspaceDir string, legacyWorkspaceDir string, channel string, version string, assetName string) []updatePathCandidate {
+	preferredWorkspaceDir = strings.TrimSpace(preferredWorkspaceDir)
+	legacyWorkspaceDir = strings.TrimSpace(legacyWorkspaceDir)
+	assetName = strings.TrimSpace(assetName)
+	preferredStagedDir := resolveUpdateStagedDirForPlatform(goos, preferredWorkspaceDir, channel, version)
+	stagedDirNames := []string{
+		buildUpdateStageDirNameForPlatform(goos, channel, version),
+		fmt.Sprintf(".gonavi-update-%s-%s", strings.TrimSpace(strings.ToLower(goos)), version),
+	}
+	workspaceCandidates := []string{preferredWorkspaceDir, legacyWorkspaceDir}
+	stageBaseCandidates := []string{preferredWorkspaceDir, legacyWorkspaceDir}
+	seenWorkspace := make(map[string]struct{}, len(workspaceCandidates))
+	seenStageBase := make(map[string]struct{}, len(stageBaseCandidates))
+	candidates := make([]updatePathCandidate, 0, 8)
+
+	for _, workspaceDir := range workspaceCandidates {
+		workspaceDir = strings.TrimSpace(workspaceDir)
+		if workspaceDir == "" {
+			continue
+		}
+		if _, exists := seenWorkspace[workspaceDir]; exists {
+			continue
+		}
+		seenWorkspace[workspaceDir] = struct{}{}
+		if shouldStoreUpdateAssetInWorkspaceRoot(goos) {
+			candidates = append(candidates, updatePathCandidate{
+				workspaceDir: workspaceDir,
+				stagedDir:    preferredStagedDir,
+				assetPath:    filepath.Join(workspaceDir, assetName),
+			})
+		}
+	}
+
+	if !shouldReuseUpdateAssetFromStagedDirForPlatform(goos, assetName) {
+		return candidates
+	}
+
+	for _, stageBaseDir := range stageBaseCandidates {
+		stageBaseDir = strings.TrimSpace(stageBaseDir)
+		if stageBaseDir == "" {
+			continue
+		}
+		if _, exists := seenStageBase[stageBaseDir]; exists {
+			continue
+		}
+		seenStageBase[stageBaseDir] = struct{}{}
+		for _, stagedDirName := range stagedDirNames {
+			stagedDir := filepath.Join(stageBaseDir, stagedDirName)
+			candidates = append(candidates, updatePathCandidate{
+				workspaceDir: stageBaseDir,
+				stagedDir:    stagedDir,
+				assetPath:    filepath.Join(stagedDir, assetName),
+			})
+		}
+	}
+
+	return candidates
 }
 
 func isExistingDownloadedAsset(filePath string, expectedSize int64) bool {
@@ -873,66 +1224,62 @@ func isExistingDownloadedAsset(filePath string, expectedSize int64) bool {
 }
 
 func resolveReusableStagedUpdate(info UpdateInfo, current *stagedUpdate) *stagedUpdate {
+	return resolveReusableStagedUpdateForPlatform(
+		stdRuntime.GOOS,
+		resolveUpdateWorkspaceDir(strings.TrimSpace(info.LatestVersion)),
+		resolveLegacyUpdateWorkspaceDir(),
+		info,
+		current,
+	)
+}
+
+func resolveReusableStagedUpdateForPlatform(goos string, preferredWorkspaceDir string, legacyWorkspaceDir string, info UpdateInfo, current *stagedUpdate) *stagedUpdate {
+	channel, err := normalizeUpdateChannel(info.Channel)
+	if err != nil {
+		channel = updateChannelLatest
+	}
 	version := strings.TrimSpace(info.LatestVersion)
 	assetName := strings.TrimSpace(info.AssetName)
 	if version == "" || assetName == "" {
 		return nil
 	}
+	allowStagedDirReuse := shouldReuseUpdateAssetFromStagedDirForPlatform(goos, assetName)
 
-	if current != nil && strings.TrimSpace(current.Version) == version {
-		currentPath := strings.TrimSpace(current.FilePath)
-		if isExistingDownloadedAsset(currentPath, info.AssetSize) {
-			if strings.TrimSpace(current.InstallLogPath) == "" {
-				current.InstallLogPath = buildUpdateInstallLogPath(filepath.Dir(currentPath))
+	if current != nil {
+		currentChannel := current.Channel
+		if currentChannel == "" {
+			currentChannel = updateChannelLatest
+		}
+		if currentChannel == channel && strings.TrimSpace(current.Version) == version {
+			currentPath := strings.TrimSpace(current.FilePath)
+			if isExistingDownloadedAsset(currentPath, info.AssetSize) {
+				if !allowStagedDirReuse && isUpdateAssetPathInsideStagedDir(currentPath, current.StagedDir) {
+					current = nil
+				} else {
+					if strings.TrimSpace(current.InstallLogPath) == "" {
+						current.InstallLogPath = buildUpdateInstallLogPath(filepath.Dir(currentPath))
+					}
+					current.Channel = channel
+					return current
+				}
 			}
-			return current
 		}
 	}
 
-	type pathCandidate struct {
-		workspaceDir string
-		stagedDir    string
-		assetPath    string
-	}
-	stagedDirName := fmt.Sprintf(".gonavi-update-%s-%s", stdRuntime.GOOS, version)
-	workspaceCandidates := []string{
-		resolveUpdateWorkspaceDir(version),
-		resolveLegacyUpdateWorkspaceDir(),
-	}
-	seenWorkspace := make(map[string]struct{}, len(workspaceCandidates))
-	candidates := make([]pathCandidate, 0, 4)
-	for _, workspaceDir := range workspaceCandidates {
-		workspaceDir = strings.TrimSpace(workspaceDir)
-		if workspaceDir == "" {
-			continue
-		}
-		if _, exists := seenWorkspace[workspaceDir]; exists {
-			continue
-		}
-		seenWorkspace[workspaceDir] = struct{}{}
-
-		stagedDir := filepath.Join(workspaceDir, stagedDirName)
-		assetPath := resolveUpdateAssetPath(workspaceDir, stagedDir, assetName)
-		candidates = append(candidates, pathCandidate{
-			workspaceDir: workspaceDir,
-			stagedDir:    stagedDir,
-			assetPath:    assetPath,
-		})
-		legacyAssetPath := filepath.Join(stagedDir, assetName)
-		if legacyAssetPath != assetPath {
-			candidates = append(candidates, pathCandidate{
-				workspaceDir: workspaceDir,
-				stagedDir:    stagedDir,
-				assetPath:    legacyAssetPath,
-			})
-		}
-	}
-
+	candidates := buildReusableUpdatePathCandidatesForPlatform(
+		goos,
+		preferredWorkspaceDir,
+		legacyWorkspaceDir,
+		string(channel),
+		version,
+		assetName,
+	)
 	for _, candidate := range candidates {
 		if !isExistingDownloadedAsset(candidate.assetPath, info.AssetSize) {
 			continue
 		}
 		return &stagedUpdate{
+			Channel:        channel,
 			Version:        version,
 			AssetName:      assetName,
 			FilePath:       candidate.assetPath,
@@ -956,6 +1303,37 @@ func resolveUpdateInstallTarget() string {
 	return exePath
 }
 
+func ensureWindowsUpdateTargetWritable(targetExe string) error {
+	targetExe = strings.TrimSpace(targetExe)
+	targetDir := strings.TrimSpace(filepath.Dir(targetExe))
+	if targetExe == "" || targetDir == "" || targetDir == "." {
+		return localizedUpdateError{key: "app.update.backend.error.install_target_unresolved"}
+	}
+
+	probePath := filepath.Join(targetDir, fmt.Sprintf(".gonavi-update-write-probe-%d.tmp", time.Now().UnixNano()))
+	file, err := os.OpenFile(probePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return localizedUpdateError{
+			key: "app.update.backend.error.install_target_not_writable",
+			params: map[string]any{
+				"path":   targetDir,
+				"detail": err.Error(),
+			},
+		}
+	}
+	if closeErr := file.Close(); closeErr != nil {
+		logger.Warnf("关闭 Windows 更新写入探针失败：%v", closeErr)
+	}
+	if removeErr := os.Remove(probePath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		logger.Warnf("清理 Windows 更新写入探针失败：%v", removeErr)
+	}
+	return nil
+}
+
+func shouldWindowsUpdateLaunchDownloadedAssetDirectly(assetPath string) bool {
+	return strings.EqualFold(strings.TrimSpace(filepath.Ext(strings.TrimSpace(assetPath))), ".exe")
+}
+
 func (a *App) emitUpdateDownloadProgress(status string, downloaded, total int64, message string) {
 	if a.ctx == nil {
 		return
@@ -973,7 +1351,7 @@ func (a *App) emitUpdateDownloadProgress(status string, downloaded, total int64,
 	if status == "done" && payload.Percent < 100 {
 		payload.Percent = 100
 	}
-	wailsRuntime.EventsEmit(a.ctx, updateDownloadProgressEvent, payload)
+	uievents.Emit(a.ctx, updateDownloadProgressEvent, payload)
 }
 
 func launchUpdateScript(staged *stagedUpdate) error {
@@ -1000,6 +1378,9 @@ func launchUpdateScript(staged *stagedUpdate) error {
 }
 
 func launchWindowsUpdate(staged *stagedUpdate, targetExe string, pid int) error {
+	if err := os.MkdirAll(staged.StagedDir, 0o755); err != nil {
+		return err
+	}
 	scriptPath := filepath.Join(staged.StagedDir, "update.cmd")
 	logPath := strings.TrimSpace(staged.InstallLogPath)
 	if logPath == "" {
@@ -1107,6 +1488,7 @@ if /I "%SOURCE_EXT%"==".zip" (
 ) else (
   set "SOURCE_EXE=%SOURCE%"
 )
+for %%I in ("%SOURCE_EXE%") do set "SOURCE_DIR=%%~dpI"
 
 :waitloop
 tasklist /FI "PID eq %PID%" | find "%PID%" >nul
@@ -1125,6 +1507,11 @@ rem -- Win10 needs extra time for kernel to release exe file handles --
 timeout /t 3 /nobreak >nul
 call :log cooldown finished, starting file replace
 
+:replace_binary
+if /I "%SOURCE_EXE%"=="%TARGET%" (
+  call :log downloaded executable already at target path, skip replace
+  goto move_done
+)
 set /a RETRY=0
 :move_retry
 call :log attempt !RETRY!: trying rename-then-copy strategy
@@ -1162,6 +1549,7 @@ exit /b 1
 
 :move_done
 del /F /Q "%TARGET_OLD%" >> "%LOG_FILE%" 2>&1
+if exist "%SOURCE%" del /F /Q "%SOURCE%" >> "%LOG_FILE%" 2>&1
 start "" /D "%TARGET_DIR%" "%TARGET%" >> "%LOG_FILE%" 2>&1
 if %ERRORLEVEL% NEQ 0 (
   call :log cmd start failed, trying powershell Start-Process

@@ -384,6 +384,18 @@ func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 
 		return parseOracleColumns(data), nil
 	}
+	for _, target := range o.lookupOracleSynonymTargets(dbName, tableName) {
+		query := buildOracleColumnsQuery(target.schema, target.table)
+		data, _, err := o.Query(query)
+		if err != nil {
+			return nil, err
+		}
+		if len(data) == 0 {
+			continue
+		}
+
+		return parseOracleColumns(data), nil
+	}
 	if columns, err := o.inferOracleColumnsFromSelect(dbName, tableName); err == nil && len(columns) > 0 {
 		return columns, nil
 	}
@@ -718,6 +730,61 @@ func oracleMetadataNamePairs(dbName string, tableName string) []oracleMetadataNa
 	return pairs
 }
 
+func (o *OracleDB) lookupOracleSynonymTargets(dbName string, tableName string) []oracleMetadataNamePair {
+	targets := make([]oracleMetadataNamePair, 0, 4)
+	seen := map[string]struct{}{}
+	add := func(schema string, table string) {
+		key := schema + "\x00" + table
+		if strings.TrimSpace(table) == "" {
+			return
+		}
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
+		targets = append(targets, oracleMetadataNamePair{schema: schema, table: table})
+	}
+
+	for _, candidate := range oracleMetadataNamePairs(dbName, tableName) {
+		data, _, err := o.Query(buildOracleSynonymLookupQuery(candidate.schema, candidate.table))
+		if err != nil {
+			continue
+		}
+		for _, row := range data {
+			targetSchema := oracleRowString(row, "TABLE_OWNER", "table_owner")
+			targetTable := oracleRowString(row, "TABLE_NAME", "table_name")
+			for _, target := range oracleMetadataNamePairs(targetSchema, targetTable) {
+				add(target.schema, target.table)
+			}
+			if strings.TrimSpace(targetTable) != "" {
+				break
+			}
+		}
+	}
+
+	return targets
+}
+
+func buildOracleSynonymLookupQuery(schema string, table string) string {
+	metadataTableName := escapeOracleMetadataLiteralExact(table)
+	if strings.TrimSpace(schema) == "" {
+		return fmt.Sprintf(`SELECT table_owner AS "TABLE_OWNER", table_name AS "TABLE_NAME"
+FROM all_synonyms
+WHERE synonym_name = '%s'
+  AND db_link IS NULL
+  AND (owner = USER OR owner = 'PUBLIC')
+ORDER BY CASE WHEN owner = USER THEN 0 WHEN owner = 'PUBLIC' THEN 1 ELSE 2 END`, metadataTableName)
+	}
+
+	metadataSchemaName := escapeOracleMetadataLiteralExact(schema)
+	return fmt.Sprintf(`SELECT table_owner AS "TABLE_OWNER", table_name AS "TABLE_NAME"
+FROM all_synonyms
+WHERE synonym_name = '%s'
+  AND db_link IS NULL
+  AND owner IN ('%s', 'PUBLIC')
+ORDER BY CASE WHEN owner = '%s' THEN 0 WHEN owner = 'PUBLIC' THEN 1 ELSE 2 END`, metadataTableName, metadataSchemaName, metadataSchemaName)
+}
+
 func buildOracleColumnsQuery(schema string, table string) string {
 	metadataTableName := escapeOracleMetadataLiteralExact(table)
 	metadataSchemaName := escapeOracleMetadataLiteralExact(schema)
@@ -733,9 +800,11 @@ func buildOracleColumnsQuery(schema string, table string) string {
 				FROM user_constraints cons
 				JOIN user_cons_columns cols USING (constraint_name)
 				WHERE cons.constraint_type = 'P'
+				  AND cons.table_name = '%s'
+				  AND cols.table_name = '%s'
 			) pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name
 			WHERE c.table_name = '%s'
-			ORDER BY c.column_id`, metadataTableName)
+			ORDER BY c.column_id`, metadataTableName, metadataTableName, metadataTableName)
 	}
 
 	return fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.data_length AS "DATA_LENGTH", c.char_length AS "CHAR_LENGTH", c.data_precision AS "DATA_PRECISION", c.data_scale AS "DATA_SCALE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
@@ -750,9 +819,13 @@ func buildOracleColumnsQuery(schema string, table string) string {
 			JOIN all_cons_columns cols
 			  ON cons.owner = cols.owner AND cons.constraint_name = cols.constraint_name
 			WHERE cons.constraint_type = 'P'
+			  AND cons.owner = '%s'
+			  AND cons.table_name = '%s'
+			  AND cols.owner = '%s'
+			  AND cols.table_name = '%s'
 		) pk ON c.owner = pk.owner AND c.table_name = pk.table_name AND c.column_name = pk.column_name
 		WHERE c.owner = '%s' AND c.table_name = '%s'
-		ORDER BY c.column_id`, metadataSchemaName, metadataTableName)
+		ORDER BY c.column_id`, metadataSchemaName, metadataTableName, metadataSchemaName, metadataTableName, metadataSchemaName, metadataTableName)
 }
 
 func parseOracleColumns(data []map[string]interface{}) []connection.ColumnDefinition {
@@ -884,19 +957,27 @@ func buildOracleForeignKeysQuery(schema string, table string) string {
 	metadataSchemaName := escapeOracleMetadataLiteralExact(schema)
 	if strings.TrimSpace(schema) == "" {
 		return fmt.Sprintf(`SELECT a.constraint_name, a.column_name, c_pk.table_name r_table_name, b.column_name r_column_name
-		FROM user_cons_columns a
+		FROM (
+			SELECT constraint_name, table_name, column_name, position
+			FROM user_cons_columns
+			WHERE table_name = '%s'
+		) a
 		JOIN user_constraints c ON a.constraint_name = c.constraint_name
 		JOIN user_constraints c_pk ON c.r_constraint_name = c_pk.constraint_name
 		JOIN user_cons_columns b ON c_pk.constraint_name = b.constraint_name AND a.position = b.position
-		WHERE c.constraint_type = 'R' AND a.table_name = '%s'`, metadataTableName)
+		WHERE c.constraint_type = 'R' AND c.table_name = '%s'`, metadataTableName, metadataTableName)
 	}
 	return fmt.Sprintf(`SELECT a.constraint_name, a.column_name, c_pk.table_name r_table_name, b.column_name r_column_name
-		FROM all_cons_columns a
+		FROM (
+			SELECT owner, constraint_name, table_name, column_name, position
+			FROM all_cons_columns
+			WHERE owner = '%s' AND table_name = '%s'
+		) a
 		JOIN all_constraints c ON a.owner = c.owner AND a.constraint_name = c.constraint_name
 		JOIN all_constraints c_pk ON c.r_owner = c_pk.owner AND c.r_constraint_name = c_pk.constraint_name
 		JOIN all_cons_columns b ON c_pk.owner = b.owner AND c_pk.constraint_name = b.constraint_name AND a.position = b.position
-		WHERE c.constraint_type = 'R' AND a.owner = '%s' AND a.table_name = '%s'`,
-		metadataSchemaName, metadataTableName)
+		WHERE c.constraint_type = 'R' AND c.owner = '%s' AND c.table_name = '%s'`,
+		metadataSchemaName, metadataTableName, metadataSchemaName, metadataTableName)
 }
 
 func parseOracleForeignKeys(data []map[string]interface{}) []connection.ForeignKeyDefinition {

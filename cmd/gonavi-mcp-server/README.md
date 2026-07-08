@@ -49,6 +49,187 @@ go run ./cmd/gonavi-mcp-server stdio
 go build -o .\bin\gonavi-mcp-server.exe .\cmd\gonavi-mcp-server
 ```
 
+## Docker / Podman / Compose
+
+当前容器化支持仅覆盖 `gonavi-mcp-server`，不包含 Wails 桌面 GUI。
+
+当前支持矩阵：
+
+- Docker Desktop / Linux 服务器 / NAS：直接使用 Compose 或 `docker run`
+- Podman / Quadlet：使用 `deploy/podman/gonavi-mcp-server`
+- Kubernetes：使用 `deploy/k8s/gonavi-mcp-server`
+- Helm：使用 `deploy/helm/gonavi-mcp-server`
+- 仅构建环境：使用仓库根目录 `Dockerfile.build-env`
+- 桌面 GUI 浏览器访问版：当前不提供，此仓库主应用仍是 Wails 桌面程序，不是现成的 Web 服务
+
+仓库根目录已提供以下文件：
+
+- `Dockerfile.mcp-server`
+- `docker-compose.mcp-server.yml`
+- `docker.mcp-server.env.example`
+- `deploy/podman/gonavi-mcp-server/*`
+
+推荐流程：
+
+```bash
+cp docker.mcp-server.env.example docker.mcp-server.env
+docker compose --env-file docker.mcp-server.env -f docker-compose.mcp-server.yml up -d
+```
+
+默认 Compose 会拉取 GHCR 预构建镜像。如果你要基于当前工作区源码本地构建，再叠加：
+
+```bash
+docker compose --env-file docker.mcp-server.env \
+  -f docker-compose.mcp-server.yml \
+  -f docker-compose.mcp-server.local.yml \
+  up -d --build
+```
+
+其中 `GONAVI_HOST_DATA_ROOT` 必须指向 GoNavi 当前活动数据目录。该目录内至少应包含：
+
+- `connections.json`
+- `daily_secrets.json`
+- `drivers/`（如果目标连接依赖可选 driver agent）
+
+容器内默认会设置：
+
+- `GONAVI_DATA_ROOT=/data`
+- `GONAVI_MCP_HTTP_ADDR=0.0.0.0:8765`
+- `GONAVI_MCP_HTTP_PATH=/mcp`
+
+`GONAVI_DATA_ROOT` 会覆盖默认活动数据目录解析逻辑，避免宿主机路径与容器内路径不一致时依赖 `storage_root.json` 的绝对路径。
+
+如果你只想手动构建镜像：
+
+```bash
+docker build -f Dockerfile.mcp-server -t gonavi-mcp-server:local .
+docker run --rm -p 8765:8765 \
+  -e GONAVI_MCP_HTTP_TOKEN=replace-with-a-random-token \
+  -e GONAVI_MCP_SCHEMA_ONLY=true \
+  -e GONAVI_DATA_ROOT=/data \
+  -v /absolute/path/to/gonavi-data:/data \
+  gonavi-mcp-server:local http
+```
+
+如果你直接使用已发布镜像：
+
+```bash
+docker run --rm -p 8765:8765 \
+  -e GONAVI_MCP_HTTP_TOKEN=replace-with-a-random-token \
+  -e GONAVI_MCP_SCHEMA_ONLY=true \
+  -e GONAVI_DATA_ROOT=/data \
+  -v /absolute/path/to/gonavi-data:/data \
+  ghcr.io/syngnat/gonavi-mcp-server:latest http
+```
+
+### Podman
+
+仓库内还提供了 Podman 原生部署样例：
+
+- `deploy/podman/gonavi-mcp-server/gonavi-mcp-server.env.example`
+- `deploy/podman/gonavi-mcp-server/gonavi-mcp-server.container`
+- `deploy/podman/gonavi-mcp-server/README.md`
+
+直接运行已发布镜像：
+
+```bash
+cp deploy/podman/gonavi-mcp-server/gonavi-mcp-server.env.example ./gonavi-mcp-server.env
+podman run -d --name gonavi-mcp-server --replace \
+  -p 8765:8765 \
+  --env-file ./gonavi-mcp-server.env \
+  -v /absolute/path/to/gonavi-data:/data:Z \
+  ghcr.io/syngnat/gonavi-mcp-server:latest http
+```
+
+如果你要基于当前源码本地构建：
+
+```bash
+podman build -f Dockerfile.mcp-server -t localhost/gonavi-mcp-server:local .
+podman run -d --name gonavi-mcp-server --replace \
+  -p 8765:8765 \
+  --env-file ./gonavi-mcp-server.env \
+  -v /absolute/path/to/gonavi-data:/data:Z \
+  localhost/gonavi-mcp-server:local http
+```
+
+其中：
+
+- `gonavi-mcp-server.env` 用 `deploy/podman/gonavi-mcp-server/gonavi-mcp-server.env.example` 初始化
+- `:Z` 适用于开启 SELinux 的宿主机；未启用 SELinux 可去掉
+- 更适合长期运行的方式见 [deploy/podman/gonavi-mcp-server/README.md](../../deploy/podman/gonavi-mcp-server/README.md) 中的 Quadlet 示例
+
+`podman compose` 本身依赖外部 compose provider，所以仓库对 Podman 的主支持路径是 `podman run` 与 Quadlet，而不是假设所有环境都能直接复用 Compose。
+
+## Kubernetes
+
+仓库内置了最小 K8s 示例：
+
+- `deploy/k8s/gonavi-mcp-server/kustomization.yaml`
+- `deploy/k8s/gonavi-mcp-server/base/deployment.yaml`
+- `deploy/k8s/gonavi-mcp-server/base/service.yaml`
+- `deploy/k8s/gonavi-mcp-server/README.md`
+- `deploy/k8s/gonavi-mcp-server/overlays/*`
+
+推荐先从现有 GoNavi 数据目录生成 Secret：
+
+```bash
+kubectl create namespace gonavi
+kubectl -n gonavi create secret generic gonavi-mcp-server-data \
+  --from-file=connections.json=/absolute/path/to/gonavi-data/connections.json \
+  --from-file=daily_secrets.json=/absolute/path/to/gonavi-data/daily_secrets.json \
+  --from-literal=GONAVI_MCP_HTTP_TOKEN=replace-with-a-random-token
+kubectl apply -k deploy/k8s/gonavi-mcp-server
+```
+
+如果需要 NAS hostPath、可选 driver agent PVC、Ingress，或两者组合，可直接使用 `overlays/nas-hostpath`、`overlays/drivers-pvc`、`overlays/ingress`、`overlays/ingress-with-drivers-pvc`。
+
+更完整的说明见 [deploy/k8s/gonavi-mcp-server/README.md](../../deploy/k8s/gonavi-mcp-server/README.md)。
+
+## Helm
+
+如果你希望把镜像、Secret、Ingress、hostPath / PVC 挂载做成参数化部署，而不是维护多份 Kustomize overlay，可直接使用：
+
+- `deploy/helm/gonavi-mcp-server`
+
+快速安装：
+
+```bash
+helm upgrade --install gonavi-mcp-server deploy/helm/gonavi-mcp-server -n gonavi --create-namespace
+```
+
+Chart 详细说明见 [deploy/helm/gonavi-mcp-server/README.md](../../deploy/helm/gonavi-mcp-server/README.md)。
+
+## Docker / Podman Build Environment
+
+如果你的目标不是运行 MCP，而是给 Linux 服务器 / NAS / CI 准备一套可重复的 Wails 构建环境，可直接使用仓库根目录的 `Dockerfile.build-env`：
+
+```bash
+docker build -f Dockerfile.build-env -t gonavi-build-env:local .
+docker run --rm -it -v "$PWD:/workspace" -w /workspace gonavi-build-env:local bash
+```
+
+如果你使用 Podman，也可以直接执行：
+
+```bash
+podman build -f Dockerfile.build-env -t localhost/gonavi-build-env:local .
+podman run --rm -it -v "$PWD:/workspace" -w /workspace localhost/gonavi-build-env:local bash
+```
+
+镜像内已预装 Go、Node、Wails CLI、GTK3 与 WebKitGTK 开发依赖，适合执行：
+
+```bash
+wails build
+```
+
+这个镜像默认安装 WebKitGTK 4.0 构建依赖，适合作为通用 Linux / NAS 构建环境。镜像基座支持多架构，`amd64` / `arm64` 会跟随容器平台。
+
+预构建镜像会发布到 GHCR：
+
+- `ghcr.io/syngnat/gonavi-mcp-server:latest`
+- `ghcr.io/syngnat/gonavi-build-env:latest`
+
+它只负责构建 Linux 产物，不会把 Wails 主程序变成浏览器版服务。
+
 远程 Agent 使用 Streamable HTTP 时必须设置 bearer token：
 
 ```powershell

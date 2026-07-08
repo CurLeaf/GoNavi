@@ -9,6 +9,7 @@ import (
 )
 
 const bootstrapFileName = "storage_root.json"
+const dataRootEnvName = "GONAVI_DATA_ROOT"
 
 var (
 	ErrSetActiveRootCreateDataDirectory      = errors.New("create data directory failed")
@@ -59,6 +60,10 @@ type bootstrapConfig struct {
 	DataRoot string `json:"dataRoot"`
 }
 
+func configuredRootOverride() string {
+	return strings.TrimSpace(os.Getenv(dataRootEnvName))
+}
+
 func DefaultRoot() string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(homeDir) == "" {
@@ -88,6 +93,9 @@ func ResolveRoot(root string) (string, error) {
 }
 
 func ResolveActiveRoot() (string, error) {
+	if override := configuredRootOverride(); override != "" {
+		return normalizeRoot(override)
+	}
 	defaultRoot, err := normalizeRoot(DefaultRoot())
 	if err != nil {
 		return "", err

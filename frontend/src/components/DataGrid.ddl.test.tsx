@@ -1924,6 +1924,46 @@ describe('DataGrid DDL interactions', () => {
     expect(content).toContain('name');
   });
 
+  it('notifies deferred data loading only after leaving the embedded object designer', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { name: 'id', type: 'bigint', key: 'PRI', nullable: 'NO', default: '', comment: '' },
+        { name: 'name', type: 'varchar(255)', key: '', nullable: 'YES', default: '', comment: '' },
+      ],
+    });
+    const handleDataViewActivate = vi.fn();
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' }]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          initialViewMode="fields"
+          initialViewModeRequestId="query-editor-jump-2"
+          onDataViewActivate={handleDataViewActivate}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    expect(handleDataViewActivate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      findButton(renderer!, '数据预览').props.onClick();
+    });
+    await waitForEffects();
+
+    expect(handleDataViewActivate).toHaveBeenCalledTimes(1);
+    renderer!.unmount();
+  });
+
   it('returns to the legacy table view when v2-only footer views are active during UI switch', async () => {
     storeState.appearance.uiVersion = 'v2';
 

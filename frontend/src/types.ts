@@ -445,6 +445,7 @@ export interface TabData {
     | "query"
     | "table"
     | "design"
+    | "sql-file-execution"
     | "sql-analysis"
     | "redis-keys"
     | "redis-command"
@@ -496,6 +497,8 @@ export interface TabData {
   tableExportInitialScope?: TableExportScope;
   tableExportQueryByScope?: Partial<Record<TableExportScope, string>>;
   tableExportRowCountByScope?: Partial<Record<TableExportScope, number>>;
+  sqlFileExecutionRequestKey?: string;
+  sqlFileExecutionFileSizeMB?: string;
   sqlAnalysisView?: "diagnose" | "slow-query";
   sqlAnalysisRequestKey?: string;
   formatRestoreSnapshot?: {
@@ -620,6 +623,7 @@ export interface AIProviderConfig {
   hasSecret?: boolean;
   baseUrl: string;
   model: string;
+  inlineCompletionModel?: string;
   models?: string[];
   apiFormat?: string; // custom 专用: openai | anthropic | gemini | cursor-agent | claude-cli | codebuddy-cli
   headers?: Record<string, string>;

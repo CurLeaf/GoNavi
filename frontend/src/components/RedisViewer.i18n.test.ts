@@ -17,6 +17,9 @@ describe('RedisViewer i18n', () => {
       '模糊',
       '精确',
       '新建 Key',
+      '导出全部',
+      '导出已选',
+      '导入',
       '重命名 Key',
     ].forEach((snippet) => {
       expect(source).not.toContain(snippet);
@@ -26,8 +29,19 @@ describe('RedisViewer i18n', () => {
     expect(source).toContain("tr('redis_viewer.message.load_keys_failed'");
     expect(source).toContain("tr('redis_viewer.message.value_load_failed'");
     expect(source).toContain("tr('redis_viewer.message.rename_success'");
+    expect(source).toContain("tr('redis_viewer.message.export_success'");
+    expect(source).toContain("tr('redis_viewer.message.import_summary'");
+    expect(source).toContain("tr('redis_viewer.message.import_file_required'");
+    expect(source).toContain("tr('redis_viewer.message.import_selection_required'");
     expect(source).toContain("tr('redis_viewer.state.empty_selection'");
+    expect(source).toContain("tr('redis_viewer.state.import_preview_empty'");
     expect(source).toContain("tr('redis_viewer.action.copy_key_name'");
+    expect(source).toContain("tr('redis_viewer.action.export_all'");
+    expect(source).toContain("tr('redis_viewer.action.export_selected'");
+    expect(source).toContain("tr('redis_viewer.action.import'");
+    expect(source).toContain("tr('redis_viewer.action.select_import_file'");
+    expect(source).toContain("tr('redis_viewer.action.change_import_file'");
+    expect(source).toContain("tr('redis_viewer.action.select_all_import_keys'");
   });
 
   it('localizes TTL and table labels with catalog keys', () => {

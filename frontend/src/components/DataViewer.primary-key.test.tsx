@@ -35,6 +35,7 @@ const backendApp = vi.hoisted(() => ({
 const messageApi = vi.hoisted(() => ({
   error: vi.fn(),
   warning: vi.fn(),
+  info: vi.fn(),
 }));
 
 const dataGridState = vi.hoisted(() => ({
@@ -144,6 +145,29 @@ describe('DataViewer safe editing locator', () => {
     await flushPromises();
 
     expect(messageApi.error).toHaveBeenCalledWith('未找到连接');
+    renderer!.unmount();
+  });
+
+  it('defers the initial table query when the table opens in embedded object design', async () => {
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'ID', key: 'PRI' }, { name: 'NAME', key: '' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<DataViewer tab={createTab({ initialViewMode: 'fields', initialViewModeRequestId: 'open-design-1' })} />);
+    });
+    await flushPromises();
+
+    expect(backendApp.DBQuery).not.toHaveBeenCalled();
+
+    await act(async () => {
+      dataGridState.latestProps?.onDataViewActivate?.();
+    });
+    await flushPromises();
+
+    expect(backendApp.DBQuery).toHaveBeenCalled();
     renderer!.unmount();
   });
 
@@ -619,7 +643,7 @@ describe('DataViewer safe editing locator', () => {
     renderer.unmount();
   });
 
-  it('keeps non-Oracle table preview read-only when no safe locator exists', async () => {
+  it('falls back to all-columns editing when no safe locator exists', async () => {
     storeState.languagePreference = 'en-US';
     storeState.connections[0].config.type = 'mysql';
     storeState.connections[0].config.database = 'main';
@@ -632,12 +656,13 @@ describe('DataViewer safe editing locator', () => {
 
     expect(dataGridState.latestProps?.pkColumns).toEqual([]);
     expect(dataGridState.latestProps?.editLocator).toMatchObject({
-      strategy: 'none',
-      readOnly: true,
-      reason: 'No primary key or usable unique index was found, so changes cannot be submitted safely.',
+      strategy: 'all-columns',
+      columns: ['ID', 'NAME'],
+      readOnly: false,
+      reason: 'No primary key or unique index was detected, so rows will be located by matching all columns. Edit with care.',
     });
-    expect(dataGridState.latestProps?.readOnly).toBe(true);
-    expect(messageApi.warning).toHaveBeenCalledWith('Table main.users remains read-only: No primary key or usable unique index was found, so changes cannot be submitted safely.');
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.info).toHaveBeenCalledWith('No primary key or unique index was detected, so rows will be located by matching all columns. Edit with care.');
     renderer.unmount();
   });
 });

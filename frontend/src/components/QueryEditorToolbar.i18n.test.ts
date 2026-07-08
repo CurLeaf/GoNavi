@@ -7,12 +7,14 @@ const legacyLiterals = [
   '隐藏结果区',
   '显示结果区',
   '生成 SQL',
+  'Text-to-SQL',
   '解释 SQL',
   '优化 SQL',
   'Schema 分析',
   '选择连接',
   '选择数据库',
   '最大返回行数',
+  '最大行数：100',
   '最大行数：500',
   '最大行数：1000',
   '最大行数：5000',
@@ -47,7 +49,7 @@ const requiredKeys = [
   'query_editor.action.format',
   'query_editor.action.format_sql',
   'query_editor.action.format_sql_with_shortcut',
-  'query_editor.action.ai_generate_sql_menu',
+  'query_editor.action.ai_text_to_sql_menu',
   'query_editor.action.ai_explain_sql_menu',
   'query_editor.action.ai_optimize_sql_menu',
   'query_editor.action.ai_schema_analysis',
@@ -63,6 +65,7 @@ describe('QueryEditorToolbar i18n', () => {
     expect(source).toContain("import { useOptionalI18n } from '../i18n/provider';");
     expect(source).toContain('const i18n = useOptionalI18n();');
     expect(source).toContain('const t = i18n?.t ?? defaultTranslate;');
+    expect(source).toContain("{ label: '100', value: 100 }");
 
     for (const key of requiredKeys) {
       expect(source).toContain(key);

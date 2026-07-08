@@ -170,6 +170,8 @@ export function GetSlowQueries(arg1:connection.ConnectionConfig,arg2:string,arg3
 
 export function GetUnboundSavedQueries():Promise<Array<connection.SavedQuery>>;
 
+export function GetUpdateChannel():Promise<connection.QueryResult>;
+
 export function ImportConfigFile():Promise<connection.QueryResult>;
 
 export function ImportConnectionsPayload(arg1:string,arg2:string):Promise<Array<connection.SavedConnectionView>>;
@@ -260,6 +262,8 @@ export function RedisDeleteKeys(arg1:connection.ConnectionConfig,arg2:Array<stri
 
 export function RedisExecuteCommand(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
+export function RedisExportKeys(arg1:connection.ConnectionConfig,arg2:app.RedisExportKeysOptions):Promise<connection.QueryResult>;
+
 export function RedisFlushDB(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
 export function RedisGetDatabases(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
@@ -268,11 +272,15 @@ export function RedisGetServerInfo(arg1:connection.ConnectionConfig):Promise<con
 
 export function RedisGetValue(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
+export function RedisImportKeys(arg1:connection.ConnectionConfig,arg2:app.RedisImportKeysOptions):Promise<connection.QueryResult>;
+
 export function RedisKeyExists(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
 export function RedisListPush(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
 
 export function RedisListSet(arg1:connection.ConnectionConfig,arg2:string,arg3:number,arg4:string):Promise<connection.QueryResult>;
+
+export function RedisPreviewImportKeys(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
 export function RedisRenameKey(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
@@ -346,11 +354,15 @@ export function SelectDriverPackageFile(arg1:string):Promise<connection.QueryRes
 
 export function SelectSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 
+export function SelectSQLFileForExecution():Promise<connection.QueryResult>;
+
 export function SelectSSHKeyFile(arg1:string):Promise<connection.QueryResult>;
 
 export function SetLanguage(arg1:string):Promise<void>;
 
 export function SetMacNativeWindowControls(arg1:boolean):Promise<void>;
+
+export function SetUpdateChannel(arg1:string):Promise<connection.QueryResult>;
 
 export function SetWindowTranslucency(arg1:number,arg2:number):Promise<void>;
 
@@ -359,6 +371,8 @@ export function Shutdown():Promise<void>;
 export function StartSecurityUpdate(arg1:app.StartSecurityUpdateRequest):Promise<app.SecurityUpdateStatus>;
 
 export function TestConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
+
+export function TestGlobalProxyConnection(arg1:connection.TestGlobalProxyInput):Promise<connection.QueryResult>;
 
 export function TestJVMConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 

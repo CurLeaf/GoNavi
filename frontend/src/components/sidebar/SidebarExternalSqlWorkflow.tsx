@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Button, Form, Input, Progress, message } from 'antd';
 import type { FormInstance } from 'antd/es/form';
 import Modal from '../common/ResizableDraggableModal';
 import type { SavedConnection, ExternalSQLDirectory } from '../../types';
 import { noAutoCapInputProps } from '../../utils/inputAutoCap';
 import { buildExternalSQLDirectoryId, buildExternalSQLTabId } from '../../utils/externalSqlTree';
+import { buildSQLFileExecutionWorkbenchTab } from '../../utils/sqlFileExecutionTab';
 import { t } from '../../i18n';
 import { resolveSidebarNodeConnectionId } from '../sidebarV2Utils';
 import {
@@ -13,8 +14,6 @@ import {
 } from '../sidebarCoreUtils';
 import {
   OpenSQLFile,
-  ExecuteSQLFile,
-  CancelSQLFileExecution,
   SelectSQLDirectory,
   ReadSQLFile,
   CreateSQLFile,
@@ -24,7 +23,6 @@ import {
   RenameSQLFile,
   RenameSQLDirectory,
 } from '../../../wailsjs/go/app/App';
-import { EventsOn } from '../../../wailsjs/runtime/runtime';
 
 export type SQLFileExecutionStatus = 'running' | 'done' | 'cancelled' | 'error';
 
@@ -88,19 +86,6 @@ type SQLFileExecutionModalProps = {
   onClose: () => void;
 };
 
-const createInitialSQLFileExecutionState = (): SQLFileExecutionState => ({
-  open: false,
-  jobId: '',
-  fileSizeMB: '',
-  status: 'running',
-  executed: 0,
-  failed: 0,
-  total: 0,
-  percent: 0,
-  currentSQL: '',
-  resultMessage: '',
-});
-
 const normalizeExternalSQLFileName = (rawName: unknown): string => {
   const name = String(rawName || '').trim();
   if (!name) return '';
@@ -142,6 +127,9 @@ const normalizeSQLFileDialogData = (data: unknown): { content: string; filePath:
     isLargeFile: false,
   };
 };
+
+const buildSQLFileExecutionRequestKey = (): string =>
+  `sql-file-execution-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const resolveSQLFileExecutionStatusLabel = (status: SQLFileExecutionStatus): string => {
   switch (status) {
@@ -324,80 +312,72 @@ export const useSidebarExternalSqlWorkflow = ({
   const [externalSQLFileForm] = Form.useForm();
   const [externalSQLFileModalMode, setExternalSQLFileModalMode] = useState<ExternalSQLFileModalMode>('create');
   const [externalSQLFileTarget, setExternalSQLFileTarget] = useState<any>(null);
-  const [sqlFileExecState, setSqlFileExecState] = useState<SQLFileExecutionState>(createInitialSQLFileExecutionState);
 
-  const startSQLFileExecution = (config: any, dbName: string, filePath: string, fileSizeMB: string) => {
-    const jobId = `sqlfile-${Date.now()}`;
-    setSqlFileExecState({
-      open: true,
-      jobId,
-      fileSizeMB,
-      status: 'running',
-      executed: 0,
-      failed: 0,
-      total: 0,
-      percent: 0,
-      currentSQL: '',
-      resultMessage: '',
-    });
+  const selectSQLFileForExecution = useCallback(async () => {
+    const backendApp = typeof window !== 'undefined' ? (window as any).go?.app?.App : undefined;
+    if (typeof backendApp?.SelectSQLFileForExecution === 'function') {
+      return backendApp.SelectSQLFileForExecution();
+    }
+    return OpenSQLFile();
+  }, []);
 
-    const offProgress = EventsOn('sqlfile:progress', (event: any) => {
-      if (!event || event.jobId !== jobId) return;
-      setSqlFileExecState(prev => ({
-        ...prev,
-        status: event.status || prev.status,
-        executed: typeof event.executed === 'number' ? event.executed : prev.executed,
-        failed: typeof event.failed === 'number' ? event.failed : prev.failed,
-        total: typeof event.total === 'number' ? event.total : prev.total,
-        percent: typeof event.percent === 'number' ? Math.min(100, event.percent) : prev.percent,
-        currentSQL: typeof event.currentSQL === 'string' ? event.currentSQL : prev.currentSQL,
-      }));
-    });
-
-    ExecuteSQLFile(config, dbName, filePath, jobId).then(res => {
-      offProgress();
-      setSqlFileExecState(prev => ({
-        ...prev,
-        status: res.success ? 'done' : (prev.status === 'cancelled' ? 'cancelled' : 'error'),
-        percent: 100,
-        resultMessage: res.message || '',
-      }));
-    }).catch(err => {
-      offProgress();
-      setSqlFileExecState(prev => ({
-        ...prev,
-        status: 'error',
-        resultMessage: String(err?.message || err),
-      }));
-    });
-  };
+  const openSQLFileExecutionWorkbench = useCallback(({
+    connectionId,
+    dbName,
+    filePath,
+    fileName,
+    fileSizeMB,
+  }: {
+    connectionId: string;
+    dbName?: string;
+    filePath: string;
+    fileName?: string;
+    fileSizeMB?: string;
+  }): boolean => {
+    const normalizedConnectionId = String(connectionId || '').trim();
+    const normalizedFilePath = String(filePath || '').trim();
+    if (!normalizedConnectionId || !normalizedFilePath) {
+      return false;
+    }
+    const conn = connections.find((item) => item.id === normalizedConnectionId);
+    if (!conn) {
+      message.error(t('sidebar.message.connection_config_not_found'));
+      return false;
+    }
+    addTab(buildSQLFileExecutionWorkbenchTab({
+      connectionId: normalizedConnectionId,
+      dbName: String(dbName || '').trim() || undefined,
+      filePath: normalizedFilePath,
+      fileName: String(fileName || '').trim() || undefined,
+      fileSizeMB: String(fileSizeMB || '').trim() || undefined,
+      requestKey: buildSQLFileExecutionRequestKey(),
+    }));
+    return true;
+  }, [addTab, connections]);
 
   const handleRunSQLFile = async (node: any) => {
-    const res = await OpenSQLFile();
+    const connectionId = node.type === 'connection'
+      ? String(node.key || '').trim()
+      : String(node?.dataRef?.id || '').trim();
+    const dbName = String(node?.dataRef?.dbName || '').trim();
+    if (!connectionId) {
+      message.warning(t('sidebar.message.select_connection_or_database_first'));
+      return;
+    }
+
+    const res = await selectSQLFileForExecution();
     if (res.success) {
       const data = normalizeSQLFileDialogData(res.data);
-      if (data.isLargeFile) {
-        const connId = node.type === 'connection' ? node.key : node.dataRef?.id;
-        const dbName = node.dataRef?.dbName || '';
-        const conn = connections.find(c => c.id === connId);
-        if (!conn) {
-          message.error(t('sidebar.message.connection_config_not_found'));
-          return;
-        }
-        startSQLFileExecution(conn.config, dbName, data.filePath, data.fileSizeMB || '');
+      if (!data.filePath) {
+        message.error(t('sidebar.message.sql_file_path_incomplete'));
         return;
       }
-
-      const { dbName, id } = node.dataRef;
-      const connectionId = node.type === 'connection' ? String(node.key) : String(id || node.dataRef.id || '');
-      addTab({
-        id: data.filePath ? buildExternalSQLTabId(connectionId, dbName || '', data.filePath) : `query-${Date.now()}`,
-        title: data.fileName || t('sidebar.sql_file_exec.title'),
-        type: 'query',
+      openSQLFileExecutionWorkbench({
         connectionId,
         dbName: dbName,
-        query: data.content,
-        filePath: data.filePath || undefined,
+        filePath: data.filePath,
+        fileName: data.fileName,
+        fileSizeMB: data.fileSizeMB,
       });
     } else if (res.message !== '已取消') {
       message.error(t('sidebar.message.read_file_failed', { error: res.message }));
@@ -410,27 +390,19 @@ export const useSidebarExternalSqlWorkflow = ({
       message.warning(t('sidebar.message.select_connection_or_database_first'));
       return;
     }
-    const res = await OpenSQLFile();
+    const res = await selectSQLFileForExecution();
     if (res.success) {
       const data = normalizeSQLFileDialogData(res.data);
-      if (data.isLargeFile) {
-        const conn = connections.find(c => c.id === ctx.connectionId);
-        if (!conn) {
-          message.error(t('sidebar.message.connection_config_not_found'));
-          return;
-        }
-        startSQLFileExecution(conn.config, ctx.dbName || '', data.filePath, data.fileSizeMB || '');
+      if (!data.filePath) {
+        message.error(t('sidebar.message.sql_file_path_incomplete'));
         return;
       }
-
-      addTab({
-        id: data.filePath ? buildExternalSQLTabId(ctx.connectionId, ctx.dbName || '', data.filePath) : `query-${Date.now()}`,
-        title: data.fileName || t('sidebar.sql_file_exec.title'),
-        type: 'query',
+      openSQLFileExecutionWorkbench({
         connectionId: ctx.connectionId,
-        dbName: ctx.dbName || undefined,
-        query: data.content,
-        filePath: data.filePath || undefined,
+        dbName: ctx.dbName || '',
+        filePath: data.filePath,
+        fileName: data.fileName,
+        fileSizeMB: data.fileSizeMB,
       });
     } else if (res.message !== '已取消') {
       message.error(t('sidebar.message.read_file_failed', { error: res.message }));
@@ -486,12 +458,13 @@ export const useSidebarExternalSqlWorkflow = ({
         message.warning(t('sidebar.message.select_host_before_large_sql_file'));
         return;
       }
-      const conn = connections.find((item) => item.id === connectionId);
-      if (!conn) {
-        message.error(t('sidebar.message.connection_config_not_found'));
-        return;
-      }
-      startSQLFileExecution(conn.config, dbName, data.filePath, data.fileSizeMB);
+      openSQLFileExecutionWorkbench({
+        connectionId,
+        dbName,
+        filePath: String((data as Record<string, unknown>).filePath || '').trim() || filePath,
+        fileName,
+        fileSizeMB: String((data as Record<string, unknown>).fileSizeMB || '').trim() || undefined,
+      });
       return;
     }
 
@@ -778,15 +751,6 @@ export const useSidebarExternalSqlWorkflow = ({
     message.success(t('sidebar.message.external_sql_directory_refreshed'));
   };
 
-  const cancelSQLFileExecution = () => {
-    CancelSQLFileExecution(sqlFileExecState.jobId);
-    setSqlFileExecState(prev => ({ ...prev, status: 'cancelled' }));
-  };
-
-  const closeSQLFileExecutionModal = () => {
-    setSqlFileExecState(prev => ({ ...prev, open: false }));
-  };
-
   return {
     handleRunSQLFile,
     handleOpenSQLFileFromToolbar,
@@ -807,11 +771,6 @@ export const useSidebarExternalSqlWorkflow = ({
       form: externalSQLFileForm,
       onOk: handleExternalSQLFileModalOk,
       onCancel: closeExternalSQLFileModal,
-    },
-    sqlFileExecutionModalProps: {
-      state: sqlFileExecState,
-      onCancelExecution: cancelSQLFileExecution,
-      onClose: closeSQLFileExecutionModal,
     },
   };
 };

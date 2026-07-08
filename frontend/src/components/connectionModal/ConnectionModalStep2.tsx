@@ -194,7 +194,14 @@ const ConnectionModalStep2: React.FC<ConnectionModalStep2Props> = (props) => {
     useSSL,
   } = props;
 
-const renderStep2 = () => {
+  const [readOnlyProtectionExpanded, setReadOnlyProtectionExpanded] =
+    React.useState(false);
+
+  React.useEffect(() => {
+    setReadOnlyProtectionExpanded(false);
+  }, [dbType]);
+
+  const renderStep2 = () => {
   const showConnectionReadOnlyField = supportsConnectionReadOnlyMode({
     type: dbType,
     driver: form.getFieldValue("driver"),
@@ -1364,6 +1371,10 @@ const renderStep2 = () => {
               renderConfigSectionCard({
                 sectionKey: "readOnly",
                 icon: <SafetyCertificateOutlined />,
+                collapsible: true,
+                expanded: readOnlyProtectionExpanded,
+                onToggle: () =>
+                  setReadOnlyProtectionExpanded((expanded) => !expanded),
                 badge: (
                   <Tag
                     color={

@@ -67,3 +67,25 @@ func TestSetActiveRootResetToDefaultRemovesBootstrap(t *testing.T) {
 		t.Fatalf("expected bootstrap file to be removed, got err=%v", err)
 	}
 }
+
+func TestResolveActiveRootPrefersEnvOverride(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+
+	customRoot := filepath.Join(t.TempDir(), "custom-root")
+	if _, err := SetActiveRoot(customRoot); err != nil {
+		t.Fatalf("SetActiveRoot returned error: %v", err)
+	}
+
+	overrideRoot := filepath.Join(t.TempDir(), "override-root")
+	t.Setenv(dataRootEnvName, overrideRoot)
+
+	resolvedRoot, err := ResolveActiveRoot()
+	if err != nil {
+		t.Fatalf("ResolveActiveRoot returned error: %v", err)
+	}
+	if resolvedRoot != overrideRoot {
+		t.Fatalf("expected env override root %q, got %q", overrideRoot, resolvedRoot)
+	}
+}

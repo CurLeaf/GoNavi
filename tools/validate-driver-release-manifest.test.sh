@@ -17,6 +17,22 @@ cleanup() {
 trap cleanup EXIT
 
 manifest_path="$tmpdir/manifest.json"
+resolve_python_bin() {
+  local candidate
+  for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -V >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+PYTHON_BIN="$(resolve_python_bin || true)"
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "skip: validate-driver-release-manifest.test.sh requires python3 or python" >&2
+  exit 0
+fi
 
 generate_revision() {
   local platform="$1"
@@ -59,6 +75,13 @@ cat >"$manifest_path" <<'EOF'
       "revision": "__CLICKHOUSE_LINUX_AMD64__",
       "size": 1
     },
+    "clickhouse-driver-agent-linux-arm64": {
+      "driver": "clickhouse",
+      "driverType": "clickhouse",
+      "platform": "linux/arm64",
+      "revision": "__CLICKHOUSE_LINUX_ARM64__",
+      "size": 1
+    },
     "clickhouse-driver-agent-windows-amd64.exe": {
       "driver": "clickhouse",
       "driverType": "clickhouse",
@@ -79,10 +102,11 @@ EOF
 
 clickhouse_darwin_revision="$(generate_revision darwin/arm64 clickhouse)"
 clickhouse_linux_revision="$(generate_revision linux/amd64 clickhouse)"
+clickhouse_linux_arm64_revision="$(generate_revision linux/arm64 clickhouse)"
 clickhouse_windows_revision="$(generate_revision windows/amd64 clickhouse)"
 mariadb_darwin_revision="$(generate_revision darwin/arm64 mariadb)"
 
-python3 - "$manifest_path" "$clickhouse_darwin_revision" "$clickhouse_linux_revision" "$clickhouse_windows_revision" "$mariadb_darwin_revision" <<'PY'
+"$PYTHON_BIN" - "$manifest_path" "$clickhouse_darwin_revision" "$clickhouse_linux_revision" "$clickhouse_linux_arm64_revision" "$clickhouse_windows_revision" "$mariadb_darwin_revision" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -90,11 +114,13 @@ from pathlib import Path
 path = Path(sys.argv[1])
 clickhouse_darwin = sys.argv[2]
 clickhouse_linux = sys.argv[3]
-clickhouse_windows = sys.argv[4]
-mariadb = sys.argv[5]
+clickhouse_linux_arm64 = sys.argv[4]
+clickhouse_windows = sys.argv[5]
+mariadb = sys.argv[6]
 data = json.loads(path.read_text(encoding="utf-8"))
 data["assets"]["clickhouse-driver-agent-darwin-arm64"]["revision"] = clickhouse_darwin
 data["assets"]["clickhouse-driver-agent-linux-amd64"]["revision"] = clickhouse_linux
+data["assets"]["clickhouse-driver-agent-linux-arm64"]["revision"] = clickhouse_linux_arm64
 data["assets"]["clickhouse-driver-agent-windows-amd64.exe"]["revision"] = clickhouse_windows
 data["assets"]["mariadb-driver-agent-darwin-arm64"]["revision"] = mariadb
 path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

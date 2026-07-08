@@ -7,6 +7,7 @@ type UseAppUtilityStylesOptions = {
   darkMode: boolean;
   effectiveOpacity: number;
   effectiveUiScale: number;
+  isV2Ui: boolean;
   resolvedAppearance: {
     opacity: number;
     blur: number;
@@ -19,6 +20,7 @@ export const useAppUtilityStyles = ({
   darkMode,
   effectiveOpacity,
   effectiveUiScale,
+  isV2Ui,
   resolvedAppearance,
   sidebarWidth,
 }: UseAppUtilityStylesOptions) => {
@@ -87,8 +89,11 @@ export const useAppUtilityStyles = ({
   }), [effectiveBlurFilter, darkMode, effectiveUiScale, isOpaqueUtilityMode, isSidebarCompact, utilityButtonBgColor, utilityButtonBorderColor, utilityButtonShadow]);
   const disableLocalBackdropFilter = isMacLikePlatform();
   const overlayTheme = useMemo(
-    () => buildOverlayWorkbenchTheme(darkMode, { disableBackdropFilter: disableLocalBackdropFilter }),
-    [darkMode, disableLocalBackdropFilter],
+    () => buildOverlayWorkbenchTheme(darkMode, {
+      disableBackdropFilter: disableLocalBackdropFilter,
+      uiVersion: isV2Ui ? 'v2' : 'legacy',
+    }),
+    [darkMode, disableLocalBackdropFilter, isV2Ui],
   );
 
   const sidebarQuickActionBaseStyle = useMemo(() => ({

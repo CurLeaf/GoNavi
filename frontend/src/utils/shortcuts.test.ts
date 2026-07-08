@@ -7,6 +7,7 @@ import {
   DEFAULT_SHORTCUT_OPTIONS,
   findReservedConflict,
   findReservedConflicts,
+  findReservedConflictsForAction,
   describeConflictContext,
   normalizeShortcutCombo,
   RESERVED_SHORTCUTS,
@@ -110,6 +111,26 @@ describe('findReservedConflicts', () => {
   });
 });
 
+describe('findReservedConflictsForAction', () => {
+  it('allows duplicate current line to reuse Monaco add-selection shortcut on Windows', () => {
+    expect(findReservedConflicts('Ctrl+D', 'windows')).toEqual([
+      expect.objectContaining({
+        monacoCommandId: 'editor.action.addSelectionToNextFindMatch',
+      }),
+    ]);
+    expect(findReservedConflictsForAction('duplicateCurrentLine', 'Ctrl+D', 'windows')).toEqual([]);
+  });
+
+  it('allows duplicate current line to reuse Monaco add-selection shortcut on macOS', () => {
+    expect(findReservedConflicts('Meta+D', 'mac')).toEqual([
+      expect.objectContaining({
+        monacoCommandId: 'editor.action.addSelectionToNextFindMatch',
+      }),
+    ]);
+    expect(findReservedConflictsForAction('duplicateCurrentLine', 'Meta+D', 'mac')).toEqual([]);
+  });
+});
+
 // ─── describeConflictContext ─────────────────────────────────────────
 
 describe('describeConflictContext', () => {
@@ -133,6 +154,7 @@ describe('shortcut localization', () => {
       expect(SHORTCUT_ACTION_META.runQuery.label).toBe('Run SQL');
       expect(SHORTCUT_ACTION_META.saveQuery.description).toBe('Save the current query tab; unnamed queries open the save dialog');
       expect(SHORTCUT_ACTION_META.formatSql.label).toBe('Format SQL');
+      expect(SHORTCUT_ACTION_META.triggerSqlAiCompletion.label).toBe('Trigger SQL AI Completion');
       expect(SHORTCUT_ACTION_META.toggleQueryResultsPanel.label).toBe('Toggle Results Panel');
       expect(SHORTCUT_ACTION_META.toggleQueryResultsPanel.description).toBe('Show or hide the results area below the query editor');
       expect(SHORTCUT_ACTION_META.sendAIChatMessage.description).toContain('Shift+Enter');
@@ -147,6 +169,7 @@ describe('shortcut localization', () => {
       setCurrentLanguage('zh-CN');
       expect(SHORTCUT_ACTION_META.runQuery.label).toBe('执行 SQL');
       expect(SHORTCUT_ACTION_META.formatSql.label).toBe('美化 SQL');
+      expect(SHORTCUT_ACTION_META.triggerSqlAiCompletion.label).toBe('触发 SQL AI 自动补全');
       expect(findReservedConflict('Ctrl+S')?.label).toBe('浏览器保存');
     } finally {
       setCurrentLanguage('zh-CN');
@@ -244,6 +267,54 @@ describe('IME shortcut guards', () => {
     expect(isShortcutMatch(event, 'Ctrl+Enter')).toBe(false);
   });
 
+  it('matches modifier shortcuts from KeyboardEvent.code when WebView reports Process', () => {
+    const event = {
+      key: 'Process',
+      code: 'Backslash',
+      keyCode: 220,
+      which: 220,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      isComposing: false,
+      nativeEvent: {
+        code: 'Backslash',
+        keyCode: 220,
+        which: 220,
+        isComposing: false,
+      },
+    } as unknown as KeyboardEvent;
+
+    expect(isImeComposingKeyEvent(event)).toBe(false);
+    expect(eventToShortcut(event)).toBe('Alt+\\');
+    expect(isShortcutMatch(event, 'Alt+\\')).toBe(true);
+  });
+
+  it('matches modifier shortcuts from IntlBackslash layout events when WebView reports Process', () => {
+    const event = {
+      key: 'Process',
+      code: 'IntlBackslash',
+      keyCode: 226,
+      which: 226,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: true,
+      shiftKey: false,
+      isComposing: false,
+      nativeEvent: {
+        code: 'IntlBackslash',
+        keyCode: 226,
+        which: 226,
+        isComposing: false,
+      },
+    } as unknown as KeyboardEvent;
+
+    expect(isImeComposingKeyEvent(event)).toBe(false);
+    expect(eventToShortcut(event)).toBe('Alt+\\');
+    expect(isShortcutMatch(event, 'Alt+\\')).toBe(true);
+  });
+
   it('treats number keys as non-shortcuts while a composition session is active', () => {
     setGlobalImeCompositionActive(true);
     const event = {
@@ -303,8 +374,21 @@ describe('shortcut defaults', () => {
       windows: { combo: 'Ctrl+E', enabled: true },
     });
     expect(SHORTCUT_ACTION_META.selectCurrentStatement).toMatchObject({
-      label: '选择当前语句',
+      label: '选择当前行并复制',
       scope: 'queryEditor',
+    });
+  });
+
+  it('registers duplicate current line as a query editor shortcut', () => {
+    expect(DEFAULT_SHORTCUT_OPTIONS.duplicateCurrentLine).toEqual({
+      mac: { combo: 'Meta+D', enabled: true },
+      windows: { combo: 'Ctrl+D', enabled: true },
+    });
+    expect(SHORTCUT_ACTION_META.duplicateCurrentLine).toMatchObject({
+      label: '复制当前行到下一行',
+      scope: 'queryEditor',
+      allowInEditable: true,
+      allowedReservedMonacoCommandIds: ['editor.action.addSelectionToNextFindMatch'],
     });
   });
 
@@ -327,6 +411,18 @@ describe('shortcut defaults', () => {
     });
     expect(SHORTCUT_ACTION_META.formatSql).toMatchObject({
       label: '美化 SQL',
+      scope: 'queryEditor',
+      allowInEditable: true,
+    });
+  });
+
+  it('registers manual SQL AI completion as a query editor shortcut', () => {
+    expect(DEFAULT_SHORTCUT_OPTIONS.triggerSqlAiCompletion).toEqual({
+      mac: { combo: 'Alt+\\', enabled: true },
+      windows: { combo: 'Alt+\\', enabled: true },
+    });
+    expect(SHORTCUT_ACTION_META.triggerSqlAiCompletion).toMatchObject({
+      label: '触发 SQL AI 自动补全',
       scope: 'queryEditor',
       allowInEditable: true,
     });
@@ -507,14 +603,14 @@ describe('comboToMonacoKeyBinding', () => {
 
   it('maps Ctrl+Enter correctly', () => {
     expect(comboToMonacoKeyBinding('Ctrl+Enter', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.CtrlCmd,
+      keyMod: mockKeyMod.WinCtrl,
       keyCode: mockKeyCode.Enter,
     });
   });
 
   it('maps Ctrl+Shift+R correctly', () => {
     expect(comboToMonacoKeyBinding('Ctrl+Shift+R', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.CtrlCmd | mockKeyMod.Shift,
+      keyMod: mockKeyMod.WinCtrl | mockKeyMod.Shift,
       keyCode: mockKeyCode.KeyR,
     });
   });
@@ -528,7 +624,7 @@ describe('comboToMonacoKeyBinding', () => {
 
   it('maps Meta+Enter (macOS variant)', () => {
     expect(comboToMonacoKeyBinding('Meta+Enter', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.WinCtrl,
+      keyMod: mockKeyMod.CtrlCmd,
       keyCode: mockKeyCode.Enter,
     });
   });
@@ -542,8 +638,15 @@ describe('comboToMonacoKeyBinding', () => {
 
   it('maps Ctrl+, (comma)', () => {
     expect(comboToMonacoKeyBinding('Ctrl+,', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.CtrlCmd,
+      keyMod: mockKeyMod.WinCtrl,
       keyCode: mockKeyCode.OemComma,
+    });
+  });
+
+  it('maps Alt+\\ (manual AI completion)', () => {
+    expect(comboToMonacoKeyBinding('Alt+\\', mockKeyMod, mockKeyCode)).toEqual({
+      keyMod: mockKeyMod.Alt,
+      keyCode: mockKeyCode.Oem5,
     });
   });
 
@@ -557,14 +660,14 @@ describe('comboToMonacoKeyBinding', () => {
 
   it('maps Ctrl+Digit1', () => {
     expect(comboToMonacoKeyBinding('Ctrl+1', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.CtrlCmd,
+      keyMod: mockKeyMod.WinCtrl,
       keyCode: mockKeyCode.Digit1,
     });
   });
 
   it('maps Ctrl+Alt+Delete', () => {
     expect(comboToMonacoKeyBinding('Ctrl+Alt+Delete', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.CtrlCmd | mockKeyMod.Alt,
+      keyMod: mockKeyMod.WinCtrl | mockKeyMod.Alt,
       keyCode: mockKeyCode.Delete,
     });
   });

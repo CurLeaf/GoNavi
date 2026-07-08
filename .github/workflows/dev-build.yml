@@ -73,6 +73,7 @@ jobs:
       drivers_windows_amd64: ${{ steps.detect.outputs.drivers_windows_amd64 }}
       drivers_windows_arm64: ${{ steps.detect.outputs.drivers_windows_arm64 }}
       drivers_linux_amd64: ${{ steps.detect.outputs.drivers_linux_amd64 }}
+      drivers_linux_arm64: ${{ steps.detect.outputs.drivers_linux_arm64 }}
       has_changes: ${{ steps.detect.outputs.has_changes }}
       release_source: ${{ steps.detect.outputs.release_source }}
       compare_base: ${{ steps.detect.outputs.compare_base }}
@@ -167,6 +168,7 @@ jobs:
               windows/amd64) echo "windows_amd64" ;;
               windows/arm64) echo "windows_arm64" ;;
               linux/amd64) echo "linux_amd64" ;;
+              linux/arm64) echo "linux_arm64" ;;
               *)
                 echo "unknown platform: $1" >&2
                 return 1
@@ -204,7 +206,7 @@ jobs:
           PLATFORM_DIFF_FAILED=false
           if [[ "$BASE_REF" != "all" && "$FORCE_GLOBAL_DRIVER_BUILDS" != "true" ]]; then
             REVISION_DRIVERS=""
-            for PLATFORM in darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64; do
+            for PLATFORM in darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64 linux/arm64; do
               PLATFORM_KEY="$(platform_output_key "$PLATFORM")"
               DIFF_ARGS=(bash ./tools/diff-driver-agent-revisions.sh --base "$BASE_REF" --head "$GITHUB_SHA" --platform "$PLATFORM")
               if [[ -n "$DRIVERS" ]]; then
@@ -228,12 +230,12 @@ jobs:
           fi
           if [[ "$BASE_REF" == "all" || "$FORCE_GLOBAL_DRIVER_BUILDS" == "true" || "$PLATFORM_DIFF_FAILED" == "true" ]]; then
             PLATFORM_OUTPUTS=()
-            for PLATFORM in darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64; do
+            for PLATFORM in darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64 linux/arm64; do
               PLATFORM_KEY="$(platform_output_key "$PLATFORM")"
               PLATFORM_OUTPUTS+=("drivers_${PLATFORM_KEY}=${DRIVERS}")
             done
           elif [[ ${#PLATFORM_OUTPUTS[@]} -eq 0 ]]; then
-            for PLATFORM in darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64; do
+            for PLATFORM in darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64 linux/arm64; do
               PLATFORM_KEY="$(platform_output_key "$PLATFORM")"
               PLATFORM_OUTPUTS+=("drivers_${PLATFORM_KEY}=")
             done
@@ -308,6 +310,15 @@ jobs:
             os_name: Linux
             arch_name: Amd64
             build_name: gonavi-build-linux-amd64
+            wails_tags: ""
+            artifact_suffix: ""
+            build_optional_agents: true
+            linux_webkit: "4.0"
+          - os: ubuntu-22.04-arm
+            platform: linux/arm64
+            os_name: Linux
+            arch_name: Arm64
+            build_name: gonavi-build-linux-arm64
             wails_tags: ""
             artifact_suffix: ""
             build_optional_agents: true
@@ -396,6 +407,12 @@ jobs:
           upx --version
 
           sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
+
+          if [ "${{ matrix.arch_name }}" != "Amd64" ]; then
+            echo "⚠️ Linux arm64 暂不生成 AppImage，仅产出 tar.gz"
+            touch /tmp/skip-appimage
+            exit 0
+          fi
 
           LINUXDEPLOY_URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
           PLUGIN_URL="https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-x86_64.AppImage"
@@ -553,6 +570,9 @@ jobs:
               ;;
             linux/amd64)
               DRIVERS='${{ needs.driver_agents.outputs.drivers_linux_amd64 }}'
+              ;;
+            linux/arm64)
+              DRIVERS='${{ needs.driver_agents.outputs.drivers_linux_arm64 }}'
               ;;
             *)
               echo "unsupported platform: ${{ matrix.platform }}" >&2

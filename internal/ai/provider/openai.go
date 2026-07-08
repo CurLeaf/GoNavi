@@ -217,6 +217,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.Chat
 		Model:       p.config.Model,
 		Messages:    messages,
 		Temperature: temperature,
+		MaxTokens:   req.MaxTokens,
 		Stream:      false,
 		Tools:       req.Tools,
 	}
@@ -270,6 +271,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, cal
 		Model:       p.config.Model,
 		Messages:    messages,
 		Temperature: temperature,
+		MaxTokens:   req.MaxTokens,
 		Stream:      true,
 		Tools:       req.Tools,
 	}

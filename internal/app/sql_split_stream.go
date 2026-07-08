@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"io"
 	"strings"
 )
@@ -400,11 +401,12 @@ func shouldDeferPLSQLKeywordPrefixInStream(text string, tokenStart int, tokenEnd
 // 返回总处理语句数和可能的错误。
 func streamSQLFile(reader io.Reader, onStatement func(index int, stmt string) error) (int, error) {
 	splitter := &sqlStreamSplitter{}
-	buffer := make([]byte, 256*1024)
+	bufferedReader := bufio.NewReaderSize(reader, 1024*1024)
+	buffer := make([]byte, 1024*1024)
 
 	count := 0
 	for {
-		n, err := reader.Read(buffer)
+		n, err := bufferedReader.Read(buffer)
 		if n > 0 {
 			stmts := splitter.Feed(buffer[:n])
 			for _, stmt := range stmts {

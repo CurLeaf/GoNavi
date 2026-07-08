@@ -4,6 +4,8 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,16 +24,19 @@ def infer_driver_and_platform(file_name: str):
         ("-driver-agent-v1-darwin-amd64", "darwin/amd64"),
         ("-driver-agent-v1-darwin-arm64", "darwin/arm64"),
         ("-driver-agent-v1-linux-amd64", "linux/amd64"),
+        ("-driver-agent-v1-linux-arm64", "linux/arm64"),
         ("-driver-agent-v1-windows-amd64.exe", "windows/amd64"),
         ("-driver-agent-v1-windows-arm64.exe", "windows/arm64"),
         ("-driver-agent-v2-darwin-amd64", "darwin/amd64"),
         ("-driver-agent-v2-darwin-arm64", "darwin/arm64"),
         ("-driver-agent-v2-linux-amd64", "linux/amd64"),
+        ("-driver-agent-v2-linux-arm64", "linux/arm64"),
         ("-driver-agent-v2-windows-amd64.exe", "windows/amd64"),
         ("-driver-agent-v2-windows-arm64.exe", "windows/arm64"),
         ("-driver-agent-darwin-amd64", "darwin/amd64"),
         ("-driver-agent-darwin-arm64", "darwin/arm64"),
         ("-driver-agent-linux-amd64", "linux/amd64"),
+        ("-driver-agent-linux-arm64", "linux/arm64"),
         ("-driver-agent-windows-amd64.exe", "windows/amd64"),
         ("-driver-agent-windows-arm64.exe", "windows/arm64"),
     ]
@@ -51,6 +56,49 @@ def normalize_driver(driver: str):
 
 def repo_root():
     return Path(__file__).resolve().parent.parent
+
+
+def resolve_bash_executable():
+    env_value = str(os.environ.get("BASH") or "").strip()
+    if env_value:
+        candidate = Path(env_value)
+        if candidate.is_file():
+            return str(candidate)
+
+    resolved = shutil.which("bash")
+    if resolved:
+        return resolved
+
+    if os.name == "nt":
+        for candidate in (
+            Path(r"C:\msys64\usr\bin\bash.exe"),
+            Path(r"C:\Program Files\Git\bin\bash.exe"),
+            Path(r"C:\Program Files\Git\usr\bin\bash.exe"),
+            Path(r"D:\Work\DevTools\Git\Git\bin\bash.exe"),
+            Path(r"D:\Work\DevTools\Git\Git\usr\bin\bash.exe"),
+        ):
+            if candidate.is_file():
+                return str(candidate)
+
+    raise FileNotFoundError("bash executable not found; set BASH or add bash to PATH")
+
+
+def to_bash_path(path):
+    text = str(path)
+    if os.name == "nt":
+        text = text.replace("\\", "/")
+        if len(text) >= 2 and text[1] == ":":
+            return f"/{text[0].lower()}{text[2:]}"
+    return text
+
+
+def run_bash_command(bash_executable: str, cwd: Path, command: list[str], **kwargs):
+    env = dict(kwargs.pop("env", os.environ.copy()))
+    if os.name == "nt":
+        env.setdefault("MSYS2_PATH_TYPE", "inherit")
+    command_text = " ".join(shlex.quote(str(part)) for part in command)
+    bash_command = f"cd {shlex.quote(to_bash_path(cwd))} && {command_text}"
+    return subprocess.run([bash_executable, "-lc", bash_command], env=env, **kwargs)
 
 
 def resolve_head_commit(root: Path):
@@ -83,6 +131,7 @@ def generate_platform_revisions(root: Path, drivers_by_platform):
     if not drivers_by_platform:
         return {}
 
+    bash_executable = resolve_bash_executable()
     with tempfile.TemporaryDirectory(prefix="gonavi-driver-release-manifest-") as tmp:
         worktree = Path(tmp) / "worktree"
         subprocess.run(
@@ -97,12 +146,10 @@ def generate_platform_revisions(root: Path, drivers_by_platform):
             result = {}
             for platform in sorted(drivers_by_platform):
                 drivers = sorted({normalize_driver(driver) for driver in drivers_by_platform[platform] if normalize_driver(driver)})
-                command = ["bash", "./tools/generate-driver-agent-revisions.sh", "--platform", platform]
-                if drivers:
-                    command.extend(["--drivers", ",".join(drivers)])
-                subprocess.run(
-                    command,
-                    cwd=worktree,
+                run_bash_command(
+                    bash_executable,
+                    worktree,
+                    ["./tools/generate-driver-agent-revisions.sh", "--platform", platform, *([] if not drivers else ["--drivers", ",".join(drivers)])],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
                     text=True,

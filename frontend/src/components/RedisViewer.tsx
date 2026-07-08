@@ -31,6 +31,7 @@ import { buildRedisWorkbenchTheme } from './redisViewerWorkbenchTheme';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { normalizeRedisSearchDraftChange, normalizeRedisSearchInput, type RedisSearchMode } from '../utils/redisSearchPattern';
 import { decodeRedisUtf8Value, formatRedisStringValue, toHexDisplay } from '../utils/redisValueDisplay';
+import { isConnectionDataImportRestricted } from '../utils/connectionReadOnly';
 import { t, type I18nParams } from '../i18n';
 import { useOptionalI18n } from '../i18n/provider';
 
@@ -52,6 +53,19 @@ interface RedisViewerProps {
     connectionId: string;
     redisDB: number;
 }
+
+type RedisExportScope = 'all' | 'selected';
+type RedisImportConflictMode = 'overwrite' | 'skip';
+type RedisImportPreview = {
+    file: string;
+    exportedAt?: string;
+    database: number;
+    scope?: string;
+    pattern?: string;
+    sourceAppName?: string;
+    total: number;
+    keys: RedisKeyInfo[];
+};
 
 // Draggable divider uses direct DOM updates to avoid resize lag.
 const ResizableDivider: React.FC<{
@@ -149,6 +163,14 @@ const isRedisKeyGoneErrorMessage = (messageText: string): boolean => {
 };
 
 const normalizeToolbarText = (value: unknown): string => String(value || '').trim();
+const extractFilenameFromPath = (value: unknown): string => {
+    const normalized = String(value || '').trim().replace(/\\/g, '/');
+    if (!normalized) {
+        return '';
+    }
+    const segments = normalized.split('/');
+    return segments[segments.length - 1] || normalized;
+};
 
 const mergeRedisKeyInfoLists = (existing: RedisKeyInfo[], incoming: RedisKeyInfo[]): RedisKeyInfo[] => {
     const keyMap = new Map<string, RedisKeyInfo>();
@@ -214,6 +236,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const redisTopology = useMemo(() => resolveRedisTopology(connection), [connection]);
     const redisSeedAddresses = useMemo(() => buildRedisSeedAddresses(connection), [connection]);
     const redisSentinelMaster = normalizeToolbarText(connection?.config?.redisSentinelMaster);
+    const importRestricted = isConnectionDataImportRestricted(connection?.config);
 
     const [keys, setKeys] = useState<RedisKeyInfo[]>([]);
     const [loading, setLoading] = useState(false);
@@ -223,6 +246,8 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const [cursor, setCursor] = useState<string>('0');
     const [hasMore, setHasMore] = useState(false);
     const [loadingAllKeys, setLoadingAllKeys] = useState(false);
+    const [exportingScope, setExportingScope] = useState<RedisExportScope | null>(null);
+    const [importingKeys, setImportingKeys] = useState(false);
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const [keyValue, setKeyValue] = useState<RedisValue | null>(null);
     const [valueLoading, setValueLoading] = useState(false);
@@ -234,6 +259,11 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const [renameTargetKey, setRenameTargetKey] = useState<string | null>(null);
     const [ttlModalOpen, setTtlModalOpen] = useState(false);
     const [ttlForm] = Form.useForm();
+    const [importModalOpen, setImportModalOpen] = useState(false);
+    const [importPreviewLoading, setImportPreviewLoading] = useState(false);
+    const [importConflictMode, setImportConflictMode] = useState<RedisImportConflictMode>('overwrite');
+    const [importPreview, setImportPreview] = useState<RedisImportPreview | null>(null);
+    const [importSelectedKeys, setImportSelectedKeys] = useState<string[]>([]);
     const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
     const [editValue, setEditValue] = useState('');
     const [treeContextMenu, setTreeContextMenu] = useState<{ x: number; y: number; rawKey: string } | null>(null);
@@ -500,6 +530,161 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
     const handleClearAllSelectedKeys = useCallback(() => {
         setSelectedKeys([]);
+    }, []);
+
+    const handleExportKeys = useCallback(async (scope: RedisExportScope) => {
+        const config = getConfig();
+        if (!config) return;
+
+        if (scope === 'selected' && selectedKeys.length === 0) {
+            message.warning(tr('redis_viewer.message.export_selection_required'));
+            return;
+        }
+
+        setExportingScope(scope);
+        try {
+            const res = await (window as any).go.app.App.RedisExportKeys(
+                buildRpcConnectionConfig(config),
+                {
+                    scope,
+                    keys: scope === 'selected' ? selectedKeys : [],
+                    pattern: searchPattern,
+                },
+            );
+            if (res?.success) {
+                const exportedCount = Number(res?.data?.exported ?? (scope === 'selected' ? selectedKeys.length : 0));
+                message.success(tr('redis_viewer.message.export_success', { count: exportedCount }));
+                return;
+            }
+            if (String(res?.message || '').trim() === '已取消') {
+                return;
+            }
+            message.error(tr('redis_viewer.message.export_failed', { detail: res?.message || 'Unknown error' }));
+        } catch (e: any) {
+            message.error(tr('redis_viewer.message.export_failed', { detail: e?.message || String(e) }));
+        } finally {
+            setExportingScope(null);
+        }
+    }, [getConfig, searchPattern, selectedKeys, tr]);
+
+    const resetImportModalState = useCallback(() => {
+        setImportModalOpen(false);
+        setImportPreview(null);
+        setImportSelectedKeys([]);
+        setImportPreviewLoading(false);
+        setImportConflictMode('overwrite');
+    }, []);
+
+    const handleChooseImportFile = useCallback(async () => {
+        const config = getConfig();
+        if (!config) return;
+
+        setImportPreviewLoading(true);
+        try {
+            const res = await (window as any).go.app.App.RedisPreviewImportKeys(
+                buildRpcConnectionConfig(config),
+            );
+            if (res?.success) {
+                const previewData = (res.data || {}) as RedisImportPreview;
+                const previewKeys = Array.isArray(previewData.keys) ? previewData.keys : [];
+                const nextPreview: RedisImportPreview = {
+                    file: String(previewData.file || '').trim(),
+                    exportedAt: previewData.exportedAt,
+                    database: Number(previewData.database ?? redisDB),
+                    scope: String(previewData.scope || '').trim(),
+                    pattern: String(previewData.pattern || '').trim(),
+                    sourceAppName: String(previewData.sourceAppName || '').trim(),
+                    total: Number(previewData.total ?? previewKeys.length),
+                    keys: previewKeys,
+                };
+                setImportPreview(nextPreview);
+                setImportSelectedKeys(previewKeys.map((item) => item.key));
+                return;
+            }
+            if (String(res?.message || '').trim() === '已取消') {
+                return;
+            }
+            message.error(tr('redis_viewer.message.import_failed', { detail: res?.message || 'Unknown error' }));
+        } catch (e: any) {
+            message.error(tr('redis_viewer.message.import_failed', { detail: e?.message || String(e) }));
+        } finally {
+            setImportPreviewLoading(false);
+        }
+    }, [getConfig, redisDB, tr]);
+
+    const handleOpenImportModal = useCallback(() => {
+        setImportModalOpen(true);
+        setImportPreview(null);
+        setImportSelectedKeys([]);
+        setImportPreviewLoading(false);
+        setImportConflictMode('overwrite');
+    }, []);
+
+    const handleConfirmImportKeys = useCallback(async () => {
+        const config = getConfig();
+        if (!config) return;
+        if (!importPreview) {
+            message.warning(tr('redis_viewer.message.import_file_required'));
+            return;
+        }
+        if (importSelectedKeys.length === 0) {
+            message.warning(tr('redis_viewer.message.import_selection_required'));
+            return;
+        }
+
+        setImportingKeys(true);
+        try {
+            const scope = importSelectedKeys.length === importPreview.keys.length ? 'all' : 'selected';
+            const res = await (window as any).go.app.App.RedisImportKeys(
+                buildRpcConnectionConfig(config),
+                {
+                    conflictMode: importConflictMode,
+                    file: importPreview.file,
+                    scope,
+                    keys: scope === 'selected' ? importSelectedKeys : [],
+                },
+            );
+            if (res?.success) {
+                const imported = Number(res?.data?.imported ?? 0);
+                const skipped = Number(res?.data?.skipped ?? 0);
+                message.success(tr('redis_viewer.message.import_summary', {
+                    imported,
+                    skipped,
+                }));
+                resetImportModalState();
+                setSelectedKeys([]);
+                setSelectedKey(null);
+                setKeyValue(null);
+                setCursor('0');
+                loadKeys(searchPattern, '0', false, getRedisScanLoadCount(searchPattern, false));
+                return;
+            }
+            if (String(res?.message || '').trim() === '已取消') {
+                return;
+            }
+            message.error(tr('redis_viewer.message.import_failed', { detail: res?.message || 'Unknown error' }));
+        } catch (e: any) {
+            message.error(tr('redis_viewer.message.import_failed', { detail: e?.message || String(e) }));
+        } finally {
+            setImportingKeys(false);
+        }
+    }, [getConfig, importConflictMode, importPreview, importSelectedKeys, loadKeys, resetImportModalState, searchPattern, tr]);
+
+    const importSelectedKeySet = useMemo(() => new Set(importSelectedKeys), [importSelectedKeys]);
+    const handleToggleImportPreviewKey = useCallback((key: string, checked: boolean) => {
+        setImportSelectedKeys((prev) => {
+            if (checked) {
+                return prev.includes(key) ? prev : [...prev, key];
+            }
+            return prev.filter((item) => item !== key);
+        });
+    }, []);
+    const handleSelectAllImportPreviewKeys = useCallback(() => {
+        if (!importPreview) return;
+        setImportSelectedKeys(importPreview.keys.map((item) => item.key));
+    }, [importPreview]);
+    const handleClearImportPreviewSelection = useCallback(() => {
+        setImportSelectedKeys([]);
     }, []);
 
     const removeMissingKeyFromView = useCallback((missingKey: string) => {
@@ -1995,6 +2180,32 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                             <Button size="small" style={primaryActionButtonStyle} onClick={handleSelectAllLoadedKeys} disabled={keys.length === 0}>{tr('redis_viewer.action.select_all_loaded')}</Button>
                             <Button size="small" style={actionButtonStyle} onClick={handleLoadAllKeys} disabled={!hasMore || loading} loading={loadingAllKeys}>{tr('redis_viewer.action.load_all')}</Button>
                             <Button size="small" style={actionButtonStyle} onClick={handleClearAllSelectedKeys} disabled={selectedKeys.length === 0}>{tr('redis_viewer.action.clear_selection')}</Button>
+                            <Button
+                                size="small"
+                                style={actionButtonStyle}
+                                onClick={() => void handleExportKeys('all')}
+                                loading={exportingScope === 'all'}
+                            >
+                                {tr('redis_viewer.action.export_all')}
+                            </Button>
+                            <Button
+                                size="small"
+                                style={actionButtonStyle}
+                                onClick={() => void handleExportKeys('selected')}
+                                disabled={selectedKeys.length === 0}
+                                loading={exportingScope === 'selected'}
+                            >
+                                {tr('redis_viewer.action.export_selected')}
+                            </Button>
+                            <Button
+                                size="small"
+                                style={primaryActionButtonStyle}
+                                onClick={handleOpenImportModal}
+                                disabled={importRestricted}
+                                loading={importingKeys}
+                            >
+                                {tr('redis_viewer.action.import')}
+                            </Button>
                         </Space>
                         <Popconfirm
                             title={tr('redis_viewer.confirm.delete_selected', { count: selectedKeys.length })}
@@ -2105,6 +2316,114 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                     </Form.Item>
                     <Form.Item name="ttl" label={tr('redis_viewer.field.ttl_seconds')} help={tr('redis_viewer.help.ttl_forever')}>
                         <InputNumber style={{ width: '100%' }} min={-1} />
+                    </Form.Item>
+                </Form>
+            </Modal>
+
+            <Modal
+                title={tr('redis_viewer.modal.import_keys')}
+                open={importModalOpen}
+                okButtonProps={{ disabled: !importPreview || importPreview.keys.length === 0 || importSelectedKeys.length === 0 || importPreviewLoading }}
+                confirmLoading={importingKeys}
+                onOk={() => void handleConfirmImportKeys()}
+                onCancel={() => {
+                    if (importingKeys || importPreviewLoading) return;
+                    resetImportModalState();
+                }}
+                width={760}
+                styles={{ content: redisModalContentStyle, header: { background: 'transparent', borderBottom: 'none', color: workbenchTheme.textPrimary }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none' } }}
+            >
+                <Form layout="vertical">
+                    <Form.Item label={tr('redis_viewer.field.import_file')}>
+                        <Space wrap size={8}>
+                            <Button
+                                style={actionButtonStyle}
+                                onClick={() => void handleChooseImportFile()}
+                                loading={importPreviewLoading}
+                            >
+                                {importPreview ? tr('redis_viewer.action.change_import_file') : tr('redis_viewer.action.select_import_file')}
+                            </Button>
+                            {importPreview && (
+                                <>
+                                    <Tag style={mutedPillTagStyle}>{extractFilenameFromPath(importPreview.file)}</Tag>
+                                    <Tag style={mutedPillTagStyle}>{tr('redis_viewer.label.import_selection', { selected: importSelectedKeys.length, total: importPreview.total })}</Tag>
+                                </>
+                            )}
+                        </Space>
+                    </Form.Item>
+                    {importPreview ? (
+                        <Form.Item label={tr('redis_viewer.field.import_keys')}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                                <Space wrap size={8}>
+                                    <Button
+                                        size="small"
+                                        style={primaryActionButtonStyle}
+                                        onClick={handleSelectAllImportPreviewKeys}
+                                        disabled={importPreview.keys.length === 0}
+                                    >
+                                        {tr('redis_viewer.action.select_all_import_keys')}
+                                    </Button>
+                                    <Button
+                                        size="small"
+                                        style={actionButtonStyle}
+                                        onClick={handleClearImportPreviewSelection}
+                                        disabled={importSelectedKeys.length === 0}
+                                    >
+                                        {tr('redis_viewer.action.clear_selection')}
+                                    </Button>
+                                </Space>
+                                <div style={{ color: workbenchTheme.textMuted, fontSize: 12 }}>
+                                    {tr('redis_viewer.label.import_database', { database: importPreview.database })}
+                                </div>
+                            </div>
+                            <div style={{ maxHeight: 320, overflowY: 'auto', border: workbenchTheme.panelBorder, borderRadius: 12, padding: 8, background: workbenchTheme.panelBg }}>
+                                {importPreview.keys.map((item) => {
+                                    const checked = importSelectedKeySet.has(item.key);
+                                    return (
+                                        <label
+                                            key={item.key}
+                                            style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: 10,
+                                                padding: '8px 6px',
+                                                borderRadius: 10,
+                                                cursor: 'pointer',
+                                            }}
+                                        >
+                                            <input
+                                                data-import-key={item.key}
+                                                type="checkbox"
+                                                checked={checked}
+                                                onChange={(event) => handleToggleImportPreviewKey(item.key, event.target.checked)}
+                                            />
+                                            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: workbenchTheme.textPrimary }}>
+                                                {item.key}
+                                            </span>
+                                            <Tag color={getTypeColor(item.type)} style={{ margin: 0 }}>
+                                                {item.type}
+                                            </Tag>
+                                            <span style={{ color: workbenchTheme.textMuted, fontSize: 12, whiteSpace: 'nowrap' }}>
+                                                {formatTTL(item.ttl)}
+                                            </span>
+                                        </label>
+                                    );
+                                })}
+                            </div>
+                        </Form.Item>
+                    ) : (
+                        <div style={{ marginBottom: 16, color: workbenchTheme.textMuted }}>
+                            {tr('redis_viewer.state.import_preview_empty')}
+                        </div>
+                    )}
+                    <Form.Item label={tr('redis_viewer.field.import_conflict_mode')}>
+                        <Radio.Group
+                            value={importConflictMode}
+                            onChange={(event) => setImportConflictMode(event.target.value as RedisImportConflictMode)}
+                        >
+                            <Radio.Button value="overwrite">{tr('redis_viewer.option.import_overwrite')}</Radio.Button>
+                            <Radio.Button value="skip">{tr('redis_viewer.option.import_skip_existing')}</Radio.Button>
+                        </Radio.Group>
                     </Form.Item>
                 </Form>
             </Modal>
