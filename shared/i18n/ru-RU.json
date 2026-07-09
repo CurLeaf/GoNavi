@@ -8018,5 +8018,19 @@
   "ai_settings.form.thinking_intensity_hint.openai": "OpenAI/GPT reasoning: reasoning_effort — none, minimal, low, medium, high, xhigh.",
   "ai_settings.form.thinking_intensity_hint.anthropic": "Anthropic: thinking + output_config.effort — off, low, medium, high, xhigh, max.",
   "ai_settings.form.thinking_intensity_hint.deepseek": "DeepSeek: off или low/medium/high (Anthropic→effort, OpenAI→thinking on/off).",
-  "ai_settings.form.thinking_intensity_hint.gemini": "Gemini: thinking_level / thinking_budget — off, minimal, low, medium, high."
+  "ai_settings.form.thinking_intensity_hint.gemini": "Gemini: thinking_level / thinking_budget — off, minimal, low, medium, high.",
+  "ai_chat.input.thinking_intensity.placeholder": "Рассуждение",
+  "ai_chat.detached.window_title": "GoNavi AI",
+  "ai_chat.detached.window_aria": "Плавающее окно AI-чата",
+  "ai_chat.detached.action.popout": "Открыть в отдельном окне",
+  "ai_chat.detached.action.dock": "Вернуть в боковую панель",
+  "ai_settings.open_mode.title": "Стиль открытия по умолчанию",
+  "ai_settings.open_mode.description": "Выберите, открывать ли AI-чат по умолчанию в боковой панели или в отдельном окне. После открытия можно переключать.",
+  "ai_settings.open_mode.dock.label": "Боковая панель",
+  "ai_settings.open_mode.dock.desc": "Открывается справа от рабочей области — удобно спрашивать параллельно.",
+  "ai_settings.open_mode.detached.label": "Отдельное окно",
+  "ai_settings.open_mode.detached.desc": "Открывается как перетаскиваемое/изменяемое отдельное окно.",
+  "ai_settings.open_mode.message.dock": "По умолчанию: боковая панель",
+  "ai_settings.open_mode.message.detached": "По умолчанию: отдельное окно",
+  "ai_settings.context.section_title": "Уровень контекста"
 }

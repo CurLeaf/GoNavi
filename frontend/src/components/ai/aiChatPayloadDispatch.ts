@@ -7,8 +7,26 @@ import type { AIChatToolDefinition } from '../../utils/aiToolRegistry';
 import { sanitizeErrorMsg } from '../../utils/aiChatRuntime';
 import { t as translateCatalog, type I18nParams } from '../../i18n';
 
+export interface AIChatSendRequestOptions {
+  model?: string;
+  thinkingIntensity?: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
 interface AIChatService {
+  AIChatStreamWithOptions?: (
+    sid: string,
+    messages: any[],
+    tools: AIChatToolDefinition[],
+    options: AIChatSendRequestOptions,
+  ) => Promise<any>;
   AIChatStream?: (sid: string, messages: any[], tools: AIChatToolDefinition[]) => Promise<any>;
+  AIChatSendWithOptions?: (
+    messages: any[],
+    tools: AIChatToolDefinition[],
+    options: AIChatSendRequestOptions,
+  ) => Promise<any>;
   AIChatSendInSession?: (sid: string, messages: any[], tools: AIChatToolDefinition[]) => Promise<any>;
   AIChatSend?: (messages: any[], tools: AIChatToolDefinition[]) => Promise<any>;
 }
@@ -17,6 +35,7 @@ interface DispatchAIChatPayloadOptions {
   sid: string;
   messages: any[];
   tools: AIChatToolDefinition[];
+  sendOptions?: AIChatSendRequestOptions;
   addAIChatMessage: (sid: string, message: AIChatMessage) => void;
   updateAIChatMessage?: (
     sid: string,
@@ -78,6 +97,7 @@ export const dispatchAIChatPayload = async ({
   sid,
   messages,
   tools,
+  sendOptions,
   addAIChatMessage,
   updateAIChatMessage,
   setSending,
@@ -91,9 +111,46 @@ export const dispatchAIChatPayload = async ({
 }: DispatchAIChatPayloadOptions): Promise<'stream' | 'send' | 'unavailable' | 'error'> => {
   try {
     const service = getAIChatService();
+    const requestOptions: AIChatSendRequestOptions = {
+      model: String(sendOptions?.model || '').trim() || undefined,
+      thinkingIntensity: String(sendOptions?.thinkingIntensity || '').trim() || undefined,
+      temperature: sendOptions?.temperature,
+      maxTokens: sendOptions?.maxTokens,
+    };
+    if (service?.AIChatStreamWithOptions) {
+      await service.AIChatStreamWithOptions(sid, messages, tools, requestOptions);
+      return 'stream';
+    }
     if (service?.AIChatStream) {
       await service.AIChatStream(sid, messages, tools);
       return 'stream';
+    }
+
+    if (service?.AIChatSendWithOptions) {
+      const result = await service.AIChatSendWithOptions(messages, tools, requestOptions);
+      const rawError = result?.error || translate('common.unknown');
+      const cleanError = sanitizeErrorMsg(rawError, translate);
+
+      settleAssistantMessage({
+        sid,
+        addAIChatMessage,
+        updateAIChatMessage,
+        nextMessageId,
+        pendingAssistantMessageId,
+        patch: {
+          content: result?.success ? result.content : `❌ ${cleanError}`,
+          thinking: result?.success ? result.reasoning_content : undefined,
+          reasoning_content: result?.success ? result.reasoning_content : undefined,
+          rawError: !result?.success && cleanError !== rawError ? rawError : undefined,
+          jvmPlanContext,
+          jvmDiagnosticPlanContext,
+        },
+      });
+      if (result?.success) {
+        onNonStreamSuccess?.();
+      }
+      setSending(false);
+      return 'send';
     }
 
     if (service?.AIChatSendInSession || service?.AIChatSend) {

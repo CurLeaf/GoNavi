@@ -8018,5 +8018,19 @@
   "ai_settings.form.thinking_intensity_hint.openai": "OpenAI / GPT 推理模型使用 reasoning_effort：none、minimal、low、medium、high、xhigh。",
   "ai_settings.form.thinking_intensity_hint.anthropic": "Anthropic 使用 thinking + output_config.effort：off、low、medium、high、xhigh、max。",
   "ai_settings.form.thinking_intensity_hint.deepseek": "DeepSeek：關閉或 low/medium/high（Anthropic 格式對應 effort；OpenAI 格式對應 thinking 開關）。",
-  "ai_settings.form.thinking_intensity_hint.gemini": "Gemini 使用 thinking_level / thinking_budget：off、minimal、low、medium、high。"
+  "ai_settings.form.thinking_intensity_hint.gemini": "Gemini 使用 thinking_level / thinking_budget：off、minimal、low、medium、high。",
+  "ai_chat.input.thinking_intensity.placeholder": "思考強度",
+  "ai_chat.detached.window_title": "GoNavi AI",
+  "ai_chat.detached.window_aria": "AI 聊天獨立視窗",
+  "ai_chat.detached.action.popout": "以獨立視窗開啟",
+  "ai_chat.detached.action.dock": "還原到側欄",
+  "ai_settings.open_mode.title": "預設開啟方式",
+  "ai_settings.open_mode.description": "控制從入口開啟 AI 聊天時預設是側欄還是獨立視窗。開啟後仍可隨時互相切換。",
+  "ai_settings.open_mode.dock.label": "側欄面板",
+  "ai_settings.open_mode.dock.desc": "貼在主工作區右側開啟，適合邊查邊問。",
+  "ai_settings.open_mode.detached.label": "獨立視窗",
+  "ai_settings.open_mode.detached.desc": "以可拖曳縮放的浮動窗開啟，適合多顯示器或更大聊天區域。",
+  "ai_settings.open_mode.message.dock": "已設為預設側欄開啟",
+  "ai_settings.open_mode.message.detached": "已設為預設獨立視窗開啟",
+  "ai_settings.context.section_title": "上下文層級"
 }

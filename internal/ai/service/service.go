@@ -784,11 +784,16 @@ func applyChatSendOptionsToProviderConfig(config ai.ProviderConfig, options ai.C
 	if model := strings.TrimSpace(options.Model); model != "" {
 		config.Model = model
 	}
+	// 思考强度以聊天面板/会话级覆盖为准，不回写供应商配置。
+	if intensity := strings.TrimSpace(options.ThinkingIntensity); intensity != "" {
+		config.ThinkingIntensity = intensity
+	}
 	return config
 }
 
 func normalizeChatSendOptions(options ai.ChatSendOptions) ai.ChatSendOptions {
 	options.Model = strings.TrimSpace(options.Model)
+	options.ThinkingIntensity = strings.TrimSpace(options.ThinkingIntensity)
 	if options.MaxTokens < 0 {
 		options.MaxTokens = 0
 	}
@@ -1361,6 +1366,12 @@ func (s *Service) aiChatSend(sessionID string, messages []ai.Message, tools []ai
 
 // AIChatStream 流式发送 AI 对话（通过 EventsEmit 推送）
 func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []ai.Tool) {
+	s.AIChatStreamWithOptions(sessionID, messages, tools, ai.ChatSendOptions{})
+}
+
+// AIChatStreamWithOptions 流式发送 AI 对话，并允许本次调用临时覆盖模型与思考强度等参数。
+func (s *Service) AIChatStreamWithOptions(sessionID string, messages []ai.Message, tools []ai.Tool, options ai.ChatSendOptions) {
+	options = normalizeChatSendOptions(options)
 	streamCtx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
 	s.cancelFuncs[sessionID] = cancel
@@ -1374,7 +1385,7 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 			cancel() // 确保释放
 		}()
 
-		p, config, err := s.getActiveProviderRuntime()
+		p, config, err := s.getActiveProviderRuntimeWithOptions(options)
 		if err != nil {
 			logger.Error(err, "AIChatStream 获取 Provider 失败：sessionID=%s messages=%d tools=%d", sessionID, len(messages), len(tools))
 			uievents.Emit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{

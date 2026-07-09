@@ -8018,5 +8018,19 @@
   "ai_settings.form.thinking_intensity_hint.openai": "OpenAI / GPT 推論モデルは reasoning_effort：none / minimal / low / medium / high / xhigh。",
   "ai_settings.form.thinking_intensity_hint.anthropic": "Anthropic は thinking + output_config.effort：off / low / medium / high / xhigh / max。",
   "ai_settings.form.thinking_intensity_hint.deepseek": "DeepSeek：off または low/medium/high（Anthropic は effort、OpenAI は thinking オン/オフ）。",
-  "ai_settings.form.thinking_intensity_hint.gemini": "Gemini は thinking_level / thinking_budget：off / minimal / low / medium / high。"
+  "ai_settings.form.thinking_intensity_hint.gemini": "Gemini は thinking_level / thinking_budget：off / minimal / low / medium / high。",
+  "ai_chat.input.thinking_intensity.placeholder": "思考強度",
+  "ai_chat.detached.window_title": "GoNavi AI",
+  "ai_chat.detached.window_aria": "AI チャット独立ウィンドウ",
+  "ai_chat.detached.action.popout": "独立ウィンドウで開く",
+  "ai_chat.detached.action.dock": "サイドバーに戻す",
+  "ai_settings.open_mode.title": "デフォルトの表示方式",
+  "ai_settings.open_mode.description": "AI チャットをサイドバーと独立ウィンドウのどちらで開くかを選びます。開いた後も切り替え可能です。",
+  "ai_settings.open_mode.dock.label": "サイドバー",
+  "ai_settings.open_mode.dock.desc": "ワークベンチ右側にドッキングして開き、並走に便利です。",
+  "ai_settings.open_mode.detached.label": "独立ウィンドウ",
+  "ai_settings.open_mode.detached.desc": "ドラッグ／リサイズ可能な独立ウィンドウで開きます。",
+  "ai_settings.open_mode.message.dock": "デフォルトをサイドバーに設定しました",
+  "ai_settings.open_mode.message.detached": "デフォルトを独立ウィンドウに設定しました",
+  "ai_settings.context.section_title": "コンテキストレベル"
 }

@@ -43,7 +43,6 @@ export const buildAddProviderEditorSession = ({
     models: [...presetModels],
     maxTokens: 4096,
     temperature: 0.7,
-    thinkingIntensity: 'medium',
     presetKey,
   };
 

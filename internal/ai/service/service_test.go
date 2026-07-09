@@ -110,6 +110,25 @@ func TestApplyChatSendOptionsToProviderConfig_OverridesModelForSingleRequest(t *
 	}
 }
 
+func TestApplyChatSendOptionsToProviderConfig_OverridesThinkingIntensity(t *testing.T) {
+	config := applyChatSendOptionsToProviderConfig(ai.ProviderConfig{
+		Model:             "chat-model",
+		ThinkingIntensity: "low",
+	}, ai.ChatSendOptions{
+		ThinkingIntensity: "xhigh",
+	})
+	if config.ThinkingIntensity != "xhigh" {
+		t.Fatalf("expected thinking intensity override, got %q", config.ThinkingIntensity)
+	}
+	// empty override keeps provider value
+	config = applyChatSendOptionsToProviderConfig(ai.ProviderConfig{
+		ThinkingIntensity: "medium",
+	}, ai.ChatSendOptions{})
+	if config.ThinkingIntensity != "medium" {
+		t.Fatalf("expected provider thinking intensity kept, got %q", config.ThinkingIntensity)
+	}
+}
+
 func TestApplyChatSendOptionsToProviderConfig_KeepsConfiguredModelWhenOverrideEmpty(t *testing.T) {
 	config := applyChatSendOptionsToProviderConfig(ai.ProviderConfig{
 		Model: "chat-model",

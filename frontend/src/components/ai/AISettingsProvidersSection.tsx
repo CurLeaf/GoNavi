@@ -14,12 +14,6 @@ import {
   PROVIDER_PRESET_GRID_STYLE,
   PROVIDER_PRESET_CARD_TITLE_STYLE,
 } from '../../utils/aiSettingsPresetLayout';
-import {
-  coerceThinkingIntensityForProfile,
-  resolveThinkingIntensityHintKey,
-  resolveThinkingIntensityOptions,
-  resolveThinkingIntensityProfile,
-} from '../../utils/aiThinkingIntensity';
 
 export interface AISettingsProviderPresetOption {
   key: string;
@@ -126,44 +120,8 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
   const currentFieldLabelStyle = fieldLabelStyle(sectionLabelColor);
   const watchedModel = Form.useWatch('model', form);
   const watchedModels = Form.useWatch('models', form);
-  const watchedBaseUrl = Form.useWatch('baseUrl', form);
-  const watchedType = Form.useWatch('type', form);
-  const watchedThinkingIntensity = Form.useWatch('thinkingIntensity', form);
   const watchedInlineCompletionModel = Form.useWatch('inlineCompletionModel', form);
   const presetFromForm = providerPresets.find((preset) => preset.key === presetKeyFromForm);
-  const thinkingProfile = React.useMemo(() => resolveThinkingIntensityProfile({
-    type: watchedType || editingProvider?.type,
-    apiFormat: watchedApiFormat || editingProvider?.apiFormat,
-    baseUrl: watchedBaseUrl || editingProvider?.baseUrl || presetFromForm?.defaultBaseUrl,
-    model: watchedModel || editingProvider?.model || presetFromForm?.defaultModel,
-  }), [
-    editingProvider?.apiFormat,
-    editingProvider?.baseUrl,
-    editingProvider?.model,
-    editingProvider?.type,
-    presetFromForm?.defaultBaseUrl,
-    presetFromForm?.defaultModel,
-    watchedApiFormat,
-    watchedBaseUrl,
-    watchedModel,
-    watchedType,
-  ]);
-  const thinkingIntensityOptions = React.useMemo(
-    () => resolveThinkingIntensityOptions(thinkingProfile).map((item) => ({
-      value: item.value,
-      label: copy(item.labelKey),
-    })),
-    // copy 依赖 i18n 语言，label 随语言刷新即可
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [copy, thinkingProfile, i18n?.language],
-  );
-  React.useEffect(() => {
-    if (!isEditing) return;
-    const next = coerceThinkingIntensityForProfile(watchedThinkingIntensity, thinkingProfile);
-    if (next && next !== String(watchedThinkingIntensity || '').trim()) {
-      form.setFieldsValue({ thinkingIntensity: next });
-    }
-  }, [form, isEditing, thinkingProfile, watchedThinkingIntensity]);
   const inlineCompletionModelOptions = React.useMemo(() => {
     const values = [
       watchedModel,
@@ -411,24 +369,6 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
         )}
         <Form.Item name="model" hidden><Input /></Form.Item>
         <Form.Item name="name" hidden><Input /></Form.Item>
-
-        <div style={{ ...currentFieldGroupStyle, marginTop: 16 }}>
-          <div style={currentFieldLabelStyle}>
-            <RobotOutlined style={{ fontSize: 14 }} /> {copy('ai_settings.form.section.thinking')}
-          </div>
-          <Form.Item
-            label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.thinking_intensity')}</span>}
-            name="thinkingIntensity"
-            extra={copy(resolveThinkingIntensityHintKey(thinkingProfile))}
-            style={{ marginBottom: 0 }}
-          >
-            <Select
-              size="middle"
-              style={{ width: '100%' }}
-              options={thinkingIntensityOptions}
-            />
-          </Form.Item>
-        </div>
 
         <div style={{ ...currentFieldGroupStyle, marginTop: 16 }}>
           <div style={currentFieldLabelStyle}>

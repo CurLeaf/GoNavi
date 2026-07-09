@@ -8018,5 +8018,19 @@
   "ai_settings.form.thinking_intensity_hint.openai": "OpenAI / GPT reasoning models use reasoning_effort: none, minimal, low, medium, high, xhigh.",
   "ai_settings.form.thinking_intensity_hint.anthropic": "Anthropic uses thinking + output_config.effort: off, low, medium, high, xhigh, max.",
   "ai_settings.form.thinking_intensity_hint.deepseek": "DeepSeek: off or low/medium/high (Anthropic maps to effort; OpenAI maps to thinking on/off).",
-  "ai_settings.form.thinking_intensity_hint.gemini": "Gemini uses thinking_level / thinking_budget: off, minimal, low, medium, high."
+  "ai_settings.form.thinking_intensity_hint.gemini": "Gemini uses thinking_level / thinking_budget: off, minimal, low, medium, high.",
+  "ai_chat.input.thinking_intensity.placeholder": "Thinking",
+  "ai_chat.detached.window_title": "GoNavi AI",
+  "ai_chat.detached.window_aria": "AI chat floating window",
+  "ai_chat.detached.action.popout": "Open in floating window",
+  "ai_chat.detached.action.dock": "Dock back to sidebar",
+  "ai_settings.open_mode.title": "Default open style",
+  "ai_settings.open_mode.description": "Choose whether AI chat opens as a sidebar or floating window by default. You can still switch either way after opening.",
+  "ai_settings.open_mode.dock.label": "Sidebar panel",
+  "ai_settings.open_mode.dock.desc": "Opens docked to the right of the workbench for side-by-side querying.",
+  "ai_settings.open_mode.detached.label": "Floating window",
+  "ai_settings.open_mode.detached.desc": "Opens as a draggable/resizable floating window for multi-monitor or larger chat space.",
+  "ai_settings.open_mode.message.dock": "Default open style set to sidebar",
+  "ai_settings.open_mode.message.detached": "Default open style set to floating window",
+  "ai_settings.context.section_title": "Context level"
 }

@@ -48,9 +48,10 @@ type ChatRequest struct {
 
 // ChatSendOptions 表示一次对话调用的临时覆盖选项，不写回 Provider 配置。
 type ChatSendOptions struct {
-	Model       string  `json:"model,omitempty"`
-	Temperature float64 `json:"temperature,omitempty"`
-	MaxTokens   int     `json:"maxTokens,omitempty"`
+	Model             string  `json:"model,omitempty"`
+	Temperature       float64 `json:"temperature,omitempty"`
+	MaxTokens         int     `json:"maxTokens,omitempty"`
+	ThinkingIntensity string  `json:"thinkingIntensity,omitempty"` // 会话/面板级思考强度，仅本次请求生效
 }
 
 // ChatResponse AI 对话响应

@@ -4,6 +4,7 @@ export namespace ai {
 	    model?: string;
 	    temperature?: number;
 	    maxTokens?: number;
+	    thinkingIntensity?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ChatSendOptions(source);
@@ -14,6 +15,7 @@ export namespace ai {
 	        this.model = source["model"];
 	        this.temperature = source["temperature"];
 	        this.maxTokens = source["maxTokens"];
+	        this.thinkingIntensity = source["thinkingIntensity"];
 	    }
 	}
 	export class MCPClientInstallResult {

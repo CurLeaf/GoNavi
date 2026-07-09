@@ -8018,5 +8018,19 @@
   "ai_settings.form.thinking_intensity_hint.openai": "OpenAI/GPT-Reasoning nutzt reasoning_effort: none, minimal, low, medium, high, xhigh.",
   "ai_settings.form.thinking_intensity_hint.anthropic": "Anthropic nutzt thinking + output_config.effort: off, low, medium, high, xhigh, max.",
   "ai_settings.form.thinking_intensity_hint.deepseek": "DeepSeek: off oder low/medium/high (Anthropic→effort, OpenAI→thinking an/aus).",
-  "ai_settings.form.thinking_intensity_hint.gemini": "Gemini nutzt thinking_level / thinking_budget: off, minimal, low, medium, high."
+  "ai_settings.form.thinking_intensity_hint.gemini": "Gemini nutzt thinking_level / thinking_budget: off, minimal, low, medium, high.",
+  "ai_chat.input.thinking_intensity.placeholder": "Denken",
+  "ai_chat.detached.window_title": "GoNavi AI",
+  "ai_chat.detached.window_aria": "Schwebendes AI-Chat-Fenster",
+  "ai_chat.detached.action.popout": "In schwebendem Fenster öffnen",
+  "ai_chat.detached.action.dock": "Zurück in die Seitenleiste",
+  "ai_settings.open_mode.title": "Standard-Öffnungsstil",
+  "ai_settings.open_mode.description": "Legen Sie fest, ob der AI-Chat standardmäßig in der Seitenleiste oder als schwebendes Fenster öffnet. Umschalten bleibt jederzeit möglich.",
+  "ai_settings.open_mode.dock.label": "Seitenleiste",
+  "ai_settings.open_mode.dock.desc": "Öffnet angedockt rechts am Workbench – ideal zum parallelen Arbeiten.",
+  "ai_settings.open_mode.detached.label": "Schwebendes Fenster",
+  "ai_settings.open_mode.detached.desc": "Öffnet als ziehbar/skalierbar schwebendes Fenster.",
+  "ai_settings.open_mode.message.dock": "Standard auf Seitenleiste gesetzt",
+  "ai_settings.open_mode.message.detached": "Standard auf schwebendes Fenster gesetzt",
+  "ai_settings.context.section_title": "Kontextstufe"
 }
