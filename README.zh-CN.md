@@ -178,13 +178,11 @@ wails build -clean
 
 构建产物位于 `build/bin`。
 
-### Docker / Podman（仅 MCP Server）
+### 浏览器访问版（Web Server，实验中）
 
-当前容器化支持仅覆盖 `gonavi-mcp-server`，不包含桌面 GUI 主界面。
+仓库主程序提供 `web-server` 运行模式，用同一套 Go 后端 + React 前端提供浏览器访问入口（**不是**桌面 Wails 窗口容器化）。
 
-### 浏览器访问版（实验中）
-
-仓库主程序现在额外提供了一个 `web-server` 运行模式，用同一套 Go 后端 + React 前端提供浏览器访问入口：
+#### 本机直接启动
 
 ```powershell
 go build .
@@ -199,12 +197,42 @@ go build .
 - 首次初始化页、登录页、登出接口
 - Session 空闲超时 / 绝对超时 / 记住登录时长
 - Google Authenticator TOTP 与恢复码
+- Docker / Compose 部署入口（见下方）
 
 当前仍在继续收口：
 
 - 外部 SQL / 连接包导入导出等文件型能力的浏览器上传下载工作台
 - 更多桌面专属能力的 Web 门禁与替代交互
 - 反向代理 / HTTPS / 零信任部署说明
+
+#### Docker / Podman（Web Server）
+
+```bash
+cp docker.web-server.env.example docker.web-server.env
+# 编辑 GONAVI_HOST_DATA_ROOT 为绝对路径
+docker compose --env-file docker.web-server.env -f docker-compose.web-server.yml up -d
+```
+
+浏览器打开 `http://127.0.0.1:34116`（或宿主机映射端口）。首次访问完成 `/setup`。
+
+请把 GoNavi 活动数据目录挂载为 `/data`。建议至少包含 `connections.json`、`daily_secrets.json`；如需可选驱动代理应包含 `drivers/`。Web 认证状态写入同目录下的 `web_auth.json`。
+
+容器内默认监听 `0.0.0.0:34116`（`GONAVI_WEB_ADDR`）。**不要把未加固的 Web 入口直接暴露到公网**；生产环境请配合反向代理与 HTTPS。
+
+默认 Compose 拉取 GHCR 预构建镜像。本地源码构建叠加 override：
+
+```bash
+docker compose --env-file docker.web-server.env \
+  -f docker-compose.web-server.yml \
+  -f docker-compose.web-server.local.yml \
+  up -d --build
+```
+
+健康检查：`GET /__gonavi/healthz`。
+
+### Docker / Podman（MCP Server）
+
+容器化另提供 `gonavi-mcp-server`（仅 MCP HTTP，不含桌面 GUI / Web UI）。
 
 ```bash
 cp docker.mcp-server.env.example docker.mcp-server.env
@@ -226,7 +254,8 @@ docker compose --env-file docker.mcp-server.env \
 
 部署矩阵：
 
-- Docker Desktop / Linux 服务器 / NAS：`docker-compose.mcp-server.yml`
+- Web UI：`docker-compose.web-server.yml`（镜像 `ghcr.io/syngnat/gonavi-web-server`）
+- MCP：`docker-compose.mcp-server.yml`（镜像 `ghcr.io/syngnat/gonavi-mcp-server`）
 - Podman / Quadlet：[deploy/podman/gonavi-mcp-server](deploy/podman/gonavi-mcp-server)
 - Kubernetes：[deploy/k8s/gonavi-mcp-server](deploy/k8s/gonavi-mcp-server)（`kustomization.yaml` + overlays）
 - Helm Chart：[deploy/helm/gonavi-mcp-server](deploy/helm/gonavi-mcp-server)
@@ -249,6 +278,7 @@ docker run --rm -it -v "$PWD:/workspace" -w /workspace gonavi-build-env:local ba
 
 仓库会把预构建镜像推送到 GHCR：
 
+- `ghcr.io/syngnat/gonavi-web-server:latest`
 - `ghcr.io/syngnat/gonavi-mcp-server:latest`
 - `ghcr.io/syngnat/gonavi-build-env:latest`
 

@@ -184,13 +184,11 @@ wails build -clean
 
 Artifacts are generated in `build/bin`.
 
-### Docker / Podman (MCP Server Only)
+### Browser Access Mode (Web Server, Experimental)
 
-The desktop GUI is not packaged as a container service. Current container support targets `gonavi-mcp-server` only.
+GoNavi provides a `web-server` mode that reuses the same Go backend and React frontend for browser access (**not** a containerized desktop Wails window).
 
-### Browser Access Mode (Experimental)
-
-The main GoNavi application now also exposes a `web-server` mode that reuses the same Go backend and React frontend for browser access:
+#### Run locally
 
 ```powershell
 go build .
@@ -205,12 +203,42 @@ Current scope already includes:
 - First-run setup page, login page, and logout endpoint
 - Session idle timeout / absolute timeout / remember-login window
 - Google Authenticator TOTP plus recovery codes
+- Docker / Compose packaging (below)
 
 Still in progress:
 
 - Browser upload/download workbenches for external SQL and connection-package flows
 - More web capability gating for desktop-only features
 - Reverse-proxy / HTTPS / zero-trust deployment guidance
+
+#### Docker / Podman (Web Server)
+
+```bash
+cp docker.web-server.env.example docker.web-server.env
+# set GONAVI_HOST_DATA_ROOT to an absolute path
+docker compose --env-file docker.web-server.env -f docker-compose.web-server.yml up -d
+```
+
+Open `http://127.0.0.1:34116` (or the mapped host port). Complete `/setup` on first visit.
+
+Mount the GoNavi active data root at `/data`. Prefer including `connections.json`, `daily_secrets.json`, and optional `drivers/`. Web auth state is stored as `web_auth.json` in that directory.
+
+The container listens on `0.0.0.0:34116` by default (`GONAVI_WEB_ADDR`). **Do not expose an unhardened Web entrypoint to the public internet**; use a reverse proxy and HTTPS for production.
+
+Default Compose pulls the GHCR image. For a local source build, add the override:
+
+```bash
+docker compose --env-file docker.web-server.env \
+  -f docker-compose.web-server.yml \
+  -f docker-compose.web-server.local.yml \
+  up -d --build
+```
+
+Health check: `GET /__gonavi/healthz`.
+
+### Docker / Podman (MCP Server)
+
+Container packaging also provides `gonavi-mcp-server` (MCP HTTP only; no desktop GUI / Web UI).
 
 ```bash
 cp docker.mcp-server.env.example docker.mcp-server.env
@@ -232,7 +260,8 @@ For Podman, use the same published OCI image with `podman run`, or the native Qu
 
 Deployment matrix:
 
-- Docker Desktop / Linux server / NAS: `docker-compose.mcp-server.yml`
+- Web UI: `docker-compose.web-server.yml` (`ghcr.io/syngnat/gonavi-web-server`)
+- MCP: `docker-compose.mcp-server.yml` (`ghcr.io/syngnat/gonavi-mcp-server`)
 - Podman / Quadlet: [deploy/podman/gonavi-mcp-server](deploy/podman/gonavi-mcp-server)
 - Kubernetes: [deploy/k8s/gonavi-mcp-server](deploy/k8s/gonavi-mcp-server) (`kustomization.yaml` + overlays)
 - Helm chart: [deploy/helm/gonavi-mcp-server](deploy/helm/gonavi-mcp-server)
@@ -255,6 +284,7 @@ The default image installs the WebKitGTK 4.0 build toolchain for broader Linux/N
 
 Published images are pushed to GHCR:
 
+- `ghcr.io/syngnat/gonavi-web-server:latest`
 - `ghcr.io/syngnat/gonavi-mcp-server:latest`
 - `ghcr.io/syngnat/gonavi-build-env:latest`
 

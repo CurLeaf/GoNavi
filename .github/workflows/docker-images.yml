@@ -24,6 +24,7 @@ jobs:
       matrix:
         image_name:
           - gonavi-mcp-server
+          - gonavi-web-server
           - gonavi-build-env
         platform:
           - linux/amd64
@@ -32,6 +33,9 @@ jobs:
           - image_name: gonavi-mcp-server
             dockerfile: Dockerfile.mcp-server
             description: GoNavi MCP Server container image
+          - image_name: gonavi-web-server
+            dockerfile: Dockerfile.web-server
+            description: GoNavi Web Server (browser UI) container image
           - image_name: gonavi-build-env
             dockerfile: Dockerfile.build-env
             description: GoNavi Linux build environment image
@@ -97,6 +101,23 @@ jobs:
           echo "MCP Server image smoke test failed" >&2
           exit 1
 
+      - name: Smoke test Web Server image
+        if: matrix.image_name == 'gonavi-web-server'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cid="$(docker run -d -p 34116:34116 -e GONAVI_WEB_ADDR=0.0.0.0:34116 codex-smoke/${{ matrix.image_name }}:local web-server)"
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+            if curl --fail --silent http://127.0.0.1:34116/__gonavi/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$cid"
+          echo "Web Server image smoke test failed" >&2
+          exit 1
+
       - name: Smoke test build environment image
         if: matrix.image_name == 'gonavi-build-env'
         shell: bash
@@ -144,6 +165,8 @@ jobs:
         include:
           - image_name: gonavi-mcp-server
             description: GoNavi MCP Server container image
+          - image_name: gonavi-web-server
+            description: GoNavi Web Server (browser UI) container image
           - image_name: gonavi-build-env
             description: GoNavi Linux build environment image
     steps:
