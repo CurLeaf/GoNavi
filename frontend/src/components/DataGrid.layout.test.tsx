@@ -73,6 +73,7 @@ vi.mock('../store', () => ({
     addTab: vi.fn(),
     setActiveContext: vi.fn(),
     tableColumnOrders: {},
+    tablePinnedLeftColumns: {},
     enableColumnOrderMemory: false,
     setTableColumnOrder: vi.fn(),
     setEnableColumnOrderMemory: vi.fn(),
@@ -2130,6 +2131,8 @@ describe('DataGrid layout', () => {
       expect(markup).toContain('vertical-align:middle');
       expect(markup).toContain('data-grid-row-number="true"');
       expect(markup).toContain('width:36');
+      // ant Table fixed 列会渲染 fix 相关 class
+      expect(markup.includes('ant-table-cell-fix') || markup.includes('fixed')).toBe(true);
       expect(markup).toContain('51');
     } finally {
       setCurrentLanguage(previousLanguage);
@@ -2542,7 +2545,7 @@ describe('DataGrid layout', () => {
     expect(filterHookSource).toContain('export type GridColumnFilterDraft');
     expect(filterHookSource).toContain('const applyColumnFilter = React.useCallback');
     expect(filterHookSource).toContain('onApplyFilter(nextConditions)');
-    expect(source).toContain("const columnHeaderFilterEnabled = exportScope === 'table' && !!onApplyFilter;");
+    expect(source).toContain("const columnHeaderFilterEnabled = !!onApplyFilter || exportScope === 'queryResult';");
     expect(source).toContain("filterOpOptions.filter((option) => option.value !== 'CUSTOM')");
     expect(source).toContain("eventTarget?.closest?.('[data-grid-column-filter-trigger=\"true\"]')");
     expect(source).toContain("eventTarget?.closest?.('[data-grid-column-filter-popover=\"true\"]')");

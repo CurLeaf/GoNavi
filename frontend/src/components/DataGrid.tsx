@@ -42,6 +42,7 @@ import {
     resolveDataTableVerticalBorderColor,
 } from '../utils/dataGridDisplay';
 import { resolvePaginationPageText, resolvePaginationSummaryText, resolvePaginationTotalForControl } from '../utils/dataGridPagination';
+import { filterRowsByGridConditions } from '../utils/dataGridClientFilter';
 import { resolveGridSortInfoFromTableSorter } from '../utils/dataGridSort';
 import {
     absorbExtraWidthIntoFlexibleColumns,
@@ -308,6 +309,8 @@ const DataGrid: React.FC<DataGridProps> = ({
   const setTableColumnOrder = useStore(state => state.setTableColumnOrder);
   const setEnableColumnOrderMemory = useStore(state => state.setEnableColumnOrderMemory);
   const clearTableColumnOrder = useStore(state => state.clearTableColumnOrder);
+  const tablePinnedLeftColumns = useStore(state => state.tablePinnedLeftColumns);
+  const setTablePinnedLeftColumns = useStore(state => state.setTablePinnedLeftColumns);
   
   const tableHiddenColumns = useStore(state => state.tableHiddenColumns);
   const enableHiddenColumnMemory = useStore(state => state.enableHiddenColumnMemory);
@@ -478,11 +481,35 @@ const DataGrid: React.FC<DataGridProps> = ({
     setAllOrderedColumnNames(nextOrder);
   }, [visibleColumnNames, tableColumnOrders, enableColumnOrderMemory, connectionId, dbName, tableName]);
 
-  // Compute final display columns
+  const tableMemoryKey = useMemo(() => {
+      if (!connectionId || !dbName || !tableName) return '';
+      return `${connectionId}-${dbName}-${tableName}`;
+  }, [connectionId, dbName, tableName]);
+
+  const pinnedLeftColumnNames = useMemo(() => {
+      if (!tableMemoryKey) return [] as string[];
+      const stored = tablePinnedLeftColumns?.[tableMemoryKey];
+      return Array.isArray(stored) ? stored.map((col) => String(col || '').trim()).filter(Boolean) : [];
+  }, [tableMemoryKey, tablePinnedLeftColumns]);
+
+  const pinnedLeftColumnSet = useMemo(
+      () => new Set(pinnedLeftColumnNames),
+      [pinnedLeftColumnNames],
+  );
+
+  // Compute final display columns（固定列须连续靠左，否则 ant Table fixed 会错位）
   useEffect(() => {
       const hiddenSet = new Set(localHiddenColumns);
-      setDisplayColumnNames(allOrderedColumnNames.filter(col => !hiddenSet.has(col)));
-  }, [allOrderedColumnNames, localHiddenColumns]);
+      const visible = allOrderedColumnNames.filter((col) => !hiddenSet.has(col));
+      if (pinnedLeftColumnNames.length === 0) {
+          setDisplayColumnNames(visible);
+          return;
+      }
+      const pinnedSet = new Set(pinnedLeftColumnNames);
+      const pinnedVisible = pinnedLeftColumnNames.filter((col) => visible.includes(col));
+      const restVisible = visible.filter((col) => !pinnedSet.has(col));
+      setDisplayColumnNames([...pinnedVisible, ...restVisible]);
+  }, [allOrderedColumnNames, localHiddenColumns, pinnedLeftColumnNames]);
 
   const displayOutputColumnNames = useMemo(
       () => resolveDataGridOutputColumnNames(
@@ -1087,6 +1114,8 @@ const DataGrid: React.FC<DataGridProps> = ({
   const gridCssText = useMemo(
       () => buildDataGridCssText({
           darkMode,
+          // 固定列实心底必须跟表格内容底一致，禁止写死 #141414 / #1f1f1f
+          bgContent,
           dataGridBackdropFilter,
           dataTableVerticalBorderRule,
           densityParams,
@@ -1275,7 +1304,8 @@ const DataGrid: React.FC<DataGridProps> = ({
       resolveNextGridFilterOperatorForColumnChange,
   });
 
-  const columnHeaderFilterEnabled = exportScope === 'table' && !!onApplyFilter;
+  // 表数据页：服务端筛选（onApplyFilter）；查询结果页：列头筛选 + 客户端过滤当前结果
+  const columnHeaderFilterEnabled = !!onApplyFilter || exportScope === 'queryResult';
   const columnHeaderFilterOpOptions = useMemo(
       () => filterOpOptions.filter((option) => option.value !== 'CUSTOM'),
       [filterOpOptions],
@@ -1323,6 +1353,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               columnMetaTooltipColor={columnMetaTooltipColor}
               darkMode={darkMode}
               highlighted={highlightedColumnName === normalizedName}
+              pinnedLeft={pinnedLeftColumnSet.has(normalizedName)}
               translate={translateDataGrid}
               onOpenForeignKey={foreignKeyTarget ? () => openForeignKeyTarget(foreignKeyTarget) : undefined}
               columnFilter={columnFilterState ? {
@@ -1366,11 +1397,11 @@ const DataGrid: React.FC<DataGridProps> = ({
       isListOp,
       isNoValueOp,
       openForeignKeyTarget,
+      pinnedLeftColumnSet,
       showColumnComment,
       showColumnType,
       translateDataGrid,
   ]);
-
   const selectedRowKeysRef = useRef(selectedRowKeys);
   const displayDataRef = useRef<any[]>([]);
 
@@ -1618,8 +1649,13 @@ const DataGrid: React.FC<DataGridProps> = ({
   ), [data, isMongoDBConnection]);
 
   const displayData = useMemo(() => {
-      return [...baseData, ...addedRows];
-  }, [baseData, addedRows]);
+      const rows = [...baseData, ...addedRows];
+      // 查询结果页没有服务端 WHERE 回调时，用列头筛选条件在客户端过滤当前结果集
+      if (exportScope === 'queryResult' && filterConditions.length > 0) {
+          return filterRowsByGridConditions(rows, filterConditions);
+      }
+      return rows;
+  }, [addedRows, baseData, exportScope, filterConditions]);
 
   useEffect(() => { displayDataRef.current = displayData; }, [displayData]);
 
@@ -2464,6 +2500,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               manualWidth: columnWidths[key],
               density: dataTableDensity,
           }),
+          ...(pinnedLeftColumnSet.has(key) ? { fixed: 'left' as const } : {}),
           sorter: onSort ? { multiple: displayColumnNames.indexOf(key) + 1 } : false,
           sortOrder: (sortInfo.find(s => s.columnKey === key && s.enabled !== false)?.order || null) as SortOrder | undefined,
           editable: canModifyData && isWritableResultColumn(key, effectiveEditLocator),
@@ -2524,7 +2561,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               },
           }),
       }));
-  }, [canModifyData, columnWidths, currentConnConfig, dataTableDensity, displayColumnNames, displayColumnTypeMap, enableVirtual, handleResizeAutoFit, handleResizeStart, isV2Ui, language, normalizedPageFindText, onSort, renderColumnTitle, showColumnComment, showColumnHeaderContextMenu, showColumnType, sortInfo]);
+  }, [canModifyData, columnWidths, currentConnConfig, dataTableDensity, displayColumnNames, displayColumnTypeMap, enableVirtual, handleResizeAutoFit, handleResizeStart, isV2Ui, language, normalizedPageFindText, onSort, pinnedLeftColumnSet, renderColumnTitle, showColumnComment, showColumnHeaderContextMenu, showColumnType, sortInfo]);
 
   const mergedColumns = useMemo(() => columns.map((col): ColumnType<any> => {
       const dataIndex = String(col.dataIndex);
@@ -2701,6 +2738,15 @@ const DataGrid: React.FC<DataGridProps> = ({
       };
   }), [closeVirtualInlineEditor, columns, currentConnConfig, darkMode, dbType, deletedRowKeys, displayColumnTypeMap, enableInlineEditableCell, enableVirtual, form, handleCellSave, handleSharedCellContextMenu, handleVirtualCellActivate, inputCellPadding, lockVirtualInlineTableScroll, modifiedColumns, openCellEditor, rowKeyStr, saveVirtualInlineEditor, updateFocusedCell, useInlineEditableBodyCell, virtualCellWrapperStyle, virtualEditingCell]);
 
+  const rowNumberColumnWidth = useMemo(() => {
+      const manual = columnWidths[GONAVI_ROW_NUMBER_COLUMN_KEY];
+      if (typeof manual === 'number' && Number.isFinite(manual) && manual > 0) {
+          // 序号列允许拖宽，但保持较窄下限，避免挤占过多数据列
+          return Math.max(28, Math.min(120, Math.round(manual)));
+      }
+      return ROW_NUMBER_COLUMN_WIDTH;
+  }, [columnWidths]);
+
   const rowNumberColumn = useMemo<ColumnType<any>>(() => ({
       title: (
           <div
@@ -2720,30 +2766,37 @@ const DataGrid: React.FC<DataGridProps> = ({
                   textAlign: 'center',
               }}
           >
+              {/* 序号列默认固定，不展示 📌，仅用户钉住的数据列显示图标 */}
               <span aria-label={translateDataGrid('data_grid.aria.row_number')}>#</span>
           </div>
       ),
       key: GONAVI_ROW_NUMBER_COLUMN_KEY,
       dataIndex: GONAVI_ROW_NUMBER_COLUMN_KEY,
-      width: ROW_NUMBER_COLUMN_WIDTH,
+      width: rowNumberColumnWidth,
       className: 'data-grid-row-number-cell',
       align: 'center',
-      ellipsis: true,
+      // 横向滚动时固定在左侧；支持拖拽调宽，不参与排序
+      fixed: 'left' as const,
+      sorter: false,
+      ellipsis: false,
       onHeaderCell: () => ({
+          // 无 id → 不参与列拖拽排序；有 width + onResizeStart → 可拖列宽
+          className: 'data-grid-row-number-cell ant-table-cell-fix-left',
+          width: rowNumberColumnWidth,
+          onResizeStart: handleResizeStart(GONAVI_ROW_NUMBER_COLUMN_KEY),
+          onResizeAutoFit: handleResizeAutoFit(GONAVI_ROW_NUMBER_COLUMN_KEY),
           style: {
               textAlign: 'center' as const,
               paddingInline: 2,
               verticalAlign: 'middle' as const,
-              width: ROW_NUMBER_COLUMN_WIDTH,
-              minWidth: ROW_NUMBER_COLUMN_WIDTH,
-              maxWidth: ROW_NUMBER_COLUMN_WIDTH,
+              width: rowNumberColumnWidth,
+              minWidth: 28,
           },
       }),
       onCell: () => ({
           style: {
-              width: ROW_NUMBER_COLUMN_WIDTH,
-              minWidth: ROW_NUMBER_COLUMN_WIDTH,
-              maxWidth: ROW_NUMBER_COLUMN_WIDTH,
+              width: rowNumberColumnWidth,
+              minWidth: 28,
               paddingInline: 2,
               textAlign: 'center' as const,
           },
@@ -2758,23 +2811,28 @@ const DataGrid: React.FC<DataGridProps> = ({
               </span>
           );
       },
-  }), [pagination?.current, pagination?.pageSize]);
+  }), [handleResizeAutoFit, handleResizeStart, pagination?.current, pagination?.pageSize, rowNumberColumnWidth]);
 
   const tableColumns = useMemo(() => {
       const baseColumns = resolvedShowRowNumberColumn
           ? [rowNumberColumn, ...mergedColumns]
           : mergedColumns;
       // 少列时把视口多余宽度只加到数据列，避免行号列被 rc-table 均摊撑宽
+      const fixedKeys = [
+          ...(resolvedShowRowNumberColumn ? [GONAVI_ROW_NUMBER_COLUMN_KEY] : []),
+          ...pinnedLeftColumnNames,
+      ];
       return absorbExtraWidthIntoFlexibleColumns({
           columns: baseColumns,
           selectionColumnWidth,
           tableViewportWidth,
-          fixedColumnKeys: resolvedShowRowNumberColumn ? [GONAVI_ROW_NUMBER_COLUMN_KEY] : [],
+          fixedColumnKeys: fixedKeys,
           defaultColumnWidth: densityParams.defaultColumnWidth,
       });
   }, [
       densityParams.defaultColumnWidth,
       mergedColumns,
+      pinnedLeftColumnNames,
       resolvedShowRowNumberColumn,
       rowNumberColumn,
       selectionColumnWidth,
@@ -3221,6 +3279,8 @@ const DataGrid: React.FC<DataGridProps> = ({
     supportsSqlQueryExport,
     tableName,
     toggleColumnVisibility,
+    pinnedLeftColumnNames,
+    setTablePinnedLeftColumns,
     translateDataGrid,
     uniqueKeyGroups,
     withSortBufferTuningSQL,
@@ -3314,6 +3374,8 @@ const DataGrid: React.FC<DataGridProps> = ({
       selectedRowKeys,
       onChange: setSelectedRowKeys,
       columnWidth: selectionColumnWidth,
+      // 与行号列一起左侧固定，横向滚动时仍可勾选/识别行
+      fixed: true as const,
       ...(isV2Ui ? {} : {
           renderCell: (_checked: boolean, _record: any, _index: number, originNode: React.ReactNode) => (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
@@ -3382,12 +3444,20 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const readVirtualHorizontalOffset = useCallback((tableContainer: HTMLElement): number => {
       const { innerEl, headerEl } = resolveVirtualHorizontalElements(tableContainer);
+      // 虚拟表数据区横向靠 marginLeft 驱动（rc-virtual-list 约定），必须以此为准
       if (innerEl instanceof HTMLElement) {
           return Math.max(0, Math.abs(parseFloat(innerEl.style.marginLeft) || 0));
       }
       return headerEl ? Math.max(0, headerEl.scrollLeft) : 0;
   }, [resolveVirtualHorizontalElements]);
 
+  /**
+   * 虚拟表横滚视觉同步：
+   * - 表体：filler marginLeft = -offset；固定列用 --gn-datagrid-h-scroll 做 translateX 补偿
+   *   （filler 有 transform:translateY，sticky 在表体不可靠）
+   * - 表头：真实 scrollLeft + sticky 固定全选/行号（不要对 header table 做 transform，
+   *   否则会把全选 checkbox / # 裁没或钉飞）
+   */
   const syncVirtualHorizontalVisualOffset = useCallback((tableContainer: HTMLElement, nextOffset: number) => {
       const { holderEl, innerEl, headerEl } = resolveVirtualHorizontalElements(tableContainer);
       if (!(holderEl instanceof HTMLElement) || !(innerEl instanceof HTMLElement)) {
@@ -3398,12 +3468,35 @@ const DataGrid: React.FC<DataGridProps> = ({
       const clampedOffset = Math.max(0, Math.min(maxScroll, nextOffset));
       const currentOffset = Math.max(0, Math.abs(parseFloat(innerEl.style.marginLeft) || 0));
       const nextMarginLeft = `${-clampedOffset}px`;
+      const scrollVar = `${clampedOffset}px`;
 
       if (innerEl.style.marginLeft !== nextMarginLeft) {
           innerEl.style.marginLeft = nextMarginLeft;
       }
-      if (headerEl instanceof HTMLElement && Math.abs(headerEl.scrollLeft - clampedOffset) > 1) {
-          headerEl.scrollLeft = clampedOffset;
+
+      // 仅表体固定列补偿用；表头走 sticky，不要挂 transform
+      tableContainer.style.setProperty('--gn-datagrid-h-scroll', scrollVar);
+      holderEl.style.setProperty('--gn-datagrid-h-scroll', scrollVar);
+      innerEl.style.setProperty('--gn-datagrid-h-scroll', scrollVar);
+
+      if (headerEl instanceof HTMLElement) {
+          headerEl.style.removeProperty('--gn-datagrid-h-scroll');
+          const headerTable = headerEl.querySelector('table') as HTMLElement | null;
+          if (headerTable) {
+              if (headerTable.style.marginLeft) {
+                  headerTable.style.marginLeft = '';
+              }
+              // 去掉历史 transform 方案残留
+              if (headerTable.style.transform) {
+                  headerTable.style.transform = '';
+              }
+              headerTable.style.setProperty('width', `${tableScrollX}px`, 'important');
+              headerTable.style.setProperty('min-width', `${tableScrollX}px`, 'important');
+              headerTable.style.setProperty('max-width', 'none', 'important');
+          }
+          if (Math.abs(headerEl.scrollLeft - clampedOffset) > 1) {
+              headerEl.scrollLeft = clampedOffset;
+          }
       }
 
       return { holderEl, clampedOffset, currentOffset };
@@ -3419,20 +3512,33 @@ const DataGrid: React.FC<DataGridProps> = ({
       const deltaX = clampedOffset - currentOffset;
       if (Math.abs(deltaX) < 0.5 && !options?.forceInternalScroll) return true;
 
+      const reassertVisual = () => {
+          syncVirtualHorizontalVisualOffset(tableContainer, clampedOffset);
+      };
+
       const tableInstance = tableRef.current;
       if (tableInstance && typeof tableInstance.scrollTo === 'function') {
+          // 更新 rc-virtual-list 内部 offsetLeft
           tableInstance.scrollTo({ left: clampedOffset, top: holderEl.scrollTop });
+          // antd onInternalScroll 会 forceScroll(header.scrollLeft)，需在其后清掉并重申 CSS 变量
+          requestAnimationFrame(() => {
+              reassertVisual();
+              window.setTimeout(reassertVisual, 0);
+          });
           return true;
       }
 
-      // 回退：通过合成 WheelEvent 驱动 rc-virtual-list 内部 offsetLeft state，
-      // 让 rc-table onInternalScroll 自动同步 header scrollLeft。
+      // 回退：合成 WheelEvent 驱动 rc-virtual-list 内部 offsetLeft state
       holderEl.dispatchEvent(new WheelEvent('wheel', {
           deltaX: deltaX,
           deltaY: 0,
           bubbles: true,
           cancelable: true,
       }));
+      requestAnimationFrame(() => {
+          reassertVisual();
+          window.setTimeout(reassertVisual, 0);
+      });
       return true;
   }, [syncVirtualHorizontalVisualOffset]);
 
@@ -3463,6 +3569,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           });
       });
   }, [applyVirtualHorizontalOffset, enableVirtual, isTableSurfaceActive, readVirtualHorizontalOffset, syncVirtualHorizontalVisualOffset]);
+
 
   const flushVirtualHorizontalWheel = useCallback((tableContainer: HTMLElement) => {
       tableHorizontalWheelRafRef.current = null;
@@ -4024,8 +4131,8 @@ const DataGrid: React.FC<DataGridProps> = ({
           const headerTable = container.querySelector('.ant-table-header > table') as HTMLElement;
           if (headerTable) {
               headerTable.style.setProperty('width', `${tableScrollX}px`, 'important');
-              headerTable.style.setProperty('min-width', '0px', 'important');
-              headerTable.style.setProperty('max-width', `${tableScrollX}px`, 'important');
+              headerTable.style.setProperty('min-width', `${tableScrollX}px`, 'important');
+              headerTable.style.setProperty('max-width', 'none', 'important');
           }
       };
       syncHeaderWidth();
@@ -4507,6 +4614,7 @@ const DataGrid: React.FC<DataGridProps> = ({
         panelPaddingY,
         panelRadius,
         pendingChangeCount,
+        pinnedLeftColumnSet,
         pkColumns,
         prefersManualTotalCount,
         previewModalOpen,

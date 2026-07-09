@@ -102,6 +102,8 @@ export const useDataGridV2Actions = (ctx: DataGridV2ActionsContext) => {
     supportsSqlQueryExport,
     tableName,
     toggleColumnVisibility,
+    pinnedLeftColumnNames,
+    setTablePinnedLeftColumns,
     translateDataGrid,
     uniqueKeyGroups,
     withSortBufferTuningSQL,
@@ -134,6 +136,24 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
           case 'auto-fit-column':
               autoFitColumnWidth(columnName);
               break;
+          case 'pin-column-left': {
+              if (!connectionId || !dbName || !tableName) {
+                  void message.info(translateDataGrid('data_grid.message.pin_column_unavailable'));
+                  break;
+              }
+              const nextPinned = [
+                  ...pinnedLeftColumnNames.filter((col: string) => col !== columnName),
+                  columnName,
+              ];
+              setTablePinnedLeftColumns(connectionId, dbName, tableName, nextPinned);
+              break;
+          }
+          case 'unpin-column-left': {
+              if (!connectionId || !dbName || !tableName) break;
+              const nextPinned = pinnedLeftColumnNames.filter((col: string) => col !== columnName);
+              setTablePinnedLeftColumns(connectionId, dbName, tableName, nextPinned);
+              break;
+          }
           case 'hide-column':
               if (displayColumnNames.length <= 1) {
                   void message.info(translateDataGrid('data_grid.message.keep_one_visible_column'));
@@ -162,10 +182,15 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
       autoFitColumnWidth,
       cellContextMenu.dataIndex,
       cellContextMenu.title,
+      connectionId,
       copyToClipboard,
+      dbName,
       displayColumnNames.length,
       handleCopyColumnData,
+      pinnedLeftColumnNames,
       setQueryOptions,
+      setTablePinnedLeftColumns,
+      tableName,
       translateDataGrid,
       toggleColumnVisibility,
   ]);

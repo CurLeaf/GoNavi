@@ -1374,6 +1374,8 @@ interface AppState {
   tableSortPreference: Record<string, "name" | "frequency">;
   tableColumnOrders: Record<string, string[]>;
   enableColumnOrderMemory: boolean;
+  /** 数据表横向滚动时左侧固定的数据列（按表维度记忆；勾选列/行号列始终固定） */
+  tablePinnedLeftColumns: Record<string, string[]>;
   tableHiddenColumns: Record<string, string[]>;
   enableHiddenColumnMemory: boolean;
   pinnedSidebarTables: string[];
@@ -1562,6 +1564,17 @@ interface AppState {
   ) => void;
   setEnableColumnOrderMemory: (enabled: boolean) => void;
   clearTableColumnOrder: (
+    connectionId: string,
+    dbName: string,
+    tableName: string,
+  ) => void;
+  setTablePinnedLeftColumns: (
+    connectionId: string,
+    dbName: string,
+    tableName: string,
+    columns: string[],
+  ) => void;
+  clearTablePinnedLeftColumns: (
     connectionId: string,
     dbName: string,
     tableName: string,
@@ -2659,6 +2672,7 @@ export const useStore = create<AppState>()(
       tableSortPreference: {},
       tableColumnOrders: {},
       enableColumnOrderMemory: true,
+      tablePinnedLeftColumns: {},
       tableHiddenColumns: {},
       enableHiddenColumnMemory: true,
       pinnedSidebarTables: [],
@@ -4023,6 +4037,33 @@ export const useStore = create<AppState>()(
       setEnableColumnOrderMemory: (enabled) =>
         set({ enableColumnOrderMemory: !!enabled }),
 
+      setTablePinnedLeftColumns: (connectionId, dbName, tableName, columns) =>
+        set((state) => {
+          const key = `${connectionId}-${dbName}-${tableName}`;
+          const normalized = Array.isArray(columns)
+            ? Array.from(new Set(columns.map((col) => String(col || "").trim()).filter(Boolean)))
+            : [];
+          if (normalized.length === 0) {
+            const next = { ...state.tablePinnedLeftColumns };
+            delete next[key];
+            return { tablePinnedLeftColumns: next };
+          }
+          return {
+            tablePinnedLeftColumns: {
+              ...state.tablePinnedLeftColumns,
+              [key]: normalized,
+            },
+          };
+        }),
+
+      clearTablePinnedLeftColumns: (connectionId, dbName, tableName) =>
+        set((state) => {
+          const key = `${connectionId}-${dbName}-${tableName}`;
+          const next = { ...state.tablePinnedLeftColumns };
+          delete next[key];
+          return { tablePinnedLeftColumns: next };
+        }),
+
       setTableHiddenColumns: (connectionId, dbName, tableName, hiddenColumns) =>
         set((state) => {
           const key = `${connectionId}-${dbName}-${tableName}`;
@@ -4536,6 +4577,9 @@ export const useStore = create<AppState>()(
         nextState.tableColumnOrders = safeOrders;
         nextState.enableColumnOrderMemory =
           state.enableColumnOrderMemory !== false;
+        nextState.tablePinnedLeftColumns = sanitizeTableColumnOrders(
+          state.tablePinnedLeftColumns,
+        );
         const safeHidden = sanitizeTableHiddenColumns(state.tableHiddenColumns);
         nextState.tableHiddenColumns = safeHidden;
         nextState.enableHiddenColumnMemory =
@@ -4619,6 +4663,9 @@ export const useStore = create<AppState>()(
           ),
           tableColumnOrders: sanitizeTableColumnOrders(state.tableColumnOrders),
           enableColumnOrderMemory: state.enableColumnOrderMemory !== false,
+          tablePinnedLeftColumns: sanitizeTableColumnOrders(
+            state.tablePinnedLeftColumns,
+          ),
           tableHiddenColumns: sanitizeTableHiddenColumns(
             state.tableHiddenColumns,
           ),
@@ -4689,6 +4736,7 @@ export const useStore = create<AppState>()(
           tableSortPreference: state.tableSortPreference,
           tableColumnOrders: state.tableColumnOrders,
           enableColumnOrderMemory: state.enableColumnOrderMemory,
+          tablePinnedLeftColumns: state.tablePinnedLeftColumns,
           tableHiddenColumns: state.tableHiddenColumns,
           enableHiddenColumnMemory: state.enableHiddenColumnMemory,
           pinnedSidebarTables: state.pinnedSidebarTables,

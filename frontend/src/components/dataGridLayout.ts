@@ -68,7 +68,10 @@ export const calculateVirtualTableScrollX = ({
   return safeTotalWidth;
 };
 
-export type AbsorbExtraColumnWidthOptions<T extends { key?: string | number; width?: number | string }> = {
+/** 兼容 antd ColumnType.key（React.Key = string | number | bigint） */
+export type AbsorbExtraColumnKey = string | number | bigint;
+
+export type AbsorbExtraColumnWidthOptions<T extends { key?: AbsorbExtraColumnKey; width?: number | string }> = {
   columns: T[];
   selectionColumnWidth: number;
   tableViewportWidth: number;
@@ -81,7 +84,7 @@ export type AbsorbExtraColumnWidthOptions<T extends { key?: string | number; wid
  * 少字段时 rc-table 会把 scroll.x 扩到视口并均摊拉宽所有列。
  * 将「视口 − 声明总宽」的差额加到最后一个非固定数据列，避免行号/勾选列被一起撑宽。
  */
-export const absorbExtraWidthIntoFlexibleColumns = <T extends { key?: string | number; width?: number | string }>({
+export const absorbExtraWidthIntoFlexibleColumns = <T extends { key?: AbsorbExtraColumnKey; width?: number | string }>({
   columns,
   selectionColumnWidth,
   tableViewportWidth,
