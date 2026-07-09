@@ -290,12 +290,12 @@ const FloatingQueryResultWindows: React.FC = () => {
                   data={windowState.result.rows || []}
                   columnNames={windowState.result.columns || []}
                   loading={false}
-                  tableName={windowState.result.tableName}
+                  tableName={windowState.result.metadataTableName || windowState.result.tableName}
                   pkColumns={windowState.result.pkColumns || []}
                   editLocator={windowState.result.editLocator as any}
                   readOnly={windowState.result.readOnly !== false}
                   connectionId={windowState.connectionId}
-                  dbName={windowState.dbName || ''}
+                  dbName={windowState.result.metadataDbName || windowState.dbName || ''}
                   resultSql={windowState.result.exportSql || windowState.result.sql}
                   exportScope="queryResult"
                 />

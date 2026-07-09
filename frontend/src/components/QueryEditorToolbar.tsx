@@ -376,7 +376,12 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
               : t("query_editor.action.save")
           }
         >
-          <Button icon={<SaveOutlined />} onClick={onQuickSave}>
+          <Button
+            className={isV2Ui ? "gn-v2-query-toolbar-save-action" : undefined}
+            type="primary"
+            icon={<SaveOutlined />}
+            onClick={onQuickSave}
+          >
             {t("query_editor.action.save")}
           </Button>
         </Tooltip>

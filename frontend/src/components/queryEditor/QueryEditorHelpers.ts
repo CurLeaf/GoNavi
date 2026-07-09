@@ -2325,13 +2325,22 @@ export const resolveQueryLocatorPlan = async ({
         executedSql: statement,
         pkColumns: [],
     };
+    const defaultSchema = isOracleLikeDialect(dbType)
+        ? resolveOracleLikeExecutionSchemaName(config, currentDb)
+        : '';
+    // 即使只读也要解析 tableRef：结果页列类型/注释依赖 metadataDbName + tableName
+    try {
+        const previewTableRef = extractQueryResultTableRef(statement, dbType, currentDb, defaultSchema);
+        if (previewTableRef) {
+            plan.tableRef = previewTableRef;
+        }
+    } catch {
+        // ignore parse errors; keep bare plan
+    }
     if (forceReadOnly) return plan;
 
     try {
-        const defaultSchema = isOracleLikeDialect(dbType)
-            ? resolveOracleLikeExecutionSchemaName(config, currentDb)
-            : '';
-        let tableRef = extractQueryResultTableRef(statement, dbType, currentDb, defaultSchema);
+        let tableRef = plan.tableRef || extractQueryResultTableRef(statement, dbType, currentDb, defaultSchema);
         if (!tableRef) return plan;
         plan.tableRef = tableRef;
         if (isSystemMetadataQueryResult(tableRef, dbType)) {

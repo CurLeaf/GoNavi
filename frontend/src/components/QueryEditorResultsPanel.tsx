@@ -34,6 +34,10 @@ export type QueryEditorResultSet = {
     messages?: string[];
     resultType?: 'grid' | 'message';
     tableName?: string;
+    /** 列类型/注释元数据所属库（跨库 SELECT 时可能与 currentDb 不同） */
+    metadataDbName?: string;
+    /** 列元数据查询用表名（PG 等可能为 schema.table） */
+    metadataTableName?: string;
     pkColumns: string[];
     editLocator?: EditRowLocator;
     readOnly: boolean;
@@ -439,11 +443,11 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                         data={rs.rows}
                         columnNames={visibleColumns}
                         loading={loading || rs.page?.loading === true}
-                        tableName={rs.tableName}
+                        tableName={rs.metadataTableName || rs.tableName}
                         exportScope="queryResult"
                         resultSql={rs.exportSql || rs.sql}
                         resultExportAllSql={rs.page?.exportAllSql}
-                        dbName={currentDb}
+                        dbName={rs.metadataDbName || currentDb}
                         connectionId={currentConnectionId}
                         pkColumns={rs.pkColumns}
                         editLocator={rs.editLocator}
