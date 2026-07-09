@@ -35,6 +35,7 @@ import {
     matchProviderPreset,
     waitForAIService,
 } from './ai/aiSettingsModalConfig';
+import { useStore } from '../store';
 interface AISettingsModalProps {
     open: boolean;
     onClose: () => void;
@@ -121,6 +122,8 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
     const [form] = Form.useForm();
     const modalBodyRef = useRef<HTMLDivElement>(null);
     const missingAIServiceWarnedRef = useRef(false);
+    const aiChatOpenMode = useStore((state) => state.aiChatOpenMode);
+    const setAIChatOpenMode = useStore((state) => state.setAIChatOpenMode);
 
     // Modal 内部 toast 通知
     const [messageApi, messageContextHolder] = antdMessage.useMessage({ getContainer: () => modalBodyRef.current || document.body });
@@ -412,7 +415,6 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                 models: resolvedModels,
                 baseUrl: finalBaseUrl,
                 apiFormat: resolvedTransport.apiFormat,
-                thinkingIntensity: String(values.thinkingIntensity || '').trim(),
             };
             // 后端 AISaveProvider 统一处理新增和更新，返回 void，失败抛异常
             await Service?.AISaveProvider?.(payload);
@@ -685,7 +687,6 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                 models: resolvedModels,
                 maxTokens: Number(values.maxTokens) || 4096,
                 temperature: Number(values.temperature) ?? 0.7,
-                thinkingIntensity: String(values.thinkingIntensity || '').trim(),
                 apiFormat: resolvedTransport.apiFormat,
             });
             if (res?.success) { setTestStatus('success'); void messageApi.success(t('ai_settings.message.test_success')); }
@@ -772,11 +773,20 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                 {activeSection === 'context' && (
                     <AISettingsContextSection
                         contextLevel={contextLevel}
+                        openMode={aiChatOpenMode}
                         darkMode={darkMode}
                         overlayTheme={overlayTheme}
                         cardBg={cardBg}
                         cardBorder={cardBorder}
                         onChange={handleContextChange}
+                        onOpenModeChange={(mode) => {
+                            setAIChatOpenMode(mode);
+                            void messageApi.success(
+                                mode === 'detached'
+                                    ? t('ai_settings.open_mode.message.detached')
+                                    : t('ai_settings.open_mode.message.dock'),
+                            );
+                        }}
                     />
                 )}
                 {activeSection === 'mcp' && (

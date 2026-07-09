@@ -1617,6 +1617,81 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().detachedQueryResultWindows).toEqual([]);
   });
 
+  it('detaches AI chat panel into a floating window and docks it back', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setAIPanelVisible(true);
+    useStore.getState().detachAIChatPanel({ x: 40, y: 50, width: 420, height: 640 });
+    expect(useStore.getState().isAIChatDetached()).toBe(true);
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    const detached = useStore.getState().detachedAIChatWindow;
+    expect(detached).toBeTruthy();
+    expect(detached?.width).toBe(420);
+    expect(detached?.height).toBe(640);
+    expect(detached?.x).toBeGreaterThanOrEqual(16);
+    expect(detached?.y).toBeGreaterThanOrEqual(16);
+    expect(detached?.zIndex).toBeGreaterThan(0);
+
+    // 使用可落入默认/无 DOM 视口上限的尺寸，避免 createDefaultDetachedBounds clamp 干扰断言
+    useStore.getState().updateDetachedAIChatBounds({ width: 500, height: 560 });
+    expect(useStore.getState().detachedAIChatWindow?.width).toBe(500);
+    expect(useStore.getState().detachedAIChatWindow?.height).toBe(560);
+    expect(useStore.getState().aiChatDetachedBoundsMemory?.width).toBe(500);
+    expect(useStore.getState().aiChatDetachedBoundsMemory?.height).toBe(560);
+
+    useStore.getState().attachAIChatPanel();
+    expect(useStore.getState().isAIChatDetached()).toBe(false);
+    expect(useStore.getState().detachedAIChatWindow).toBeNull();
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    // 还原侧栏后仍保留上次尺寸记忆
+    expect(useStore.getState().aiChatDetachedBoundsMemory?.width).toBe(500);
+    expect(useStore.getState().aiChatDetachedBoundsMemory?.height).toBe(560);
+
+    // 再次弹出应复用记忆尺寸
+    useStore.getState().detachAIChatPanel();
+    expect(useStore.getState().detachedAIChatWindow?.width).toBe(500);
+    expect(useStore.getState().detachedAIChatWindow?.height).toBe(560);
+
+    useStore.getState().setAIPanelVisible(false);
+    expect(useStore.getState().detachedAIChatWindow).toBeNull();
+    expect(useStore.getState().aiPanelVisible).toBe(false);
+    expect(useStore.getState().aiChatDetachedBoundsMemory?.width).toBe(500);
+  });
+
+  it('opens AI chat according to the configured default open mode', async () => {
+    const { useStore } = await importStore();
+
+    expect(useStore.getState().aiChatOpenMode).toBe('dock');
+    useStore.getState().setAIPanelVisible(true);
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    expect(useStore.getState().detachedAIChatWindow).toBeNull();
+
+    useStore.getState().setAIPanelVisible(false);
+    useStore.getState().setAIChatOpenMode('detached');
+    expect(useStore.getState().aiChatOpenMode).toBe('detached');
+
+    useStore.getState().setAIPanelVisible(true);
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    expect(useStore.getState().isAIChatDetached()).toBe(true);
+    expect(useStore.getState().detachedAIChatWindow).toBeTruthy();
+
+    // 手动还原到侧栏不改变默认打开偏好
+    useStore.getState().attachAIChatPanel();
+    expect(useStore.getState().isAIChatDetached()).toBe(false);
+    expect(useStore.getState().aiChatOpenMode).toBe('detached');
+
+    // 再次从入口打开仍按默认偏好弹出独立窗
+    useStore.getState().setAIPanelVisible(false);
+    useStore.getState().toggleAIPanel();
+    expect(useStore.getState().isAIChatDetached()).toBe(true);
+
+    useStore.getState().setAIChatOpenMode('dock');
+    useStore.getState().setAIPanelVisible(false);
+    useStore.getState().setAIPanelVisible(true);
+    expect(useStore.getState().detachedAIChatWindow).toBeNull();
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+  });
+
   it('returns to the source tab after closing an object edit tab opened from a hyperlink', async () => {
     const { useStore } = await importStore();
 

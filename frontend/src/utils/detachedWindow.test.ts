@@ -6,6 +6,7 @@ import {
   resolveDetachedWindowTitle,
   resolveResultDetachPreferredBounds,
   shouldDetachTabByDrag,
+  toAIChatDetachedBoundsMemory,
 } from './detachedWindow';
 
 describe('detachedWindow helpers', () => {
@@ -42,5 +43,28 @@ describe('detachedWindow helpers', () => {
   it('maps pointer release position to floating window preferred bounds', () => {
     expect(resolveResultDetachPreferredBounds(200, 300)).toEqual({ x: 80, y: 276 });
     expect(resolveResultDetachPreferredBounds(10, 10)).toEqual({ x: 16, y: 16 });
+  });
+
+  it('snapshots AI chat detached bounds for size memory', () => {
+    expect(
+      toAIChatDetachedBoundsMemory({
+        x: 12,
+        y: 34,
+        width: 480,
+        height: 560,
+      }),
+    ).toEqual({ x: 12, y: 34, width: 480, height: 560 });
+  });
+
+  it('reuses preferred size when building AI chat floating bounds', () => {
+    const bounds = createDefaultDetachedBounds(
+      [],
+      { width: 520, height: 560, x: 40, y: 60 },
+      'ai-chat',
+    );
+    expect(bounds.width).toBe(520);
+    expect(bounds.height).toBe(560);
+    expect(bounds.x).toBe(40);
+    expect(bounds.y).toBe(60);
   });
 });

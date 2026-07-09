@@ -13,6 +13,13 @@ const overlayTheme = buildOverlayWorkbenchTheme(false);
 const contextSectionSource = readFileSync(new URL('./AISettingsContextSection.tsx', import.meta.url), 'utf8');
 
 const REQUIRED_CONTEXT_KEYS = [
+  'ai_settings.open_mode.title',
+  'ai_settings.open_mode.description',
+  'ai_settings.open_mode.dock.label',
+  'ai_settings.open_mode.dock.desc',
+  'ai_settings.open_mode.detached.label',
+  'ai_settings.open_mode.detached.desc',
+  'ai_settings.context.section_title',
   'ai_settings.context.description',
   'ai_settings.context.schema_only.label',
   'ai_settings.context.schema_only.desc',
@@ -76,20 +83,25 @@ describe('AI settings readonly sections', () => {
     }
   });
 
-  it('renders the context cards and keeps the selected level visible', () => {
+  it('renders the open-mode and context cards and keeps the selected values visible', () => {
     const markup = renderToStaticMarkup(
       <I18nProvider preference="en-US" systemLanguages={['en-US']} onPreferenceChange={() => {}}>
         <AISettingsContextSection
           contextLevel="with_samples"
+          openMode="dock"
           darkMode={false}
           overlayTheme={overlayTheme}
           cardBg="#fff"
           cardBorder="rgba(0,0,0,0.08)"
           onChange={() => {}}
+          onOpenModeChange={() => {}}
         />
       </I18nProvider>,
     );
 
+    expect(markup).toContain('Default open style');
+    expect(markup).toContain('Sidebar panel');
+    expect(markup).toContain('Floating window');
     expect(markup).toContain('Schema only');
     expect(markup).toContain('With samples');
     expect(markup).toContain('With query results');

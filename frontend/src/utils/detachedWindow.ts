@@ -41,11 +41,33 @@ export type DetachedQueryResultWindow = DetachedWindowBounds & {
   result: DetachedQueryResultSnapshot;
 };
 
+/** AI 聊天独立浮动窗（单例，会话态；尺寸/位置记忆另存） */
+export type DetachedAIChatWindow = DetachedWindowBounds;
+
+/** 独立窗上次尺寸与位置（持久化，再次打开时复用） */
+export type AIChatDetachedBoundsMemory = Pick<
+  DetachedWindowBounds,
+  'x' | 'y' | 'width' | 'height'
+>;
+
+export const toAIChatDetachedBoundsMemory = (
+  bounds: Pick<DetachedWindowBounds, 'x' | 'y' | 'width' | 'height'>,
+): AIChatDetachedBoundsMemory => ({
+  x: bounds.x,
+  y: bounds.y,
+  width: bounds.width,
+  height: bounds.height,
+});
+
 export const DETACH_TAB_DRAG_Y_THRESHOLD = 56;
 export const DEFAULT_DETACHED_WINDOW_WIDTH = 960;
 export const DEFAULT_DETACHED_WINDOW_HEIGHT = 640;
 export const DEFAULT_DETACHED_WINDOW_MIN_WIDTH = 480;
 export const DEFAULT_DETACHED_WINDOW_MIN_HEIGHT = 320;
+export const DEFAULT_DETACHED_AI_CHAT_WIDTH = 440;
+export const DEFAULT_DETACHED_AI_CHAT_HEIGHT = 720;
+export const DEFAULT_DETACHED_AI_CHAT_MIN_WIDTH = 360;
+export const DEFAULT_DETACHED_AI_CHAT_MIN_HEIGHT = 420;
 export const DETACHED_WINDOW_VIEWPORT_PADDING = 16;
 
 export const clamp = (value: number, min: number, max: number): number =>
@@ -78,17 +100,22 @@ const getViewportSize = () => {
 export const createDefaultDetachedBounds = (
   windows: Array<{ zIndex?: number }>,
   preferred?: Partial<Pick<DetachedWindowBounds, 'x' | 'y' | 'width' | 'height'>>,
+  sizePreset: 'workbench' | 'ai-chat' = 'workbench',
 ): DetachedWindowBounds => {
   const viewport = getViewportSize();
+  const defaultWidth = sizePreset === 'ai-chat' ? DEFAULT_DETACHED_AI_CHAT_WIDTH : DEFAULT_DETACHED_WINDOW_WIDTH;
+  const defaultHeight = sizePreset === 'ai-chat' ? DEFAULT_DETACHED_AI_CHAT_HEIGHT : DEFAULT_DETACHED_WINDOW_HEIGHT;
+  const minWidth = sizePreset === 'ai-chat' ? DEFAULT_DETACHED_AI_CHAT_MIN_WIDTH : DEFAULT_DETACHED_WINDOW_MIN_WIDTH;
+  const minHeight = sizePreset === 'ai-chat' ? DEFAULT_DETACHED_AI_CHAT_MIN_HEIGHT : DEFAULT_DETACHED_WINDOW_MIN_HEIGHT;
   const width = clamp(
-    Number(preferred?.width) || DEFAULT_DETACHED_WINDOW_WIDTH,
-    DEFAULT_DETACHED_WINDOW_MIN_WIDTH,
-    Math.max(DEFAULT_DETACHED_WINDOW_MIN_WIDTH, viewport.width - DETACHED_WINDOW_VIEWPORT_PADDING * 2),
+    Number(preferred?.width) || defaultWidth,
+    minWidth,
+    Math.max(minWidth, viewport.width - DETACHED_WINDOW_VIEWPORT_PADDING * 2),
   );
   const height = clamp(
-    Number(preferred?.height) || DEFAULT_DETACHED_WINDOW_HEIGHT,
-    DEFAULT_DETACHED_WINDOW_MIN_HEIGHT,
-    Math.max(DEFAULT_DETACHED_WINDOW_MIN_HEIGHT, viewport.height - DETACHED_WINDOW_VIEWPORT_PADDING * 2),
+    Number(preferred?.height) || defaultHeight,
+    minHeight,
+    Math.max(minHeight, viewport.height - DETACHED_WINDOW_VIEWPORT_PADDING * 2),
   );
   const cascade = (windows.length % 8) * 28;
   const defaultX = Math.max(

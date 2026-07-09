@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button, Tooltip } from 'antd';
-import { HistoryOutlined, RobotOutlined, ClearOutlined, SettingOutlined, CloseOutlined, ExportOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { HistoryOutlined, RobotOutlined, ClearOutlined, SettingOutlined, CloseOutlined, ExportOutlined, PlusOutlined, ThunderboltOutlined, ExpandOutlined, CompressOutlined } from '@ant-design/icons';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIChatMessage } from '../../types';
 import { t as catalogTranslate } from '../../i18n/catalog';
@@ -12,10 +12,15 @@ interface AIChatHeaderProps {
     textColor: string;
     overlayTheme: OverlayWorkbenchTheme;
     isV2Ui?: boolean;
+    presentation?: 'dock' | 'detached';
     onHistoryClick: () => void;
     onClear: () => void;
     onSettingsClick: () => void;
     onClose: () => void;
+    onDetach?: () => void;
+    onAttach?: () => void;
+    /** 独立窗拖拽：点在标题栏空白/品牌区开始拖动 */
+    onWindowDragStart?: (event: React.PointerEvent) => void;
     messages?: AIChatMessage[];
     sessionTitle?: string;
     activeMode?: 'chat' | 'insights' | 'history';
@@ -52,7 +57,9 @@ const exportToMarkdown = (messages: AIChatMessage[], title: string, labels: Expo
 export const AIChatHeader: React.FC<AIChatHeaderProps> = ({
     darkMode, mutedColor, textColor, overlayTheme,
     isV2Ui = false,
+    presentation = 'dock',
     onHistoryClick, onClear, onSettingsClick, onClose,
+    onDetach, onAttach, onWindowDragStart,
     messages = [], sessionTitle,
     activeMode = 'chat',
     onModeChange,
@@ -68,9 +75,23 @@ export const AIChatHeader: React.FC<AIChatHeaderProps> = ({
         userRole: t('ai_chat.header.export_user'),
     });
 
+    const handleDragStart = (event: React.PointerEvent) => {
+        if (!onWindowDragStart) return;
+        // 点在按钮/标签等交互控件上不拖窗
+        const target = event.target as HTMLElement | null;
+        if (target?.closest('button, a, input, textarea, .ant-btn, .gn-v2-ai-mode-tabs, .ai-chat-header-right')) {
+            return;
+        }
+        onWindowDragStart(event);
+    };
+
     if (!isV2Ui) {
         return (
-            <div className="ai-chat-header" style={{ borderBottom: 'none', padding: '10px 16px', background: darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.01)' }}>
+            <div
+                className="ai-chat-header"
+                style={{ borderBottom: 'none', padding: '10px 16px', background: darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.01)' }}
+                onPointerDown={handleDragStart}
+            >
                 <div className="ai-chat-header-left" style={{ gap: 8 }}>
                     <Tooltip title={t('ai_chat.header.tooltip.history')}>
                         <Button type="text" size="small" icon={<HistoryOutlined />} onClick={onHistoryClick} style={{ color: mutedColor }} />
@@ -80,7 +101,7 @@ export const AIChatHeader: React.FC<AIChatHeaderProps> = ({
                     </div>
                     <span className="ai-title" style={{ color: textColor, fontSize: 13, fontWeight: 600 }}>GoNavi AI</span>
                 </div>
-                <div className="ai-chat-header-right">
+                <div className="ai-chat-header-right" onPointerDown={(event) => event.stopPropagation()}>
                     {messages.length > 0 && (
                         <Tooltip title={t('ai_chat.header.tooltip.export_markdown')}>
                             <Button type="text" size="small" icon={<ExportOutlined />} onClick={exportMarkdown} style={{ color: mutedColor }} />
@@ -92,6 +113,16 @@ export const AIChatHeader: React.FC<AIChatHeaderProps> = ({
                     <Tooltip title={t('ai_chat.header.tooltip.settings')}>
                         <Button type="text" size="small" icon={<SettingOutlined />} onClick={onSettingsClick} style={{ color: mutedColor }} />
                     </Tooltip>
+                    {presentation === 'dock' && onDetach && (
+                        <Tooltip title={t('ai_chat.detached.action.popout')}>
+                            <Button type="text" size="small" icon={<ExpandOutlined />} onClick={onDetach} style={{ color: mutedColor }} />
+                        </Tooltip>
+                    )}
+                    {presentation === 'detached' && onAttach && (
+                        <Tooltip title={t('ai_chat.detached.action.dock')}>
+                            <Button type="text" size="small" icon={<CompressOutlined />} onClick={onAttach} style={{ color: mutedColor }} />
+                        </Tooltip>
+                    )}
                     <Tooltip title={t('ai_chat.header.tooltip.close')}>
                         <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} style={{ color: mutedColor }} />
                     </Tooltip>
@@ -101,7 +132,11 @@ export const AIChatHeader: React.FC<AIChatHeaderProps> = ({
     }
 
     return (
-        <div className="ai-chat-header gn-v2-ai-header" style={{ borderBottom: 'none', padding: '10px 16px', background: darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.01)' }}>
+        <div
+            className="ai-chat-header gn-v2-ai-header"
+            style={{ borderBottom: 'none', padding: '10px 16px', background: darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.01)' }}
+            onPointerDown={handleDragStart}
+        >
             <div className="gn-v2-ai-header-top">
                 <div className="ai-chat-header-left gn-v2-ai-brand" style={{ gap: 8 }}>
                     <div className="ai-logo" style={{ background: overlayTheme.iconBg, color: overlayTheme.iconColor, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, borderRadius: 6, fontSize: 12 }}>
@@ -113,7 +148,7 @@ export const AIChatHeader: React.FC<AIChatHeaderProps> = ({
                     </div>
                     <span className="gn-v2-ai-provider-badge">{t('app.theme.ui_version.v2.badge')}</span>
                 </div>
-                <div className="ai-chat-header-right gn-v2-ai-header-actions">
+                <div className="ai-chat-header-right gn-v2-ai-header-actions" onPointerDown={(event) => event.stopPropagation()}>
                     <Tooltip title={t('ai_chat.header.tooltip.new_chat')}>
                         <Button type="text" size="small" icon={<PlusOutlined />} onClick={onClear} style={{ color: mutedColor }} />
                     </Tooltip>
@@ -123,13 +158,27 @@ export const AIChatHeader: React.FC<AIChatHeaderProps> = ({
                     <Tooltip title={t('ai_chat.header.tooltip.settings')}>
                         <Button type="text" size="small" icon={<SettingOutlined />} onClick={onSettingsClick} style={{ color: mutedColor }} />
                     </Tooltip>
+                    {presentation === 'dock' && onDetach && (
+                        <Tooltip title={t('ai_chat.detached.action.popout')}>
+                            <Button type="text" size="small" icon={<ExpandOutlined />} onClick={onDetach} style={{ color: mutedColor }} />
+                        </Tooltip>
+                    )}
+                    {presentation === 'detached' && onAttach && (
+                        <Tooltip title={t('ai_chat.detached.action.dock')}>
+                            <Button type="text" size="small" icon={<CompressOutlined />} onClick={onAttach} style={{ color: mutedColor }} />
+                        </Tooltip>
+                    )}
                     <Tooltip title={t('ai_chat.header.tooltip.close')}>
                         <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} style={{ color: mutedColor }} />
                     </Tooltip>
                 </div>
             </div>
 
-            <div className="gn-v2-ai-mode-tabs" aria-label={t('ai_chat.header.mode_tabs.aria_label')}>
+            <div
+                className="gn-v2-ai-mode-tabs"
+                aria-label={t('ai_chat.header.mode_tabs.aria_label')}
+                onPointerDown={(event) => event.stopPropagation()}
+            >
                 <button
                     type="button"
                     className={activeMode === 'chat' ? 'is-active' : undefined}
