@@ -1622,9 +1622,19 @@ func launchMacUpdate(staged *stagedUpdate, targetExe string, pid int) error {
 		return err
 	}
 
+	// 用 bash 执行脚本；Setsid 脱离主进程会话，避免 Quit 后脚本被 SIGHUP
 	cmd := exec.Command("/bin/bash", scriptPath)
-	logger.Infof("启动 macOS 更新脚本：target=%s script=%s log=%s", targetApp, scriptPath, logPath)
-	return cmd.Start()
+	configureDetachedUpdateCommand(cmd)
+	logger.Infof("启动 macOS 更新脚本：target=%s script=%s log=%s package=%s", targetApp, scriptPath, logPath, staged.FilePath)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if cmd.Process != nil {
+		if err := cmd.Process.Release(); err != nil {
+			logger.Warnf("释放 macOS 更新脚本进程句柄失败：%v", err)
+		}
+	}
+	return nil
 }
 
 func launchLinuxUpdate(staged *stagedUpdate, targetExe string, pid int) error {
@@ -1635,7 +1645,14 @@ func launchLinuxUpdate(staged *stagedUpdate, targetExe string, pid int) error {
 	}
 
 	cmd := exec.Command("/bin/sh", scriptPath)
-	return cmd.Start()
+	configureDetachedUpdateCommand(cmd)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if cmd.Process != nil {
+		_ = cmd.Process.Release()
+	}
+	return nil
 }
 
 func buildWindowsScript(source, target, stagedDir, logPath string, pid int) string {
@@ -1781,22 +1798,101 @@ func buildWindowsLaunchCommand(scriptPath string) *exec.Cmd {
 	return cmd
 }
 
-func buildMacScript(dmgPath, targetApp, stagedDir, mountDir, logPath string, pid int) string {
+func buildMacScript(packagePath, targetApp, stagedDir, mountDir, logPath string, pid int) string {
 	return fmt.Sprintf(`#!/bin/bash
-set -euo pipefail
+set -uo pipefail
 PID=%d
-DMG="%s"
+PACKAGE="%s"
 TARGET_APP="%s"
 STAGED="%s"
 MOUNT_DIR="%s"
 LOG_FILE="%s"
 TMP_APP="${TARGET_APP}.new"
 BACKUP_APP="${TARGET_APP}.backup"
-APP_BIN_NAME=$(basename "$TARGET_APP" .app)
-APP_BIN_REL="Contents/MacOS/$APP_BIN_NAME"
+EXTRACT_DIR="${STAGED}/_extract"
+WAIT_PID_SECONDS=0
+MAX_WAIT_PID_SECONDS=120
+APP_SRC=""
+APP_BIN_REL=""
+DETACH_NEEDED=0
 
 log() {
-  echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] $*" >> "$LOG_FILE"
+  echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] $*" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+cleanup_mount() {
+  if [ "$DETACH_NEEDED" = "1" ]; then
+    /usr/bin/hdiutil detach "$MOUNT_DIR" -quiet >>"$LOG_FILE" 2>&1 || \
+      /usr/bin/hdiutil detach "$MOUNT_DIR" -force -quiet >>"$LOG_FILE" 2>&1 || true
+    DETACH_NEEDED=0
+  fi
+}
+
+resolve_app_binary_rel() {
+  local app_root="$1"
+  local preferred
+  preferred=$(basename "$TARGET_APP" .app)
+  if [ -n "$preferred" ] && [ -x "$app_root/Contents/MacOS/$preferred" ]; then
+    APP_BIN_REL="Contents/MacOS/$preferred"
+    return 0
+  fi
+  local found
+  found=$(/usr/bin/find "$app_root/Contents/MacOS" -maxdepth 1 -type f -perm -111 2>/dev/null | /usr/bin/head -n 1 || true)
+  if [ -n "$found" ]; then
+    APP_BIN_REL="Contents/MacOS/$(basename "$found")"
+    return 0
+  fi
+  return 1
+}
+
+prepare_app_source_from_package() {
+  local ext
+  ext=$(printf '%%s' "${PACKAGE##*.}" | tr '[:upper:]' '[:lower:]')
+  case "$ext" in
+    dmg)
+      log "attaching dmg: $PACKAGE"
+      /bin/mkdir -p "$MOUNT_DIR" >>"$LOG_FILE" 2>&1 || true
+      if ! /usr/bin/hdiutil attach "$PACKAGE" -nobrowse -quiet -mountpoint "$MOUNT_DIR" >>"$LOG_FILE" 2>&1; then
+        log "hdiutil attach failed, retry without quiet"
+        if ! /usr/bin/hdiutil attach "$PACKAGE" -nobrowse -mountpoint "$MOUNT_DIR" >>"$LOG_FILE" 2>&1; then
+          log "hdiutil attach failed for $PACKAGE"
+          return 1
+        fi
+      fi
+      DETACH_NEEDED=1
+      APP_SRC=$(/usr/bin/find "$MOUNT_DIR" -maxdepth 2 -name "*.app" -type d 2>/dev/null | /usr/bin/head -n 1 || true)
+      if [ -z "$APP_SRC" ]; then
+        log "no .app found inside dmg mount: $MOUNT_DIR"
+        return 1
+      fi
+      ;;
+    zip)
+      log "extracting zip package: $PACKAGE"
+      /bin/rm -rf "$EXTRACT_DIR" >>"$LOG_FILE" 2>&1 || true
+      /bin/mkdir -p "$EXTRACT_DIR" >>"$LOG_FILE" 2>&1 || true
+      if ! /usr/bin/ditto -x -k "$PACKAGE" "$EXTRACT_DIR" >>"$LOG_FILE" 2>&1; then
+        if ! /usr/bin/unzip -qo "$PACKAGE" -d "$EXTRACT_DIR" >>"$LOG_FILE" 2>&1; then
+          log "extract zip failed: $PACKAGE"
+          return 1
+        fi
+      fi
+      APP_SRC=$(/usr/bin/find "$EXTRACT_DIR" -maxdepth 3 -name "*.app" -type d 2>/dev/null | /usr/bin/head -n 1 || true)
+      if [ -z "$APP_SRC" ]; then
+        log "no .app found inside zip: $PACKAGE"
+        return 1
+      fi
+      ;;
+    *)
+      log "unsupported mac package type: $PACKAGE"
+      return 1
+      ;;
+  esac
+  if ! resolve_app_binary_rel "$APP_SRC"; then
+    log "no executable found in package app: $APP_SRC"
+    return 1
+  fi
+  log "package app source: $APP_SRC binary=$APP_BIN_REL"
+  return 0
 }
 
 run_admin_replace() {
@@ -1823,68 +1919,92 @@ APPLESCRIPT
 }
 
 replace_app_direct() {
-  rm -rf "$TMP_APP" "$BACKUP_APP" >>"$LOG_FILE" 2>&1 || true
+  /bin/rm -rf "$TMP_APP" "$BACKUP_APP" >>"$LOG_FILE" 2>&1 || true
   /usr/bin/ditto "$APP_SRC" "$TMP_APP" >>"$LOG_FILE" 2>&1
   if [ ! -x "$TMP_APP/$APP_BIN_REL" ]; then
     log "tmp app binary missing: $TMP_APP/$APP_BIN_REL"
     return 1
   fi
-  xattr -rd com.apple.quarantine "$TMP_APP" >>"$LOG_FILE" 2>&1 || true
+  /usr/bin/xattr -rd com.apple.quarantine "$TMP_APP" >>"$LOG_FILE" 2>&1 || true
   if [ -d "$TARGET_APP" ]; then
-    mv "$TARGET_APP" "$BACKUP_APP" >>"$LOG_FILE" 2>&1
+    /bin/mv "$TARGET_APP" "$BACKUP_APP" >>"$LOG_FILE" 2>&1
   fi
-  if ! mv "$TMP_APP" "$TARGET_APP" >>"$LOG_FILE" 2>&1; then
+  if ! /bin/mv "$TMP_APP" "$TARGET_APP" >>"$LOG_FILE" 2>&1; then
     log "move new app failed, trying rollback"
-    rm -rf "$TARGET_APP" >>"$LOG_FILE" 2>&1 || true
+    /bin/rm -rf "$TARGET_APP" >>"$LOG_FILE" 2>&1 || true
     if [ -d "$BACKUP_APP" ]; then
-      mv "$BACKUP_APP" "$TARGET_APP" >>"$LOG_FILE" 2>&1 || true
+      /bin/mv "$BACKUP_APP" "$TARGET_APP" >>"$LOG_FILE" 2>&1 || true
     fi
     return 1
   fi
-  rm -rf "$BACKUP_APP" >>"$LOG_FILE" 2>&1 || true
-  xattr -rd com.apple.quarantine "$TARGET_APP" >>"$LOG_FILE" 2>&1 || true
+  /bin/rm -rf "$BACKUP_APP" >>"$LOG_FILE" 2>&1 || true
+  /usr/bin/xattr -rd com.apple.quarantine "$TARGET_APP" >>"$LOG_FILE" 2>&1 || true
   return 0
 }
 
 relaunch_app() {
+  if /usr/bin/open -n -a "$TARGET_APP" >>"$LOG_FILE" 2>&1; then
+    return 0
+  fi
   if /usr/bin/open -n "$TARGET_APP" >>"$LOG_FILE" 2>&1; then
     return 0
   fi
-  log "open -n failed, trying binary launch"
-  "$TARGET_APP/$APP_BIN_REL" >>"$LOG_FILE" 2>&1 &
+  log "open failed, trying binary launch"
+  nohup "$TARGET_APP/$APP_BIN_REL" >>"$LOG_FILE" 2>&1 &
   return 0
 }
 
-log "updater started"
-while kill -0 $PID 2>/dev/null; do
-  sleep 1
+log "updater started package=$PACKAGE target=$TARGET_APP pid=$PID"
+while /bin/kill -0 "$PID" 2>/dev/null; do
+  if [ "$WAIT_PID_SECONDS" -ge "$MAX_WAIT_PID_SECONDS" ]; then
+    log "host process still running after ${WAIT_PID_SECONDS}s, aborting update"
+    exit 1
+  fi
+  /bin/sleep 1
+  WAIT_PID_SECONDS=$((WAIT_PID_SECONDS + 1))
 done
-log "host process exited"
-hdiutil attach "$DMG" -nobrowse -quiet -mountpoint "$MOUNT_DIR" >>"$LOG_FILE" 2>&1
-APP_SRC=$(ls "$MOUNT_DIR"/*.app 2>/dev/null | head -n 1 || true)
-if [ -z "$APP_SRC" ]; then
-  log "no .app found inside dmg"
-  hdiutil detach "$MOUNT_DIR" -quiet >>"$LOG_FILE" 2>&1 || true
+log "host process exited after ${WAIT_PID_SECONDS}s"
+/bin/sleep 1
+
+if [ ! -f "$PACKAGE" ]; then
+  log "package file missing: $PACKAGE"
+  exit 1
+fi
+
+if ! prepare_app_source_from_package; then
+  cleanup_mount
   exit 1
 fi
 
 log "install target: $TARGET_APP"
 if ! replace_app_direct; then
   log "direct replace failed, trying admin replace"
-  run_admin_replace >>"$LOG_FILE" 2>&1
+  if ! run_admin_replace >>"$LOG_FILE" 2>&1; then
+    log "admin replace failed"
+    cleanup_mount
+    exit 1
+  fi
 fi
 
+if ! resolve_app_binary_rel "$TARGET_APP"; then
+  log "target app binary missing after replace: $TARGET_APP"
+  cleanup_mount
+  exit 1
+fi
 if [ ! -x "$TARGET_APP/$APP_BIN_REL" ]; then
-  log "target app binary missing after replace: $TARGET_APP/$APP_BIN_REL"
-  hdiutil detach "$MOUNT_DIR" -quiet >>"$LOG_FILE" 2>&1 || true
+  log "target app binary not executable: $TARGET_APP/$APP_BIN_REL"
+  cleanup_mount
   exit 1
 fi
 
-hdiutil detach "$MOUNT_DIR" -quiet >>"$LOG_FILE" 2>&1 || true
-rm -rf "$MOUNT_DIR" "$DMG" "$STAGED" >>"$LOG_FILE" 2>&1 || true
+cleanup_mount
+# 不要删除 STAGED（脚本自身所在目录），只删安装包与临时解压目录
+/bin/rm -rf "$EXTRACT_DIR" >>"$LOG_FILE" 2>&1 || true
+/bin/rm -f "$PACKAGE" >>"$LOG_FILE" 2>&1 || true
 relaunch_app
 log "relaunch requested"
-	`, pid, dmgPath, targetApp, stagedDir, mountDir, logPath)
+exit 0
+	`, pid, packagePath, targetApp, stagedDir, mountDir, logPath)
 }
 
 func buildLinuxScript(tarPath, targetExe, stagedDir string, pid int) string {
