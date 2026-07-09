@@ -9,6 +9,7 @@ import { BrowserOpenURL, Environment, EventsOn, WindowFullscreen, WindowGetPosit
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import FloatingWorkbenchWindows from './components/FloatingWorkbenchWindows';
+import FloatingAIChatWindow from './components/FloatingAIChatWindow';
 import FloatingQueryResultWindows from './components/FloatingQueryResultWindows';
 import ConnectionModal from './components/ConnectionModal';
 import SnippetSettingsModal from './components/SnippetSettingsModal';
@@ -18,7 +19,7 @@ import { type DataSyncEntryMode } from './components/dataSyncEntryMode';
 import DriverManagerModal from './components/DriverManagerModal';
 import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';
 import LogPanel from './components/LogPanel';
-import AISettingsModal, { AISettingsContent } from './components/AISettingsModal';
+import { AISettingsContent } from './components/AISettingsModal';
 import AIChatPanel from './components/AIChatPanel';
 import AIPanelErrorBoundary from './components/ai/AIPanelErrorBoundary';
 import SecurityUpdateBanner from './components/SecurityUpdateBanner';
@@ -836,6 +837,9 @@ function App() {
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
   const aiPanelVisible = useStore(state => state.aiPanelVisible);
+  const detachedAIChatWindow = useStore(state => state.detachedAIChatWindow);
+  const detachAIChatPanel = useStore(state => state.detachAIChatPanel);
+  const aiChatDetached = Boolean(detachedAIChatWindow);
   const toggleAIPanel = useStore(state => state.toggleAIPanel);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const windowDiagSequenceRef = React.useRef(0);
@@ -1905,7 +1909,9 @@ function App() {
           setIsSecurityUpdateSettingsOpen(false);
           setSecurityUpdateRepairSource(repairEntry.repairSource);
           setFocusedAIProviderId(repairEntry.providerId);
-          setIsAISettingsOpen(true);
+          setActiveSettingsCenterGroupKey('services');
+          setActiveSettingsCenterPane({ key: 'ai', group: 'services' });
+          setIsSettingsModalOpen(true);
           return;
       }
       if (repairEntry.type === 'retry') {
@@ -2636,7 +2642,7 @@ function App() {
   const [selectedDataRootPath, setSelectedDataRootPath] = useState('');
   const [dataRootLoading, setDataRootLoading] = useState(false);
   const [dataRootApplying, setDataRootApplying] = useState(false);
-  const [isAISettingsOpen, setIsAISettingsOpen] = useState(false);
+
   const aiEntryPlacement = resolveAIEntryPlacement();
   const legacyAiEdgeHandleAttachment = resolveLegacyAIEdgeHandleAttachment(aiPanelVisible);
   const aiPanelOverlayActive = aiPanelVisible && shouldOverlayAIPanel({
@@ -2892,15 +2898,36 @@ function App() {
       setActiveSettingsCenterPane({ key, group });
       setIsSettingsModalOpen(true);
   }, []);
+  const finalizeSecurityRepairReturnFromAISettings = useCallback(() => {
+      const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
+      setFocusedAIProviderId(undefined);
+      setSecurityUpdateRepairSource(null);
+      if (reopenSecurityUpdateDetails) {
+          setIsSecurityUpdateSettingsOpen(true);
+      }
+  }, [securityUpdateRepairSource]);
   const handleBackFromSettingsCenterPane = useCallback(() => {
+      const leavingAI = activeSettingsCenterPane?.key === 'ai';
       const returnGroup = activeSettingsCenterPane?.group ?? activeSettingsCenterGroupKey;
       setActiveSettingsCenterGroupKey(returnGroup);
       setActiveSettingsCenterPane(null);
-  }, [activeSettingsCenterGroupKey, activeSettingsCenterPane?.group]);
+      if (leavingAI) {
+          finalizeSecurityRepairReturnFromAISettings();
+      }
+  }, [
+      activeSettingsCenterGroupKey,
+      activeSettingsCenterPane?.group,
+      activeSettingsCenterPane?.key,
+      finalizeSecurityRepairReturnFromAISettings,
+  ]);
   const handleCancelSettingsCenterPane = useCallback(() => {
+      const leavingAI = activeSettingsCenterPane?.key === 'ai';
       setActiveSettingsCenterPane(null);
       setIsSettingsModalOpen(false);
-  }, []);
+      if (leavingAI) {
+          finalizeSecurityRepairReturnFromAISettings();
+      }
+  }, [activeSettingsCenterPane?.key, finalizeSecurityRepairReturnFromAISettings]);
   const isSettingsAboutPaneOpen = isSettingsModalOpen && activeSettingsCenterPane?.key === 'about-go-navi';
   const isSettingsAboutPaneOpenRef = useRef(false);
   useEffect(() => {
@@ -3245,10 +3272,13 @@ function App() {
       }
   }, [securityUpdateRepairSource]);
 
+  /** 从聊天面板等入口打开 AI 配置：走设置中心，不再弹独立 AISettingsModal */
   const handleOpenAISettings = useCallback((providerId?: string) => {
       setSecurityUpdateRepairSource(null);
       setFocusedAIProviderId(providerId);
-      setIsAISettingsOpen(true);
+      setActiveSettingsCenterGroupKey('services');
+      setActiveSettingsCenterPane({ key: 'ai', group: 'services' });
+      setIsSettingsModalOpen(true);
   }, []);
 
   const handleAIPanelRenderError = useCallback((error: Error, errorInfo: React.ErrorInfo) => {
@@ -3267,16 +3297,6 @@ function App() {
   const handleRetryAIPanelRender = useCallback(() => {
       setAiPanelRenderNonce((current) => current + 1);
   }, []);
-
-  const handleCloseAISettings = useCallback(() => {
-      const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
-      setIsAISettingsOpen(false);
-      setFocusedAIProviderId(undefined);
-      setSecurityUpdateRepairSource(null);
-      if (reopenSecurityUpdateDetails) {
-          setIsSecurityUpdateSettingsOpen(true);
-      }
-  }, [securityUpdateRepairSource]);
 
   const handleWebLogout = useCallback(async () => {
       try {
@@ -6498,7 +6518,7 @@ function App() {
                )}
                </>
                )}
-               {aiPanelVisible && (
+               {aiPanelVisible && !aiChatDetached && (
                   <div
                     className={aiPanelOverlayActive ? 'gn-v2-ai-panel-overlay' : undefined}
                     style={aiPanelOverlayActive
@@ -6601,12 +6621,32 @@ function App() {
                           </div>
                         )}
                       >
-                        <AIChatPanel width={aiPanelRenderWidth} darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
-                          handleOpenAISettings();
-                        }} overlayTheme={overlayTheme} />
+                        <AIChatPanel
+                          width={aiPanelRenderWidth}
+                          darkMode={darkMode}
+                          bgColor={bgContent}
+                          presentation="dock"
+                          onClose={() => setAIPanelVisible(false)}
+                          onDetach={() => detachAIChatPanel()}
+                          onOpenSettings={() => {
+                            handleOpenAISettings();
+                          }}
+                          overlayTheme={overlayTheme}
+                        />
                       </AIPanelErrorBoundary>
                       </div>
                   </div>
+               )}
+               {aiPanelVisible && aiChatDetached && (
+                  <FloatingAIChatWindow
+                    darkMode={darkMode}
+                    bgColor={bgContent}
+                    overlayTheme={overlayTheme}
+                    renderNonce={aiPanelRenderNonce}
+                    onOpenSettings={() => handleOpenAISettings()}
+                    onRenderError={handleAIPanelRenderError}
+                    onRetryRender={handleRetryAIPanelRender}
+                  />
                )}
              </div>
              {!isV2Ui && isLogPanelOpen && (
@@ -7282,10 +7322,7 @@ function App() {
           <Modal
             title={renderUtilityModalTitle(<SettingOutlined />, t('app.settings.title'), t('app.settings.description'))}
             open={isSettingsModalOpen}
-            onCancel={() => {
-                setActiveSettingsCenterPane(null);
-                setIsSettingsModalOpen(false);
-            }}
+            onCancel={handleCancelSettingsCenterPane}
             footer={null}
             centered
             width={1080}
@@ -7632,16 +7669,6 @@ function App() {
             overlayTheme={overlayTheme}
             surfaceOpacity={effectiveOpacity}
           />
-          {isAISettingsOpen && (
-          <AISettingsModal
-            open={isAISettingsOpen}
-            onClose={handleCloseAISettings}
-            darkMode={darkMode}
-            overlayTheme={overlayTheme}
-            focusProviderId={focusedAIProviderId}
-            onBeforeExternalMCPUse={handlePrepareExternalMCPUse}
-          />
-          )}
           <ConnectionPackagePasswordModal
             open={connectionPackageDialog.open && !(isToolsModalOpen && activeToolCenterPane?.key === 'connection-package')}
             title={connectionPackageDialog.mode === 'export'

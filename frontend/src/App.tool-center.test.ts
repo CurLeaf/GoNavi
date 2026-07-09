@@ -304,7 +304,7 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('{isSettingsModalOpen && (');
     expect(appSource).toContain('{isThemeModalOpen && (');
     expect(appSource).toContain('{isShortcutModalOpen && (');
-    expect(appSource).toContain('{isAISettingsOpen && (');
+    expect(appSource).not.toContain('{isAISettingsOpen && (');
     expect(appSource).toContain('{isDriverModalOpen && (');
     expect(appSource).toContain('{isSyncModalOpen && (');
   });
@@ -320,8 +320,11 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('setIsModalOpen(true);');
   });
 
-  it('loads editable AI provider details before opening the edit modal so stored api keys can be shown', () => {
-    expect(appSource).toContain('<AISettingsModal');
+  it('loads editable AI provider details inside settings-center AI pane content', () => {
+    // 聊天/入口打开 AI 配置走设置中心 AISettingsContent，不再挂独立 AISettingsModal
+    expect(appSource).toContain('<AISettingsContent');
+    expect(appSource).toContain("activeSettingsCenterPane.key === 'ai'");
+    expect(appSource).not.toContain('<AISettingsModal');
     const modalSource = readFileSync(new URL('./components/AISettingsModal.tsx', import.meta.url), 'utf8');
     expect(modalSource).toContain("typeof Service?.AIGetEditableProvider === 'function'");
     expect(modalSource).toContain('await Service.AIGetEditableProvider(p.id)');

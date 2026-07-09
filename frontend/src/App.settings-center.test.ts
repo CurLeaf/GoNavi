@@ -105,6 +105,14 @@ describe('settings center layout', () => {
     expect(appSource).toContain('renderSettingsCenterAboutPane()');
   });
 
+  it('opens AI settings from the chat panel via settings center instead of a standalone modal', () => {
+    expect(appSource).toContain('const handleOpenAISettings = useCallback((providerId?: string) => {');
+    expect(appSource).toContain("setActiveSettingsCenterPane({ key: 'ai', group: 'services' })");
+    expect(appSource).toContain('setIsSettingsModalOpen(true)');
+    expect(appSource).not.toContain('setIsAISettingsOpen(true)');
+    expect(appSource).not.toContain('<AISettingsModal');
+  });
+
   it('opens the about group directly instead of showing a one-item list', () => {
     expect(appSource).toContain('const resolveSettingsCenterGroupInitialPane = (group: SettingsCenterGroupKey): SettingsCenterPaneState | null => (');
     expect(appSource).toContain("group === 'about' ? { key: 'about-go-navi', group: 'about' } : null");
