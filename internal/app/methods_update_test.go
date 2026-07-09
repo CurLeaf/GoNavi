@@ -741,13 +741,20 @@ func TestBuildWindowsScriptReplacesTargetWithDownloadedExe(t *testing.T) {
 		`:replace_binary`,
 		`move /Y "%TARGET%" "%TARGET_OLD%"`,
 		`copy /Y "%SOURCE_EXE%" "%TARGET%"`,
-		`if exist "%SOURCE%" del /F /Q "%SOURCE%"`,
 		`start "" /D "%TARGET_DIR%" "%TARGET%"`,
+		`package kept for manual install`,
+		`del /F /Q "%SOURCE%"`,
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(script, want) {
 			t.Fatalf("windows update script missing required token: %s\nscript:\n%s", want, script)
 		}
+	}
+	// relaunch 必须在删除安装包之前
+	startIdx := strings.Index(script, `start "" /D "%TARGET_DIR%" "%TARGET%"`)
+	delIdx := strings.LastIndex(script, `del /F /Q "%SOURCE%"`)
+	if startIdx < 0 || delIdx < 0 || delIdx < startIdx {
+		t.Fatalf("source package must be deleted only after relaunch attempt (start=%d del=%d)", startIdx, delIdx)
 	}
 	if strings.Contains(script, "launch_downloaded_exe") {
 		t.Fatalf("windows update script should not launch downloaded exe side-by-side\nscript:\n%s", script)

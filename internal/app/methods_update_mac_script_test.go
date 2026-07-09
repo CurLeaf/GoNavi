@@ -23,11 +23,12 @@ func TestBuildMacScriptContainsHardeningGuards(t *testing.T) {
 		"replace_app_direct",
 		"run_admin_replace",
 		"relaunch_app",
-		"open -n -a",
+		`open -n "$TARGET_APP"`,
 		// 安装包扩展名分支
 		"dmg)",
 		"zip)",
-		// 不要在脚本运行中 rm -rf 整个 STAGED（脚本自身所在目录）
+		// relaunch 成功后再删安装包，失败则保留
+		"package kept for manual install",
 		`/bin/rm -f "$PACKAGE"`,
 	}
 	for _, token := range mustContain {
@@ -37,6 +38,12 @@ func TestBuildMacScriptContainsHardeningGuards(t *testing.T) {
 	}
 	if strings.Contains(script, `rm -rf "$MOUNT_DIR" "$DMG" "$STAGED"`) {
 		t.Fatal("mac update script must not delete STAGED while the script may still be running from it")
+	}
+	// 确保不会在 relaunch 之前无条件删除安装包
+	rmIdx := strings.Index(script, `/bin/rm -f "$PACKAGE"`)
+	relaunchIdx := strings.Index(script, "if ! relaunch_app; then")
+	if rmIdx < 0 || relaunchIdx < 0 || rmIdx < relaunchIdx {
+		t.Fatalf("package cleanup must happen only after relaunch attempt (rmIdx=%d relaunchIdx=%d)", rmIdx, relaunchIdx)
 	}
 	if !strings.Contains(script, "/tmp/GoNavi-1.2.3-MacOS-Arm64.dmg") {
 		t.Fatal("expected package path embedded in script")

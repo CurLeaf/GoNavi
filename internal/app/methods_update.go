@@ -1765,14 +1765,23 @@ exit /b 1
 
 :move_done
 del /F /Q "%TARGET_OLD%" >> "%LOG_FILE%" 2>&1
-if exist "%SOURCE%" del /F /Q "%SOURCE%" >> "%LOG_FILE%" 2>&1
+rem 先重启，成功后再删安装包，避免失败时 latest 包被删、用户只剩旧 dev 可运行
+call :log launching target: %TARGET%
 start "" /D "%TARGET_DIR%" "%TARGET%" >> "%LOG_FILE%" 2>&1
 if %ERRORLEVEL% NEQ 0 (
   call :log cmd start failed, trying powershell Start-Process
   powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%TARGET%' -WorkingDirectory '%TARGET_DIR%'" >> "%LOG_FILE%" 2>&1
   if !ERRORLEVEL! NEQ 0 (
-    call :log relaunch failed
+    call :log relaunch failed - package kept for manual install: %SOURCE%
     exit /b 1
+  )
+)
+rem relaunch 已发出后再清理下载包与 staging
+if exist "%SOURCE%" (
+  if /I not "%SOURCE%"=="%TARGET%" (
+    if /I not "%SOURCE_EXE%"=="%TARGET%" (
+      del /F /Q "%SOURCE%" >> "%LOG_FILE%" 2>&1
+    )
   )
 )
 rmdir /S /Q "%STAGED%" >> "%LOG_FILE%" 2>&1
@@ -1943,15 +1952,25 @@ replace_app_direct() {
 }
 
 relaunch_app() {
-  if /usr/bin/open -n -a "$TARGET_APP" >>"$LOG_FILE" 2>&1; then
-    return 0
-  fi
+  # open -a 需要应用名，不能传完整路径；路径必须用 open -n "xxx.app"
   if /usr/bin/open -n "$TARGET_APP" >>"$LOG_FILE" 2>&1; then
+    log "relaunch via open -n path ok"
     return 0
   fi
-  log "open failed, trying binary launch"
-  nohup "$TARGET_APP/$APP_BIN_REL" >>"$LOG_FILE" 2>&1 &
-  return 0
+  local app_name
+  app_name=$(basename "$TARGET_APP" .app)
+  if [ -n "$app_name" ] && /usr/bin/open -n -a "$app_name" >>"$LOG_FILE" 2>&1; then
+    log "relaunch via open -n -a name ok: $app_name"
+    return 0
+  fi
+  log "open failed, trying binary launch: $TARGET_APP/$APP_BIN_REL"
+  if [ -x "$TARGET_APP/$APP_BIN_REL" ]; then
+    nohup "$TARGET_APP/$APP_BIN_REL" >>"$LOG_FILE" 2>&1 &
+    log "relaunch via binary pid=$!"
+    return 0
+  fi
+  log "relaunch failed: no launch method succeeded"
+  return 1
 }
 
 log "updater started package=$PACKAGE target=$TARGET_APP pid=$PID"
@@ -1980,29 +1999,36 @@ log "install target: $TARGET_APP"
 if ! replace_app_direct; then
   log "direct replace failed, trying admin replace"
   if ! run_admin_replace >>"$LOG_FILE" 2>&1; then
-    log "admin replace failed"
+    log "admin replace failed — package kept at: $PACKAGE"
     cleanup_mount
     exit 1
   fi
 fi
 
 if ! resolve_app_binary_rel "$TARGET_APP"; then
-  log "target app binary missing after replace: $TARGET_APP"
+  log "target app binary missing after replace: $TARGET_APP — package kept at: $PACKAGE"
   cleanup_mount
   exit 1
 fi
 if [ ! -x "$TARGET_APP/$APP_BIN_REL" ]; then
-  log "target app binary not executable: $TARGET_APP/$APP_BIN_REL"
+  log "target app binary not executable: $TARGET_APP/$APP_BIN_REL — package kept at: $PACKAGE"
   cleanup_mount
   exit 1
 fi
 
 cleanup_mount
-# 不要删除 STAGED（脚本自身所在目录），只删安装包与临时解压目录
+# 仅清理临时解压目录；安装包在 relaunch 成功后再删，失败则保留便于手动安装
 /bin/rm -rf "$EXTRACT_DIR" >>"$LOG_FILE" 2>&1 || true
+
+if ! relaunch_app; then
+  log "update files replaced but relaunch failed — package kept for manual install: $PACKAGE"
+  log "please open: $TARGET_APP"
+  exit 1
+fi
+
+# relaunch 已发出：再删安装包（用户已不需要 dmg/zip）
 /bin/rm -f "$PACKAGE" >>"$LOG_FILE" 2>&1 || true
-relaunch_app
-log "relaunch requested"
+log "relaunch requested; package cleaned if possible"
 exit 0
 	`, pid, packagePath, targetApp, stagedDir, mountDir, logPath)
 }
@@ -2055,14 +2081,24 @@ func detectMacAppPath(exePath string) string {
 func resolveMacUpdateTarget(exePath string) string {
 	targetApp := detectMacAppPath(exePath)
 	if targetApp == "" {
+		logger.Warnf("无法从可执行路径解析 .app，回退 /Applications/GoNavi.app：exe=%s", exePath)
 		return "/Applications/GoNavi.app"
 	}
 	targetApp = filepath.Clean(targetApp)
-	// Gatekeeper App Translocation 路径不可用于稳定覆盖更新，统一回退到 /Applications。
+	// Gatekeeper App Translocation 路径不可用于稳定覆盖更新。
+	// 优先使用 /Applications 中已有的正式安装；否则仍回退到标准路径（避免写进临时隔离目录）。
 	if strings.Contains(targetApp, string(filepath.Separator)+"AppTranslocation"+string(filepath.Separator)) {
-		logger.Warnf("检测到 AppTranslocation 运行路径，更新目标回退至 /Applications/GoNavi.app：%s", targetApp)
-		return "/Applications/GoNavi.app"
+		applicationsTarget := "/Applications/GoNavi.app"
+		if st, err := os.Stat(applicationsTarget); err == nil && st.IsDir() {
+			logger.Warnf("检测到 AppTranslocation，更新目标使用已有 Applications 安装：%s（来自 %s）", applicationsTarget, targetApp)
+			return applicationsTarget
+		}
+		logger.Warnf("检测到 AppTranslocation 且 Applications 无安装，仍将更新到 %s（来自 %s）", applicationsTarget, targetApp)
+		return applicationsTarget
 	}
+	// 正在运行的是桌面/便携 .app（含 dev 包）：必须覆盖「当前这份」而不是误写到 /Applications，
+	// 否则会出现：latest 包被删、用户仍打开旧的 Desktop dev 包。
+	logger.Infof("macOS 更新目标使用当前运行的应用包：%s", targetApp)
 	return targetApp
 }
 
