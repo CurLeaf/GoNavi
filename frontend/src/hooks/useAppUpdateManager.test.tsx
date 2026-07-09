@@ -281,6 +281,47 @@ describe('useAppUpdateManager', () => {
     expect(messageApi.error).not.toHaveBeenCalled();
   });
 
+  it('opens settings-center bridge instead of legacy about modal on silent update discovery', async () => {
+    const bridge = {
+      open: vi.fn(),
+      close: vi.fn(),
+      isOpen: vi.fn(() => false),
+    };
+    const bridgeRef = { current: bridge };
+
+    backendApp.CheckForUpdatesSilently.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        assetSize: 1024,
+      },
+    });
+
+    const Harness = () => {
+      hook = useAppUpdateManager({
+        runtimeBuildType: 'release',
+        t,
+        updateCenterBridgeRef: bridgeRef,
+      });
+      return null;
+    };
+
+    act(() => {
+      renderer = create(<Harness />);
+    });
+
+    await act(async () => {
+      await hook?.checkForUpdates(true);
+    });
+
+    expect(bridge.open).toHaveBeenCalledTimes(1);
+    expect(hook?.isAboutOpen).toBe(false);
+    expect(hook?.lastUpdateInfo?.hasUpdate).toBe(true);
+    expect(hook?.lastUpdateInfo?.latestVersion).toBe('0.8.2');
+  });
+
   it('opens the downloaded update directory when a package is already downloaded', async () => {
     backendApp.CheckForUpdates.mockResolvedValue({
       success: true,

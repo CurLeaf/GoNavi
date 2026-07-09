@@ -76,6 +76,24 @@ describe('settings center layout', () => {
     expect(appSource).toContain("t('common.back_to_previous')");
   });
 
+  it('uses instant-apply footer actions only on v2 theme settings pane', () => {
+    expect(appSource).toContain("isV2Ui && activeSettingsCenterPane.key === 'theme' ? (");
+    expect(appSource).toContain("t('common.close')");
+    expect(appSource).toContain("t('app.theme.instant_apply_hint')");
+  });
+
+  it('gates the new theme layout to v2 and keeps legacy side nav for old UI', () => {
+    expect(appSource).toContain('renderThemeSettingsContentV2');
+    expect(appSource).toContain('renderThemeSettingsContentLegacy');
+    expect(appSource).toContain('isV2Ui ? renderThemeSettingsContentV2() : renderThemeSettingsContentLegacy()');
+    expect(appSource).toContain("gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0'");
+    expect(appSource).toContain('className="gonavi-theme-settings"');
+    expect(appSource).toContain('ThemeSettingsSlider');
+    expect(appSource).toContain("value: 'workspace'");
+    expect(appSource).toContain('gonavi-settings-tabs');
+    expect(appSource).toContain('setThemeModalSection(item.value)');
+  });
+
   it('opens theme, AI, and about entries inside settings center detail panes', () => {
     expect(appSource).toContain("handleOpenSettingsCenterPane('preferences', 'theme')");
     expect(appSource).toContain("handleOpenSettingsCenterPane('services', 'ai')");
@@ -92,6 +110,15 @@ describe('settings center layout', () => {
     expect(appSource).toContain("group === 'about' ? { key: 'about-go-navi', group: 'about' } : null");
     expect(appSource).toContain('setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(group));');
     expect(appSource).toContain('setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(group.key));');
+  });
+
+  it('routes silent update discovery to the settings center about pane via bridge', () => {
+    expect(appSource).toContain('const updateCenterBridgeRef = useRef<{');
+    expect(appSource).toContain('updateCenterBridgeRef,');
+    expect(appSource).toContain('updateCenterBridgeRef.current = {');
+    expect(appSource).toContain("handleOpenSettingsCenterPane('about', 'about-go-navi')");
+    expect(appSource).toContain('prepareAboutSurface');
+    expect(appSource).toContain('isSettingsAboutPaneOpen');
   });
 
   it('renders the settings center about page with the reference card layout', () => {

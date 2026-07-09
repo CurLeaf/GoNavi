@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	stdRuntime "runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
@@ -770,5 +771,65 @@ func TestBuildLinuxScriptPrefersTargetExecutableBasename(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Fatalf("linux update script missing required token: %s\nscript:\n%s", want, script)
 		}
+	}
+}
+
+func TestApplyGitHubAPIRequestHeadersUsesTokenAndVersion(t *testing.T) {
+	t.Setenv("GONAVI_GITHUB_TOKEN", "ghp_test_token")
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/Syngnat/GoNavi/releases/latest", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	applyGitHubAPIRequestHeaders(req)
+	if got := req.Header.Get("Authorization"); got != "Bearer ghp_test_token" {
+		t.Fatalf("Authorization = %q", got)
+	}
+	if got := req.Header.Get("X-GitHub-Api-Version"); got != updateGitHubAPIVersion {
+		t.Fatalf("X-GitHub-Api-Version = %q", got)
+	}
+	if !strings.HasPrefix(req.Header.Get("User-Agent"), "GoNavi-Updater/") {
+		t.Fatalf("User-Agent = %q", req.Header.Get("User-Agent"))
+	}
+}
+
+func TestClassifyGitHubUpdateHTTPErrorRateLimit(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("X-RateLimit-Remaining", "0")
+	headers.Set("X-RateLimit-Reset", "1783562945")
+	body := []byte(`{"message":"API rate limit exceeded for 1.2.3.4."}`)
+	err := classifyGitHubUpdateHTTPError(http.StatusForbidden, body, headers, true)
+	var localized localizedUpdateError
+	if !errors.As(err, &localized) {
+		t.Fatalf("expected localizedUpdateError, got %T %v", err, err)
+	}
+	if localized.key != "app.update.backend.error.check_http_rate_limited" {
+		t.Fatalf("unexpected key: %s", localized.key)
+	}
+	if detail, _ := localized.params["detail"].(string); !strings.Contains(detail, "rate limit") {
+		t.Fatalf("detail should include rate limit message: %q", detail)
+	}
+}
+
+func TestFetchReleaseByURLFallsBackToCacheOn403(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"API rate limit exceeded"}`))
+	}))
+	defer server.Close()
+
+	updateReleaseCache = sync.Map{}
+	storeCachedGitHubRelease(server.URL, &githubRelease{
+		TagName: "v9.9.9",
+		Name:    "cached",
+		HTMLURL: "https://example.com",
+	})
+
+	release, err := fetchReleaseByURL(server.URL)
+	if err != nil {
+		t.Fatalf("expected cache fallback, got err=%v", err)
+	}
+	if release.TagName != "v9.9.9" {
+		t.Fatalf("unexpected release: %#v", release)
 	}
 }

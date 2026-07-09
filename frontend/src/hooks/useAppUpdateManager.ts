@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { message } from 'antd';
 import { EventsOn } from '../../wailsjs/runtime';
 import { resolveAboutDisplayVersion } from '../utils/appVersionDisplay';
@@ -40,9 +40,17 @@ type UpdateDownloadResultData = {
   autoRelaunch?: boolean;
 };
 
+/** 启动发现更新时打开「设置中心-关于」页（替代旧版关于弹窗） */
+export type UpdateCenterBridge = {
+  open: () => void;
+  close: () => void;
+  isOpen: () => boolean;
+};
+
 type UseAppUpdateManagerOptions = {
   runtimeBuildType: string;
   t: Translator;
+  updateCenterBridgeRef?: MutableRefObject<UpdateCenterBridge | null>;
 };
 
 type AboutInfo = {
@@ -129,6 +137,7 @@ const shouldAutoInstallDownloadedUpdate = (resultData: UpdateDownloadResultData 
 export const useAppUpdateManager = ({
   runtimeBuildType,
   t,
+  updateCenterBridgeRef,
 }: UseAppUpdateManagerOptions) => {
   const updateCheckInFlightRef = useRef(false);
   const updateDownloadInFlightRef = useRef(false);
@@ -140,6 +149,26 @@ export const useAppUpdateManager = ({
   const updateMutedVersionRef = useRef<string | null>(null);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const isAboutOpenRef = useRef(false);
+
+  const isUpdateCenterOpen = useCallback(() => {
+    return Boolean(updateCenterBridgeRef?.current?.isOpen?.() || isAboutOpenRef.current);
+  }, [updateCenterBridgeRef]);
+
+  // 仅打开关于 UI；应用信息加载由 prepareAboutSurface / isAboutOpen effect 负责
+  const openUpdateCenter = useCallback(() => {
+    if (updateCenterBridgeRef?.current?.open) {
+      updateCenterBridgeRef.current.open();
+      return;
+    }
+    // 兼容：未接线时回退旧版关于弹窗
+    setIsAboutOpen(true);
+  }, [updateCenterBridgeRef]);
+
+  const closeUpdateCenter = useCallback(() => {
+    updateCenterBridgeRef?.current?.close?.();
+    setIsAboutOpen(false);
+  }, [updateCenterBridgeRef]);
+
   const [aboutLoading, setAboutLoading] = useState(false);
   const [updateChannel, setUpdateChannelState] = useState<UpdateChannel>('latest');
   const [isUpdateChannelLoading, setIsUpdateChannelLoading] = useState(false);
@@ -355,7 +384,7 @@ export const useAppUpdateManager = ({
     };
     if (!info) return;
     setUpdateChannelState(normalizeUpdateChannel(info.channel));
-    const aboutOpen = isAboutOpenRef.current;
+    const aboutOpen = isUpdateCenterOpen();
     if (info.hasUpdate) {
       const infoKey = buildUpdateKey(info);
       if (!info.downloaded && updateDownloadedVersionRef.current === infoKey) {
@@ -426,7 +455,8 @@ export const useAppUpdateManager = ({
       }
       if (silent && !aboutOpen && updateMutedVersionRef.current !== infoKey && updateNotifiedVersionRef.current !== infoKey) {
         updateNotifiedVersionRef.current = infoKey;
-        setIsAboutOpen(true);
+        // 启动/后台检查发现更新时，打开设置中心「关于」页，不再弹旧版关于对话框
+        openUpdateCenter();
       }
     } else if (!silent) {
       setUpdateDownloadProgress((prev) => {
@@ -452,7 +482,7 @@ export const useAppUpdateManager = ({
     } else {
       setLastUpdateInfo(info);
     }
-  }, [formatAboutUpdateStatus, t]);
+  }, [formatAboutUpdateStatus, isUpdateCenterOpen, openUpdateCenter, t]);
 
   const loadAboutInfo = useCallback(async () => {
     setAboutLoading(true);
@@ -477,6 +507,12 @@ export const useAppUpdateManager = ({
       setAboutLoading(false);
     }
   }, [t]);
+
+  /** 关于页（设置中心或旧弹窗）打开时刷新状态与应用信息 */
+  const prepareAboutSurface = useCallback(() => {
+    setAboutUpdateStatus(formatAboutUpdateStatus(lastUpdateInfo));
+    void loadAboutInfo();
+  }, [formatAboutUpdateStatus, lastUpdateInfo, loadAboutInfo]);
 
   const loadUpdateChannel = useCallback(async () => {
     const backendApp = (window as any).go?.app?.App;
@@ -533,8 +569,8 @@ export const useAppUpdateManager = ({
     if (lastUpdateKey) {
       updateMutedVersionRef.current = lastUpdateKey;
     }
-    setIsAboutOpen(false);
-  }, [lastUpdateKey]);
+    closeUpdateCenter();
+  }, [closeUpdateCenter, lastUpdateKey]);
 
   const markUpdateProgressDismissed = useCallback(() => {
     updateUserDismissedRef.current = true;
@@ -624,6 +660,7 @@ export const useAppUpdateManager = ({
     markUpdateProgressDismissed,
     muteLatestUpdate,
     openDownloadedUpdateDirectory,
+    prepareAboutSurface,
     setIsAboutOpen,
     showUpdateDownloadProgress,
     updateChannel,

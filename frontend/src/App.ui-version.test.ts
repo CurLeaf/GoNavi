@@ -13,40 +13,53 @@ describe('UI version switch placement', () => {
     expect(appSource).toContain("import './v2-theme.css';");
   });
 
-  it('keeps the UI version switch in theme mode and outside macOS-only settings', () => {
+  it('keeps light/dark first with compact previews and UI version preview tiles', () => {
     const themeBranchIndex = appSource.indexOf("{themeModalSection === 'theme' ? (");
-    const uiVersionIndex = appSource.indexOf("t('app.theme.ui_version.title')", themeBranchIndex);
     const lightThemeIndex = appSource.indexOf("t('app.theme.mode.light.label')", themeBranchIndex);
-    const appearanceBranchIndex = appSource.indexOf(') : (', themeBranchIndex);
+    const uiVersionIndex = appSource.indexOf("t('app.theme.ui_version.title')", themeBranchIndex);
+    const appearanceBranchIndex = appSource.indexOf(") : themeModalSection === 'appearance' ? (", themeBranchIndex);
     const macWindowIndex = appSource.indexOf("t('app.theme.mac_window.title')");
 
     expect(themeBranchIndex).toBeGreaterThan(-1);
-    expect(uiVersionIndex).toBeGreaterThan(themeBranchIndex);
-    expect(uiVersionIndex).toBeLessThan(lightThemeIndex);
+    expect(lightThemeIndex).toBeGreaterThan(themeBranchIndex);
+    expect(uiVersionIndex).toBeGreaterThan(lightThemeIndex);
     expect(uiVersionIndex).toBeLessThan(appearanceBranchIndex);
     expect(macWindowIndex).toBeGreaterThan(uiVersionIndex);
-    expect(appSource).toContain("badge: t('app.theme.ui_version.legacy.badge')");
-    expect(appSource).toContain("badge: t('app.theme.ui_version.v2.badge')");
-    expect(appSource).toContain("onClick={() => setAppearance({ uiVersion: item.key as 'legacy' | 'v2' })}");
+    expect(appSource).toContain('renderUiVersionPreview');
+    expect(appSource).toContain('gonavi-settings-ui-version-grid');
+    expect(appSource).toContain("onClick={() => setAppearance({ uiVersion: item.key })}");
     expect(appSource).toContain("t('app.theme.ui_version.beta_warning')");
     expect(appSource).toContain("t('app.theme.ui_version.platform_hint')");
     expect(appSource).toContain("t('app.theme.ui_version.sidebar_search.title')");
     expect(appSource).toContain("value={appearance.v2SidebarSearchMode ?? 'command'}");
     expect(appSource).toContain("setAppearance({ v2SidebarSearchMode: value as 'command' | 'filter' })");
+    expect(appSource).toContain("appearance.uiVersion === 'v2' ? (");
   });
 
-  it('uses the card-style v2 switch from the redesign instead of the segmented pill', () => {
-    const uiVersionIndex = appSource.indexOf("t('app.theme.ui_version.title')");
-    const themeModeIndex = appSource.indexOf("t('app.theme.mode_title')", uiVersionIndex);
-    const uiVersionBlock = appSource.slice(uiVersionIndex, themeModeIndex);
+  it('uses compact previews only in v2 theme settings layout', () => {
+    expect(appSource).toContain('renderThemeSettingsContentV2');
+    expect(appSource).toContain('renderThemeSettingsContentLegacy');
+    expect(appSource).toContain('isV2Ui ? renderThemeSettingsContentV2() : renderThemeSettingsContentLegacy()');
+    expect(appSource).toContain('className="gonavi-theme-settings"');
+    expect(appSource).toContain('gonavi-settings-mode-grid');
+    expect(appSource).toContain('gonavi-settings-mode-tile');
+    expect(appSource).toContain('renderThemeModePreview');
+    expect(appSource).toContain("preview: 'light' as const");
+    expect(appSource).toContain('ThemeSettingsSlider');
+    expect(appSource).toContain("unit=\"percent\"");
+    expect(appSource).toContain('gonavi-settings-tabs');
+    expect(appSource).toContain('gonavi-settings-tab');
+    expect(appSource).toContain('gonavi-settings-pill');
+    // 旧版布局仍保留侧栏导航
+    expect(appSource).toContain("gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0'");
+  });
 
-    expect(uiVersionBlock).toContain("t('app.theme.ui_version.badge.new')");
-    expect(uiVersionBlock).toContain("gridTemplateColumns: 'repeat(2, minmax(0, 1fr))'");
-    expect(uiVersionBlock).toContain("label: t('app.theme.ui_version.legacy.label')");
-    expect(uiVersionBlock).toContain("label: t('app.theme.ui_version.v2.label')");
-    expect(uiVersionBlock).toContain('CheckOutlined');
-    expect(uiVersionBlock).toContain("t('app.theme.ui_version.sidebar_search.title')");
-    expect(uiVersionBlock).toContain('<Segmented');
+  it('isolates workspace settings and remembers the active section', () => {
+    expect(appSource).toContain("value: 'workspace'");
+    expect(appSource).toContain("t('app.theme.nav.workspace.title')");
+    expect(appSource).toContain("setThemeModalSection('workspace')");
+    expect(appSource).toContain("themeModalSection !== 'workspace'");
+    expect(appSource).toContain('gonavi.themeSettingsSection');
   });
 
   it('localizes the v2 sidebar search mode copy', () => {

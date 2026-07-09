@@ -1366,18 +1366,18 @@ export namespace connection {
 	    proxy: SaveGlobalProxyInput;
 	    url: string;
 	    timeoutSeconds?: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new TestGlobalProxyInput(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.proxy = this.convertValues(source["proxy"], SaveGlobalProxyInput);
 	        this.url = source["url"];
 	        this.timeoutSeconds = source["timeoutSeconds"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1591,3 +1591,4 @@ export namespace sync {
 	}
 
 }
+

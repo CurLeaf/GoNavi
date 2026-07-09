@@ -29,6 +29,13 @@ describe('windowStateUi', () => {
     expect(shouldToggleMaximisedWindowForScaleFix('restore', true)).toBe(false);
   });
 
+  it('applies the Windows scale fix on cold startup the same way as taskbar restore', () => {
+    expect(shouldApplyWindowsScaleFix('startup', true)).toBe(true);
+    expect(shouldApplyWindowsScaleFix('startup', false)).toBe(true);
+    expect(shouldToggleMaximisedWindowForScaleFix('startup', true)).toBe(false);
+    expect(shouldResetWebViewZoomForScaleFix('startup', false)).toBe(true);
+  });
+
   it('calls the backend WebView2 zoom reset whenever a minimized window is restored', () => {
     expect(shouldResetWebViewZoomForScaleFix('restore', true)).toBe(true);
     // 字体模糊/DirectWrite 度量缓存异常不一定表现为 viewport ratio drift，

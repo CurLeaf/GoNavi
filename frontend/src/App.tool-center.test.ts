@@ -68,7 +68,7 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain("title: t('app.tools.group.config.title')");
     expect(appSource).toContain("title: t('app.tools.group.workflow.title')");
     expect(appSource).toContain("title: t('app.tools.group.workspace.title')");
-    expect(appSource).toContain("toolCenterGroups.find((group) => group.key === activeToolCenterGroupKey)");
+    expect(appSource).toContain("filteredToolCenterGroups.find((group) => group.key === activeToolCenterGroupKey)");
     expect(appUtilityStylesSource).toContain("const toolCenterModalSplitStyle = useMemo<React.CSSProperties>(() => ({");
     expect(appUtilityStylesSource).toContain("gridTemplateColumns: '232px minmax(0, 1fr)'");
     expect(appUtilityStylesSource).toContain("const toolCenterNavPanelStyle = useMemo<React.CSSProperties>(() => ({");
@@ -381,6 +381,17 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('const nudgedWidth = getWindowsScaleFixNudgedWidth(width);');
     expect(appSource).toContain('WindowSetSize(nudgedWidth, height);');
     expect(appSource).toContain('该异常不一定表现为 viewport ratio drift');
+  });
+
+  it('settles Windows cold-start window layout without requiring a taskbar restore', () => {
+    expect(appSource).toContain("const applyStartupWindowChrome = (attempt: number, mode: 'maximised' | 'fullscreen') => {");
+    expect(appSource).toContain("markStartupWindowRestorePending();");
+    expect(appSource).toContain("applyStartupWindowChrome(1, 'maximised');");
+    expect(appSource).toContain('resolveDefaultStartupWindowBounds(readCurrentVisibleViewport())');
+    expect(appSource).toContain("void fixWindowScaleIfNeeded('startup');");
+    expect(appSource).toContain('const startupLayoutFixTimers = [220, 1000, 1900].map((delayMs) => (');
+    expect(appSource).toContain('if (isStartupWindowRestorePending())');
+    expect(appSource).toContain('clearStartupWindowRestorePending();');
   });
 
   it('captures window state on startup and lifecycle events instead of waiting only for the polling interval', () => {

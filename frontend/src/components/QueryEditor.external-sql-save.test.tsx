@@ -10098,12 +10098,17 @@ describe('QueryEditor external SQL save', () => {
     expect(appCss).toContain('justify-content: flex-start;');
     expect(appCss).toContain('gap: 6px;');
     expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .left {');
-    expect(appCss).toContain('flex: 0 1 auto;');
-    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .right {');
+    // 主名称优先完整显示：左侧可增长，不先被右侧元数据挤成省略号
     expect(appCss).toContain('flex: 1 1 auto;');
+    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .right {');
+    // 元数据让位：优先压缩/省略右侧表名类型，而不是截断字段名
+    expect(appCss).toContain('flex: 0 1 auto;');
+    expect(appCss).toContain('flex-shrink: 4;');
+    expect(appCss).toContain('max-width: 48%;');
     expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row.string-label > .contents > .main > .right > .details-label {');
     expect(appCss).toContain('display: inline !important;');
     expect(appCss).toContain('margin-left: 0;');
+    expect(appCss).toContain('text-overflow: ellipsis;');
     expect(appCss).not.toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget {');
     expect(appCss).not.toContain('width: 680px;');
     expect(appCss).not.toContain('min-width: 560px;');

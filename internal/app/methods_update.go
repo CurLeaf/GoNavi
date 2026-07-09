@@ -17,6 +17,7 @@ import (
 	stdRuntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"GoNavi-Wails/internal/connection"
@@ -33,7 +34,17 @@ const (
 	updateChecksumAsset         = "SHA256SUMS"
 	updateDownloadProgressEvent = "update:download-progress"
 	updateNetworkRetryDelay     = 250 * time.Millisecond
+	updateReleaseCacheTTL       = 10 * time.Minute
+	updateGitHubAPIVersion      = "2022-11-28"
+	updateHTTPBodySnippetLimit  = 240
 )
+
+type cachedGitHubRelease struct {
+	release   *githubRelease
+	fetchedAt time.Time
+}
+
+var updateReleaseCache sync.Map // apiURL -> cachedGitHubRelease
 
 var (
 	updateFetchLatestRelease   = fetchLatestRelease
@@ -60,6 +71,7 @@ type UpdateInfo struct {
 	ReleaseNotesURL    string `json:"releaseNotesUrl"`
 	AssetName          string `json:"assetName"`
 	AssetURL           string `json:"assetUrl"`
+	AssetAPIURL        string `json:"assetApiUrl,omitempty"`
 	AssetSize          int64  `json:"assetSize"`
 	SHA256             string `json:"sha256"`
 	Downloaded         bool   `json:"downloaded"`
@@ -389,13 +401,19 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 
 	// 安装包本体放在工作区根级，staging 目录只保留更新脚本和临时展开物。
 	assetPath := resolveUpdateAssetPath(workspaceDir, stagedDir, info.AssetName)
-	actualHash, err := downloadFileWithHash(info.AssetURL, assetPath, func(downloaded, total int64) {
+	progressCB := func(downloaded, total int64) {
 		reportTotal := total
 		if reportTotal <= 0 {
 			reportTotal = info.AssetSize
 		}
 		a.emitUpdateDownloadProgress("downloading", downloaded, reportTotal, "")
-	})
+	}
+	actualHash, err := downloadFileWithHash(info.AssetURL, assetPath, progressCB)
+	if err != nil && strings.TrimSpace(info.AssetAPIURL) != "" && !strings.EqualFold(strings.TrimSpace(info.AssetAPIURL), strings.TrimSpace(info.AssetURL)) {
+		logger.Warnf("更新包主下载地址失败，尝试 assets API 回退：err=%v", err)
+		_ = os.Remove(assetPath)
+		actualHash, err = downloadFileWithHash(info.AssetAPIURL, assetPath, progressCB)
+	}
 	if err != nil {
 		_ = os.Remove(assetPath)
 		_ = os.RemoveAll(stagedDir)
@@ -503,7 +521,8 @@ func fetchLatestUpdateInfo(channel updateChannel) (UpdateInfo, error) {
 		ReleasePublishedAt: strings.TrimSpace(release.PublishedAt),
 		ReleaseNotesURL:    release.HTMLURL,
 		AssetName:          asset.Name,
-		AssetURL:           asset.BrowserDownloadURL,
+		AssetURL:           firstNonEmptyString(asset.BrowserDownloadURL, asset.URL),
+		AssetAPIURL:        strings.TrimSpace(asset.URL),
 		AssetSize:          asset.Size,
 		SHA256:             sha256Value,
 	}, nil
@@ -568,32 +587,188 @@ func fetchDevRelease() (*githubRelease, error) {
 }
 
 func fetchReleaseByURL(apiURL string) (*githubRelease, error) {
+	apiURL = strings.TrimSpace(apiURL)
+	if apiURL == "" {
+		return nil, localizedUpdateError{key: "app.update.backend.error.latest_version_unparseable"}
+	}
+
 	client := newHTTPClientWithGlobalProxy(15 * time.Second)
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "GoNavi-Updater")
-	req.Header.Set("Accept", "application/vnd.github+json")
+	applyGitHubAPIRequestHeaders(req)
 
 	resp, err := doUpdateRequest(client, req)
 	if err != nil {
+		if cached := loadCachedGitHubRelease(apiURL); cached != nil {
+			logger.Warnf("检查更新网络失败，回退缓存发布信息：url=%s err=%v", apiURL, err)
+			return cached, nil
+		}
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, localizedUpdateError{
-			key:    "app.update.backend.error.check_http_status",
-			params: map[string]any{"status": resp.StatusCode},
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if readErr != nil {
+		if cached := loadCachedGitHubRelease(apiURL); cached != nil {
+			logger.Warnf("检查更新读取响应失败，回退缓存发布信息：url=%s err=%v", apiURL, readErr)
+			return cached, nil
 		}
+		return nil, wrapUpdateNetworkError(readErr)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
+			if cached := loadCachedGitHubRelease(apiURL); cached != nil {
+				logger.Warnf("检查更新被限流/拒绝 (HTTP %d)，回退缓存发布信息：url=%s", resp.StatusCode, apiURL)
+				return cached, nil
+			}
+		}
+		return nil, classifyGitHubUpdateHTTPError(resp.StatusCode, body, resp.Header, true)
 	}
 
 	var release githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+	if err := json.Unmarshal(body, &release); err != nil {
 		return nil, wrapUpdateNetworkError(err)
 	}
+	storeCachedGitHubRelease(apiURL, &release)
 	return &release, nil
+}
+
+func applyGitHubAPIRequestHeaders(req *http.Request) {
+	if req == nil {
+		return
+	}
+	req.Header.Set("User-Agent", "GoNavi-Updater/"+strings.TrimSpace(getCurrentVersion()))
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", updateGitHubAPIVersion)
+	if token := resolveGitHubAPIToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+}
+
+func applyGitHubDownloadRequestHeaders(req *http.Request, assetAPIURL bool) {
+	if req == nil {
+		return
+	}
+	req.Header.Set("User-Agent", "GoNavi-Updater/"+strings.TrimSpace(getCurrentVersion()))
+	if assetAPIURL {
+		req.Header.Set("Accept", "application/octet-stream")
+		req.Header.Set("X-GitHub-Api-Version", updateGitHubAPIVersion)
+		if token := resolveGitHubAPIToken(); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		return
+	}
+	// browser_download_url 通常走 objects/release-assets CDN，不强制 github+json
+	req.Header.Set("Accept", "*/*")
+}
+
+func resolveGitHubAPIToken() string {
+	for _, key := range []string{"GONAVI_GITHUB_TOKEN", "GITHUB_TOKEN"} {
+		if token := strings.TrimSpace(os.Getenv(key)); token != "" {
+			return token
+		}
+	}
+	return ""
+}
+
+func loadCachedGitHubRelease(apiURL string) *githubRelease {
+	value, ok := updateReleaseCache.Load(strings.TrimSpace(apiURL))
+	if !ok {
+		return nil
+	}
+	entry, ok := value.(cachedGitHubRelease)
+	if !ok || entry.release == nil {
+		return nil
+	}
+	if time.Since(entry.fetchedAt) > updateReleaseCacheTTL {
+		return nil
+	}
+	// 浅拷贝，避免调用方意外改写缓存
+	cloned := *entry.release
+	if entry.release.Assets != nil {
+		cloned.Assets = append([]githubAsset(nil), entry.release.Assets...)
+	}
+	return &cloned
+}
+
+func storeCachedGitHubRelease(apiURL string, release *githubRelease) {
+	if strings.TrimSpace(apiURL) == "" || release == nil {
+		return
+	}
+	cloned := *release
+	if release.Assets != nil {
+		cloned.Assets = append([]githubAsset(nil), release.Assets...)
+	}
+	updateReleaseCache.Store(strings.TrimSpace(apiURL), cachedGitHubRelease{
+		release:   &cloned,
+		fetchedAt: time.Now(),
+	})
+}
+
+func classifyGitHubUpdateHTTPError(status int, body []byte, headers http.Header, isCheck bool) error {
+	snippet := strings.TrimSpace(string(body))
+	if len(snippet) > updateHTTPBodySnippetLimit {
+		snippet = snippet[:updateHTTPBodySnippetLimit] + "…"
+	}
+	lower := strings.ToLower(snippet)
+	remaining := strings.TrimSpace(headers.Get("X-RateLimit-Remaining"))
+	reset := strings.TrimSpace(headers.Get("X-RateLimit-Reset"))
+	detailParts := make([]string, 0, 3)
+	if snippet != "" {
+		// 尽量抽出 GitHub JSON message 字段
+		var payload struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(body, &payload) == nil && strings.TrimSpace(payload.Message) != "" {
+			detailParts = append(detailParts, strings.TrimSpace(payload.Message))
+		} else {
+			detailParts = append(detailParts, snippet)
+		}
+	}
+	if remaining != "" {
+		detailParts = append(detailParts, "X-RateLimit-Remaining="+remaining)
+	}
+	if reset != "" {
+		detailParts = append(detailParts, "X-RateLimit-Reset="+reset)
+	}
+	detail := strings.Join(detailParts, " | ")
+
+	rateLimited := status == http.StatusTooManyRequests ||
+		strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "secondary rate limit") ||
+		(status == http.StatusForbidden && remaining == "0")
+
+	if rateLimited {
+		return localizedUpdateError{
+			key:    "app.update.backend.error.check_http_rate_limited",
+			params: map[string]any{"detail": detail},
+		}
+	}
+	if status == http.StatusForbidden {
+		if isCheck {
+			return localizedUpdateError{
+				key:    "app.update.backend.error.check_http_forbidden",
+				params: map[string]any{"detail": detail},
+			}
+		}
+		return localizedUpdateError{
+			key:    "app.update.backend.error.package_download_forbidden",
+			params: map[string]any{"detail": detail},
+		}
+	}
+	if isCheck {
+		return localizedUpdateError{
+			key:    "app.update.backend.error.check_http_status",
+			params: map[string]any{"status": status},
+		}
+	}
+	return localizedUpdateError{
+		key:    "app.update.backend.error.package_download_http_failed",
+		params: map[string]any{"status": status},
+	}
 }
 
 func expectedAssetName(goos, goarch, version string) (string, error) {
@@ -687,42 +862,70 @@ func normalizeGitHubAssetSHA256(digest string) string {
 }
 
 func fetchReleaseSHA256(assets []githubAsset) (map[string]string, error) {
-	var checksumURL string
+	var candidates []string
+	seen := map[string]struct{}{}
+	addCandidate := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return
+		}
+		if _, ok := seen[raw]; ok {
+			return
+		}
+		seen[raw] = struct{}{}
+		candidates = append(candidates, raw)
+	}
 	for _, asset := range assets {
 		if strings.EqualFold(asset.Name, updateChecksumAsset) || strings.Contains(strings.ToLower(asset.Name), "sha256sums") {
-			checksumURL = asset.BrowserDownloadURL
+			addCandidate(asset.BrowserDownloadURL)
+			addCandidate(asset.URL)
 			break
 		}
 	}
-	if checksumURL == "" {
+	if len(candidates) == 0 {
 		return nil, localizedUpdateError{key: "app.update.backend.error.sha256sums_missing"}
 	}
 
 	client := newHTTPClientWithGlobalProxy(15 * time.Second)
-	req, err := http.NewRequest(http.MethodGet, checksumURL, nil)
-	if err != nil {
-		return nil, err
+	var lastStatus int
+	for _, candidate := range candidates {
+		resp, err := doGitHubDownload(client, candidate)
+		if err != nil {
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			continue
+		}
+		if resp.StatusCode == http.StatusOK {
+			return parseSHA256Sums(string(body)), nil
+		}
+		lastStatus = resp.StatusCode
 	}
-	req.Header.Set("User-Agent", "GoNavi-Updater")
-	resp, err := doUpdateRequest(client, req)
-	if err != nil {
-		return nil, err
+	if lastStatus == 0 {
+		lastStatus = http.StatusForbidden
 	}
-	defer resp.Body.Close()
+	return nil, localizedUpdateError{
+		key:    "app.update.backend.error.sha256sums_download_failed",
+		params: map[string]any{"status": lastStatus},
+	}
+}
 
-	if resp.StatusCode != http.StatusOK {
+func doGitHubDownload(client *http.Client, rawURL string) (*http.Response, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
 		return nil, localizedUpdateError{
-			key:    "app.update.backend.error.sha256sums_download_failed",
-			params: map[string]any{"status": resp.StatusCode},
+			key:    "app.update.backend.error.package_download_http_failed",
+			params: map[string]any{"status": 0},
 		}
 	}
-
-	body, err := io.ReadAll(resp.Body)
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, wrapUpdateNetworkError(err)
+		return nil, err
 	}
-
-	return parseSHA256Sums(string(body)), nil
+	applyGitHubDownloadRequestHeaders(req, isGitHubReleaseAssetAPIURL(rawURL))
+	return doUpdateRequest(client, req)
 }
 
 func parseSHA256Sums(content string) map[string]string {
@@ -780,26 +983,15 @@ func downloadFileWithHashWithTimeout(url, filePath string, onProgress func(downl
 		timeout = 10 * time.Minute
 	}
 	client := newHTTPClientWithGlobalProxy(timeout)
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", "GoNavi-Updater")
-	if isGitHubReleaseAssetAPIURL(url) {
-		req.Header.Set("Accept", "application/octet-stream")
-	}
-
-	resp, err := doUpdateRequest(client, req)
+	resp, err := doGitHubDownload(client, url)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", localizedUpdateError{
-			key:    "app.update.backend.error.package_download_http_failed",
-			params: map[string]any{"status": resp.StatusCode},
-		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		return "", classifyGitHubUpdateHTTPError(resp.StatusCode, body, resp.Header, false)
 	}
 
 	// Windows 上旧文件可能被杀毒软件/索引服务占用，先尝试删除并重试
