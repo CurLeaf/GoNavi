@@ -4201,8 +4201,8 @@ function App() {
           </Button>
       ) : null,
       isLatestUpdateDownloaded ? (
-          <Button key="install-direct" type="primary" icon={<DownloadOutlined />} onClick={handleInstallFromProgress}>
-              {t('app.about.action.install_update')}
+          <Button key="restart-to-update" type="primary" icon={<DownloadOutlined />} onClick={handleInstallFromProgress}>
+              {t('app.about.action.restart_to_update')}
           </Button>
       ) : null,
   ].filter(Boolean);
@@ -7961,8 +7961,8 @@ function App() {
                   <Button key="open-install-directory" onClick={openDownloadedUpdateDirectory}>
                       {t('app.about.action.open_install_directory')}
                   </Button>,
-                  <Button key="install" type="primary" onClick={handleInstallFromProgress}>
-                      {t('app.about.action.install_update')}
+                  <Button key="restart" type="primary" onClick={handleInstallFromProgress}>
+                      {t('app.about.action.restart_to_update')}
                   </Button>
               ] : (updateDownloadProgress.status === 'error' ? [
                   <Button key="close" onClick={hideUpdateDownloadProgress}>{t('common.close')}</Button>
@@ -7974,10 +7974,20 @@ function App() {
                       status={updateDownloadProgress.status === 'error' ? 'exception' : (updateDownloadProgress.status === 'done' ? 'success' : 'active')}
                   />
                   <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
-                      {`${formatBytes(updateDownloadProgress.downloaded)} / ${formatBytes(updateDownloadProgress.total)}`}
+                      {updateDownloadProgress.status === 'done'
+                          ? t('app.about.download_progress.complete_hint')
+                          : `${formatBytes(updateDownloadProgress.downloaded)} / ${formatBytes(updateDownloadProgress.total)}`}
                   </div>
                   {updateDownloadProgress.message ? (
-                      <div style={{ fontSize: 12, color: '#ff4d4f' }}>{updateDownloadProgress.message}</div>
+                      <div style={{
+                          fontSize: 12,
+                          color: updateDownloadProgress.status === 'error'
+                              ? '#ff4d4f'
+                              : (darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(16,24,40,0.65)'),
+                      }}
+                      >
+                          {updateDownloadProgress.message}
+                      </div>
                   ) : null}
               </div>
           </Modal>

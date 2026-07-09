@@ -129,11 +129,6 @@ const normalizeAboutInfo = (value: unknown): AboutInfo => {
   };
 };
 
-const shouldAutoInstallDownloadedUpdate = (resultData: UpdateDownloadResultData | null | undefined): boolean => {
-  const platform = String(resultData?.platform || '').trim().toLowerCase();
-  return platform === 'darwin' && resultData?.autoRelaunch !== false;
-};
-
 export const useAppUpdateManager = ({
   runtimeBuildType,
   t,
@@ -191,7 +186,7 @@ export const useAppUpdateManager = ({
       const localDownloaded = updateDownloadedVersionRef.current === buildUpdateKey(info);
       const hasDownloaded = Boolean(info.downloaded) || localDownloaded;
       return hasDownloaded
-        ? t('app.about.update_status.new_version_downloaded', { version: info.latestVersion })
+        ? t('app.about.update_status.new_version_ready_restart', { version: info.latestVersion })
         : t('app.about.update_status.new_version_not_downloaded', { version: info.latestVersion });
     }
     return t('app.about.update_status.latest', { version: info.currentVersion || t('common.unknown') });
@@ -273,27 +268,22 @@ export const useAppUpdateManager = ({
           downloadPath: resultData?.downloadPath || prev.downloadPath || info.downloadPath,
         };
       });
-      if (resultData?.downloadPath) {
-        void message.success({ content: t('app.about.message.download_completed_with_path', { path: resultData.downloadPath }), duration: 5 });
-      } else {
-        void message.success({ content: t('app.about.message.download_completed'), duration: 2 });
-      }
+      // 与 Terminus/Codex 一致：下载到 100% 后停留在就绪态，由用户点击「重启应用更新」
+      setUpdateDownloadProgress((prev) => ({
+        ...prev,
+        open: true,
+        status: 'done',
+        percent: 100,
+        downloaded: prev.total > 0 ? prev.total : (info.assetSize || prev.downloaded),
+        message: t('app.about.download_progress.ready_to_restart'),
+      }));
+      void message.success({
+        content: resultData?.downloadPath
+          ? t('app.about.message.download_ready_restart_with_path', { path: resultData.downloadPath })
+          : t('app.about.message.download_ready_restart'),
+        duration: 4,
+      });
       setAboutUpdateStatus(formatAboutUpdateStatus({ ...info, channel: normalizeUpdateChannel(info.channel), downloaded: true }));
-
-      if (shouldAutoInstallDownloadedUpdate(resultData)) {
-        let installRes: any = null;
-        try {
-          installRes = await (window as any).go?.app?.App?.InstallUpdateAndRestart?.();
-        } catch (error: any) {
-          installRes = { success: false, message: error?.message || t('common.unknown') };
-        }
-        if (!installRes?.success) {
-          void message.error(t('app.about.message.install_failed_with_error', { error: installRes?.message || t('common.unknown') }));
-          return;
-        }
-        updateInstallTriggeredVersionRef.current = targetKey || null;
-        setUpdateDownloadProgress((prev) => ({ ...prev, open: false }));
-      }
     } else {
       setUpdateDownloadProgress((prev) => ({
         ...prev,
@@ -335,14 +325,40 @@ export const useAppUpdateManager = ({
     if (!canInstall) {
       return;
     }
-    const res = await (window as any).go.app.App.InstallUpdateAndRestart();
+    // 点击后进入「正在应用并重启」态，再拉起安装脚本并退出
+    setUpdateDownloadProgress((prev) => ({
+      ...prev,
+      open: true,
+      status: 'downloading',
+      percent: 100,
+      message: t('app.about.download_progress.applying_restart'),
+    }));
+    let res: any = null;
+    try {
+      res = await (window as any).go?.app?.App?.InstallUpdateAndRestart?.();
+    } catch (error: any) {
+      res = { success: false, message: error?.message || t('common.unknown') };
+    }
     if (!res?.success) {
+      setUpdateDownloadProgress((prev) => ({
+        ...prev,
+        open: true,
+        status: 'error',
+        message: res?.message || t('common.unknown'),
+      }));
       void message.error(t('app.about.message.install_failed_with_error', { error: res?.message || t('common.unknown') }));
       return;
     }
     updateInstallTriggeredVersionRef.current = lastUpdateKey || null;
-    hideUpdateDownloadProgress();
-  }, [hideUpdateDownloadProgress, lastUpdateInfo, lastUpdateKey, t, updateDownloadProgress.status]);
+    // 后端会 Quit；此处保持弹窗文案，避免用户误以为失败
+    setUpdateDownloadProgress((prev) => ({
+      ...prev,
+      open: true,
+      status: 'done',
+      percent: 100,
+      message: t('app.about.download_progress.restarting'),
+    }));
+  }, [lastUpdateInfo, lastUpdateKey, t, updateDownloadProgress.status]);
 
   const openDownloadedUpdateDirectory = useCallback(async () => {
     const backendApp = (window as any).go?.app?.App;
@@ -620,16 +636,31 @@ export const useAppUpdateManager = ({
           ? event.percent
           : (total > 0 ? (downloaded / total) * 100 : 0);
         const percent = Math.max(0, Math.min(100, percentRaw));
-        setUpdateDownloadProgress((prev) => ({
-          open: prev.open,
-          version: prev.version,
-          key: prev.key,
-          status: nextStatus,
-          percent,
-          downloaded,
-          total,
-          message: String(event.message || ''),
-        }));
+        setUpdateDownloadProgress((prev) => {
+          // 用户已点「重启应用更新」时，不让 downloading 事件把 100% 就绪态打回中间态文案
+          if (updateInstallTriggeredVersionRef.current && prev.key && updateInstallTriggeredVersionRef.current === prev.key) {
+            return prev;
+          }
+          const eventMessage = String(event.message || '');
+          let message = eventMessage;
+          if (!message) {
+            if (nextStatus === 'done') {
+              message = t('app.about.download_progress.ready_to_restart');
+            } else if (nextStatus === 'start' || nextStatus === 'downloading') {
+              message = t('app.about.download_progress.downloading');
+            }
+          }
+          return {
+            open: prev.open || nextStatus === 'start' || nextStatus === 'downloading' || nextStatus === 'done' || nextStatus === 'error',
+            version: prev.version,
+            key: prev.key,
+            status: nextStatus,
+            percent: nextStatus === 'done' ? 100 : percent,
+            downloaded: nextStatus === 'done' && total > 0 ? total : downloaded,
+            total: total > 0 ? total : prev.total,
+            message,
+          };
+        });
       });
     } catch (e) {
       console.warn('Wails API: EventsOn unavailable', e);
@@ -637,7 +668,7 @@ export const useAppUpdateManager = ({
     return () => {
       if (offDownloadProgress) offDownloadProgress();
     };
-  }, []);
+  }, [t]);
 
   return {
     aboutDisplayVersion,

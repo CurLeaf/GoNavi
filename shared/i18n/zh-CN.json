@@ -2417,7 +2417,7 @@
   "app.about.action.download_progress": "下载进度",
   "app.about.action.download_update": "下载更新",
   "app.about.action.hide_to_background": "隐藏到后台",
-  "app.about.action.install_update": "安装更新",
+  "app.about.action.install_update": "重启应用更新",
   "app.about.action.mute_this_version": "本次不再提示",
   "app.about.action.open_install_directory": "打开安装目录",
   "app.about.community.ai_book": "AI全书",
@@ -2459,7 +2459,7 @@
   "app.about.update_status.check_failed": "检查更新失败: {{error}}",
   "app.about.update_status.checking": "正在检查更新...",
   "app.about.update_status.latest": "当前已是最新版本（{{version}}）",
-  "app.about.update_status.new_version_downloaded": "发现新版本 {{version}}（已下载，请点击“下载进度”后安装）",
+  "app.about.update_status.new_version_downloaded": "发现新版本 {{version}}（已下载，可重启应用更新）",
   "app.about.update_status.new_version_not_downloaded": "发现新版本 {{version}}（未下载）",
   "app.about.update_status.not_checked": "未检查",
   "app.about.version.current": "当前版本",
@@ -8032,5 +8032,14 @@
   "ai_settings.open_mode.detached.desc": "以可拖拽缩放的浮动窗打开，适合多显示器或更大聊天区域。",
   "ai_settings.open_mode.message.dock": "已设为默认侧栏打开",
   "ai_settings.open_mode.message.detached": "已设为默认独立窗口打开",
-  "ai_settings.context.section_title": "上下文级别"
+  "ai_settings.context.section_title": "上下文级别",
+  "app.about.action.restart_to_update": "重启应用更新",
+  "app.about.download_progress.ready_to_restart": "下载完成（100%）。点击「重启应用更新」即可完成安装。",
+  "app.about.download_progress.downloading": "正在下载更新…",
+  "app.about.download_progress.applying_restart": "正在应用更新并重启…",
+  "app.about.download_progress.restarting": "正在重启应用…",
+  "app.about.download_progress.complete_hint": "更新包已就绪（100%）",
+  "app.about.message.download_ready_restart": "更新下载完成，可点击「重启应用更新」",
+  "app.about.message.download_ready_restart_with_path": "更新下载完成，可点击「重启应用更新」。路径：{{path}}",
+  "app.about.update_status.new_version_ready_restart": "发现新版本 {{version}}（已下载，点击「重启应用更新」）"
 }

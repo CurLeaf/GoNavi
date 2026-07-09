@@ -2417,7 +2417,7 @@
   "app.about.action.download_progress": "Downloadfortschritt",
   "app.about.action.download_update": "Update herunterladen",
   "app.about.action.hide_to_background": "Im Hintergrund ausblenden",
-  "app.about.action.install_update": "Update installieren",
+  "app.about.action.install_update": "Zum Aktualisieren neu starten",
   "app.about.action.mute_this_version": "Diesmal nicht erinnern",
   "app.about.action.open_install_directory": "Installationsordner öffnen",
   "app.about.community.ai_book": "AI全书",
@@ -2459,7 +2459,7 @@
   "app.about.update_status.check_failed": "Updateprüfung fehlgeschlagen: {{error}}",
   "app.about.update_status.checking": "Suche nach Updates...",
   "app.about.update_status.latest": "Sie verwenden die neueste Version ({{version}})",
-  "app.about.update_status.new_version_downloaded": "Neue Version {{version}} gefunden (heruntergeladen; öffnen Sie den Downloadfortschritt zur Installation)",
+  "app.about.update_status.new_version_downloaded": "Neue Version {{version}} heruntergeladen. Neu starten zum Aktualisieren.",
   "app.about.update_status.new_version_not_downloaded": "Neue Version {{version}} gefunden (nicht heruntergeladen)",
   "app.about.update_status.not_checked": "Nicht geprüft",
   "app.about.version.current": "Aktuelle Version",
@@ -8032,5 +8032,14 @@
   "ai_settings.open_mode.detached.desc": "Öffnet als ziehbar/skalierbar schwebendes Fenster.",
   "ai_settings.open_mode.message.dock": "Standard auf Seitenleiste gesetzt",
   "ai_settings.open_mode.message.detached": "Standard auf schwebendes Fenster gesetzt",
-  "ai_settings.context.section_title": "Kontextstufe"
+  "ai_settings.context.section_title": "Kontextstufe",
+  "app.about.action.restart_to_update": "Zum Aktualisieren neu starten",
+  "app.about.download_progress.ready_to_restart": "Download abgeschlossen (100%). Klicken Sie auf „Zum Aktualisieren neu starten“.",
+  "app.about.download_progress.downloading": "Update wird heruntergeladen…",
+  "app.about.download_progress.applying_restart": "Update wird angewendet und neu gestartet…",
+  "app.about.download_progress.restarting": "Neustart…",
+  "app.about.download_progress.complete_hint": "Update-Paket bereit (100%)",
+  "app.about.message.download_ready_restart": "Update heruntergeladen. Klicken Sie auf „Zum Aktualisieren neu starten“.",
+  "app.about.message.download_ready_restart_with_path": "Update heruntergeladen. Klicken Sie auf „Zum Aktualisieren neu starten“. Pfad: {{path}}",
+  "app.about.update_status.new_version_ready_restart": "Neue Version {{version}} bereit. Auf „Zum Aktualisieren neu starten“ klicken."
 }

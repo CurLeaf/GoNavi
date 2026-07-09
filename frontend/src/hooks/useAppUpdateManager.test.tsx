@@ -161,7 +161,7 @@ describe('useAppUpdateManager', () => {
     expect(hook?.lastUpdateInfo?.downloaded).toBe(true);
   });
 
-  it('auto-installs a macOS update immediately after download when the backend reports auto relaunch support', async () => {
+  it('keeps download at 100% ready-to-restart without auto-installing after download completes', async () => {
     backendApp.CheckForUpdates.mockResolvedValue({
       success: true,
       data: {
@@ -193,8 +193,39 @@ describe('useAppUpdateManager', () => {
     });
 
     expect(backendApp.DownloadUpdate).toHaveBeenCalledTimes(1);
-    expect(backendApp.InstallUpdateAndRestart).toHaveBeenCalledTimes(1);
+    // 下载完成后不自动安装；用户需点击「重启应用更新」
+    expect(backendApp.InstallUpdateAndRestart).not.toHaveBeenCalled();
     expect(backendApp.OpenDownloadedUpdateDirectory).not.toHaveBeenCalled();
+    expect(hook?.updateDownloadProgress.status).toBe('done');
+    expect(hook?.updateDownloadProgress.percent).toBe(100);
+    expect(hook?.updateDownloadProgress.open).toBe(true);
+    expect(hook?.lastUpdateInfo?.downloaded).toBe(true);
+  });
+
+  it('installs and restarts only after the user confirms restart-to-update', async () => {
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        downloaded: true,
+        assetSize: 2048,
+      },
+    });
+    backendApp.InstallUpdateAndRestart.mockResolvedValue({ success: true });
+
+    renderHook();
+
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+
+    await act(async () => {
+      await hook?.handleInstallFromProgress();
+    });
+
+    expect(backendApp.InstallUpdateAndRestart).toHaveBeenCalledTimes(1);
   });
 
   it('switches update channel and re-checks against the selected channel', async () => {

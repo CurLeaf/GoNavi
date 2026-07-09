@@ -2417,7 +2417,7 @@
   "app.about.action.download_progress": "ダウンロード状況",
   "app.about.action.download_update": "更新をダウンロード",
   "app.about.action.hide_to_background": "バックグラウンドに隠す",
-  "app.about.action.install_update": "更新をインストール",
+  "app.about.action.install_update": "再起動して更新",
   "app.about.action.mute_this_version": "今回は通知しない",
   "app.about.action.open_install_directory": "インストールディレクトリを開く",
   "app.about.community.ai_book": "AI全书",
@@ -2459,7 +2459,7 @@
   "app.about.update_status.check_failed": "更新確認に失敗しました: {{error}}",
   "app.about.update_status.checking": "更新を確認しています...",
   "app.about.update_status.latest": "現在は最新バージョンです（{{version}}）",
-  "app.about.update_status.new_version_downloaded": "新しいバージョン {{version}} が見つかりました（ダウンロード済み。「ダウンロード状況」からインストールしてください）",
+  "app.about.update_status.new_version_downloaded": "新しいバージョン {{version}} をダウンロード済みです。再起動して更新できます。",
   "app.about.update_status.new_version_not_downloaded": "新しいバージョン {{version}} が見つかりました（未ダウンロード）",
   "app.about.update_status.not_checked": "未確認",
   "app.about.version.current": "現在のバージョン",
@@ -8032,5 +8032,14 @@
   "ai_settings.open_mode.detached.desc": "ドラッグ／リサイズ可能な独立ウィンドウで開きます。",
   "ai_settings.open_mode.message.dock": "デフォルトをサイドバーに設定しました",
   "ai_settings.open_mode.message.detached": "デフォルトを独立ウィンドウに設定しました",
-  "ai_settings.context.section_title": "コンテキストレベル"
+  "ai_settings.context.section_title": "コンテキストレベル",
+  "app.about.action.restart_to_update": "再起動して更新",
+  "app.about.download_progress.ready_to_restart": "ダウンロード完了（100%）。「再起動して更新」をクリックしてください。",
+  "app.about.download_progress.downloading": "更新をダウンロード中…",
+  "app.about.download_progress.applying_restart": "更新を適用して再起動しています…",
+  "app.about.download_progress.restarting": "再起動中…",
+  "app.about.download_progress.complete_hint": "更新パッケージの準備完了（100%）",
+  "app.about.message.download_ready_restart": "更新のダウンロードが完了しました。「再起動して更新」をクリックしてください。",
+  "app.about.message.download_ready_restart_with_path": "更新のダウンロードが完了しました。「再起動して更新」をクリックしてください。パス: {{path}}",
+  "app.about.update_status.new_version_ready_restart": "新しいバージョン {{version}} の準備ができました。「再起動して更新」をクリックしてください。"
 }

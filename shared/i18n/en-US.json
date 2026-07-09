@@ -2417,7 +2417,7 @@
   "app.about.action.download_progress": "Download Progress",
   "app.about.action.download_update": "Download Update",
   "app.about.action.hide_to_background": "Hide to Background",
-  "app.about.action.install_update": "Install Update",
+  "app.about.action.install_update": "Restart to update",
   "app.about.action.mute_this_version": "Do Not Remind This Time",
   "app.about.action.open_install_directory": "Open Install Directory",
   "app.about.community.ai_book": "AI全书",
@@ -2459,7 +2459,7 @@
   "app.about.update_status.check_failed": "Update check failed: {{error}}",
   "app.about.update_status.checking": "Checking for updates...",
   "app.about.update_status.latest": "You are on the latest version ({{version}})",
-  "app.about.update_status.new_version_downloaded": "New version {{version}} found (downloaded; open Download Progress to install)",
+  "app.about.update_status.new_version_downloaded": "New version {{version}} is downloaded. Restart to update.",
   "app.about.update_status.new_version_not_downloaded": "New version {{version}} found (not downloaded)",
   "app.about.update_status.not_checked": "Not checked",
   "app.about.version.current": "Current Version",
@@ -8032,5 +8032,14 @@
   "ai_settings.open_mode.detached.desc": "Opens as a draggable/resizable floating window for multi-monitor or larger chat space.",
   "ai_settings.open_mode.message.dock": "Default open style set to sidebar",
   "ai_settings.open_mode.message.detached": "Default open style set to floating window",
-  "ai_settings.context.section_title": "Context level"
+  "ai_settings.context.section_title": "Context level",
+  "app.about.action.restart_to_update": "Restart to update",
+  "app.about.download_progress.ready_to_restart": "Download complete (100%). Click “Restart to update” to finish installing.",
+  "app.about.download_progress.downloading": "Downloading update…",
+  "app.about.download_progress.applying_restart": "Applying update and restarting…",
+  "app.about.download_progress.restarting": "Restarting…",
+  "app.about.download_progress.complete_hint": "Update package ready (100%)",
+  "app.about.message.download_ready_restart": "Update downloaded. Click “Restart to update” when ready.",
+  "app.about.message.download_ready_restart_with_path": "Update downloaded. Click “Restart to update” when ready. Path: {{path}}",
+  "app.about.update_status.new_version_ready_restart": "New version {{version}} is ready. Click “Restart to update”."
 }
