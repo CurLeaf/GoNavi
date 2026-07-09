@@ -4044,17 +4044,24 @@ export const useStore = create<AppState>()(
       setEnableHiddenColumnMemory: (enabled) =>
         set({ enableHiddenColumnMemory: !!enabled }),
 
-      setWindowBounds: (bounds) =>
-        set({
-          windowBounds: {
-            width: Math.max(400, Math.trunc(bounds.width)),
-            height: Math.max(300, Math.trunc(bounds.height)),
-            x: Math.trunc(bounds.x),
-            y: Math.trunc(bounds.y),
-          },
-        }),
+      setWindowBounds: (bounds) => {
+        const nextBounds = {
+          width: Math.max(400, Math.trunc(bounds.width)),
+          height: Math.max(300, Math.trunc(bounds.height)),
+          x: Math.trunc(bounds.x),
+          y: Math.trunc(bounds.y),
+        };
+        set({ windowBounds: nextBounds });
+        // 与 startupFullscreen 一致：立即落盘，避免 Windows 退出时异步 persist 丢尺寸记忆
+        writePersistedStatePatch({ windowBounds: nextBounds });
+      },
 
-      setWindowState: (state) => set({ windowState: state }),
+      setWindowState: (state) => {
+        const nextState = sanitizeWindowState(state);
+        set({ windowState: nextState });
+        // 最大化/普通态也要同步写盘，否则下次冷启动会落到默认 1024×768「半窗」
+        writePersistedStatePatch({ windowState: nextState });
+      },
 
       setSidebarWidth: (width) =>
         set({ sidebarWidth: sanitizeSidebarWidth(width) }),

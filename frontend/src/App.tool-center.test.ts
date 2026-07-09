@@ -388,13 +388,19 @@ describe('tool center menu entries', () => {
 
   it('settles Windows cold-start window layout without requiring a taskbar restore', () => {
     expect(appSource).toContain("const applyStartupWindowChrome = (attempt: number, mode: 'maximised' | 'fullscreen') => {");
-    expect(appSource).toContain("markStartupWindowRestorePending();");
+    expect(appSource).toContain('markStartupWindowRestorePending(3200)');
     expect(appSource).toContain("applyStartupWindowChrome(1, 'maximised');");
+    expect(appSource).toContain('const delayMs = attempt <= 1 ? 0 : applyRetryDelayMs');
+    expect(appSource).toContain('markAppliedMaximisedOrFullscreen');
     expect(appSource).toContain('resolveDefaultStartupWindowBounds(readCurrentVisibleViewport())');
     expect(appSource).toContain("void fixWindowScaleIfNeeded('startup');");
     expect(appSource).toContain('const startupLayoutFixTimers = [220, 1000, 1900].map((delayMs) => (');
     expect(appSource).toContain('if (isStartupWindowRestorePending())');
     expect(appSource).toContain('clearStartupWindowRestorePending();');
+    // 启动恢复顺序：开关最大化 → 记忆最大化 → 记忆尺寸
+    expect(appSource).toContain('// 1) 「启动时最大化」开关优先（Windows 按 Maximize 处理）');
+    expect(appSource).toContain('// 2) 记忆用户上次窗口态：最大化/全屏');
+    expect(appSource).toContain('// 3) 普通窗口：恢复用户调整过的尺寸和位置');
   });
 
   it('captures window state on startup and lifecycle events instead of waiting only for the polling interval', () => {

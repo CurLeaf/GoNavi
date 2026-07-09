@@ -1041,9 +1041,10 @@ function App() {
   useEffect(() => {
       let cancelled = false;
       let startupWindowTimer: number | null = null;
-      const maxApplyAttempts = 6;
-      const applyRetryDelayMs = 400;
-      const settleDelayMs = 160;
+      let restoredOnce = false;
+      const maxApplyAttempts = 8;
+      const applyRetryDelayMs = 350;
+      const settleDelayMs = 180;
       const useMaximiseForStartup = isWindowsPlatform();
 
       const checkStartupPreferenceApplied = async (): Promise<boolean> => {
@@ -1064,13 +1065,25 @@ function App() {
           return false;
       };
 
+      const markAppliedMaximisedOrFullscreen = (mode: 'maximised' | 'fullscreen') => {
+          // 启动偏好成功后立刻固化 windowState，避免宽限期内被写成 normal 导致下次半窗
+          if (mode === 'maximised' || useMaximiseForStartup) {
+              useStore.getState().setWindowState('maximized');
+          } else {
+              useStore.getState().setWindowState('fullscreen');
+          }
+          clearStartupWindowRestorePending();
+      };
+
       // mode:
       // - maximised: 始终最大化（Windows 启动偏好 / 记忆的 maximized / Windows 上的 fullscreen 记忆）
       // - fullscreen: 非 Windows 优先真全屏，失败再最大化
+      // 第 1 次立即执行（delay=0），避免 Windows 先闪 1024×768 半窗再最大化
       const applyStartupWindowChrome = (attempt: number, mode: 'maximised' | 'fullscreen') => {
           if (startupWindowTimer !== null) {
               window.clearTimeout(startupWindowTimer);
           }
+          const delayMs = attempt <= 1 ? 0 : applyRetryDelayMs;
           startupWindowTimer = window.setTimeout(() => {
               if (cancelled) {
                   return;
@@ -1078,7 +1091,7 @@ function App() {
               void Promise.resolve()
                   .then(async () => {
                       if (await checkStartupPreferenceApplied()) {
-                          clearStartupWindowRestorePending();
+                          markAppliedMaximisedOrFullscreen(mode);
                           return;
                       }
                       try {
@@ -1089,7 +1102,7 @@ function App() {
                               await WindowFullscreen();
                               await new Promise((resolve) => window.setTimeout(resolve, settleDelayMs));
                               if (await checkStartupPreferenceApplied()) {
-                                  clearStartupWindowRestorePending();
+                                  markAppliedMaximisedOrFullscreen(mode);
                                   return;
                               }
                               await WindowMaximise();
@@ -1100,41 +1113,57 @@ function App() {
                       }
 
                       if (await checkStartupPreferenceApplied()) {
-                          clearStartupWindowRestorePending();
+                          markAppliedMaximisedOrFullscreen(mode);
                           return;
                       }
                       if (attempt < maxApplyAttempts) {
                           applyStartupWindowChrome(attempt + 1, mode);
+                      } else {
+                          // 最终仍失败：结束宽限，避免长期阻断 bounds 记忆；下次启动会再试
+                          clearStartupWindowRestorePending();
+                          void emitWindowDiagnostic('warn:startup-maximise-failed', {
+                              mode,
+                              attempts: attempt,
+                          });
                       }
                   });
-          }, applyRetryDelayMs);
+          }, delayMs);
       };
 
       const restoreWindowState = async () => {
           if (cancelled) return;
+          // 仅在 hydration 完成后跑一次（或显式重入）；避免未水合默认态先写半窗 bounds
+          if (!useStore.persist.hasHydrated()) {
+              return;
+          }
+          if (restoredOnce) {
+              return;
+          }
+          restoredOnce = true;
+
           const state = useStore.getState();
-          // startupFullscreen 设置优先
+          // 1) 「启动时最大化」开关优先（Windows 按 Maximize 处理）
           if (state.startupFullscreen) {
-              markStartupWindowRestorePending();
+              markStartupWindowRestorePending(3200);
               applyStartupWindowChrome(1, useMaximiseForStartup ? 'maximised' : 'fullscreen');
               return;
           }
-          // 根据上次保存的窗口状态恢复
+          // 2) 记忆用户上次窗口态：最大化/全屏
           const savedState = state.windowState;
           if (savedState === 'fullscreen') {
               // Windows 上记忆的 fullscreen 也走最大化，避免真全屏后标题栏交互困难
-              markStartupWindowRestorePending();
+              markStartupWindowRestorePending(3200);
               applyStartupWindowChrome(1, useMaximiseForStartup ? 'maximised' : 'fullscreen');
               return;
           }
           if (savedState === 'maximized') {
               // 必须重试：Windows 冷启动 HWND/WebView2 未就绪时单次 Maximise 经常失败，
               // 会残留 main.go 默认 1024x768 贴左上角；任务栏恢复后才“突然正常”。
-              markStartupWindowRestorePending();
+              markStartupWindowRestorePending(3200);
               applyStartupWindowChrome(1, 'maximised');
               return;
           }
-          // 普通窗口：恢复尺寸和位置
+          // 3) 普通窗口：恢复用户调整过的尺寸和位置
           const bounds = state.windowBounds;
           if (!bounds || bounds.width < 400 || bounds.height < 300) {
               // 无记忆尺寸时，Windows 默认左上角小窗看起来像“只开了一半”，改为居中可用尺寸
@@ -1144,6 +1173,7 @@ function App() {
                       WindowSetSize(nextBounds.width, nextBounds.height);
                       WindowSetPosition(nextBounds.x, nextBounds.y);
                       state.setWindowBounds(nextBounds);
+                      state.setWindowState('normal');
                       void emitWindowDiagnostic('adjust:startup-default-window-bounds', {
                           to: nextBounds,
                       });
@@ -1169,6 +1199,7 @@ function App() {
               }
               WindowSetSize(nextBounds.width, nextBounds.height);
               WindowSetPosition(nextBounds.x, nextBounds.y);
+              state.setWindowState('normal');
           } catch (e) {
               console.warn('Failed to restore window bounds', e);
           }
@@ -1181,6 +1212,8 @@ function App() {
           if (cancelled) {
               return;
           }
+          // hydration 完成后再恢复，确保读到 startupFullscreen / windowState / windowBounds
+          restoredOnce = false;
           void restoreWindowState();
       });
 

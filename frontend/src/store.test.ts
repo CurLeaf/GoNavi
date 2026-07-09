@@ -2053,6 +2053,22 @@ describe('store appearance persistence', () => {
     expect(reloaded.useStore.getState().startupFullscreen).toBe(true);
   });
 
+  it('persists window state and bounds immediately so Windows reopen keeps maximise or size memory', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setWindowState('maximized');
+    useStore.getState().setWindowBounds({ width: 1400, height: 900, x: 80, y: 40 });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.windowState).toBe('maximized');
+    expect(persisted.state.windowBounds).toEqual({ width: 1400, height: 900, x: 80, y: 40 });
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().windowState).toBe('maximized');
+    expect(reloaded.useStore.getState().windowBounds).toEqual({ width: 1400, height: 900, x: 80, y: 40 });
+  });
+
   it('falls back to Enter when persisted AI chat send shortcut is invalid', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {
