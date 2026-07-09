@@ -5,10 +5,14 @@
 
 FROM --platform=$BUILDPLATFORM node:20-bookworm AS frontend
 
-WORKDIR /frontend
+# 使用 monorepo 布局：frontend 源码通过相对路径 ../../../shared/i18n 引用仓库 shared/
+# （见 frontend/src/i18n/catalog.ts、shared/i18n/messages.ts、shared/i18n/translate.ts）。
+# 仅 COPY frontend/ 会导致 tsc 报 Cannot find module '../../../shared/i18n/*'。
+WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
+COPY shared/ /src/shared/
 # wailsjs 绑定已入库；容器内只构建静态前端
 RUN npm run build
 
@@ -25,7 +29,7 @@ COPY third_party/go-irisnative/go.mod third_party/go-irisnative/go.sum ./third_p
 RUN go mod download
 
 COPY . .
-COPY --from=frontend /frontend/dist ./frontend/dist
+COPY --from=frontend /src/frontend/dist ./frontend/dist
 
 # 纯 Go 构建主程序（web-server 模式不需要 Wails WebView / CGO）
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
