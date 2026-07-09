@@ -2938,7 +2938,7 @@
   "app.update.backend.error.channel_invalid": "無効な更新チャネルです: {{channel}}",
   "app.update.backend.error.check_failed": "更新確認に失敗しました: {{detail}}",
   "app.update.backend.error.check_http_forbidden": "更新確認に失敗しました: GitHub が 403 を返しました。api.github.com への通信/プロキシを確認するか、GONAVI_GITHUB_TOKEN を設定してください。{{detail}}",
-  "app.update.backend.error.check_http_rate_limited": "更新確認に失敗しました: GitHub API のレート制限に達しました（未認証は約 60 回/時。共有プロキシ IP では更に早く制限されます）。しばらくして再試行するか、GONAVI_GITHUB_TOKEN を設定してください。{{detail}}",
+  "app.update.backend.error.check_http_rate_limited": "更新確認に失敗しました: 更新サーバーが混雑しているか、ネットワーク出口が制限されています。しばらくしてから再試行してください。一般ユーザーは Token の設定は不要です。{{detail}}",
   "app.update.backend.error.check_http_status": "更新確認に失敗しました: HTTP {{status}}",
   "app.update.backend.error.download_failed": "更新のダウンロードに失敗しました: {{detail}}",
   "app.update.backend.error.install_target_not_writable": "現在のインストール先ディレクトリに書き込めません: {{path}} ({{detail}})",

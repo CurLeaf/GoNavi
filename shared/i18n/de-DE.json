@@ -2938,7 +2938,7 @@
   "app.update.backend.error.channel_invalid": "Ungültiger Update-Kanal: {{channel}}",
   "app.update.backend.error.check_failed": "Updateprüfung fehlgeschlagen: {{detail}}",
   "app.update.backend.error.check_http_forbidden": "Update-Prüfung fehlgeschlagen: GitHub meldete 403 Forbidden. Prüfen Sie den Zugriff auf api.github.com über Netzwerk/Proxy oder setzen Sie GONAVI_GITHUB_TOKEN. {{detail}}",
-  "app.update.backend.error.check_http_rate_limited": "Update-Prüfung fehlgeschlagen: GitHub-API-Ratenlimit erreicht (ohne Auth ca. 60 Anfragen/Stunde; gemeinsame Proxy-IPs sind schneller erschöpft). Später erneut versuchen oder GONAVI_GITHUB_TOKEN setzen. {{detail}}",
+  "app.update.backend.error.check_http_rate_limited": "Update-Prüfung fehlgeschlagen: Der Update-Dienst ist ausgelastet oder Ihr Netzausgang ist begrenzt. Bitte später erneut versuchen. Endnutzer müssen kein Token konfigurieren. {{detail}}",
   "app.update.backend.error.check_http_status": "Updateprüfung fehlgeschlagen: HTTP {{status}}",
   "app.update.backend.error.download_failed": "Updatedownload fehlgeschlagen: {{detail}}",
   "app.update.backend.error.install_target_not_writable": "Das aktuelle Installationsverzeichnis ist nicht beschreibbar: {{path}} ({{detail}})",

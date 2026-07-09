@@ -2938,7 +2938,7 @@
   "app.update.backend.error.channel_invalid": "无效的更新通道：{{channel}}",
   "app.update.backend.error.check_failed": "检查更新失败：{{detail}}",
   "app.update.backend.error.check_http_forbidden": "检查更新失败：GitHub 返回 403（访问被拒绝）。请确认网络/代理可访问 api.github.com，或配置 GONAVI_GITHUB_TOKEN。{{detail}}",
-  "app.update.backend.error.check_http_rate_limited": "检查更新失败：GitHub API 请求过于频繁（未认证约 60 次/小时；若走共享代理，出口 IP 会更快被限流）。可稍后再试，或设置环境变量 GONAVI_GITHUB_TOKEN 提高配额。{{detail}}",
+  "app.update.backend.error.check_http_rate_limited": "检查更新失败：更新服务暂时繁忙或网络出口被限流。请稍后再试；普通用户无需配置任何 Token。{{detail}}",
   "app.update.backend.error.check_http_status": "检查更新失败：HTTP {{status}}",
   "app.update.backend.error.download_failed": "更新下载失败：{{detail}}",
   "app.update.backend.error.install_target_not_writable": "当前安装目录不可写：{{path}}（{{detail}}）",

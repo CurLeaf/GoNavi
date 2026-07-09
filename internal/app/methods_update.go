@@ -158,17 +158,19 @@ func (a *App) localizedUpdateError(err error) string {
 }
 
 func (a *App) CheckForUpdates() connection.QueryResult {
-	return a.checkForUpdates(true)
+	// 用户手动检查：强制走网络（静态清单优先，API 回退）
+	return a.checkForUpdates(true, true)
 }
 
 func (a *App) CheckForUpdatesSilently() connection.QueryResult {
-	return a.checkForUpdates(false)
+	// 静默检查：允许节流，优先磁盘/短时缓存，避免启动刷爆网络
+	return a.checkForUpdates(false, false)
 }
 
-func (a *App) checkForUpdates(logFailure bool) connection.QueryResult {
+func (a *App) checkForUpdates(logFailure bool, forceNetwork bool) connection.QueryResult {
 	a.ensurePersistedGlobalProxyRuntime()
 	channel := a.currentUpdateChannel()
-	info, err := fetchLatestUpdateInfo(channel)
+	info, err := fetchLatestUpdateInfoWithOptions(channel, forceNetwork)
 	if err != nil {
 		if logFailure {
 			updateLogCheckError(err)
@@ -456,10 +458,15 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 }
 
 func fetchLatestUpdateInfo(channel updateChannel) (UpdateInfo, error) {
+	return fetchLatestUpdateInfoWithOptions(channel, true)
+}
+
+func fetchLatestUpdateInfoWithOptions(channel updateChannel, forceNetwork bool) (UpdateInfo, error) {
 	if channel != updateChannelDev {
 		channel = updateChannelLatest
 	}
-	release, err := fetchReleaseForChannel(channel)
+	// 优先静态 latest.json（不占 api.github.com 配额）→ GitHub API → 磁盘缓存
+	release, err := fetchReleaseForChannelPreferringStatic(channel, forceNetwork)
 	if err != nil {
 		return UpdateInfo{}, err
 	}

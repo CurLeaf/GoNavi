@@ -355,6 +355,9 @@ if command -v sha256sum &> /dev/null; then
     : > SHA256SUMS
     for f in *; do
         [ -f "$f" ] || continue
+        case "$f" in
+            SHA256SUMS|latest.json|latest-dev.json) continue ;;
+        esac
         sha256sum "$f" >> SHA256SUMS
     done
     cd ..
@@ -363,11 +366,38 @@ elif command -v shasum &> /dev/null; then
     : > SHA256SUMS
     for f in *; do
         [ -f "$f" ] || continue
+        case "$f" in
+            SHA256SUMS|latest.json|latest-dev.json) continue ;;
+        esac
         shasum -a 256 "$f" >> SHA256SUMS
     done
     cd ..
 else
     echo -e "${YELLOW}   ⚠️  未找到 sha256sum/shasum，跳过校验文件生成。${NC}"
+fi
+
+echo -e "${GREEN}📄 生成静态更新清单 latest.json...${NC}"
+if command -v python3 &> /dev/null; then
+    TAG_FOR_MANIFEST="v${VERSION#v}"
+    CHANNEL_FOR_MANIFEST="latest"
+    OUT_MANIFEST="$DIST_DIR/latest.json"
+    case "$VERSION" in
+        *dev*|*test*|*-*)
+            # 本地/测试版本默认打 latest.json，发正式版时由 CI 使用 git tag
+            ;;
+    esac
+    if python3 tools/generate-update-latest-manifest.py \
+        --assets-dir "$DIST_DIR" \
+        --version "$VERSION" \
+        --tag "$TAG_FOR_MANIFEST" \
+        --channel "$CHANNEL_FOR_MANIFEST" \
+        --output "$OUT_MANIFEST"; then
+        echo -e "${GREEN}   ✅ 已生成 $OUT_MANIFEST${NC}"
+    else
+        echo -e "${YELLOW}   ⚠️  生成 latest.json 失败（不影响本地产物，正式发版由 CI 生成）${NC}"
+    fi
+else
+    echo -e "${YELLOW}   ⚠️  未找到 python3，跳过 latest.json${NC}"
 fi
 
 echo ""

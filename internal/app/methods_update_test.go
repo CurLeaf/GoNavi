@@ -28,6 +28,11 @@ func TestFetchLatestUpdateInfoSkipsChecksumWhenCurrentVersionIsAlreadyLatest(t *
 	}()
 
 	releaseCalled := false
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		// 单测走 API 路径，模拟尚无 latest.json 的历史 Release
+		return nil, errors.New("static manifest unavailable in test")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
 		releaseCalled = true
 		return &githubRelease{
@@ -84,6 +89,10 @@ func TestFetchLatestUpdateInfoUsesAssetDigestWhenUpdateIsAvailable(t *testing.T)
 		AppVersion = originalVersion
 	}()
 
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		return nil, errors.New("static manifest unavailable in test")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
 		return &githubRelease{
 			TagName:     "v0.6.5",
@@ -139,6 +148,10 @@ func TestFetchLatestUpdateInfoFallsBackToChecksumFileWhenAssetDigestMissing(t *t
 		AppVersion = originalVersion
 	}()
 
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		return nil, errors.New("static manifest unavailable in test")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
 		return &githubRelease{
 			TagName: "v0.6.5",
@@ -181,7 +194,12 @@ func TestFetchLatestUpdateInfoFallsBackToChecksumFileWhenAssetDigestMissing(t *t
 
 func TestCheckForUpdatesLogsFailuresForManualChecks(t *testing.T) {
 	app := &App{configDir: t.TempDir()}
+	t.Setenv("GONAVI_DATA_ROOT", t.TempDir())
 
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		return nil, errors.New("static unavailable")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
 		return nil, errors.New("request timed out")
 	})
@@ -204,7 +222,12 @@ func TestCheckForUpdatesLogsFailuresForManualChecks(t *testing.T) {
 
 func TestCheckForUpdatesSilentlySkipsFailureLogs(t *testing.T) {
 	app := &App{configDir: t.TempDir()}
+	t.Setenv("GONAVI_DATA_ROOT", t.TempDir())
 
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		return nil, errors.New("static unavailable")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
 		return nil, errors.New("request timed out")
 	})
@@ -273,6 +296,10 @@ func TestCheckForUpdatesRestoresPersistedGlobalProxyRuntime(t *testing.T) {
 		AppVersion = originalVersion
 	}()
 
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		return nil, errors.New("static unavailable; exercise API proxy path")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchDevRelease(func() (*githubRelease, error) {
 		return fetchReleaseByURL("http://api.github.invalid/repos/Syngnat/GoNavi/releases/tags/dev-latest")
 	})
@@ -304,6 +331,10 @@ func TestFetchLatestUpdateInfoForDevChannelUsesReleaseBuildVersion(t *testing.T)
 		AppVersion = originalVersion
 	}()
 
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		return nil, errors.New("static unavailable in test")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchDevRelease(func() (*githubRelease, error) {
 		return &githubRelease{
 			TagName: "dev-latest",
@@ -362,6 +393,10 @@ func TestFetchLatestUpdateInfoForDevChannelSkipsChecksumWhenBuildMatches(t *test
 		AppVersion = originalVersion
 	}()
 
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		return nil, errors.New("static unavailable in test")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchDevRelease(func() (*githubRelease, error) {
 		return &githubRelease{
 			TagName: "dev-latest",

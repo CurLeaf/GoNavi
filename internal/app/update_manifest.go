@@ -1,0 +1,349 @@
+package app
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"GoNavi-Wails/internal/appdata"
+	"GoNavi-Wails/internal/logger"
+)
+
+const (
+	// 静态清单：挂在 GitHub Release 资产上，走 github.com 下载链路，不消耗 api.github.com 配额。
+	// 发版时由 CI/build-release 生成 latest.json 并上传到当前 latest 发布。
+	updateLatestManifestURL = "https://github.com/" + updateRepo + "/releases/latest/download/latest.json"
+	updateDevManifestURL    = "https://github.com/" + updateRepo + "/releases/download/" + updateDevReleaseTag + "/latest-dev.json"
+
+	updateManifestSchemaVersion = 1
+	updateManifestFileName      = "latest.json"
+	updateDevManifestFileName   = "latest-dev.json"
+	// 磁盘缓存：跨重启保留；过期后仍可作为限流/网络失败时的 stale 回退
+	updateDiskCacheMaxAge = 7 * 24 * time.Hour
+	// 静默检查最短间隔，避免启动/前台切换反复打网
+	updateSilentCheckMinInterval = time.Hour
+)
+
+// updateReleaseManifest 是面向终端用户的静态更新清单（不依赖 GitHub REST API）。
+type updateReleaseManifest struct {
+	SchemaVersion int                    `json:"schemaVersion"`
+	Channel       string                 `json:"channel"`
+	TagName       string                 `json:"tagName"`
+	Version       string                 `json:"version"`
+	Name          string                 `json:"name,omitempty"`
+	HTMLURL       string                 `json:"htmlUrl,omitempty"`
+	PublishedAt   string                 `json:"publishedAt,omitempty"`
+	Assets        []updateManifestAsset  `json:"assets"`
+	FetchedAt     time.Time              `json:"fetchedAt,omitempty"` // 仅本地缓存写入
+	Source        string                 `json:"source,omitempty"`    // static | api | disk-cache
+}
+
+type updateManifestAsset struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	APIURL string `json:"apiUrl,omitempty"`
+	Size   int64  `json:"size,omitempty"`
+	SHA256 string `json:"sha256,omitempty"`
+}
+
+type updateNetworkCheckMemory struct {
+	at      time.Time
+	channel updateChannel
+}
+
+var (
+	updateFetchStaticManifest = fetchStaticUpdateManifest
+	updateNetworkCheckMu      sync.Mutex
+	updateLastNetworkCheck    updateNetworkCheckMemory
+)
+
+func swapUpdateFetchStaticManifest(next func(updateChannel) (*githubRelease, error)) func() {
+	original := updateFetchStaticManifest
+	updateFetchStaticManifest = next
+	return func() {
+		updateFetchStaticManifest = original
+	}
+}
+
+func updateManifestRemoteURL(channel updateChannel) string {
+	if channel == updateChannelDev {
+		return updateDevManifestURL
+	}
+	return updateLatestManifestURL
+}
+
+func updateManifestCachePath(channel updateChannel) string {
+	name := updateManifestFileName
+	if channel == updateChannelDev {
+		name = updateDevManifestFileName
+	}
+	return filepath.Join(appdata.MustResolveActiveRoot(), "update-cache", name)
+}
+
+func releaseFromUpdateManifest(manifest *updateReleaseManifest) *githubRelease {
+	if manifest == nil {
+		return nil
+	}
+	assets := make([]githubAsset, 0, len(manifest.Assets))
+	for _, item := range manifest.Assets {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		url := strings.TrimSpace(item.URL)
+		apiURL := strings.TrimSpace(item.APIURL)
+		digest := ""
+		if sha := normalizeGitHubAssetSHA256(item.SHA256); sha != "" {
+			digest = "sha256:" + sha
+		}
+		assets = append(assets, githubAsset{
+			Name:               name,
+			BrowserDownloadURL: url,
+			URL:                firstNonEmptyString(apiURL, url),
+			Digest:             digest,
+			Size:               item.Size,
+		})
+	}
+	tagName := strings.TrimSpace(manifest.TagName)
+	if tagName == "" && strings.TrimSpace(manifest.Version) != "" {
+		tagName = "v" + strings.TrimPrefix(strings.TrimSpace(manifest.Version), "v")
+	}
+	name := strings.TrimSpace(manifest.Name)
+	if name == "" {
+		name = tagName
+	}
+	return &githubRelease{
+		TagName:     tagName,
+		Name:        name,
+		HTMLURL:     strings.TrimSpace(manifest.HTMLURL),
+		PublishedAt: strings.TrimSpace(manifest.PublishedAt),
+		Assets:      assets,
+	}
+}
+
+func updateManifestFromGitHubRelease(channel updateChannel, release *githubRelease, hashes map[string]string) *updateReleaseManifest {
+	if release == nil {
+		return nil
+	}
+	version := resolveReleaseVersion(channel, release)
+	assets := make([]updateManifestAsset, 0, len(release.Assets))
+	for _, asset := range release.Assets {
+		name := strings.TrimSpace(asset.Name)
+		if name == "" {
+			continue
+		}
+		sha := normalizeGitHubAssetSHA256(asset.Digest)
+		if sha == "" && hashes != nil {
+			sha = normalizeGitHubAssetSHA256(hashes[name])
+		}
+		assets = append(assets, updateManifestAsset{
+			Name:   name,
+			URL:    firstNonEmptyString(asset.BrowserDownloadURL, asset.URL),
+			APIURL: strings.TrimSpace(asset.URL),
+			Size:   asset.Size,
+			SHA256: sha,
+		})
+	}
+	return &updateReleaseManifest{
+		SchemaVersion: updateManifestSchemaVersion,
+		Channel:       string(channel),
+		TagName:       strings.TrimSpace(release.TagName),
+		Version:       version,
+		Name:          strings.TrimSpace(release.Name),
+		HTMLURL:       strings.TrimSpace(release.HTMLURL),
+		PublishedAt:   strings.TrimSpace(release.PublishedAt),
+		Assets:        assets,
+		FetchedAt:     time.Now().UTC(),
+		Source:        "api",
+	}
+}
+
+func loadDiskUpdateManifest(channel updateChannel) (*updateReleaseManifest, bool /*stale*/) {
+	path := updateManifestCachePath(channel)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var manifest updateReleaseManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, false
+	}
+	if manifest.SchemaVersion != 0 && manifest.SchemaVersion != updateManifestSchemaVersion {
+		return nil, false
+	}
+	if strings.TrimSpace(manifest.TagName) == "" && strings.TrimSpace(manifest.Version) == "" {
+		return nil, false
+	}
+	stale := false
+	if !manifest.FetchedAt.IsZero() {
+		stale = time.Since(manifest.FetchedAt) > updateDiskCacheMaxAge
+	}
+	manifest.Source = "disk-cache"
+	return &manifest, stale
+}
+
+func storeDiskUpdateManifest(channel updateChannel, manifest *updateReleaseManifest) {
+	if manifest == nil {
+		return
+	}
+	path := updateManifestCachePath(channel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		logger.Warnf("写入更新清单缓存目录失败：%v", err)
+		return
+	}
+	clone := *manifest
+	if clone.FetchedAt.IsZero() {
+		clone.FetchedAt = time.Now().UTC()
+	}
+	if strings.TrimSpace(clone.Source) == "" {
+		clone.Source = "static"
+	}
+	payload, err := json.MarshalIndent(clone, "", "  ")
+	if err != nil {
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, payload, 0o644); err != nil {
+		logger.Warnf("写入更新清单缓存失败：%v", err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		logger.Warnf("提交更新清单缓存失败：%v", err)
+	}
+}
+
+func fetchStaticUpdateManifest(channel updateChannel) (*githubRelease, error) {
+	url := updateManifestRemoteURL(channel)
+	client := newHTTPClientWithGlobalProxy(15 * time.Second)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "GoNavi-Updater/"+strings.TrimSpace(getCurrentVersion()))
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := doUpdateRequest(client, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if readErr != nil {
+		return nil, wrapUpdateNetworkError(readErr)
+	}
+	if resp.StatusCode != http.StatusOK {
+		// 静态资产 404：尚未发布 latest.json 的旧版本 Release，正常回退 API
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("static update manifest not found: %s", url)
+		}
+		return nil, classifyGitHubUpdateHTTPError(resp.StatusCode, body, resp.Header, true)
+	}
+
+	var manifest updateReleaseManifest
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return nil, wrapUpdateNetworkError(err)
+	}
+	if strings.TrimSpace(manifest.TagName) == "" && strings.TrimSpace(manifest.Version) == "" {
+		return nil, localizedUpdateError{key: "app.update.backend.error.latest_version_unparseable"}
+	}
+	if manifest.SchemaVersion != 0 && manifest.SchemaVersion != updateManifestSchemaVersion {
+		return nil, fmt.Errorf("unsupported update manifest schema: %d", manifest.SchemaVersion)
+	}
+	manifest.FetchedAt = time.Now().UTC()
+	manifest.Source = "static"
+	if strings.TrimSpace(manifest.Channel) == "" {
+		manifest.Channel = string(channel)
+	}
+	storeDiskUpdateManifest(channel, &manifest)
+	release := releaseFromUpdateManifest(&manifest)
+	// 同步进进程内 API 缓存，供限流回退
+	if channel == updateChannelDev {
+		storeCachedGitHubRelease(updateDevAPIURL, release)
+	} else {
+		storeCachedGitHubRelease(updateLatestAPIURL, release)
+	}
+	return release, nil
+}
+
+// fetchReleaseForChannel prefers static manifest → GitHub API → disk cache.
+// forceNetwork=false 时：静默检查若距上次成功拉网过近，直接用磁盘缓存。
+func fetchReleaseForChannelPreferringStatic(channel updateChannel, forceNetwork bool) (*githubRelease, error) {
+	if channel != updateChannelDev {
+		channel = updateChannelLatest
+	}
+
+	if !forceNetwork {
+		if release := loadRecentNetworkOrDiskRelease(channel); release != nil {
+			return release, nil
+		}
+	}
+
+	var staticErr error
+	if release, err := updateFetchStaticManifest(channel); err == nil && release != nil {
+		markUpdateNetworkCheck(channel)
+		return release, nil
+	} else {
+		staticErr = err
+		if err != nil {
+			logger.Warnf("静态更新清单不可用，回退 GitHub API：channel=%s err=%v", channel, err)
+		}
+	}
+
+	var apiErr error
+	release, err := fetchReleaseForChannel(channel)
+	if err == nil && release != nil {
+		// API 成功时落盘，供下次静态失败/限流时使用
+		storeDiskUpdateManifest(channel, updateManifestFromGitHubRelease(channel, release, nil))
+		markUpdateNetworkCheck(channel)
+		return release, nil
+	}
+	apiErr = err
+
+	if cached, stale := loadDiskUpdateManifest(channel); cached != nil {
+		logger.Warnf("更新检查回退磁盘清单：channel=%s stale=%v staticErr=%v apiErr=%v", channel, stale, staticErr, apiErr)
+		return releaseFromUpdateManifest(cached), nil
+	}
+
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	if staticErr != nil {
+		return nil, staticErr
+	}
+	return nil, localizedUpdateError{key: "app.update.backend.error.latest_version_unparseable"}
+}
+
+func loadRecentNetworkOrDiskRelease(channel updateChannel) *githubRelease {
+	updateNetworkCheckMu.Lock()
+	last := updateLastNetworkCheck
+	updateNetworkCheckMu.Unlock()
+	if last.channel == channel && !last.at.IsZero() && time.Since(last.at) < updateSilentCheckMinInterval {
+		if cached, stale := loadDiskUpdateManifest(channel); cached != nil && !stale {
+			logger.Warnf("静默更新检查节流：复用磁盘清单 channel=%s age=%s", channel, time.Since(last.at))
+			return releaseFromUpdateManifest(cached)
+		}
+		// 内存 API 缓存
+		apiURL := updateLatestAPIURL
+		if channel == updateChannelDev {
+			apiURL = updateDevAPIURL
+		}
+		if mem := loadCachedGitHubRelease(apiURL); mem != nil {
+			return mem
+		}
+	}
+	return nil
+}
+
+func markUpdateNetworkCheck(channel updateChannel) {
+	updateNetworkCheckMu.Lock()
+	updateLastNetworkCheck = updateNetworkCheckMemory{at: time.Now(), channel: channel}
+	updateNetworkCheckMu.Unlock()
+}

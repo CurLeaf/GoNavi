@@ -2938,7 +2938,7 @@
   "app.update.backend.error.channel_invalid": "Недопустимый канал обновления: {{channel}}",
   "app.update.backend.error.check_failed": "Не удалось проверить обновления: {{detail}}",
   "app.update.backend.error.check_http_forbidden": "Не удалось проверить обновления: GitHub вернул 403. Проверьте доступ к api.github.com через сеть/прокси или задайте GONAVI_GITHUB_TOKEN. {{detail}}",
-  "app.update.backend.error.check_http_rate_limited": "Не удалось проверить обновления: превышен лимит GitHub API (без токена ~60 запросов/час; общий IP прокси исчерпывается быстрее). Повторите позже или задайте GONAVI_GITHUB_TOKEN. {{detail}}",
+  "app.update.backend.error.check_http_rate_limited": "Не удалось проверить обновления: служба обновлений занята или сетевой выход ограничен. Повторите позже. Конечным пользователям не нужно настраивать токен. {{detail}}",
   "app.update.backend.error.check_http_status": "Не удалось проверить обновления: HTTP {{status}}",
   "app.update.backend.error.download_failed": "Не удалось скачать обновление: {{detail}}",
   "app.update.backend.error.install_target_not_writable": "Текущий каталог установки недоступен для записи: {{path}} ({{detail}})",

@@ -2938,7 +2938,7 @@
   "app.update.backend.error.channel_invalid": "Invalid update channel: {{channel}}",
   "app.update.backend.error.check_failed": "Check for updates failed: {{detail}}",
   "app.update.backend.error.check_http_forbidden": "Update check failed: GitHub returned 403 Forbidden. Ensure api.github.com is reachable via your network/proxy, or set GONAVI_GITHUB_TOKEN. {{detail}}",
-  "app.update.backend.error.check_http_rate_limited": "Update check failed: GitHub API rate limit exceeded (about 60 requests/hour unauthenticated; shared proxy IPs hit the limit faster). Retry later, or set GONAVI_GITHUB_TOKEN to raise the quota. {{detail}}",
+  "app.update.backend.error.check_http_rate_limited": "Update check failed: the update service is busy or your network egress is rate-limited. Please try again later. End users do not need to configure any token. {{detail}}",
   "app.update.backend.error.check_http_status": "Check for updates failed: HTTP {{status}}",
   "app.update.backend.error.download_failed": "Update download failed: {{detail}}",
   "app.update.backend.error.install_target_not_writable": "The current install directory is not writable: {{path}} ({{detail}})",
