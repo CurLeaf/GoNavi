@@ -8,6 +8,7 @@ import (
 
 const (
 	defaultSQLMaxOpenConns    = 4
+	defaultSQLMaxIdleConns    = 1
 	defaultSQLConnMaxLifetime = 30 * time.Minute
 	defaultSQLConnMaxIdleTime = 30 * time.Second
 )
@@ -21,7 +22,13 @@ func configureSQLConnectionPool(db *sql.DB, dbType string) {
 		return
 	case "oracle", "oceanbase":
 		db.SetMaxOpenConns(defaultSQLMaxOpenConns)
-		db.SetMaxIdleConns(1)
+		db.SetMaxIdleConns(defaultSQLMaxIdleConns)
+		db.SetConnMaxIdleTime(defaultSQLConnMaxIdleTime)
+		db.SetConnMaxLifetime(defaultSQLConnMaxLifetime)
+		return
+	case "sqlserver":
+		db.SetMaxOpenConns(defaultSQLMaxOpenConns)
+		db.SetMaxIdleConns(defaultSQLMaxIdleConns)
 		db.SetConnMaxIdleTime(defaultSQLConnMaxIdleTime)
 		db.SetConnMaxLifetime(defaultSQLConnMaxLifetime)
 		return
