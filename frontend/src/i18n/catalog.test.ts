@@ -2149,7 +2149,7 @@ describe("i18n catalog", () => {
       sliceBetween(
         source,
         "      const binding = selectCurrentStatementShortcutBinding;",
-        "  }, [languagePreference, selectCurrentStatementShortcutBinding, handleSelectCurrentStatement]);",
+        "  }, [activeShortcutPlatform, languagePreference, selectCurrentStatementShortcutBinding, handleSelectCurrentStatement]);",
       ),
       sliceBetween(
         source,

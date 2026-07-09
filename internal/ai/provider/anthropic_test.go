@@ -26,6 +26,105 @@ func TestNormalizeAnthropicMessagesURL_UsesMoonshotAnthropicMessagesEndpoint(t *
 	}
 }
 
+func TestNormalizeAnthropicMessagesURL_DeepSeekCustomEndpointUsesAnthropicPath(t *testing.T) {
+	cases := map[string]string{
+		"https://api.deepseek.com":               "https://api.deepseek.com/anthropic/v1/messages",
+		"https://api.deepseek.com/":              "https://api.deepseek.com/anthropic/v1/messages",
+		"https://api.deepseek.com/v1":            "https://api.deepseek.com/anthropic/v1/messages",
+		"https://api.deepseek.com/anthropic":     "https://api.deepseek.com/anthropic/v1/messages",
+		"https://api.deepseek.com/anthropic/v1":  "https://api.deepseek.com/anthropic/v1/messages",
+		"https://api.deepseek.com/anthropic/v1/messages": "https://api.deepseek.com/anthropic/v1/messages",
+	}
+	for input, want := range cases {
+		if got := normalizeAnthropicMessagesURL(input); got != want {
+			t.Fatalf("normalizeAnthropicMessagesURL(%q)=%q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestBuildAnthropicMessagesReplaysThinkingBlocksForDeepSeek(t *testing.T) {
+	msgs := buildAnthropicMessagesWithOptions([]ai.Message{{
+		Role:             "assistant",
+		Content:          "done",
+		ReasoningContent: "step by step",
+		ToolCalls: []ai.ToolCall{{
+			ID:   "call_1",
+			Type: "function",
+			Function: ai.ToolCallFunction{
+				Name:      "get_tables",
+				Arguments: `{"connectionId":"c1"}`,
+			},
+		}},
+	}}, true)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	parts, ok := msgs[0].Content.([]map[string]interface{})
+	if !ok || len(parts) < 2 {
+		t.Fatalf("expected multi-part content, got %#v", msgs[0].Content)
+	}
+	if parts[0]["type"] != "thinking" || parts[0]["thinking"] != "step by step" {
+		t.Fatalf("expected leading thinking block, got %#v", parts[0])
+	}
+}
+
+func TestAnthropicProviderAppliesThinkingIntensity(t *testing.T) {
+	providerInstance, err := NewAnthropicProvider(ai.ProviderConfig{
+		Type:              "custom",
+		Name:              "deepseek-anthropic",
+		APIKey:            "sk-test",
+		BaseURL:           "https://api.deepseek.com",
+		Model:             "deepseek-chat",
+		MaxTokens:         128,
+		Temperature:       0.2,
+		ThinkingIntensity: "high",
+	})
+	if err != nil {
+		t.Fatalf("create provider failed: %v", err)
+	}
+	p := providerInstance.(*AnthropicProvider)
+	if p.baseURL != "https://api.deepseek.com/anthropic" {
+		t.Fatalf("expected deepseek base normalized with /anthropic, got %q", p.baseURL)
+	}
+	body := anthropicRequest{Model: p.config.Model, MaxTokens: 128}
+	p.applyThinkingToRequest(&body)
+	if body.Thinking == nil || body.Thinking.Type != "enabled" || body.Thinking.BudgetTokens != 16000 {
+		t.Fatalf("expected high thinking config, got %#v", body.Thinking)
+	}
+	if body.OutputConfig == nil || body.OutputConfig.Effort != "high" {
+		t.Fatalf("expected high effort, got %#v", body.OutputConfig)
+	}
+
+	// DeepSeek 档位集不含 xhigh，应钳制到 high
+	p.config.ThinkingIntensity = "xhigh"
+	body = anthropicRequest{Model: p.config.Model, MaxTokens: 128}
+	p.applyThinkingToRequest(&body)
+	if body.OutputConfig == nil || body.OutputConfig.Effort != "high" {
+		t.Fatalf("expected deepseek to clamp xhigh to high, got %#v", body.OutputConfig)
+	}
+
+	// 官方 Anthropic 应保留 xhigh
+	official, err := NewAnthropicProvider(ai.ProviderConfig{
+		Type:              "anthropic",
+		Name:              "claude",
+		APIKey:            "sk-test",
+		BaseURL:           "https://api.anthropic.com",
+		Model:             "claude-opus-4",
+		MaxTokens:         128,
+		Temperature:       0.2,
+		ThinkingIntensity: "xhigh",
+	})
+	if err != nil {
+		t.Fatalf("create official anthropic provider failed: %v", err)
+	}
+	op := official.(*AnthropicProvider)
+	body = anthropicRequest{Model: op.config.Model, MaxTokens: 128}
+	op.applyThinkingToRequest(&body)
+	if body.OutputConfig == nil || body.OutputConfig.Effort != "xhigh" {
+		t.Fatalf("expected anthropic xhigh effort, got %#v", body.OutputConfig)
+	}
+}
+
 func TestNormalizeAnthropicMessagesURL_PreservesExplicitMessagesPath(t *testing.T) {
 	url := normalizeAnthropicMessagesURL("https://api.moonshot.cn/anthropic/v1/messages")
 	if url != "https://api.moonshot.cn/anthropic/v1/messages" {

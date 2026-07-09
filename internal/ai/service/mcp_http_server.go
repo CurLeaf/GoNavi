@@ -223,7 +223,8 @@ func normalizeInAppMCPHTTPOptions(options ai.MCPHTTPServerOptions, textLookup mc
 		Addr:       addr,
 		Path:       path,
 		Token:      token,
-		SchemaOnly: true,
+		// 尊重调用方配置：false 时注册 execute_sql，用于查少量样例数据（仍受 AI 安全控制与行数上限约束）。
+		SchemaOnly: options.SchemaOnly,
 	}, token, nil
 }
 
@@ -375,7 +376,7 @@ func statusFromMCPHTTPOptions(options mcpHTTPProcessStartOptions, token string, 
 		Addr:                options.Addr,
 		Path:                options.Path,
 		URL:                 buildMCPHTTPURL(options.Addr, options.Path),
-		SchemaOnly:          true,
+		SchemaOnly:          options.SchemaOnly,
 		Token:               token,
 		AuthorizationHeader: "Bearer " + token,
 		StartedAt:           time.Now().UnixMilli(),
@@ -397,7 +398,8 @@ func defaultMCPHTTPServerStatus(textLookup mcpHTTPTextLookup) ai.MCPHTTPServerSt
 		Addr:       defaultMCPHTTPAddr,
 		Path:       defaultMCPHTTPPath,
 		URL:        buildMCPHTTPURL(defaultMCPHTTPAddr, defaultMCPHTTPPath),
-		SchemaOnly: true,
+		// 默认允许只读 execute_sql 查少量数据；仍可在启动时显式传 schemaOnly=true 关闭。
+		SchemaOnly: false,
 		Message:    localizeMCPHTTPText(textLookup, "ai_settings.mcp_http.status.not_running", nil),
 	}
 }

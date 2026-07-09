@@ -629,6 +629,8 @@ export interface AIProviderConfig {
   headers?: Record<string, string>;
   maxTokens: number;
   temperature: number;
+  /** 思考强度：off | low | medium | high；空表示供应商默认 */
+  thinkingIntensity?: string;
 }
 
 export interface AIUserPromptSettings {

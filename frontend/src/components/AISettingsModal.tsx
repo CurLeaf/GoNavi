@@ -57,7 +57,8 @@ const DEFAULT_MCP_HTTP_SERVER_STATUS: AIMCPHTTPServerStatus = {
     addr: '127.0.0.1:8765',
     path: '/mcp',
     url: 'http://127.0.0.1:8765/mcp',
-    schemaOnly: true,
+    // 默认允许 execute_sql 查少量数据
+    schemaOnly: false,
     message: '',
 };
 
@@ -65,6 +66,7 @@ const DEFAULT_MCP_HTTP_SERVER_DRAFT: AIMCPHTTPServerDraft = {
     addr: DEFAULT_MCP_HTTP_SERVER_STATUS.addr,
     path: DEFAULT_MCP_HTTP_SERVER_STATUS.path,
     authorizationHeader: '',
+    schemaOnly: false,
 };
 
 const buildMCPHTTPServerDraftFromStatus = (
@@ -79,6 +81,10 @@ const buildMCPHTTPServerDraftFromStatus = (
         fallback.authorizationHeader ||
         '',
     ).trim(),
+    // 运行中用状态；未运行保留草稿选择
+    schemaOnly: typeof status.schemaOnly === 'boolean'
+        ? status.schemaOnly
+        : (typeof fallback.schemaOnly === 'boolean' ? fallback.schemaOnly : false),
 });
 
 const normalizeMCPHTTPAuthorizationToken = (value: string): string => {
@@ -406,6 +412,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                 models: resolvedModels,
                 baseUrl: finalBaseUrl,
                 apiFormat: resolvedTransport.apiFormat,
+                thinkingIntensity: String(values.thinkingIntensity || '').trim(),
             };
             // 后端 AISaveProvider 统一处理新增和更新，返回 void，失败抛异常
             await Service?.AISaveProvider?.(payload);
@@ -549,7 +556,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                     addr: mcpHTTPServerDraft.addr || DEFAULT_MCP_HTTP_SERVER_STATUS.addr,
                     path: mcpHTTPServerDraft.path || DEFAULT_MCP_HTTP_SERVER_STATUS.path,
                     token: normalizeMCPHTTPAuthorizationToken(mcpHTTPServerDraft.authorizationHeader),
-                    schemaOnly: true,
+                    schemaOnly: mcpHTTPServerDraft.schemaOnly === true,
                 })
                 : await Service.AIStopMCPHTTPServer();
             if (nextStatus) {
@@ -678,6 +685,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                 models: resolvedModels,
                 maxTokens: Number(values.maxTokens) || 4096,
                 temperature: Number(values.temperature) ?? 0.7,
+                thinkingIntensity: String(values.thinkingIntensity || '').trim(),
                 apiFormat: resolvedTransport.apiFormat,
             });
             if (res?.success) { setTestStatus('success'); void messageApi.success(t('ai_settings.message.test_success')); }

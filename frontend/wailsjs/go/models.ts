@@ -297,6 +297,7 @@ export namespace ai {
 	    headers?: Record<string, string>;
 	    maxTokens: number;
 	    temperature: number;
+	    thinkingIntensity?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProviderConfig(source);
@@ -318,6 +319,7 @@ export namespace ai {
 	        this.headers = source["headers"];
 	        this.maxTokens = source["maxTokens"];
 	        this.temperature = source["temperature"];
+	        this.thinkingIntensity = source["thinkingIntensity"];
 	    }
 	}
 	export class SafetyResult {
