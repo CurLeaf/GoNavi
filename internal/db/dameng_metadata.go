@@ -109,8 +109,9 @@ func buildDamengColumnsQuery(dbName, tableName string) string {
 	upperTableName := strings.ToUpper(strings.TrimSpace(tableName))
 	upperDBName := strings.ToUpper(strings.TrimSpace(dbName))
 
+	// 注意：达梦中 COMMENT 为保留字，不能使用 AS comment 作为列别名（Error -2007 语法分析出错）。
 	if upperDBName == "" {
-		return fmt.Sprintf(`SELECT c.column_name, c.data_type, c.data_length, c.char_length, c.data_precision, c.data_scale, c.nullable, c.data_default, cc.comments AS comment,
+		return fmt.Sprintf(`SELECT c.column_name, c.data_type, c.data_length, c.char_length, c.data_precision, c.data_scale, c.nullable, c.data_default, cc.comments AS col_comment,
 		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key
 		FROM user_tab_columns c
 		LEFT JOIN user_col_comments cc
@@ -127,7 +128,7 @@ func buildDamengColumnsQuery(dbName, tableName string) string {
 		ORDER BY c.column_id`, upperTableName, upperTableName, upperTableName)
 	}
 
-	return fmt.Sprintf(`SELECT c.column_name, c.data_type, c.data_length, c.char_length, c.data_precision, c.data_scale, c.nullable, c.data_default, cc.comments AS comment,
+	return fmt.Sprintf(`SELECT c.column_name, c.data_type, c.data_length, c.char_length, c.data_precision, c.data_scale, c.nullable, c.data_default, cc.comments AS col_comment,
 		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key
 		FROM all_tab_columns c
 		LEFT JOIN all_col_comments cc
@@ -247,7 +248,8 @@ func buildDamengColumnDefinitions(data []map[string]interface{}) []connection.Co
 			Type:     formatDamengColumnType(row),
 			Nullable: normalizeDamengNullable(getDamengRowString(row, "NULLABLE")),
 			Key:      getDamengRowString(row, "COLUMN_KEY"),
-			Comment:  getDamengRowString(row, "COMMENT", "COMMENTS"),
+			// col_comment：避免达梦保留字 comment 别名；兼容旧别名与原生 comments 列名
+			Comment: getDamengRowString(row, "COL_COMMENT", "COMMENT", "COMMENTS"),
 		}
 
 		defaultValue := getDamengRowString(row, "DATA_DEFAULT")
