@@ -22,6 +22,7 @@ import (
 	"GoNavi-Wails/internal/logger"
 	proxytunnel "GoNavi-Wails/internal/proxy"
 	redisbackend "GoNavi-Wails/internal/redis"
+	"GoNavi-Wails/internal/resultdiff"
 	"GoNavi-Wails/internal/secretstore"
 	syncbackend "GoNavi-Wails/internal/sync"
 	"GoNavi-Wails/shared/i18n"
@@ -102,6 +103,7 @@ type App struct {
 	jvmPreviewTokenTTL            time.Duration
 	keepAliveCancel               context.CancelFunc
 	keepAliveDone                 chan struct{}
+	resultDiffManager             *resultdiff.Manager
 }
 
 // NewApp creates a new App application struct
@@ -123,6 +125,7 @@ func NewAppWithSecretStore(store secretstore.SecretStore) *App {
 		localizer:          newAppLocalizer(),
 		jvmPreviewTokens:   make(map[string]jvmPreviewConfirmationToken),
 		jvmPreviewTokenTTL: defaultJVMPreviewConfirmationTokenTTL,
+		resultDiffManager:  resultdiff.NewManager(30 * time.Minute),
 	}
 }
 

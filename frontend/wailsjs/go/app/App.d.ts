@@ -5,6 +5,7 @@ import {sync} from '../models';
 import {app} from '../models';
 import {jvm} from '../models';
 import {redis} from '../models';
+import {resultdiff} from '../models';
 
 export function ApplyChanges(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:connection.ChangeSet):Promise<connection.QueryResult>;
 
@@ -331,6 +332,16 @@ export function ResolveDriverPackageDownloadURL(arg1:string,arg2:string):Promise
 export function ResolveDriverRepositoryURL(arg1:string):Promise<connection.QueryResult>;
 
 export function RestartSecurityUpdate(arg1:app.RestartSecurityUpdateRequest):Promise<app.SecurityUpdateStatus>;
+
+export function ResultDiffClose(arg1:string):Promise<connection.QueryResult>;
+
+export function ResultDiffCompute(arg1:string):Promise<connection.QueryResult>;
+
+export function ResultDiffPage(arg1:resultdiff.PageRequest):Promise<connection.QueryResult>;
+
+export function ResultDiffStart(arg1:app.ResultDiffStartRequest):Promise<connection.QueryResult>;
+
+export function ResultDiffUploadChunk(arg1:resultdiff.UploadChunkRequest):Promise<connection.QueryResult>;
 
 export function RetrySecurityUpdateCurrentRound(arg1:app.RetrySecurityUpdateRequest):Promise<app.SecurityUpdateStatus>;
 

@@ -70,6 +70,18 @@ import QueryEditorResultsPanel, {
     QUERY_EDITOR_SQL_LOG_TAB_KEY,
     type QueryEditorResultSet,
 } from './QueryEditorResultsPanel';
+import ResultDiffWizard from './resultDiff/ResultDiffWizard';
+import ResultDiffPanel from './resultDiff/ResultDiffPanel';
+import ViewDataVerifyWizard from './resultDiff/ViewDataVerifyWizard';
+import type {
+  ResultDiffColumnMeta,
+  ResultDiffComparableResult,
+  ResultDiffSummary,
+} from '../utils/resultDiff/types';
+import {
+  isViewEditSql,
+  resolveViewNameForVerify,
+} from '../utils/resultDiff/viewDataVerify';
 import { SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS } from './QueryEditorTransactionSettings';
 import QueryEditorTransactionToolbar from './QueryEditorTransactionToolbar';
 import QueryEditorToolbar from './QueryEditorToolbar';
@@ -1138,6 +1150,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const [textToSqlInstruction, setTextToSqlInstruction] = useState('');
   const [textToSqlApplyMode, setTextToSqlApplyMode] = useState<QueryEditorAiApplyMode>('insert');
   const [textToSqlGenerating, setTextToSqlGenerating] = useState(false);
+  const [resultDiffWizardOpen, setResultDiffWizardOpen] = useState(false);
+  const [resultDiffAnchorKey, setResultDiffAnchorKey] = useState<string>('');
+  const [resultDiffSession, setResultDiffSession] = useState<{
+    jobId: string;
+    summary: ResultDiffSummary;
+    leftLabel: string;
+    rightLabel: string;
+    columnMeta?: Record<string, ResultDiffColumnMeta>;
+  } | null>(null);
+  const [viewDataVerifyOpen, setViewDataVerifyOpen] = useState(false);
 
   // Resizing state
   const [editorHeight, setEditorHeight] = useState(300);
@@ -7927,6 +7949,27 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         onTriggerSqlAiCompletion={() => triggerAiInlineCompletionRef.current?.()}
         onToggleResultPanelVisibility={toggleResultPanelVisibility}
         onAIAction={handleAIAction}
+        showViewDataVerify={
+          isObjectEditQueryTab
+          && (
+            Boolean(String(tab.viewName || '').trim())
+            || tab.objectType === 'view'
+            || tab.objectType === 'materialized-view'
+            || isViewEditSql(query)
+          )
+        }
+        onViewDataVerify={() => {
+          const viewName = resolveViewNameForVerify({
+            sql: query,
+            tabViewName: tab.viewName,
+            tabTitle: tab.title,
+          });
+          if (!viewName) {
+            message.warning(translate('result_diff.view_verify.error.no_view_name'));
+            return;
+          }
+          setViewDataVerifyOpen(true);
+        }}
       />
       
       <div
@@ -7994,8 +8037,75 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           onReloadResult={handleReloadResult}
           onResultPageChange={handleResultPageChange}
           onDiagnoseExecutionError={handleDiagnoseExecutionError}
+          onCompareResult={(resultKey) => {
+            setResultDiffAnchorKey(resultKey);
+            setResultDiffWizardOpen(true);
+          }}
         />
       )}
+
+      <ResultDiffWizard
+        open={resultDiffWizardOpen}
+        results={resultSets
+          .map((rs, idx) => ({ rs, idx }))
+          .filter(({ rs }) => rs.resultType !== 'message' && Array.isArray(rs.columns) && rs.columns.length > 0)
+          .map(({ rs, idx }): ResultDiffComparableResult => ({
+            key: rs.key,
+            label: translate('query_editor.results_panel.tab.result', { index: idx + 1 }) + ` (${rs.rows?.length ?? 0})`,
+            sql: String(rs.sql || rs.exportSql || ''),
+            columns: rs.columns || [],
+            rows: (rs.rows || []) as Record<string, unknown>[],
+            pkColumns: rs.pkColumns || [],
+            truncated: Boolean(rs.truncated),
+            metadataDbName: rs.metadataDbName || currentDb,
+            metadataTableName: rs.metadataTableName || rs.tableName,
+          }))}
+        initialRightKey={resultDiffAnchorKey}
+        connectionConfig={(() => {
+          const conn = connections.find((c) => c.id === currentConnectionId);
+          return conn ? buildRpcConnectionConfig(conn) : {};
+        })()}
+        database={currentDb}
+        onCancel={() => setResultDiffWizardOpen(false)}
+        onCompleted={(payload) => {
+          setResultDiffWizardOpen(false);
+          setResultDiffSession(payload);
+        }}
+      />
+
+      {resultDiffSession && (
+        <ResultDiffPanel
+          open={Boolean(resultDiffSession)}
+          jobId={resultDiffSession.jobId}
+          summary={resultDiffSession.summary}
+          leftLabel={resultDiffSession.leftLabel}
+          rightLabel={resultDiffSession.rightLabel}
+          darkMode={darkMode}
+          columnMeta={resultDiffSession.columnMeta}
+          onClose={() => setResultDiffSession(null)}
+        />
+      )}
+
+      <ViewDataVerifyWizard
+        open={viewDataVerifyOpen}
+        connectionConfig={(() => {
+          const conn = connections.find((c) => c.id === currentConnectionId);
+          return conn ? buildRpcConnectionConfig(conn) : {};
+        })()}
+        database={currentDb}
+        dbType={String(connections.find((c) => c.id === currentConnectionId)?.config?.type || '')}
+        viewName={resolveViewNameForVerify({
+          sql: query,
+          tabViewName: tab.viewName,
+          tabTitle: tab.title,
+        })}
+        ddlSql={query}
+        onCancel={() => setViewDataVerifyOpen(false)}
+        onCompleted={(payload) => {
+          setViewDataVerifyOpen(false);
+          setResultDiffSession(payload);
+        }}
+      />
 
       <Modal
         title={translate('query_editor.text_to_sql.title')}

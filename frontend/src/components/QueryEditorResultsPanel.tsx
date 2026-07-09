@@ -69,6 +69,7 @@ interface QueryEditorResultsPanelProps {
     onReloadResult: (key: string, sql: string) => void;
     onResultPageChange: (key: string, page: number, pageSize: number) => void;
     onDiagnoseExecutionError: () => void;
+    onCompareResult?: (resultKey: string) => void;
 }
 
 const isAffectedRowsResult = (result: QueryEditorResultSet): boolean =>
@@ -101,6 +102,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     onReloadResult,
     onResultPageChange,
     onDiagnoseExecutionError,
+    onCompareResult,
 }) => {
     const i18n = useOptionalI18n();
     const t = i18n?.t ?? defaultTranslate;
@@ -338,12 +340,23 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     );
 
     function buildResultTabMenuItems(key: string, index: number): MenuProps['items'] {
+        const comparableCount = resultSets.filter(
+            (rs) => rs.resultType !== 'message' && !isAffectedRowsResult(rs) && Array.isArray(rs.columns) && rs.columns.length > 0,
+        ).length;
         return [
             ...(onOpenResultInWindow
                 ? [{
                     key: 'open-in-window',
                     label: t('query_editor.results_panel.menu.open_in_window'),
                     onClick: () => onOpenResultInWindow(key),
+                }, { type: 'divider' as const }]
+                : []),
+            ...(onCompareResult
+                ? [{
+                    key: 'compare-results',
+                    label: t('query_editor.results_panel.menu.compare_results'),
+                    disabled: comparableCount < 2,
+                    onClick: () => onCompareResult(key),
                 }, { type: 'divider' as const }]
                 : []),
             { key: 'close-other', label: t('query_editor.results_panel.menu.close_other'), disabled: resultSets.length <= 1, onClick: () => onCloseOtherResultTabs(key) },

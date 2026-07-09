@@ -654,6 +654,26 @@ export function RestartSecurityUpdate(arg1) {
   return window['go']['app']['App']['RestartSecurityUpdate'](arg1);
 }
 
+export function ResultDiffClose(arg1) {
+  return window['go']['app']['App']['ResultDiffClose'](arg1);
+}
+
+export function ResultDiffCompute(arg1) {
+  return window['go']['app']['App']['ResultDiffCompute'](arg1);
+}
+
+export function ResultDiffPage(arg1) {
+  return window['go']['app']['App']['ResultDiffPage'](arg1);
+}
+
+export function ResultDiffStart(arg1) {
+  return window['go']['app']['App']['ResultDiffStart'](arg1);
+}
+
+export function ResultDiffUploadChunk(arg1) {
+  return window['go']['app']['App']['ResultDiffUploadChunk'](arg1);
+}
+
 export function RetrySecurityUpdateCurrentRound(arg1) {
   return window['go']['app']['App']['RetrySecurityUpdateCurrentRound'](arg1);
 }
