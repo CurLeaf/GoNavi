@@ -203,6 +203,18 @@ const FloatingWorkbenchWindows: React.FC = () => {
             : '0 18px 48px rgba(15,23,42,0.18)'};
           overflow: hidden;
           pointer-events: auto;
+          animation: gn-detached-workbench-enter 180ms cubic-bezier(0.22, 1, 0.36, 1);
+          transform-origin: top left;
+        }
+        @keyframes gn-detached-workbench-enter {
+          from {
+            opacity: 0.55;
+            transform: scale(0.92);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
         }
         .gn-detached-window.is-focused {
           border-color: ${isDark ? 'rgba(255,214,102,0.55)' : 'rgba(22,119,255,0.45)'};

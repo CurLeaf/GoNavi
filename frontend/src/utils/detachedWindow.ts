@@ -116,6 +116,15 @@ export const shouldDetachTabByDrag = (deltaY: number, overId?: string | null): b
   return Math.abs(deltaY) >= DETACH_TAB_DRAG_Y_THRESHOLD;
 };
 
+/** 从指针位置推算浮动窗落点，便于结果 Tab 拖出时「跟手」打开 */
+export const resolveResultDetachPreferredBounds = (
+  clientX: number,
+  clientY: number,
+): Partial<Pick<DetachedWindowBounds, 'x' | 'y'>> => ({
+  x: Math.max(DETACHED_WINDOW_VIEWPORT_PADDING, Math.round(clientX - 120)),
+  y: Math.max(DETACHED_WINDOW_VIEWPORT_PADDING, Math.round(clientY - 24)),
+});
+
 export const resolveDetachedWindowTitle = (params: {
   kindLabel: string;
   objectLabel?: string;

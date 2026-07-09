@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Button, Dropdown, Tabs, Tooltip, message, type MenuProps } from 'antd';
 import { BugOutlined, CloseOutlined, CopyOutlined, EyeInvisibleOutlined, RobotOutlined } from '@ant-design/icons';
 
@@ -7,8 +7,19 @@ import type { QueryResultPaginationState } from '../utils/queryResultPagination'
 import { filterColumnNamesByGlobalHiddenColumns, useGlobalHiddenColumns } from '../utils/globalHiddenColumns';
 import { t as defaultTranslate } from '../i18n';
 import { useOptionalI18n } from '../i18n/provider';
+import {
+  resolveResultDetachPreferredBounds,
+  shouldDetachTabByDrag,
+  type DetachedWindowBounds,
+} from '../utils/detachedWindow';
+import DetachDragPreview, {
+  buildDetachDragPreviewState,
+  type DetachDragPreviewState,
+} from './DetachDragPreview';
 import DataGrid from './DataGrid';
 import LogPanel from './LogPanel';
+
+export type OpenResultInWindowPreferred = Partial<Pick<DetachedWindowBounds, 'x' | 'y' | 'width' | 'height'>>;
 
 export const QUERY_EDITOR_SQL_LOG_TAB_KEY = '__gonavi_sql_execution_log__';
 
@@ -50,7 +61,7 @@ interface QueryEditorResultsPanelProps {
     onCloseResultTabsToLeft: (key: string) => void;
     onCloseResultTabsToRight: (key: string) => void;
     onCloseAllResultTabs: () => void;
-    onOpenResultInWindow?: (key: string) => void;
+    onOpenResultInWindow?: (key: string, preferred?: OpenResultInWindowPreferred) => void;
     onReloadResult: (key: string, sql: string) => void;
     onResultPageChange: (key: string, page: number, pageSize: number) => void;
     onDiagnoseExecutionError: () => void;
@@ -90,6 +101,132 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     const i18n = useOptionalI18n();
     const t = i18n?.t ?? defaultTranslate;
     const globalHiddenColumns = useGlobalHiddenColumns();
+    const [draggingResultKey, setDraggingResultKey] = useState<string | null>(null);
+    const [detachDragPreview, setDetachDragPreview] = useState<DetachDragPreviewState | null>(null);
+    const resultTabDragRef = useRef<{
+        key: string;
+        title: string;
+        startX: number;
+        startY: number;
+        active: boolean;
+    } | null>(null);
+
+    const resolveResultTabTitle = useCallback((key: string) => {
+        const index = resultSets.findIndex((item) => item.key === key);
+        const rs = index >= 0 ? resultSets[index] : null;
+        if (!rs) return t('query_editor.results_panel.menu.open_in_window');
+        if (rs.resultType === 'message') {
+            return t('query_editor.results_panel.tab.message', { index: index + 1 });
+        }
+        return t('query_editor.results_panel.tab.result', { index: index + 1 });
+    }, [resultSets, t]);
+
+    const handleResultTabPointerDown = useCallback((event: React.PointerEvent<HTMLElement>, key: string) => {
+        if (!onOpenResultInWindow || event.button !== 0) return;
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        if (target?.closest('.query-result-tab-close, button, a, input, textarea')) {
+            return;
+        }
+        const title = resolveResultTabTitle(key);
+        resultTabDragRef.current = {
+            key,
+            title,
+            startX: event.clientX,
+            startY: event.clientY,
+            active: false,
+        };
+
+        const previousUserSelect = document.body.style.userSelect;
+        const previousWebkitUserSelect = (document.body.style as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect || '';
+        let selectionSuppressed = false;
+
+        const clearNativeSelection = () => {
+            const selection = window.getSelection?.();
+            if (selection && selection.rangeCount > 0) {
+                selection.removeAllRanges();
+            }
+        };
+
+        const suppressTextSelection = () => {
+            if (!selectionSuppressed) {
+                selectionSuppressed = true;
+                document.body.style.userSelect = 'none';
+                (document.body.style as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect = 'none';
+                document.documentElement.classList.add('gn-result-tab-detaching');
+                window.addEventListener('selectstart', preventSelectStart, true);
+                window.addEventListener('dragstart', preventSelectStart, true);
+            }
+            clearNativeSelection();
+        };
+
+        const preventSelectStart = (selectEvent: Event) => {
+            selectEvent.preventDefault();
+            selectEvent.stopPropagation();
+        };
+
+        const clearListeners = () => {
+            window.removeEventListener('pointermove', handleMove);
+            window.removeEventListener('pointerup', handleUp);
+            window.removeEventListener('pointercancel', handleUp);
+            window.removeEventListener('selectstart', preventSelectStart, true);
+            window.removeEventListener('dragstart', preventSelectStart, true);
+            if (selectionSuppressed) {
+                document.body.style.userSelect = previousUserSelect;
+                (document.body.style as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect = previousWebkitUserSelect;
+                document.documentElement.classList.remove('gn-result-tab-detaching');
+            }
+            resultTabDragRef.current = null;
+            setDraggingResultKey(null);
+            setDetachDragPreview(null);
+        };
+
+        const handleMove = (moveEvent: PointerEvent) => {
+            const drag = resultTabDragRef.current;
+            if (!drag || drag.key !== key) return;
+            const dx = moveEvent.clientX - drag.startX;
+            const dy = moveEvent.clientY - drag.startY;
+            if (!drag.active && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+                drag.active = true;
+                setDraggingResultKey(key);
+                suppressTextSelection();
+            }
+            if (drag.active) {
+                // 拖出过程中禁止浏览器默认选中 SQL 编辑器文本
+                moveEvent.preventDefault();
+                suppressTextSelection();
+                setDetachDragPreview(buildDetachDragPreviewState({
+                    title,
+                    clientX: moveEvent.clientX,
+                    clientY: moveEvent.clientY,
+                    deltaY: dy,
+                }));
+            }
+        };
+
+        const handleUp = (upEvent: PointerEvent) => {
+            const drag = resultTabDragRef.current;
+            if (!drag || drag.key !== key) {
+                clearListeners();
+                return;
+            }
+            const dy = upEvent.clientY - drag.startY;
+            const shouldDetach = drag.active && shouldDetachTabByDrag(dy);
+            if (drag.active) {
+                upEvent.preventDefault();
+                clearNativeSelection();
+            }
+            // 先清预览再打开真实窗口，避免叠两层
+            clearListeners();
+            if (shouldDetach) {
+                onOpenResultInWindow(key, resolveResultDetachPreferredBounds(upEvent.clientX, upEvent.clientY));
+            }
+        };
+
+        window.addEventListener('pointermove', handleMove, { passive: false });
+        window.addEventListener('pointerup', handleUp);
+        window.addEventListener('pointercancel', handleUp);
+    }, [onOpenResultInWindow, resolveResultTabTitle]);
+
     const shouldShowSqlLogTab = isV2Ui && (sqlLogCount > 0 || activeResultKey === QUERY_EDITOR_SQL_LOG_TAB_KEY);
     const logTabCountLabel = sqlLogCount > 999 ? '999+' : String(sqlLogCount);
     const hideTooltipTitle = toggleShortcutLabel
@@ -217,7 +354,12 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
         key: rs.key,
         label: (
             <Dropdown menu={{ items: buildResultTabMenuItems(rs.key, idx) }} trigger={['contextMenu']} rootClassName={isV2Ui ? 'gn-v2-tab-context-menu-popup' : undefined}>
-                <div className="query-result-tab-label" onContextMenu={(event) => event.preventDefault()}>
+                <div
+                    className={`query-result-tab-label${onOpenResultInWindow ? ' is-detachable' : ''}${draggingResultKey === rs.key ? ' is-dragging-detach' : ''}`}
+                    title={onOpenResultInWindow ? t('query_editor.results_panel.menu.open_in_window') : undefined}
+                    onContextMenu={(event) => event.preventDefault()}
+                    onPointerDown={(event) => handleResultTabPointerDown(event, rs.key)}
+                >
                     <Tooltip title={rs.sql}>
                         <span className="query-result-tab-text">
                             {rs.resultType === 'message'
@@ -386,6 +528,15 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
               .query-result-tabs .ant-tabs-tabpane-hidden { display: none !important; }
               .query-result-tabs .ant-tabs-ink-bar { transition: none !important; }
               .query-result-tab-label { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 126px; height: 100%; line-height: 1; user-select: none; -webkit-user-select: none; }
+              .query-result-tab-label.is-detachable { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+              .query-result-tab-label.is-dragging-detach { cursor: grabbing; opacity: 0.72; }
+              html.gn-result-tab-detaching,
+              html.gn-result-tab-detaching body,
+              html.gn-result-tab-detaching * {
+                user-select: none !important;
+                -webkit-user-select: none !important;
+                cursor: grabbing !important;
+              }
               .query-result-tab-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 700; }
               .query-result-tab-count { flex: 0 0 auto; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: rgba(148, 163, 184, 0.16); color: inherit; font-size: 11px; font-weight: 700; line-height: 17px; }
               .query-result-tab-close { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 999px; color: #999; cursor: pointer; flex: 0 0 auto; }
@@ -436,6 +587,11 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                     </>
                 )}
             </div>
+            <DetachDragPreview
+                preview={detachDragPreview}
+                darkMode={darkMode}
+                readyHint={t('query_editor.results_panel.menu.open_in_window')}
+            />
         </>
     );
 };

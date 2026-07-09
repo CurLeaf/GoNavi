@@ -7692,7 +7692,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       setActiveResultKey('');
   };
 
-  const openResultInWindow = (key: string) => {
+  const openResultInWindow = (
+      key: string,
+      preferred?: { x?: number; y?: number; width?: number; height?: number },
+  ) => {
       const target = resultSets.find((result) => result.key === key);
       if (!target) return;
       const index = resultSets.findIndex((result) => result.key === key);
@@ -7706,6 +7709,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           connectionId: currentConnectionId || tab.connectionId || '',
           dbName: currentDb || tab.dbName || '',
           title,
+          ...(preferred?.x !== undefined ? { x: preferred.x } : {}),
+          ...(preferred?.y !== undefined ? { y: preferred.y } : {}),
+          ...(preferred?.width !== undefined ? { width: preferred.width } : {}),
+          ...(preferred?.height !== undefined ? { height: preferred.height } : {}),
           result: {
               key: target.key,
               sql: target.sql,

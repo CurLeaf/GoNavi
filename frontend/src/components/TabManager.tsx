@@ -4,7 +4,7 @@ import { Button, Dropdown, message, Tabs, Tooltip } from 'antd';
 import { AppstoreOutlined, CloseOutlined, ConsoleSqlOutlined, DatabaseOutlined, PlusOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons';
 import type { MenuProps, TabsProps } from 'antd';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
-import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
+import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core';
 import { SortableContext, useSortable, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useStore } from '../store';
@@ -27,7 +27,14 @@ import {
 } from '../utils/sqlFileTabDirty';
 import { clearSQLFileTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
 import WorkbenchTabContent from './WorkbenchTabContent';
-import { shouldDetachTabByDrag } from '../utils/detachedWindow';
+import DetachDragPreview, {
+  buildDetachDragPreviewState,
+  type DetachDragPreviewState,
+} from './DetachDragPreview';
+import {
+  resolveResultDetachPreferredBounds,
+  shouldDetachTabByDrag,
+} from '../utils/detachedWindow';
 
 const getTabKindLabel = (tab: TabData): string => {
   if (tab.type === 'query') return t('tab_manager.kind_badge.query');
@@ -408,6 +415,13 @@ const TabManager: React.FC = React.memo(() => {
   );
   const tabsNavBorderColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.09)' : 'rgba(0, 0, 0, 0.08)';
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
+  const [detachDragPreview, setDetachDragPreview] = useState<DetachDragPreviewState | null>(null);
+  const detachDragSessionRef = useRef<{
+    tabId: string;
+    title: string;
+    startX: number;
+    startY: number;
+  } | null>(null);
   const suppressClickUntilRef = useRef<number>(0);
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -575,29 +589,60 @@ const TabManager: React.FC = React.memo(() => {
     }
   };
 
+  const clearDetachDragSession = useCallback(() => {
+    detachDragSessionRef.current = null;
+    setDetachDragPreview(null);
+    document.documentElement.classList.remove('gn-workbench-tab-detaching');
+  }, []);
+
   const handleDragStart = (event: DragStartEvent) => {
     const sourceId = String(event.active.id || '').trim();
     setDraggingTabId(sourceId || null);
+    const tab = dockedTabs.find((item) => item.id === sourceId);
+    const connection = connections.find((conn) => conn.id === tab?.connectionId);
+    const displayModel = tab
+      ? buildTabDisplayModel(tab, connection, appearance.tabDisplay, t)
+      : null;
+    const title = displayModel?.fullTitle || tab?.title || t('tab_manager.detached.title_fallback');
+    const pointerEvent = event.activatorEvent as PointerEvent | MouseEvent | undefined;
+    const startX = typeof pointerEvent?.clientX === 'number' ? pointerEvent.clientX : 0;
+    const startY = typeof pointerEvent?.clientY === 'number' ? pointerEvent.clientY : 0;
+    detachDragSessionRef.current = sourceId
+      ? { tabId: sourceId, title, startX, startY }
+      : null;
+    document.documentElement.classList.add('gn-workbench-tab-detaching');
+  };
+
+  const handleDragMove = (event: DragMoveEvent) => {
+    const session = detachDragSessionRef.current;
+    if (!session) return;
+    const deltaX = Number(event.delta?.x || 0);
+    const deltaY = Number(event.delta?.y || 0);
+    setDetachDragPreview(buildDetachDragPreviewState({
+      title: session.title,
+      clientX: session.startX + deltaX,
+      clientY: session.startY + deltaY,
+      deltaY,
+    }));
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const sourceId = String(event.active.id || '').trim();
     const targetId = String(event.over?.id || '').trim();
+    const deltaX = Number(event.delta?.x || 0);
     const deltaY = Number(event.delta?.y || 0);
+    const session = detachDragSessionRef.current;
     setDraggingTabId(null);
+    clearDetachDragSession();
     if (!sourceId) {
       return;
     }
     if (shouldDetachTabByDrag(deltaY, targetId || null)) {
       suppressClickUntilRef.current = Date.now() + 120;
-      const pointerEvent = event.activatorEvent as PointerEvent | MouseEvent | undefined;
-      const preferredX = typeof pointerEvent?.clientX === 'number'
-        ? Math.max(16, pointerEvent.clientX - 120)
-        : undefined;
-      const preferredY = typeof pointerEvent?.clientY === 'number'
-        ? Math.max(16, pointerEvent.clientY - 20)
-        : undefined;
-      detachWorkbenchTab(sourceId, { x: preferredX, y: preferredY });
+      const releaseX = (session?.startX ?? 0) + deltaX;
+      const releaseY = (session?.startY ?? 0) + deltaY;
+      const preferred = resolveResultDetachPreferredBounds(releaseX, releaseY);
+      detachWorkbenchTab(sourceId, preferred);
       return;
     }
     if (!targetId || sourceId === targetId) {
@@ -609,6 +654,7 @@ const TabManager: React.FC = React.memo(() => {
 
   const handleDragCancel = () => {
     setDraggingTabId(null);
+    clearDetachDragSession();
   };
 
   React.useEffect(() => {
@@ -979,6 +1025,12 @@ body[data-theme='dark'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
               color: var(--gn-fg-2);
               font-weight: 600;
             }
+            html.gn-workbench-tab-detaching,
+            html.gn-workbench-tab-detaching body,
+            html.gn-workbench-tab-detaching * {
+              user-select: none !important;
+              -webkit-user-select: none !important;
+            }
         `}</style>
         {isV2Ui && !hasTabs ? (
           EmptyWorkbench
@@ -990,6 +1042,7 @@ body[data-theme='dark'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
           sensors={sensors}
           collisionDetection={closestCenter}
           onDragStart={handleDragStart}
+          onDragMove={handleDragMove}
           onDragEnd={handleDragEnd}
           onDragCancel={handleDragCancel}
         >
@@ -1011,6 +1064,11 @@ body[data-theme='dark'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
           </SortableContext>
         </DndContext>
         )}
+        <DetachDragPreview
+          preview={detachDragPreview}
+          darkMode={theme === 'dark'}
+          readyHint={t('tab_manager.menu.open_in_window')}
+        />
     </div>
   );
 });
