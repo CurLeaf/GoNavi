@@ -50,6 +50,7 @@ interface QueryEditorResultsPanelProps {
     onCloseResultTabsToLeft: (key: string) => void;
     onCloseResultTabsToRight: (key: string) => void;
     onCloseAllResultTabs: () => void;
+    onOpenResultInWindow?: (key: string) => void;
     onReloadResult: (key: string, sql: string) => void;
     onResultPageChange: (key: string, page: number, pageSize: number) => void;
     onDiagnoseExecutionError: () => void;
@@ -81,6 +82,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     onCloseResultTabsToLeft,
     onCloseResultTabsToRight,
     onCloseAllResultTabs,
+    onOpenResultInWindow,
     onReloadResult,
     onResultPageChange,
     onDiagnoseExecutionError,
@@ -196,6 +198,13 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
 
     function buildResultTabMenuItems(key: string, index: number): MenuProps['items'] {
         return [
+            ...(onOpenResultInWindow
+                ? [{
+                    key: 'open-in-window',
+                    label: t('query_editor.results_panel.menu.open_in_window'),
+                    onClick: () => onOpenResultInWindow(key),
+                }, { type: 'divider' as const }]
+                : []),
             { key: 'close-other', label: t('query_editor.results_panel.menu.close_other'), disabled: resultSets.length <= 1, onClick: () => onCloseOtherResultTabs(key) },
             { key: 'close-left', label: t('query_editor.results_panel.menu.close_left'), disabled: index <= 0, onClick: () => onCloseResultTabsToLeft(key) },
             { key: 'close-right', label: t('query_editor.results_panel.menu.close_right'), disabled: index >= resultSets.length - 1, onClick: () => onCloseResultTabsToRight(key) },

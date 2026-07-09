@@ -8,6 +8,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { BrowserOpenURL, Environment, EventsOn, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetDarkTheme, WindowSetLightTheme, WindowSetPosition, WindowSetSize, WindowSetSystemDefaultTheme, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
+import FloatingWorkbenchWindows from './components/FloatingWorkbenchWindows';
+import FloatingQueryResultWindows from './components/FloatingQueryResultWindows';
 import ConnectionModal from './components/ConnectionModal';
 import SnippetSettingsModal from './components/SnippetSettingsModal';
 import ConnectionPackagePasswordModal from './components/ConnectionPackagePasswordModal';
@@ -5360,6 +5362,8 @@ function App() {
              <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'row', position: 'relative' }}>
                <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? 'var(--gonavi-border-radius)' : 0, clipPath: isLogPanelOpen ? 'inset(0 round var(--gonavi-border-radius))' : 'none' }}>
                   <TabManager />
+                  <FloatingWorkbenchWindows />
+                  <FloatingQueryResultWindows />
                </div>
                {!isV2Ui && !aiPanelVisible && (
                <>

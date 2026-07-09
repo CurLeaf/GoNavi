@@ -54,6 +54,11 @@ import {
     hasQueryTabDraft,
     persistQueryTabDraftSnapshot,
 } from '../utils/sqlFileTabDrafts';
+import {
+    clearQueryEditorResultSession,
+    saveQueryEditorResultSession,
+    takeQueryEditorResultSession,
+} from '../utils/queryEditorResultSessionCache';
 import { buildEditableTriggerSql } from '../utils/triggerEditSql';
 import {
     getColumnDefinitionComment,
@@ -1102,9 +1107,18 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   
   type ResultSet = QueryEditorResultSet;
 
-  // Result Sets
-  const [resultSets, setResultSets] = useState<ResultSet[]>([]);
-  const [activeResultKey, setActiveResultKey] = useState<string>('');
+  // Result Sets (session cache survives detach/attach remounts)
+  const restoredResultSessionRef = useRef(takeQueryEditorResultSession(tab.id));
+  const [resultSets, setResultSets] = useState<ResultSet[]>(
+    () => restoredResultSessionRef.current?.resultSets || [],
+  );
+  const [activeResultKey, setActiveResultKey] = useState<string>(
+    () => restoredResultSessionRef.current?.activeResultKey || '',
+  );
+  const resultSetsRef = useRef(resultSets);
+  const activeResultKeyRef = useRef(activeResultKey);
+  resultSetsRef.current = resultSets;
+  activeResultKeyRef.current = activeResultKey;
   const [loading, setLoading] = useState(false);
   const [executionError, setExecutionError] = useState<string>('');
   const [, setCurrentQueryId] = useState<string>('');
@@ -1246,8 +1260,22 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const sqlEditorTransactionOptions = useStore(state => state.sqlEditorTransactionOptions);
   const setSqlEditorTransactionOptions = useStore(state => state.setSqlEditorTransactionOptions);
   const [isResultPanelVisible, setIsResultPanelVisible] = useState(
-      () => tab.resultPanelVisible === true
+      () => restoredResultSessionRef.current?.isResultPanelVisible
+          ?? (tab.resultPanelVisible === true)
   );
+  const isResultPanelVisibleRef = useRef(isResultPanelVisible);
+  isResultPanelVisibleRef.current = isResultPanelVisible;
+
+  useEffect(() => {
+      // Keep result panel state across detach/attach remounts of the same tab.
+      return () => {
+          saveQueryEditorResultSession(tab.id, {
+              resultSets: resultSetsRef.current,
+              activeResultKey: activeResultKeyRef.current,
+              isResultPanelVisible: isResultPanelVisibleRef.current,
+          });
+      };
+  }, [tab.id]);
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
   const runQueryShortcutBinding = useMemo(
@@ -1499,6 +1527,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       });
   }, [triggerSqlAiCompletionShortcutBinding]);
   useEffect(() => {
+      // Prefer remount session cache (detach/attach); otherwise follow tab draft flag.
+      if (restoredResultSessionRef.current && restoredResultSessionRef.current.isResultPanelVisible !== undefined) {
+          setIsResultPanelVisible(restoredResultSessionRef.current.isResultPanelVisible === true);
+          return;
+      }
       setIsResultPanelVisible(tab.resultPanelVisible === true);
   }, [tab.id, tab.resultPanelVisible]);
   const updateResultPanelVisibility = useCallback((visible: boolean) => {
@@ -7659,6 +7692,84 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       setActiveResultKey('');
   };
 
+  const openResultInWindow = (key: string) => {
+      const target = resultSets.find((result) => result.key === key);
+      if (!target) return;
+      const index = resultSets.findIndex((result) => result.key === key);
+      const title = target.resultType === 'message'
+          ? translate('query_editor.results_panel.tab.message', { index: index + 1 })
+          : translate('query_editor.results_panel.detached.title', { index: index + 1 });
+      const windowId = `query-result:${tab.id}:${target.key}`;
+      useStore.getState().detachQueryResultWindow({
+          id: windowId,
+          sourceQueryTabId: tab.id,
+          connectionId: currentConnectionId || tab.connectionId || '',
+          dbName: currentDb || tab.dbName || '',
+          title,
+          result: {
+              key: target.key,
+              sql: target.sql,
+              exportSql: target.exportSql,
+              sourceStatementIndex: target.sourceStatementIndex,
+              statementResultIndex: target.statementResultIndex,
+              rows: target.rows,
+              columns: target.columns,
+              messages: target.messages,
+              resultType: target.resultType,
+              tableName: target.tableName,
+              pkColumns: target.pkColumns || [],
+              editLocator: target.editLocator as any,
+              readOnly: target.readOnly !== false,
+              showRowNumberColumn: target.showRowNumberColumn,
+              truncated: target.truncated,
+          },
+      });
+      handleCloseResult(key);
+  };
+
+  React.useEffect(() => {
+      const handleRestoreQueryResult = (event: Event) => {
+          const detail = (event as CustomEvent).detail || {};
+          const sourceQueryTabId = String(detail.sourceQueryTabId || '').trim();
+          if (sourceQueryTabId !== tab.id) return;
+          const restored = detail.result;
+          if (!restored || typeof restored !== 'object') return;
+          const restoredKey = String(restored.key || '').trim();
+          if (!restoredKey) return;
+          setResultSets((prev) => {
+              if (prev.some((item) => item.key === restoredKey)) {
+                  return prev;
+              }
+              return [
+                  ...prev,
+                  {
+                      key: restoredKey,
+                      sql: String(restored.sql || ''),
+                      exportSql: restored.exportSql,
+                      sourceStatementIndex: restored.sourceStatementIndex,
+                      statementResultIndex: restored.statementResultIndex,
+                      rows: Array.isArray(restored.rows) ? restored.rows : [],
+                      columns: Array.isArray(restored.columns) ? restored.columns : [],
+                      messages: Array.isArray(restored.messages) ? restored.messages : undefined,
+                      resultType: restored.resultType === 'message' ? 'message' : 'grid',
+                      tableName: restored.tableName,
+                      pkColumns: Array.isArray(restored.pkColumns) ? restored.pkColumns : [],
+                      editLocator: restored.editLocator,
+                      readOnly: restored.readOnly !== false,
+                      showRowNumberColumn: restored.showRowNumberColumn,
+                      truncated: restored.truncated,
+                  } as ResultSet,
+              ];
+          });
+          setActiveResultKey(restoredKey);
+          updateResultPanelVisibility(true);
+      };
+      window.addEventListener('gonavi:restore-query-result', handleRestoreQueryResult as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:restore-query-result', handleRestoreQueryResult as EventListener);
+      };
+  }, [tab.id, updateResultPanelVisibility]);
+
   const toggleQueryResultsPanelShortcutLabel =
       toggleQueryResultsPanelShortcutBinding.enabled && toggleQueryResultsPanelShortcutBinding.combo
           ? getShortcutDisplayLabel(toggleQueryResultsPanelShortcutBinding.combo, activeShortcutPlatform)
@@ -7813,6 +7924,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           onCloseResultTabsToLeft={closeResultTabsToLeft}
           onCloseResultTabsToRight={closeResultTabsToRight}
           onCloseAllResultTabs={closeAllResultTabs}
+          onOpenResultInWindow={openResultInWindow}
           onReloadResult={handleReloadResult}
           onResultPageChange={handleResultPageChange}
           onDiagnoseExecutionError={handleDiagnoseExecutionError}

@@ -1548,6 +1548,75 @@ describe('store appearance persistence', () => {
     });
   });
 
+  it('detaches and restores workbench tabs as floating windows', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'table-users',
+      title: 'users',
+      type: 'table',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      tableName: 'users',
+    });
+    useStore.getState().addTab({
+      id: 'query-1',
+      title: '新建查询',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      query: 'select 1;',
+    });
+
+    useStore.getState().detachWorkbenchTab('table-users', { x: 80, y: 90, width: 800, height: 500 });
+    expect(useStore.getState().isWorkbenchTabDetached('table-users')).toBe(true);
+    expect(useStore.getState().detachedWorkbenchWindows).toEqual([
+      expect.objectContaining({
+        tabId: 'table-users',
+        x: 80,
+        y: 90,
+        width: 800,
+        height: 500,
+      }),
+    ]);
+    expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual(['table-users', 'query-1']);
+
+    useStore.getState().attachWorkbenchTab('table-users');
+    expect(useStore.getState().isWorkbenchTabDetached('table-users')).toBe(false);
+    expect(useStore.getState().detachedWorkbenchWindows).toEqual([]);
+    expect(useStore.getState().activeTabId).toBe('table-users');
+
+    useStore.getState().detachWorkbenchTab('table-users');
+    useStore.getState().closeTab('table-users');
+    expect(useStore.getState().detachedWorkbenchWindows).toEqual([]);
+    expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual(['query-1']);
+  });
+
+  it('detaches and restores query result floating windows', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().detachQueryResultWindow({
+      id: 'query-result:tab-1:rs-1',
+      sourceQueryTabId: 'tab-1',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      title: '结果 1',
+      result: {
+        key: 'rs-1',
+        sql: 'select 1',
+        rows: [{ a: 1 }],
+        columns: ['a'],
+        pkColumns: [],
+        readOnly: true,
+      },
+    });
+    expect(useStore.getState().detachedQueryResultWindows).toHaveLength(1);
+
+    const restored = useStore.getState().attachQueryResultWindow('query-result:tab-1:rs-1');
+    expect(restored?.result.key).toBe('rs-1');
+    expect(useStore.getState().detachedQueryResultWindows).toEqual([]);
+  });
+
   it('returns to the source tab after closing an object edit tab opened from a hyperlink', async () => {
     const { useStore } = await importStore();
 

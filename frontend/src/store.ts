@@ -49,6 +49,14 @@ import {
 } from "./utils/oceanBaseProtocol";
 import { sanitizeFontFamilyInput } from "./utils/fontFamilies";
 import {
+  createDefaultDetachedBounds,
+  nextDetachedZIndex,
+  type DetachedQueryResultWindow,
+  type DetachedWorkbenchWindow,
+  type DetachedWindowBounds,
+} from "./utils/detachedWindow";
+import { clearQueryEditorResultSession } from "./utils/queryEditorResultSessionCache";
+import {
   DEFAULT_LANGUAGE,
   LANGUAGE_PREFERENCES,
   resolveLanguage,
@@ -1328,6 +1336,10 @@ interface AppState {
   connectionTags: ConnectionTag[];
   sidebarRootOrder: string[];
   tabs: TabData[];
+  /** 主工作区已拆出的浮动窗口（会话态，不持久化） */
+  detachedWorkbenchWindows: DetachedWorkbenchWindow[];
+  /** SQL 结果区已拆出的浮动窗口（会话态，不持久化） */
+  detachedQueryResultWindows: DetachedQueryResultWindow[];
   activeTabId: string | null;
   activeContext: { connectionId: string; dbName: string } | null;
   savedQueries: SavedQuery[];
@@ -1441,6 +1453,29 @@ interface AppState {
   setActiveContext: (
     context: { connectionId: string; dbName: string } | null,
   ) => void;
+  detachWorkbenchTab: (
+    tabId: string,
+    preferred?: Partial<Pick<DetachedWindowBounds, "x" | "y" | "width" | "height">>,
+  ) => void;
+  attachWorkbenchTab: (tabId: string) => void;
+  updateDetachedWorkbenchBounds: (
+    tabId: string,
+    bounds: Partial<Pick<DetachedWindowBounds, "x" | "y" | "width" | "height">>,
+  ) => void;
+  focusDetachedWorkbenchTab: (tabId: string) => void;
+  isWorkbenchTabDetached: (tabId: string) => boolean;
+  detachQueryResultWindow: (
+    windowState: Omit<DetachedQueryResultWindow, keyof DetachedWindowBounds> &
+      Partial<Pick<DetachedWindowBounds, "x" | "y" | "width" | "height">>,
+  ) => void;
+  attachQueryResultWindow: (id: string) => DetachedQueryResultWindow | null;
+  closeDetachedQueryResultWindow: (id: string) => void;
+  updateDetachedQueryResultBounds: (
+    id: string,
+    bounds: Partial<Pick<DetachedWindowBounds, "x" | "y" | "width" | "height">>,
+  ) => void;
+  focusDetachedQueryResultWindow: (id: string) => void;
+  closeDetachedQueryResultWindowsBySourceTab: (sourceQueryTabId: string) => void;
 
   replaceSavedQueries: (queries: SavedQuery[]) => void;
   saveQuery: (query: SavedQuery) => Promise<SavedQuery>;
@@ -2517,11 +2552,13 @@ export async function loadAISessionFromBackend(
 
 export const useStore = create<AppState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       connections: [],
       connectionTags: [],
       sidebarRootOrder: [],
       tabs: [],
+      detachedWorkbenchWindows: [],
+      detachedQueryResultWindows: [],
       activeTabId: null,
       activeContext: null,
       savedQueries: [],
@@ -3061,11 +3098,21 @@ export const useStore = create<AppState>()(
           const closedTab = state.tabs.find((t) => t.id === id);
           if (closedTab?.type === "query") {
             clearQueryTabDraft(closedTab.id);
+            clearQueryEditorResultSession(id);
           }
           const newTabs = state.tabs.filter((t) => t.id !== id);
           let newActiveId = state.activeTabId;
           if (state.activeTabId === id) {
-            newActiveId = resolveCloseTabActiveTabId(closedTab, newTabs);
+            // Prefer next docked tab when closing the active one
+            const dockedCandidates = newTabs.filter(
+              (tab) =>
+                !state.detachedWorkbenchWindows.some(
+                  (windowState) => windowState.tabId === tab.id,
+                ),
+            );
+            newActiveId =
+              resolveCloseTabActiveTabId(closedTab, dockedCandidates) ||
+              resolveCloseTabActiveTabId(closedTab, newTabs);
           }
           return {
             tabs: newTabs,
@@ -3074,6 +3121,12 @@ export const useStore = create<AppState>()(
               newTabs,
               newActiveId,
               state.activeContext,
+            ),
+            detachedWorkbenchWindows: state.detachedWorkbenchWindows.filter(
+              (windowState) => windowState.tabId !== id,
+            ),
+            detachedQueryResultWindows: state.detachedQueryResultWindows.filter(
+              (windowState) => windowState.sourceQueryTabId !== id,
             ),
           };
         }),
@@ -3084,11 +3137,20 @@ export const useStore = create<AppState>()(
           if (!keep) return state;
           state.tabs
             .filter((tab) => tab.id !== id && tab.type === "query")
-            .forEach((tab) => clearQueryTabDraft(tab.id));
+            .forEach((tab) => {
+              clearQueryTabDraft(tab.id);
+              clearQueryEditorResultSession(tab.id);
+            });
           return {
             tabs: [keep],
             activeTabId: id,
             activeContext: resolveActiveContextFromTab(keep),
+            detachedWorkbenchWindows: state.detachedWorkbenchWindows.filter(
+              (windowState) => windowState.tabId === id,
+            ),
+            detachedQueryResultWindows: state.detachedQueryResultWindows.filter(
+              (windowState) => windowState.sourceQueryTabId === id,
+            ),
           };
         }),
 
@@ -3099,8 +3161,12 @@ export const useStore = create<AppState>()(
           state.tabs
             .slice(0, index)
             .filter((tab) => tab.type === "query")
-            .forEach((tab) => clearQueryTabDraft(tab.id));
+            .forEach((tab) => {
+              clearQueryTabDraft(tab.id);
+              clearQueryEditorResultSession(tab.id);
+            });
           const newTabs = state.tabs.slice(index);
+          const keptIds = new Set(newTabs.map((tab) => tab.id));
           const activeStillExists = state.activeTabId
             ? newTabs.some((t) => t.id === state.activeTabId)
             : false;
@@ -3111,6 +3177,12 @@ export const useStore = create<AppState>()(
               newTabs,
               activeStillExists ? state.activeTabId : id,
               state.activeContext,
+            ),
+            detachedWorkbenchWindows: state.detachedWorkbenchWindows.filter(
+              (windowState) => keptIds.has(windowState.tabId),
+            ),
+            detachedQueryResultWindows: state.detachedQueryResultWindows.filter(
+              (windowState) => keptIds.has(windowState.sourceQueryTabId),
             ),
           };
         }),
@@ -3122,8 +3194,12 @@ export const useStore = create<AppState>()(
           state.tabs
             .slice(index + 1)
             .filter((tab) => tab.type === "query")
-            .forEach((tab) => clearQueryTabDraft(tab.id));
+            .forEach((tab) => {
+              clearQueryTabDraft(tab.id);
+              clearQueryEditorResultSession(tab.id);
+            });
           const newTabs = state.tabs.slice(0, index + 1);
+          const keptIds = new Set(newTabs.map((tab) => tab.id));
           const activeStillExists = state.activeTabId
             ? newTabs.some((t) => t.id === state.activeTabId)
             : false;
@@ -3134,6 +3210,12 @@ export const useStore = create<AppState>()(
               newTabs,
               activeStillExists ? state.activeTabId : id,
               state.activeContext,
+            ),
+            detachedWorkbenchWindows: state.detachedWorkbenchWindows.filter(
+              (windowState) => keptIds.has(windowState.tabId),
+            ),
+            detachedQueryResultWindows: state.detachedQueryResultWindows.filter(
+              (windowState) => keptIds.has(windowState.sourceQueryTabId),
             ),
           };
         }),
@@ -3148,7 +3230,10 @@ export const useStore = create<AppState>()(
                 tab.type === "query" &&
                 String(tab.connectionId || "").trim() === targetConnectionId,
             )
-            .forEach((tab) => clearQueryTabDraft(tab.id));
+            .forEach((tab) => {
+              clearQueryTabDraft(tab.id);
+              clearQueryEditorResultSession(tab.id);
+            });
           const newTabs = state.tabs.filter(
             (t) => String(t.connectionId || "").trim() !== targetConnectionId,
           );
@@ -3164,6 +3249,7 @@ export const useStore = create<AppState>()(
             state.activeContext?.connectionId === targetConnectionId
               ? null
               : state.activeContext;
+          const keptIds = new Set(newTabs.map((tab) => tab.id));
           return {
             tabs: newTabs,
             activeTabId: nextActiveTabId,
@@ -3171,6 +3257,12 @@ export const useStore = create<AppState>()(
               newTabs,
               nextActiveTabId,
               nextFallbackContext,
+            ),
+            detachedWorkbenchWindows: state.detachedWorkbenchWindows.filter(
+              (windowState) => keptIds.has(windowState.tabId),
+            ),
+            detachedQueryResultWindows: state.detachedQueryResultWindows.filter(
+              (windowState) => keptIds.has(windowState.sourceQueryTabId),
             ),
           };
         }),
@@ -3188,7 +3280,10 @@ export const useStore = create<AppState>()(
               const sameDb = String(tab.dbName || "").trim() === targetDbName;
               return sameConnection && sameDb;
             })
-            .forEach((tab) => clearQueryTabDraft(tab.id));
+            .forEach((tab) => {
+              clearQueryTabDraft(tab.id);
+              clearQueryEditorResultSession(tab.id);
+            });
           const newTabs = state.tabs.filter((tab) => {
             const sameConnection =
               String(tab.connectionId || "").trim() === targetConnectionId;
@@ -3210,6 +3305,7 @@ export const useStore = create<AppState>()(
           const nextFallbackContext = sameActiveContext
             ? null
             : state.activeContext;
+          const keptIds = new Set(newTabs.map((tab) => tab.id));
           return {
             tabs: newTabs,
             activeTabId: nextActiveTabId,
@@ -3217,6 +3313,12 @@ export const useStore = create<AppState>()(
               newTabs,
               nextActiveTabId,
               nextFallbackContext,
+            ),
+            detachedWorkbenchWindows: state.detachedWorkbenchWindows.filter(
+              (windowState) => keptIds.has(windowState.tabId),
+            ),
+            detachedQueryResultWindows: state.detachedQueryResultWindows.filter(
+              (windowState) => keptIds.has(windowState.sourceQueryTabId),
             ),
           };
         }),
@@ -3243,20 +3345,307 @@ export const useStore = create<AppState>()(
         set((state) => {
           state.tabs
             .filter((tab) => tab.type === "query")
-            .forEach((tab) => clearQueryTabDraft(tab.id));
-          return { tabs: [], activeTabId: null, activeContext: null };
+            .forEach((tab) => {
+              clearQueryTabDraft(tab.id);
+              clearQueryEditorResultSession(tab.id);
+            });
+          return {
+            tabs: [],
+            activeTabId: null,
+            activeContext: null,
+            detachedWorkbenchWindows: [],
+            detachedQueryResultWindows: [],
+          };
         }),
 
       setActiveTab: (id) =>
+        set((state) => {
+          const tabId = String(id || "").trim();
+          const isDetached = state.detachedWorkbenchWindows.some(
+            (windowState) => windowState.tabId === tabId,
+          );
+          if (!isDetached) {
+            return {
+              activeTabId: tabId,
+              activeContext: resolveActiveContextForTabId(
+                state.tabs,
+                tabId,
+                state.activeContext,
+              ),
+            };
+          }
+          // Detached tab: keep active context, raise floating window
+          const zIndex = nextDetachedZIndex(state.detachedWorkbenchWindows);
+          return {
+            activeTabId: tabId,
+            activeContext: resolveActiveContextForTabId(
+              state.tabs,
+              tabId,
+              state.activeContext,
+            ),
+            detachedWorkbenchWindows: state.detachedWorkbenchWindows.map(
+              (windowState) =>
+                windowState.tabId === tabId
+                  ? { ...windowState, zIndex }
+                  : windowState,
+            ),
+          };
+        }),
+      setActiveContext: (context) => set({ activeContext: context }),
+
+      detachWorkbenchTab: (tabId, preferred) =>
+        set((state) => {
+          const id = String(tabId || "").trim();
+          if (!id || !state.tabs.some((tab) => tab.id === id)) {
+            return state;
+          }
+          const existing = state.detachedWorkbenchWindows.find(
+            (windowState) => windowState.tabId === id,
+          );
+          if (existing) {
+            const zIndex = nextDetachedZIndex(state.detachedWorkbenchWindows);
+            return {
+              activeTabId: id,
+              activeContext: resolveActiveContextForTabId(
+                state.tabs,
+                id,
+                state.activeContext,
+              ),
+              detachedWorkbenchWindows: state.detachedWorkbenchWindows.map(
+                (windowState) =>
+                  windowState.tabId === id
+                    ? { ...windowState, zIndex }
+                    : windowState,
+              ),
+            };
+          }
+          const bounds = createDefaultDetachedBounds(
+            state.detachedWorkbenchWindows,
+            preferred,
+          );
+          const detachedTab = state.tabs.find((tab) => tab.id === id);
+          return {
+            detachedWorkbenchWindows: [
+              ...state.detachedWorkbenchWindows,
+              { tabId: id, ...bounds },
+            ],
+            // Keep detached tab active so connection context and focus stay correct;
+            // TabManager only renders docked tabs and falls back visually.
+            activeTabId: id,
+            activeContext: resolveActiveContextFromTab(detachedTab) ||
+              resolveActiveContextForTabId(
+                state.tabs,
+                id,
+                state.activeContext,
+              ),
+          };
+        }),
+
+      attachWorkbenchTab: (tabId) =>
+        set((state) => {
+          const id = String(tabId || "").trim();
+          if (!id) return state;
+          if (
+            !state.detachedWorkbenchWindows.some(
+              (windowState) => windowState.tabId === id,
+            )
+          ) {
+            return {
+              activeTabId: id,
+              activeContext: resolveActiveContextForTabId(
+                state.tabs,
+                id,
+                state.activeContext,
+              ),
+            };
+          }
+          return {
+            detachedWorkbenchWindows: state.detachedWorkbenchWindows.filter(
+              (windowState) => windowState.tabId !== id,
+            ),
+            activeTabId: id,
+            activeContext: resolveActiveContextForTabId(
+              state.tabs,
+              id,
+              state.activeContext,
+            ),
+          };
+        }),
+
+      updateDetachedWorkbenchBounds: (tabId, bounds) =>
+        set((state) => {
+          const id = String(tabId || "").trim();
+          if (!id) return state;
+          return {
+            detachedWorkbenchWindows: state.detachedWorkbenchWindows.map(
+              (windowState) =>
+                windowState.tabId === id
+                  ? {
+                      ...windowState,
+                      ...(bounds.x !== undefined ? { x: bounds.x } : {}),
+                      ...(bounds.y !== undefined ? { y: bounds.y } : {}),
+                      ...(bounds.width !== undefined
+                        ? { width: bounds.width }
+                        : {}),
+                      ...(bounds.height !== undefined
+                        ? { height: bounds.height }
+                        : {}),
+                    }
+                  : windowState,
+            ),
+          };
+        }),
+
+      focusDetachedWorkbenchTab: (tabId) =>
+        set((state) => {
+          const id = String(tabId || "").trim();
+          if (
+            !id ||
+            !state.detachedWorkbenchWindows.some(
+              (windowState) => windowState.tabId === id,
+            )
+          ) {
+            return state;
+          }
+          const zIndex = nextDetachedZIndex(state.detachedWorkbenchWindows);
+          return {
+            activeTabId: id,
+            activeContext: resolveActiveContextForTabId(
+              state.tabs,
+              id,
+              state.activeContext,
+            ),
+            detachedWorkbenchWindows: state.detachedWorkbenchWindows.map(
+              (windowState) =>
+                windowState.tabId === id
+                  ? { ...windowState, zIndex }
+                  : windowState,
+            ),
+          };
+        }),
+
+      isWorkbenchTabDetached: (tabId): boolean => {
+        const id = String(tabId || "").trim();
+        return get().detachedWorkbenchWindows.some(
+          (windowState) => windowState.tabId === id,
+        );
+      },
+
+      detachQueryResultWindow: (windowState) =>
+        set((state) => {
+          const id = String(windowState.id || "").trim();
+          if (!id) return state;
+          const existingIndex = state.detachedQueryResultWindows.findIndex(
+            (item) => item.id === id,
+          );
+          if (existingIndex >= 0) {
+            const zIndex = nextDetachedZIndex(state.detachedQueryResultWindows);
+            const next = [...state.detachedQueryResultWindows];
+            next[existingIndex] = {
+              ...next[existingIndex],
+              ...windowState,
+              zIndex,
+            };
+            return { detachedQueryResultWindows: next };
+          }
+          const bounds = createDefaultDetachedBounds(
+            state.detachedQueryResultWindows,
+            windowState,
+          );
+          return {
+            detachedQueryResultWindows: [
+              ...state.detachedQueryResultWindows,
+              {
+                id,
+                sourceQueryTabId: String(windowState.sourceQueryTabId || ""),
+                connectionId: String(windowState.connectionId || ""),
+                dbName: windowState.dbName,
+                title: String(windowState.title || id),
+                result: windowState.result,
+                ...bounds,
+              },
+            ],
+          };
+        }),
+
+      attachQueryResultWindow: (id) => {
+        const windowId = String(id || "").trim();
+        if (!windowId) return null;
+        const current = get().detachedQueryResultWindows;
+        const found =
+          current.find((windowState) => windowState.id === windowId) || null;
+        if (!found) return null;
+        set({
+          detachedQueryResultWindows: current.filter(
+            (windowState) => windowState.id !== windowId,
+          ),
+        });
+        return found;
+      },
+
+      closeDetachedQueryResultWindow: (id) =>
         set((state) => ({
-          activeTabId: id,
-          activeContext: resolveActiveContextForTabId(
-            state.tabs,
-            id,
-            state.activeContext,
+          detachedQueryResultWindows: state.detachedQueryResultWindows.filter(
+            (windowState) => windowState.id !== String(id || "").trim(),
           ),
         })),
-      setActiveContext: (context) => set({ activeContext: context }),
+
+      updateDetachedQueryResultBounds: (id, bounds) =>
+        set((state) => {
+          const windowId = String(id || "").trim();
+          if (!windowId) return state;
+          return {
+            detachedQueryResultWindows: state.detachedQueryResultWindows.map(
+              (windowState) =>
+                windowState.id === windowId
+                  ? {
+                      ...windowState,
+                      ...(bounds.x !== undefined ? { x: bounds.x } : {}),
+                      ...(bounds.y !== undefined ? { y: bounds.y } : {}),
+                      ...(bounds.width !== undefined
+                        ? { width: bounds.width }
+                        : {}),
+                      ...(bounds.height !== undefined
+                        ? { height: bounds.height }
+                        : {}),
+                    }
+                  : windowState,
+            ),
+          };
+        }),
+
+      focusDetachedQueryResultWindow: (id) =>
+        set((state) => {
+          const windowId = String(id || "").trim();
+          if (
+            !windowId ||
+            !state.detachedQueryResultWindows.some(
+              (windowState) => windowState.id === windowId,
+            )
+          ) {
+            return state;
+          }
+          const zIndex = nextDetachedZIndex(state.detachedQueryResultWindows);
+          return {
+            detachedQueryResultWindows: state.detachedQueryResultWindows.map(
+              (windowState) =>
+                windowState.id === windowId
+                  ? { ...windowState, zIndex }
+                  : windowState,
+            ),
+          };
+        }),
+
+      closeDetachedQueryResultWindowsBySourceTab: (sourceQueryTabId) =>
+        set((state) => {
+          const sourceId = String(sourceQueryTabId || "").trim();
+          if (!sourceId) return state;
+          return {
+            detachedQueryResultWindows: state.detachedQueryResultWindows.filter(
+              (windowState) => windowState.sourceQueryTabId !== sourceId,
+            ),
+          };
+        }),
 
       replaceSavedQueries: (queries) =>
         set({ savedQueries: sanitizeSavedQueries(queries) }),
@@ -3957,6 +4346,9 @@ export const useStore = create<AppState>()(
           connectionTags: persistedConnectionTags,
           sidebarRootOrder: persistedSidebarRootOrder,
           tabs: safeTabs,
+          // Floating windows are session-only and must not be restored from disk.
+          detachedWorkbenchWindows: [],
+          detachedQueryResultWindows: [],
           activeTabId: sanitizeActiveTabId(state.activeTabId, safeTabs),
           savedQueries: currentState.savedQueries,
           externalSQLDirectories: sanitizeExternalSQLDirectories(

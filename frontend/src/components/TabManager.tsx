@@ -7,25 +7,7 @@ import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from 
 import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, useSortable, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { restrictToHorizontalAxis } from '@dnd-kit/modifiers';
 import { useStore } from '../store';
-import DataViewer from './DataViewer';
-import QueryEditor from './QueryEditor';
-import TableDesigner from './TableDesigner';
-import RedisViewer from './RedisViewer';
-import RedisCommandEditor from './RedisCommandEditor';
-import RedisMonitor from './RedisMonitor';
-import TriggerViewer from './TriggerViewer';
-import DefinitionViewer from './DefinitionViewer';
-import TableOverview from './TableOverview';
-import TableExportWorkbench from './TableExportWorkbench';
-import SQLFileExecutionWorkbench from './SQLFileExecutionWorkbench';
-import JVMOverview from './JVMOverview';
-import JVMResourceBrowser from './JVMResourceBrowser';
-import JVMAuditViewer from './JVMAuditViewer';
-import JVMDiagnosticConsole from './JVMDiagnosticConsole';
-import JVMMonitoringDashboard from './JVMMonitoringDashboard';
-import SqlAnalysisWorkbench from './explain/SqlAnalysisWorkbench';
 import type { TabData } from '../types';
 import { t } from '../i18n';
 import {
@@ -44,6 +26,8 @@ import {
   normalizeSQLFileReadContent,
 } from '../utils/sqlFileTabDirty';
 import { clearSQLFileTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
+import WorkbenchTabContent from './WorkbenchTabContent';
+import { shouldDetachTabByDrag } from '../utils/detachedWindow';
 
 const getTabKindLabel = (tab: TabData): string => {
   if (tab.type === 'query') return t('tab_manager.kind_badge.query');
@@ -396,63 +380,9 @@ const DraggableTabNode: React.FC<DraggableTabNodeProps> = ({ node }) => {
   });
 };
 
-const TabContent: React.FC<{ tab: TabData; isActive: boolean }> = React.memo(({ tab, isActive }) => {
-  if (tab.type === 'query') {
-    return <QueryEditor tab={tab} isActive={isActive} />;
-  }
-  if (tab.type === 'table') {
-    return <DataViewer tab={tab} isActive={isActive} />;
-  }
-  if (tab.type === 'design') {
-    return <TableDesigner tab={tab} />;
-  }
-  if (tab.type === 'redis-keys') {
-    return <RedisViewer connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
-  }
-  if (tab.type === 'redis-command') {
-    return <RedisCommandEditor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
-  }
-  if (tab.type === 'redis-monitor') {
-    return <RedisMonitor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
-  }
-  if (tab.type === 'trigger') {
-    return <TriggerViewer tab={tab} />;
-  }
-  if (tab.type === 'view-def' || tab.type === 'event-def' || tab.type === 'routine-def' || tab.type === 'sequence-def' || tab.type === 'package-def') {
-    return <DefinitionViewer tab={tab} />;
-  }
-  if (tab.type === 'table-overview') {
-    return <TableOverview tab={tab} />;
-  }
-  if (tab.type === 'table-export') {
-    return <TableExportWorkbench tab={tab} />;
-  }
-  if (tab.type === 'sql-file-execution') {
-    return <SQLFileExecutionWorkbench tab={tab} />;
-  }
-  if (tab.type === 'sql-analysis') {
-    return <SqlAnalysisWorkbench tab={tab} />;
-  }
-  if (tab.type === 'jvm-overview') {
-    return <JVMOverview tab={tab} />;
-  }
-  if (tab.type === 'jvm-resource') {
-    return <JVMResourceBrowser tab={tab} />;
-  }
-  if (tab.type === 'jvm-audit') {
-    return <JVMAuditViewer tab={tab} />;
-  }
-  if (tab.type === 'jvm-diagnostic') {
-    return <JVMDiagnosticConsole tab={tab} />;
-  }
-  if (tab.type === 'jvm-monitoring') {
-    return <JVMMonitoringDashboard tab={tab} />;
-  }
-  return null;
-});
-
 const TabManager: React.FC = React.memo(() => {
   const tabs = useStore(state => state.tabs);
+  const detachedWorkbenchWindows = useStore(state => state.detachedWorkbenchWindows);
   const connections = useStore(state => state.connections);
   const theme = useStore(state => state.theme);
   const appearance = useStore(state => state.appearance);
@@ -466,7 +396,16 @@ const TabManager: React.FC = React.memo(() => {
   const closeTabsToRight = useStore(state => state.closeTabsToRight);
   const closeAllTabs = useStore(state => state.closeAllTabs);
   const moveTab = useStore(state => state.moveTab);
+  const detachWorkbenchTab = useStore(state => state.detachWorkbenchTab);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
+  const detachedTabIdSet = useMemo(
+    () => new Set(detachedWorkbenchWindows.map((windowState) => windowState.tabId)),
+    [detachedWorkbenchWindows],
+  );
+  const dockedTabs = useMemo(
+    () => tabs.filter((tab) => !detachedTabIdSet.has(tab.id)),
+    [detachedTabIdSet, tabs],
+  );
   const tabsNavBorderColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.09)' : 'rgba(0, 0, 0, 0.08)';
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
   const suppressClickUntilRef = useRef<number>(0);
@@ -477,6 +416,13 @@ const TabManager: React.FC = React.memo(() => {
   );
   const isV2Ui = appearance.uiVersion === 'v2';
   const hasTabs = tabs.length > 0;
+  const hasDockedTabs = dockedTabs.length > 0;
+  const dockedActiveTabId = useMemo(() => {
+    if (activeTabId && dockedTabs.some((tab) => tab.id === activeTabId)) {
+      return activeTabId;
+    }
+    return dockedTabs[0]?.id || null;
+  }, [activeTabId, dockedTabs]);
   const pendingCloseTabIdsRef = useRef<Set<string>>(new Set());
 
   const onChange = (newActiveKey: string) => {
@@ -637,8 +583,24 @@ const TabManager: React.FC = React.memo(() => {
   const handleDragEnd = (event: DragEndEvent) => {
     const sourceId = String(event.active.id || '').trim();
     const targetId = String(event.over?.id || '').trim();
+    const deltaY = Number(event.delta?.y || 0);
     setDraggingTabId(null);
-    if (!sourceId || !targetId || sourceId === targetId) {
+    if (!sourceId) {
+      return;
+    }
+    if (shouldDetachTabByDrag(deltaY, targetId || null)) {
+      suppressClickUntilRef.current = Date.now() + 120;
+      const pointerEvent = event.activatorEvent as PointerEvent | MouseEvent | undefined;
+      const preferredX = typeof pointerEvent?.clientX === 'number'
+        ? Math.max(16, pointerEvent.clientX - 120)
+        : undefined;
+      const preferredY = typeof pointerEvent?.clientY === 'number'
+        ? Math.max(16, pointerEvent.clientY - 20)
+        : undefined;
+      detachWorkbenchTab(sourceId, { x: preferredX, y: preferredY });
+      return;
+    }
+    if (!targetId || sourceId === targetId) {
       return;
     }
     suppressClickUntilRef.current = Date.now() + 120;
@@ -702,14 +664,14 @@ const TabManager: React.FC = React.memo(() => {
     return () => window.removeEventListener('gonavi:insert-sql', handleGlobalInsertSql);
   }, [tabs, activeTabId, addTab, setActiveTab, connections]);
 
-  const tabIds = useMemo(() => tabs.map((tab) => tab.id), [tabs]);
+  const tabIds = useMemo(() => dockedTabs.map((tab) => tab.id), [dockedTabs]);
   const hasDoubleLineTabLabel = useMemo(() => (
-    tabs.some((tab) => {
+    dockedTabs.some((tab) => {
       const connection = connections.find((conn) => conn.id === tab.connectionId);
       const displayModel = buildTabDisplayModel(tab, connection, appearance.tabDisplay, t);
       return displayModel.layout === 'double' && Boolean(displayModel.secondaryText);
     })
-  ), [appearance.tabDisplay, connections, tabs]);
+  ), [appearance.tabDisplay, connections, dockedTabs]);
 
   const renderTabBar: TabsProps['renderTabBar'] = (tabBarProps, DefaultTabBar) => (
     <DefaultTabBar {...tabBarProps}>
@@ -717,12 +679,12 @@ const TabManager: React.FC = React.memo(() => {
     </DefaultTabBar>
   );
 
-  const items = useMemo(() => tabs.map((tab, index) => {
+  const items = useMemo(() => dockedTabs.map((tab, index) => {
     const connection = connections.find((conn) => conn.id === tab.connectionId);
     const displayModel = buildTabDisplayModel(tab, connection, appearance.tabDisplay, t);
     const displayTitle = displayModel.fullTitle;
     const hostSummary = resolveConnectionHostSummary(connection?.config);
-    const tabIsActive = tab.id === activeTabId;
+    const tabIsActive = tab.id === dockedActiveTabId;
 
     const menuItems: MenuProps['items'] = [
       {
@@ -730,6 +692,11 @@ const TabManager: React.FC = React.memo(() => {
         icon: <SettingOutlined />,
         label: t('tab_manager.menu.tab_display_settings'),
         onClick: openTabDisplaySettings,
+      },
+      {
+        key: 'open-in-window',
+        label: t('tab_manager.menu.open_in_window'),
+        onClick: () => detachWorkbenchTab(tab.id),
       },
       { type: 'divider' },
       {
@@ -742,13 +709,13 @@ const TabManager: React.FC = React.memo(() => {
         key: 'close-left',
         label: t('tab_manager.menu.close_left'),
         disabled: index === 0,
-        onClick: () => closeTabsWithSQLFilePrompt(getCloseTabsToLeftIds(tabs, tab.id), () => closeTabsToLeft(tab.id)),
+        onClick: () => closeTabsWithSQLFilePrompt(getCloseTabsToLeftIds(dockedTabs, tab.id), () => closeTabsToLeft(tab.id)),
       },
       {
         key: 'close-right',
         label: t('tab_manager.menu.close_right'),
-        disabled: index === tabs.length - 1,
-        onClick: () => closeTabsWithSQLFilePrompt(getCloseTabsToRightIds(tabs, tab.id), () => closeTabsToRight(tab.id)),
+        disabled: index === dockedTabs.length - 1,
+        onClick: () => closeTabsWithSQLFilePrompt(getCloseTabsToRightIds(dockedTabs, tab.id), () => closeTabsToRight(tab.id)),
       },
       { type: 'divider' },
       {
@@ -774,9 +741,9 @@ const TabManager: React.FC = React.memo(() => {
       ),
       key: tab.id,
       closable: !isV2Ui,
-      children: <TabContent tab={tab} isActive={tabIsActive} />,
+      children: <WorkbenchTabContent tab={tab} isActive={tabIsActive} />,
     };
-  }), [tabs, connections, appearance.tabDisplay, activeTabId, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs, closeTab, closeTabsWithSQLFilePrompt, isV2Ui, languagePreference]);
+  }), [dockedTabs, dockedActiveTabId, tabs, connections, appearance.tabDisplay, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs, closeTab, closeTabsWithSQLFilePrompt, detachWorkbenchTab, isV2Ui, languagePreference]);
 
   const handleOpenConnectionModal = () => {
     const target = document.querySelector<HTMLButtonElement>('[data-gonavi-create-connection-action="true"]');
@@ -1015,11 +982,13 @@ body[data-theme='dark'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
         `}</style>
         {isV2Ui && !hasTabs ? (
           EmptyWorkbench
+        ) : !hasDockedTabs ? (
+          // All tabs are floating: keep empty docked area; floating host still shows content.
+          <div className="gn-detached-only-workbench" style={{ flex: 1, minHeight: 0 }} />
         ) : (
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
-          modifiers={[restrictToHorizontalAxis]}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           onDragCancel={handleDragCancel}
@@ -1033,7 +1002,7 @@ body[data-theme='dark'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
                   if (Date.now() < suppressClickUntilRef.current) return;
                   onChange(newActiveKey);
                 }}
-                activeKey={activeTabId || undefined}
+                activeKey={dockedActiveTabId || undefined}
                 onEdit={onEdit}
                 items={items}
                 hideAdd
