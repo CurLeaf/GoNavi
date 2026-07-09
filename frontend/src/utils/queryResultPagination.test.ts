@@ -45,6 +45,25 @@ describe('queryResultPagination', () => {
     });
   });
 
+  it('treats query-editor injected Oracle ROWNUM wrapper as a capped page', () => {
+    const page = createInitialQueryResultPagination({
+      executedSql: 'SELECT * FROM (SELECT id, name FROM users ORDER BY created_at DESC) WHERE ROWNUM <= 500',
+      exportSql: 'SELECT id, name FROM users ORDER BY created_at DESC',
+      dbType: 'oracle',
+      returnedRowCount: 500,
+      fallbackPageSize: 500,
+    });
+
+    expect(page).toMatchObject({
+      current: 1,
+      pageSize: 500,
+      total: 500,
+      totalKnown: true,
+      baseSql: 'SELECT id, name FROM users ORDER BY created_at DESC',
+      exportAllSql: 'SELECT id, name FROM users ORDER BY created_at DESC',
+    });
+  });
+
   it('builds the next page SQL with one lookahead row', () => {
     expect(buildQueryResultPageSql({
       baseSql: 'SELECT id FROM users',

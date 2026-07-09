@@ -1,4 +1,5 @@
 import { resolveSqlDialect } from './sqlDialect';
+import { buildPaginatedSelectSQL } from './sql';
 
 const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
 const isWord = (ch: string) => /[A-Za-z0-9_]/.test(ch);
@@ -322,7 +323,7 @@ export const applyQueryAutoLimit = (
     if (offsetPos >= 0 && (fromPos < 0 || offsetPos > fromPos)) return { sql, applied: false, maxRows };
     const forPos = findTopLevelKeyword(main, 'for');
     if (forPos >= 0 && (fromPos < 0 || forPos > fromPos)) return { sql, applied: false, maxRows };
-    return { sql: `${main.trimEnd()} FETCH FIRST ${maxRows} ROWS ONLY${tail}`, applied: true, maxRows };
+    return { sql: `${buildPaginatedSelectSQL(normalizedType, main, '', maxRows, 0)}${tail}`, applied: true, maxRows };
   }
 
   const offsetPos = findTopLevelKeyword(main, 'offset');

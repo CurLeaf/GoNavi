@@ -68,12 +68,29 @@ const stripExplicitLimitForExport = (sql: string): string => {
   return splitSqlTail(sql).main.trim();
 };
 
-const wasLimitAppliedByQueryEditorCap = (executedSql: string, exportSql: string): boolean => {
+const wasLimitAppliedByQueryEditorCap = (
+  executedSql: string,
+  exportSql: string,
+  dbType: string,
+  driver: string,
+  fallbackPageSize: number,
+): boolean => {
   const executed = String(executedSql || '').trim();
   const exportable = String(exportSql || '').trim();
   if (!executed || !exportable) return false;
   if (normalizeSqlForComparison(executed) === normalizeSqlForComparison(exportable)) return false;
-  return normalizeSqlForComparison(stripExplicitLimitForExport(executed)) === normalizeSqlForComparison(stripExplicitLimitForExport(exportable));
+
+  const exportBaseSql = stripExplicitLimitForExport(exportable);
+  if (normalizeSqlForComparison(stripExplicitLimitForExport(executed)) === normalizeSqlForComparison(exportBaseSql)) {
+    return true;
+  }
+
+  const pageSize = normalizePositiveInteger(fallbackPageSize);
+  if (pageSize <= 0 || getLeadingKeyword(exportBaseSql) !== 'select') return false;
+
+  const dialect = resolveSqlDialect(dbType || 'mysql', driver || '');
+  const queryEditorCappedSql = buildPaginatedSelectSQL(dialect, exportBaseSql, '', pageSize, 0);
+  return normalizeSqlForComparison(executed) === normalizeSqlForComparison(queryEditorCappedSql);
 };
 
 const resolveWrappedBaseSql = (dbType: string, baseSql: string): string => {
@@ -155,14 +172,22 @@ export const createInitialQueryResultPagination = (params: {
     : 1;
   if (current <= 1 && returnedRowCount < pageSize) return undefined;
 
-  const baseSql = explicitLimit?.baseSql || mainSql;
-  if (!baseSql) return undefined;
-
   const exportSql = String(params.exportSql || '').trim();
   const exportAllSql = exportSql && getLeadingKeyword(exportSql) === 'select'
     ? stripExplicitLimitForExport(exportSql)
     : stripExplicitLimitForExport(executedSql);
-  const autoLimitCap = current === 1 && wasLimitAppliedByQueryEditorCap(executedSql, exportSql);
+  const autoLimitCap = current === 1 && wasLimitAppliedByQueryEditorCap(
+    executedSql,
+    exportSql,
+    params.dbType,
+    params.driver || '',
+    fallbackPageSize,
+  );
+  const baseSql = autoLimitCap && exportAllSql
+    ? exportAllSql
+    : explicitLimit?.baseSql || mainSql;
+  if (!baseSql) return undefined;
+
   const totalState = autoLimitCap
     ? { total: returnedRowCount, totalKnown: true }
     : resolveQueryResultPaginationTotal({
