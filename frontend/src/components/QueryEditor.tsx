@@ -10,7 +10,7 @@ import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBQueryMultiInTransaction, DB
 import { GONAVI_ROW_KEY } from './DataGrid';
 import { EventsOn } from '../../wailsjs/runtime';
 import { findConnectionMutatingStatements } from '../utils/connectionReadOnly';
-import { getDataSourceCapabilities, shouldShowOceanBaseRowNumberColumn } from '../utils/dataSourceCapabilities';
+import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from "../utils/mongodb";
 import { getShortcutDisplayLabel, getShortcutPlatform, getShortcutPrimaryModifierDisplayLabel, isEditableElement, isImeComposingKeyEvent, isShortcutMatch, comboToMonacoKeyBinding, normalizeShortcutCombo, resolveShortcutBinding } from "../utils/shortcuts";
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
@@ -1209,6 +1209,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const visibleDbsRef = useRef<string[]>([]); // Store visible databases for cross-db intellisense
   const metadataFetchKeyRef = useRef<string>('');
   const metadataContextKeyRef = useRef<string>('');
+  /** SQL 中引用到的库集合变化时触发跨库元数据补拉（供超链接/补全） */
+  const [sqlReferencedMetadataKey, setSqlReferencedMetadataKey] = useState('');
+  const sqlReferencedMetadataTimerRef = useRef<number | null>(null);
+  const lastSqlReferencedMetadataKeyRef = useRef('');
 
   const connections = useStore(state => state.connections);
   const queryCapableConnections = useMemo(
@@ -2656,6 +2660,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }
 
       let cancelled = false;
+      // 仅在本次 effect 成功完成后写入；中途 cancel 不得留下 key，否则同 key 永远不再拉取 → 超链接全灭
+      let activeFetchKey = '';
       const fetchMetadata = async () => {
           const conn = connections.find(c => c.id === currentConnectionId);
           if (!conn) return;
@@ -2683,10 +2689,18 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           );
           const metadataFetchKey = [
               currentConnectionId,
-              ...metadataDbNames.map((dbName) => String(dbName || '').toLowerCase()),
+              ...metadataDbNames.map((dbName) => String(dbName || '').toLowerCase()).sort(),
           ].join('\u0000');
-          if (metadataFetchKeyRef.current === metadataFetchKey) return;
-          metadataFetchKeyRef.current = metadataFetchKey;
+          const hasCurrentDbTables = tablesRef.current.some(
+              (table) => String(table.dbName || '').trim().toLowerCase() === metadataDbName.toLowerCase(),
+          );
+          if (metadataFetchKeyRef.current === metadataFetchKey && hasCurrentDbTables) {
+              // 已成功拉过同一批库且当前库表仍在：只刷新装饰
+              refreshObjectDecorations();
+              return;
+          }
+          // key 相同但表为空（中途 cancel / 异常）：允许重拉
+          activeFetchKey = metadataFetchKey;
 
           const allTables: CompletionTableMeta[] = [];
           const allColumns: CompletionColumnMeta[] = [];
@@ -2935,13 +2949,25 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
 
           if (!syncMetadataSnapshot()) return;
+          // 成功完成后才固化 key，避免 cancel 后同 key 被误判为「已完成」
+          metadataFetchKeyRef.current = activeFetchKey;
+          lastSqlReferencedMetadataKeyRef.current = activeFetchKey;
           refreshObjectDecorations();
       };
       void fetchMetadata();
       return () => {
           cancelled = true;
       };
-  }, [autoFetchVisible, currentConnectionId, currentDb, connections, isActive, isObjectEditQueryTab, refreshObjectDecorations]);
+  }, [
+      autoFetchVisible,
+      currentConnectionId,
+      currentDb,
+      connections,
+      isActive,
+      isObjectEditQueryTab,
+      refreshObjectDecorations,
+      sqlReferencedMetadataKey,
+  ]);
 
   // Query ID management helpers
   const setQueryId = (id: string) => {
@@ -4180,6 +4206,33 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (hasSlashCommandMarker) {
               refreshObjectDecorations(QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH);
           }
+          // SQL 文本变更后，按引用库集合防抖触发跨库元数据拉取（db.table / schema.table / db.schema.table）
+          if (sqlReferencedMetadataTimerRef.current !== null) {
+              window.clearTimeout(sqlReferencedMetadataTimerRef.current);
+          }
+          sqlReferencedMetadataTimerRef.current = window.setTimeout(() => {
+              sqlReferencedMetadataTimerRef.current = null;
+              if (editorRef.current !== editor) {
+                  return;
+              }
+              const modelText = String(editor.getModel?.()?.getValue?.() || '');
+              const referencedDbs = collectQueryEditorReferencedDatabaseNames(
+                  modelText,
+                  currentDbRef.current || '',
+                  visibleDbsRef.current,
+              );
+              const nextKey = [
+                  String(currentConnectionIdRef.current || '').trim(),
+                  ...referencedDbs.map((dbName) => String(dbName || '').toLowerCase()).sort(),
+              ].join('\u0000');
+              if (nextKey === lastSqlReferencedMetadataKeyRef.current) {
+                  // 库集合未变：仍刷新装饰（可能表列表已异步到位）
+                  refreshObjectDecorations(QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH);
+                  return;
+              }
+              lastSqlReferencedMetadataKeyRef.current = nextKey;
+              setSqlReferencedMetadataKey(nextKey);
+          }, 450);
           const acceptedCurrentAiGhost = !aiInlineGhostAcceptingRef.current
               && didModelContentAcceptCurrentAiInlineGhost(event);
           if (acceptedCurrentAiGhost) {
@@ -6186,7 +6239,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 .length || sourceStatements.length;
 
             const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;
-            const showRowNumberColumn = shouldShowOceanBaseRowNumberColumn(config);
             const defaultOracleSchema = isOracleLikeDialect(normalizedDbType)
                 ? resolveOracleLikeDefaultSchemaName(config)
                 : '';
@@ -6500,7 +6552,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         pkColumns: plan?.pkColumns || [],
                         editLocator,
                         readOnly: forceReadOnlyResult || !editLocator || editLocator.readOnly,
-                        showRowNumberColumn,
                         truncated,
                         page,
                     });

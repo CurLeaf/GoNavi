@@ -3013,6 +3013,28 @@ describe('QueryEditor external SQL save', () => {
       tableName: 'dbo.orders',
       schemaName: 'dbo',
     });
+    // MySQL 跨库手写 db.table：库不在可见列表时，只要元数据已加载也应可跳转
+    expect(resolveQueryEditorNavigationTarget(
+      'select * from front_end_sys_new.fs_mkefu_regist_record',
+      'select * from front_end_sys_new.fs_mkefu_regist_record'.length,
+      'mkefu_test_new',
+      ['mkefu_test_new'],
+      [
+        { dbName: 'mkefu_test_new', tableName: 'uk_back_corp' },
+        { dbName: 'front_end_sys_new', tableName: 'fs_mkefu_regist_record' },
+      ],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+    )).toEqual({
+      type: 'table',
+      dbName: 'front_end_sys_new',
+      tableName: 'fs_mkefu_regist_record',
+      schemaName: undefined,
+    });
     expect(resolveQueryEditorNavigationTarget('use analytics', 6, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines, sequences, packages)).toEqual({
       type: 'database',
       dbName: 'analytics',
@@ -8143,7 +8165,8 @@ describe('QueryEditor external SQL save', () => {
       readOnly: false,
     });
     expect(dataGridState.latestProps?.readOnly).toBe(false);
-    expect(dataGridState.latestProps?.showRowNumberColumn).toBe(true);
+    // 行号改由 appearance.showDataTableRowNumber 控制，不再按数据源硬编码写入结果集
+    expect(dataGridState.latestProps?.showRowNumberColumn).toBeUndefined();
     expect(storeState.addSqlLog).toHaveBeenCalledWith(expect.objectContaining({
       sql: 'SELECT * FROM EDC_LOG',
       status: 'success',

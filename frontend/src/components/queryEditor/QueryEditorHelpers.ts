@@ -1605,6 +1605,23 @@ export const buildQueryEditorAliasMap = (
     return aliasMap;
 };
 
+/**
+ * 常见「schema」名：两段限定时优先当作 schema.table（PG/SQL Server），
+ * 不把它们推断成需要跨库拉取的 database。
+ */
+export const QUERY_EDITOR_COMMON_SCHEMA_NAME_SET = new Set([
+    'public',
+    'dbo',
+    'sys',
+    'information_schema',
+    'pg_catalog',
+    'pg_toast',
+    'mysql',
+    'performance_schema',
+    'sysdb',
+    'guest',
+]);
+
 export const collectQueryEditorReferencedDatabaseNames = (
     fullText: string,
     currentDb: string,
@@ -1629,24 +1646,43 @@ export const collectQueryEditorReferencedDatabaseNames = (
             .filter(Boolean)
             .map((db) => [db.toLowerCase(), db] as const),
     );
-    const commonSchemaNames = new Set(['public', 'dbo', 'sys', 'information_schema', 'pg_catalog', 'mysql', 'performance_schema']);
+    const currentDbKey = String(currentDb || '').trim().toLowerCase();
     const tableRegex = QUERY_EDITOR_SQL_TABLE_REFERENCE_REGEX;
     tableRegex.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = tableRegex.exec(String(fullText || ''))) !== null) {
         const tableIdent = normalizeCompletionQualifiedName(match[1] || '');
         if (!tableIdent) continue;
-        const parts = tableIdent.split('.');
+        const parts = tableIdent.split('.').map((part) => String(part || '').trim()).filter(Boolean);
         if (parts.length < 2) continue;
-        const candidate = visibleDbByLower.get(String(parts[0] || '').toLowerCase());
-        if (candidate) {
-            addDb(candidate);
-        } else if (visibleDbByLower.size === 0) {
-            const inferredDb = String(parts[0] || '').trim();
-            const inferredKey = inferredDb.toLowerCase();
-            if (inferredDb && inferredKey !== String(currentDb || '').trim().toLowerCase() && !commonSchemaNames.has(inferredKey)) {
-                addDb(inferredDb);
+
+        const firstPart = parts[0];
+        const firstKey = firstPart.toLowerCase();
+        const asVisibleDb = visibleDbByLower.get(firstKey);
+        if (asVisibleDb) {
+            // MySQL: db.table；PG 三段 db.schema.table 的首段也是库
+            addDb(asVisibleDb);
+            continue;
+        }
+
+        // 三段及以上：首段通常是 database（PG/SQL Server 跨库限定）
+        if (parts.length >= 3) {
+            if (firstKey && firstKey !== currentDbKey && !QUERY_EDITOR_COMMON_SCHEMA_NAME_SET.has(firstKey)) {
+                addDb(firstPart);
             }
+            continue;
+        }
+
+        // 两段：可能是 MySQL 的 db.table，也可能是 PG 的 schema.table。
+        // - 常见 schema 名不当库拉（避免 public/dbo 误请求）
+        // - 其它未知前缀：若在可见库中已处理；若不在可见库但仍不像 schema，
+        //   也作为候选库名拉取（覆盖 includeDatabases 过滤后手写跨库、或列表尚未刷新）
+        if (
+            firstKey
+            && firstKey !== currentDbKey
+            && !QUERY_EDITOR_COMMON_SCHEMA_NAME_SET.has(firstKey)
+        ) {
+            addDb(firstPart);
         }
     }
     return result;
@@ -1897,14 +1933,54 @@ export const resolveQueryEditorNavigationTarget = (
 
     if (parts.length === 2) {
         const [firstPart, secondPart] = parts;
-        if (visibleDbSet.has(firstPart.toLowerCase())) {
-            return findObjectInPriorityOrder(firstPart, secondPart);
+        const firstKey = firstPart.toLowerCase();
+        const firstIsVisibleDb = visibleDbSet.has(firstKey);
+        const firstLooksLikeSchema = QUERY_EDITOR_COMMON_SCHEMA_NAME_SET.has(firstKey);
+
+        // 1) 首段是可见库 → MySQL/ClickHouse 风格 db.table（或跨库）
+        if (firstIsVisibleDb) {
+            const asDatabaseObject = findObjectInPriorityOrder(firstPart, secondPart);
+            if (asDatabaseObject) {
+                return asDatabaseObject;
+            }
         }
-        return findObjectInPriorityOrder(currentDbName, secondPart, firstPart);
+
+        // 2) 当前库下的 schema.table（PostgreSQL / SQL Server / Oracle owner）
+        //    元数据里 tableName 可能是 "public.users" 或裸名 + schemaName
+        const asSchemaObject = findObjectInPriorityOrder(currentDbName, secondPart, firstPart);
+        if (asSchemaObject) {
+            return asSchemaObject;
+        }
+        const asRawQualifiedUnderCurrent = findObjectInPriorityOrder(
+            currentDbName,
+            `${firstPart}.${secondPart}`,
+        );
+        if (asRawQualifiedUnderCurrent) {
+            return asRawQualifiedUnderCurrent;
+        }
+
+        // 3) 首段不在可见库列表，但元数据里已有该库（或拉取中的跨库结果）
+        //    跳过明显 schema 名，避免 public.xxx 误当成库
+        if (!firstIsVisibleDb && !firstLooksLikeSchema) {
+            const asInferredDatabaseObject = findObjectInPriorityOrder(firstPart, secondPart);
+            if (asInferredDatabaseObject) {
+                return asInferredDatabaseObject;
+            }
+        }
+
+        return null;
     }
 
+    // 三段：database.schema.object（PG/SQL Server 跨库限定）
     const [dbName, schemaName, tableName] = parts;
-    if (!visibleDbSet.has(dbName.toLowerCase())) {
+    const dbKey = dbName.toLowerCase();
+    const dbIsKnown = visibleDbSet.has(dbKey)
+        || tableMetas.some((meta) => meta.normalizedDbName === dbKey)
+        || viewMetas.some((meta) => meta.normalizedDbName === dbKey)
+        || materializedViewMetas.some((meta) => meta.normalizedDbName === dbKey);
+
+    if (!dbIsKnown) {
+        // Oracle 风格：schema.package.member / schema.sequence.nextval（库仍是 currentDb）
         const schemaQualifiedSequence = findSequence(currentDbName, schemaName, dbName);
         if (schemaQualifiedSequence && ['nextval', 'currval'].includes(tableName.toLowerCase())) {
             return schemaQualifiedSequence;
@@ -1913,9 +1989,12 @@ export const resolveQueryEditorNavigationTarget = (
         if (schemaQualifiedPackage) {
             return schemaQualifiedPackage;
         }
-        return null;
+        // 仍尝试把首段当库解析（元数据可能已按 SQL 引用拉取）
+        return findObjectInPriorityOrder(dbName, tableName, schemaName)
+            || findObjectInPriorityOrder(dbName, `${schemaName}.${tableName}`);
     }
-    return findObjectInPriorityOrder(dbName, tableName, schemaName);
+    return findObjectInPriorityOrder(dbName, tableName, schemaName)
+        || findObjectInPriorityOrder(dbName, `${schemaName}.${tableName}`);
 };
 
 export const resolveQueryEditorHoverTarget = (
