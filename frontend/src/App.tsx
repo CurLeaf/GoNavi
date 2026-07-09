@@ -113,6 +113,8 @@ import {
   isStartupWindowRestorePending,
   markStartupWindowRestorePending,
   resolveDefaultStartupWindowBounds,
+  resolveWorkAreaFillWindowBounds,
+  shouldPreferWindowsStartupMaximise,
 } from './utils/windowStartupLayout';
 import {
   SHORTCUT_ACTION_META,
@@ -1106,6 +1108,26 @@ function App() {
           clearStartupWindowRestorePending();
       };
 
+      /** Maximise 多次失败时：把窗口铺满工作区，避免残留 1024×768 / 84% 浮动半窗。 */
+      const applyWindowsWorkAreaFillFallback = () => {
+          if (!isWindowsPlatform()) {
+              return;
+          }
+          try {
+              const nextBounds = resolveWorkAreaFillWindowBounds(readCurrentVisibleViewport());
+              WindowSetSize(nextBounds.width, nextBounds.height);
+              WindowSetPosition(nextBounds.x, nextBounds.y);
+              useStore.getState().setWindowBounds(nextBounds);
+              // 仍记为 maximized：视觉上已铺满，下次继续走最大化恢复
+              useStore.getState().setWindowState('maximized');
+              void emitWindowDiagnostic('adjust:startup-work-area-fill-fallback', {
+                  to: nextBounds,
+              });
+          } catch (e) {
+              console.warn('Failed to apply Windows work-area fill fallback', e);
+          }
+      };
+
       // mode:
       // - maximised: 始终最大化（Windows 启动偏好 / 记忆的 maximized / Windows 上的 fullscreen 记忆）
       // - fullscreen: 非 Windows 优先真全屏，失败再最大化
@@ -1150,15 +1172,52 @@ function App() {
                       if (attempt < maxApplyAttempts) {
                           applyStartupWindowChrome(attempt + 1, mode);
                       } else {
-                          // 最终仍失败：结束宽限，避免长期阻断 bounds 记忆；下次启动会再试
-                          clearStartupWindowRestorePending();
+                          // 最终仍失败：Windows 铺满工作区兜底，再结束宽限
                           void emitWindowDiagnostic('warn:startup-maximise-failed', {
                               mode,
                               attempts: attempt,
                           });
+                          applyWindowsWorkAreaFillFallback();
+                          clearStartupWindowRestorePending();
                       }
                   });
           }, delayMs);
+      };
+
+      const restoreNormalWindowBounds = async (bounds: {
+          width: number;
+          height: number;
+          x: number;
+          y: number;
+      }) => {
+          // Windows 可能以原生 Maximised 首帧启动，恢复普通窗前先取消最大化
+          if (isWindowsPlatform()) {
+              try {
+                  if (await WindowIsMaximised()) {
+                      WindowUnmaximise();
+                      await new Promise((resolve) => window.setTimeout(resolve, settleDelayMs));
+                  }
+              } catch (e) {
+                  console.warn('Failed to unmaximise before restoring normal bounds', e);
+              }
+          }
+          const state = useStore.getState();
+          const nextBounds = resolveVisibleStartupWindowBounds(bounds, readCurrentVisibleViewport());
+          if (
+              nextBounds.x !== bounds.x ||
+              nextBounds.y !== bounds.y ||
+              nextBounds.width !== bounds.width ||
+              nextBounds.height !== bounds.height
+          ) {
+              void emitWindowDiagnostic('adjust:startup-window-bounds', {
+                  from: bounds,
+                  to: nextBounds,
+              });
+              state.setWindowBounds(nextBounds);
+          }
+          WindowSetSize(nextBounds.width, nextBounds.height);
+          WindowSetPosition(nextBounds.x, nextBounds.y);
+          state.setWindowState('normal');
       };
 
       const restoreWindowState = async () => {
@@ -1195,12 +1254,23 @@ function App() {
               return;
           }
           // 3) 普通窗口：恢复用户调整过的尺寸和位置
+          // Windows：无记忆 / 历史半窗 / 84% 默认小窗 → 直接最大化，而不是再落到浮动半窗
           const bounds = state.windowBounds;
+          const viewport = readCurrentVisibleViewport();
+          if (isWindowsPlatform() && shouldPreferWindowsStartupMaximise(bounds, viewport)) {
+              markStartupWindowRestorePending(3200);
+              applyStartupWindowChrome(1, 'maximised');
+              void emitWindowDiagnostic('adjust:startup-prefer-maximise', {
+                  from: bounds,
+                  reason: !bounds ? 'missing-bounds' : 'undersized-bounds',
+              });
+              return;
+          }
           if (!bounds || bounds.width < 400 || bounds.height < 300) {
-              // 无记忆尺寸时，Windows 默认左上角小窗看起来像“只开了一半”，改为居中可用尺寸
+              // 非 Windows：无记忆时保持系统默认；Windows 已在上方走最大化
               if (isWindowsPlatform()) {
                   try {
-                      const nextBounds = resolveDefaultStartupWindowBounds(readCurrentVisibleViewport());
+                      const nextBounds = resolveDefaultStartupWindowBounds(viewport);
                       WindowSetSize(nextBounds.width, nextBounds.height);
                       WindowSetPosition(nextBounds.x, nextBounds.y);
                       state.setWindowBounds(nextBounds);
@@ -1215,22 +1285,7 @@ function App() {
               return;
           }
           try {
-              const nextBounds = resolveVisibleStartupWindowBounds(bounds, readCurrentVisibleViewport());
-              if (
-                  nextBounds.x !== bounds.x ||
-                  nextBounds.y !== bounds.y ||
-                  nextBounds.width !== bounds.width ||
-                  nextBounds.height !== bounds.height
-              ) {
-                  void emitWindowDiagnostic('adjust:startup-window-bounds', {
-                      from: bounds,
-                      to: nextBounds,
-                  });
-                  state.setWindowBounds(nextBounds);
-              }
-              WindowSetSize(nextBounds.width, nextBounds.height);
-              WindowSetPosition(nextBounds.x, nextBounds.y);
-              state.setWindowState('normal');
+              await restoreNormalWindowBounds(bounds);
           } catch (e) {
               console.warn('Failed to restore window bounds', e);
           }

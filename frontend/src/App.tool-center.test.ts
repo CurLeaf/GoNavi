@@ -392,7 +392,10 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain("applyStartupWindowChrome(1, 'maximised');");
     expect(appSource).toContain('const delayMs = attempt <= 1 ? 0 : applyRetryDelayMs');
     expect(appSource).toContain('markAppliedMaximisedOrFullscreen');
-    expect(appSource).toContain('resolveDefaultStartupWindowBounds(readCurrentVisibleViewport())');
+    expect(appSource).toContain('shouldPreferWindowsStartupMaximise(bounds, viewport)');
+    expect(appSource).toContain('applyWindowsWorkAreaFillFallback');
+    expect(appSource).toContain('resolveWorkAreaFillWindowBounds(readCurrentVisibleViewport())');
+    expect(appSource).toContain('restoreNormalWindowBounds');
     expect(appSource).toContain("void fixWindowScaleIfNeeded('startup');");
     expect(appSource).toContain('const startupLayoutFixTimers = [220, 1000, 1900].map((delayMs) => (');
     expect(appSource).toContain('if (isStartupWindowRestorePending())');

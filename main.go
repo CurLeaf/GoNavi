@@ -58,14 +58,23 @@ func main() {
 		}, true)
 	}
 
+	// Windows 冷启动：原生先最大化，避免 main 默认小窗先闪一帧；
+	// 前端 hydration 后再按用户记忆（最大化 / 普通尺寸）精细恢复。
+	// 其它平台仍用 Normal，由前端恢复逻辑接管。
+	windowStartState := options.Normal
+	if strings.EqualFold(strings.TrimSpace(runtime.GOOS), "windows") {
+		windowStartState = options.Maximised
+	}
+
 	// Create application with options
 	err := wails.Run(&options.App{
-		Title:     "GoNavi",
-		Width:     1024,
-		Height:    768,
-		MinWidth:  900,
-		MinHeight: 600,
-		Frameless: true,
+		Title:            "GoNavi",
+		Width:            1440,
+		Height:           900,
+		MinWidth:         900,
+		MinHeight:        600,
+		WindowStartState: windowStartState,
+		Frameless:        true,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
