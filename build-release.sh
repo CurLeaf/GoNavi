@@ -376,14 +376,19 @@ else
     echo -e "${YELLOW}   ⚠️  未找到 sha256sum/shasum，跳过校验文件生成。${NC}"
 fi
 
-echo -e "${GREEN}📄 生成静态更新清单 latest.json...${NC}"
+echo -e "${GREEN}📄 生成静态更新清单...${NC}"
 if command -v python3 &> /dev/null; then
-    TAG_FOR_MANIFEST="v${VERSION#v}"
-    CHANNEL_FOR_MANIFEST="latest"
-    OUT_MANIFEST="$DIST_DIR/latest.json"
+    # 正式版：latest.json；dev/test 版本：latest-dev.json（对应客户端 dev 通道）
     case "$VERSION" in
-        *dev*|*test*|*-*)
-            # 本地/测试版本默认打 latest.json，发正式版时由 CI 使用 git tag
+        dev-*|*-dev*|*dev*|*test*)
+            TAG_FOR_MANIFEST="dev-latest"
+            CHANNEL_FOR_MANIFEST="dev"
+            OUT_MANIFEST="$DIST_DIR/latest-dev.json"
+            ;;
+        *)
+            TAG_FOR_MANIFEST="v${VERSION#v}"
+            CHANNEL_FOR_MANIFEST="latest"
+            OUT_MANIFEST="$DIST_DIR/latest.json"
             ;;
     esac
     if python3 tools/generate-update-latest-manifest.py \
@@ -392,12 +397,12 @@ if command -v python3 &> /dev/null; then
         --tag "$TAG_FOR_MANIFEST" \
         --channel "$CHANNEL_FOR_MANIFEST" \
         --output "$OUT_MANIFEST"; then
-        echo -e "${GREEN}   ✅ 已生成 $OUT_MANIFEST${NC}"
+        echo -e "${GREEN}   ✅ 已生成 $OUT_MANIFEST (channel=${CHANNEL_FOR_MANIFEST})${NC}"
     else
-        echo -e "${YELLOW}   ⚠️  生成 latest.json 失败（不影响本地产物，正式发版由 CI 生成）${NC}"
+        echo -e "${YELLOW}   ⚠️  生成更新清单失败（不影响本地产物，正式/dev 发版由 CI 生成）${NC}"
     fi
 else
-    echo -e "${YELLOW}   ⚠️  未找到 python3，跳过 latest.json${NC}"
+    echo -e "${YELLOW}   ⚠️  未找到 python3，跳过更新清单${NC}"
 fi
 
 echo ""
