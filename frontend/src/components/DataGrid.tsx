@@ -44,6 +44,7 @@ import {
 import { resolvePaginationPageText, resolvePaginationSummaryText, resolvePaginationTotalForControl } from '../utils/dataGridPagination';
 import { resolveGridSortInfoFromTableSorter } from '../utils/dataGridSort';
 import {
+    absorbExtraWidthIntoFlexibleColumns,
     calculateExternalHorizontalScrollInnerWidth,
     calculateTableBodyBottomPadding,
     calculateVirtualTableScrollX,
@@ -286,7 +287,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     resultExportAllSql,
     onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions, quickWhereCondition,
     onApplyQuickWhereCondition,
-    scrollSnapshot, onScrollSnapshotChange, toolbarExtraActions, showRowNumberColumn = false, isActive = true, enableSqlLogEvent = false,
+    scrollSnapshot, onScrollSnapshotChange, toolbarExtraActions, showRowNumberColumn, isActive = true, enableSqlLogEvent = false,
     initialViewMode,
     initialViewModeRequestId,
     onDataViewActivate,
@@ -348,6 +349,10 @@ const DataGrid: React.FC<DataGridProps> = ({
   const useVirtualEditableVisibilityHints = !isMacLike && !isV2Ui;
   const dataGridBackdropFilter = isV2Ui || isMacLike ? 'none' : (opacity < 0.999 ? 'blur(14px)' : 'none');
   const showDataTableVerticalBorders = appearance.showDataTableVerticalBorders === true;
+  // 未显式传入时跟随外观设置（默认显示行号）；DataViewer / SQL 结果共用
+  const resolvedShowRowNumberColumn = typeof showRowNumberColumn === 'boolean'
+      ? showRowNumberColumn
+      : appearance.showDataTableRowNumber !== false;
   const dataTableDensity = appearance.dataTableDensity;
   const densityParams = useMemo(() => getDensityParams(dataTableDensity), [dataTableDensity]);
   const virtualCellWrapperStyle = useMemo<React.CSSProperties>(() => ({
@@ -2723,11 +2728,24 @@ const DataGrid: React.FC<DataGridProps> = ({
       width: ROW_NUMBER_COLUMN_WIDTH,
       className: 'data-grid-row-number-cell',
       align: 'center',
+      ellipsis: true,
       onHeaderCell: () => ({
           style: {
               textAlign: 'center' as const,
-              paddingInline: 0,
+              paddingInline: 2,
               verticalAlign: 'middle' as const,
+              width: ROW_NUMBER_COLUMN_WIDTH,
+              minWidth: ROW_NUMBER_COLUMN_WIDTH,
+              maxWidth: ROW_NUMBER_COLUMN_WIDTH,
+          },
+      }),
+      onCell: () => ({
+          style: {
+              width: ROW_NUMBER_COLUMN_WIDTH,
+              minWidth: ROW_NUMBER_COLUMN_WIDTH,
+              maxWidth: ROW_NUMBER_COLUMN_WIDTH,
+              paddingInline: 2,
+              textAlign: 'center' as const,
           },
       }),
       render: (_value: unknown, _record: Item, index: number) => {
@@ -2742,10 +2760,26 @@ const DataGrid: React.FC<DataGridProps> = ({
       },
   }), [pagination?.current, pagination?.pageSize]);
 
-  const tableColumns = useMemo(
-      () => (showRowNumberColumn ? [rowNumberColumn, ...mergedColumns] : mergedColumns),
-      [mergedColumns, rowNumberColumn, showRowNumberColumn]
-  );
+  const tableColumns = useMemo(() => {
+      const baseColumns = resolvedShowRowNumberColumn
+          ? [rowNumberColumn, ...mergedColumns]
+          : mergedColumns;
+      // 少列时把视口多余宽度只加到数据列，避免行号列被 rc-table 均摊撑宽
+      return absorbExtraWidthIntoFlexibleColumns({
+          columns: baseColumns,
+          selectionColumnWidth,
+          tableViewportWidth,
+          fixedColumnKeys: resolvedShowRowNumberColumn ? [GONAVI_ROW_NUMBER_COLUMN_KEY] : [],
+          defaultColumnWidth: densityParams.defaultColumnWidth,
+      });
+  }, [
+      densityParams.defaultColumnWidth,
+      mergedColumns,
+      resolvedShowRowNumberColumn,
+      rowNumberColumn,
+      selectionColumnWidth,
+      tableViewportWidth,
+  ]);
 
   const handleAddRow = () => {
       const newKey = `new-${Date.now()}`;

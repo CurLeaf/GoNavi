@@ -5292,6 +5292,16 @@ function App() {
                                           ),
                                       })}
                                       {renderThemeSettingsRow({
+                                          label: t('app.theme.data_table.row_number'),
+                                          hint: t('app.theme.data_table.row_number_hint'),
+                                          control: (
+                                              <Switch
+                                                  checked={appearance.showDataTableRowNumber !== false}
+                                                  onChange={(checked) => setAppearance({ showDataTableRowNumber: checked })}
+                                              />
+                                          ),
+                                      })}
+                                      {renderThemeSettingsRow({
                                           label: t('app.theme.data_table.table_double_click_action'),
                                           hint: t('app.theme.data_table.table_double_click_action_hint'),
                                           stacked: true,
@@ -6063,6 +6073,16 @@ function App() {
                                           <Switch
                                               checked={appearance.showDataTableVerticalBorders === true}
                                               onChange={(checked) => setAppearance({ showDataTableVerticalBorders: checked })}
+                                          />
+                                      </div>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                                          <div>
+                                              <div style={{ fontWeight: 500 }}>{t('app.theme.data_table.row_number')}</div>
+                                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>{t('app.theme.data_table.row_number_hint')}</div>
+                                          </div>
+                                          <Switch
+                                              checked={appearance.showDataTableRowNumber !== false}
+                                              onChange={(checked) => setAppearance({ showDataTableRowNumber: checked })}
                                           />
                                       </div>
                                       <div>

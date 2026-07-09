@@ -2818,6 +2818,8 @@
   "app.theme.data_table.title": "数据表显示",
   "app.theme.data_table.vertical_borders": "显示数据表竖向分隔线",
   "app.theme.data_table.vertical_borders_hint": "仅作用于数据表页面 DataGrid，不影响其他表格组件。",
+  "app.theme.data_table.row_number": "显示数据表行号",
+  "app.theme.data_table.row_number_hint": "作用于数据预览与 SQL 查询结果表；关闭后隐藏左侧行号列。默认开启。",
   "app.theme.font_family.default_mono_option": "默认代码字体",
   "app.theme.font_family.default_ui_option": "默认 UI 字体",
   "app.theme.font_family.linux_cjk_install_prefix": "Ubuntu/Linux 未检测到中文 CJK 字体，界面可能显示方框。请安装：",

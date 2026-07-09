@@ -14,6 +14,14 @@ describe('dataGridDisplay helpers', () => {
   it('sanitizes missing display settings to safe defaults', () => {
     expect(sanitizeDataGridDisplaySettings(undefined)).toEqual(DEFAULT_DATA_GRID_DISPLAY_SETTINGS);
     expect(sanitizeDataGridDisplaySettings({ dataTableDensity: 'invalid' as never })).toEqual(DEFAULT_DATA_GRID_DISPLAY_SETTINGS);
+    expect(DEFAULT_DATA_GRID_DISPLAY_SETTINGS.showDataTableRowNumber).toBe(true);
+  });
+
+  it('defaults showDataTableRowNumber to true unless explicitly disabled', () => {
+    expect(sanitizeDataGridDisplaySettings({}).showDataTableRowNumber).toBe(true);
+    expect(sanitizeDataGridDisplaySettings({ showDataTableRowNumber: undefined }).showDataTableRowNumber).toBe(true);
+    expect(sanitizeDataGridDisplaySettings({ showDataTableRowNumber: true }).showDataTableRowNumber).toBe(true);
+    expect(sanitizeDataGridDisplaySettings({ showDataTableRowNumber: false }).showDataTableRowNumber).toBe(false);
   });
 
   it('resolves density-based default column widths', () => {

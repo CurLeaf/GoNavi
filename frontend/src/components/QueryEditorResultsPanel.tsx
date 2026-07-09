@@ -447,7 +447,6 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                         connectionId={currentConnectionId}
                         pkColumns={rs.pkColumns}
                         editLocator={rs.editLocator}
-                        showRowNumberColumn={rs.showRowNumberColumn}
                         onReload={() => {
                             if (rs.page) {
                                 onResultPageChange(rs.key, rs.page.current, rs.page.pageSize);

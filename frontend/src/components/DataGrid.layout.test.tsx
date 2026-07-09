@@ -56,6 +56,7 @@ vi.mock('../store', () => ({
       opacity: 1,
       blur: 0,
       showDataTableVerticalBorders: false,
+      showDataTableRowNumber: true,
       dataTableDensity: 'comfortable',
       uiVersion: mockStoreState.uiVersion,
     },
@@ -2125,10 +2126,47 @@ describe('DataGrid layout', () => {
       expect(markup).toContain('align-items:center');
       expect(markup).toContain('min-height:var(--gonavi-header-min-height, 40px)');
       expect(markup).toContain('text-align:center');
-      expect(markup).toContain('padding-inline:0');
+      expect(markup).toContain('padding-inline:2');
       expect(markup).toContain('vertical-align:middle');
       expect(markup).toContain('data-grid-row-number="true"');
+      expect(markup).toContain('width:36');
       expect(markup).toContain('51');
+    } finally {
+      setCurrentLanguage(previousLanguage);
+    }
+  });
+
+  it('follows appearance.showDataTableRowNumber when prop is omitted', () => {
+    const previousLanguage = getCurrentLanguage();
+    setCurrentLanguage('zh-CN');
+
+    try {
+      const withDefault = renderToStaticMarkup(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="events"
+          dbName="main"
+          connectionId="conn-1"
+          readOnly
+        />,
+      );
+      expect(withDefault).toContain('data-grid-row-number="true"');
+
+      const hidden = renderToStaticMarkup(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="events"
+          dbName="main"
+          connectionId="conn-1"
+          readOnly
+          showRowNumberColumn={false}
+        />,
+      );
+      expect(hidden).not.toContain('data-grid-row-number="true"');
     } finally {
       setCurrentLanguage(previousLanguage);
     }

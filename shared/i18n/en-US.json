@@ -2818,6 +2818,8 @@
   "app.theme.data_table.title": "Data Table Display",
   "app.theme.data_table.vertical_borders": "Show Data Table Vertical Separators",
   "app.theme.data_table.vertical_borders_hint": "Only affects DataGrid on data table pages, not other table components.",
+  "app.theme.data_table.row_number": "Show Data Table Row Numbers",
+  "app.theme.data_table.row_number_hint": "Applies to table data preview and SQL result grids. Turn off to hide the left row-number column. Enabled by default.",
   "app.theme.font_family.default_mono_option": "Default code font",
   "app.theme.font_family.default_ui_option": "Default UI font",
   "app.theme.font_family.linux_cjk_install_prefix": "Ubuntu/Linux did not detect Chinese CJK fonts, so the interface may show missing glyph boxes. Install: ",

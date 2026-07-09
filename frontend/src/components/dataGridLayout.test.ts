@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  absorbExtraWidthIntoFlexibleColumns,
   calculateExternalHorizontalScrollInnerWidth,
   calculateTableBodyBottomPadding,
   calculateVirtualTableScrollX,
@@ -34,6 +35,40 @@ describe('dataGridLayout helpers', () => {
     expect(calculateVirtualTableScrollX({ totalWidth: 646, tableViewportWidth: 1200, isMacLike: false })).toBe(1200);
     expect(calculateVirtualTableScrollX({ totalWidth: 646, tableViewportWidth: 0, isMacLike: false })).toBe(646);
     expect(calculateVirtualTableScrollX({ totalWidth: 1200, tableViewportWidth: 800, isMacLike: true })).toBe(1202);
+  });
+
+  it('absorbs leftover viewport width into the last flexible data column only', () => {
+    const columns = [
+      { key: '__gonavi_row_number__', width: 36 },
+      { key: 'id', width: 180 },
+      { key: 'name', width: 160 },
+    ];
+    const next = absorbExtraWidthIntoFlexibleColumns({
+      columns,
+      selectionColumnWidth: 46,
+      tableViewportWidth: 1200,
+      fixedColumnKeys: ['__gonavi_row_number__'],
+      defaultColumnWidth: 180,
+    });
+    // 1200 - (36 + 180 + 160 + 46) = 778 → 加到最后一列 name
+    expect(next[0].width).toBe(36);
+    expect(next[1].width).toBe(180);
+    expect(next[2].width).toBe(160 + 778);
+  });
+
+  it('does not change columns when content already fills the viewport', () => {
+    const columns = [
+      { key: '__gonavi_row_number__', width: 36 },
+      { key: 'id', width: 900 },
+    ];
+    const next = absorbExtraWidthIntoFlexibleColumns({
+      columns,
+      selectionColumnWidth: 46,
+      tableViewportWidth: 800,
+      fixedColumnKeys: ['__gonavi_row_number__'],
+      defaultColumnWidth: 180,
+    });
+    expect(next).toEqual(columns);
   });
 
   it('keeps external horizontal scrollbar range aligned with table content range', () => {

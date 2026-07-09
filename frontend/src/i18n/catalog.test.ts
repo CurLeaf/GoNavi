@@ -194,6 +194,8 @@ describe("i18n catalog", () => {
       "app.theme.mode.system.description",
       "app.theme.mode.system.label",
       "app.theme.mode_title",
+      "app.theme.data_table.row_number",
+      "app.theme.data_table.row_number_hint",
       "app.theme.data_table.table_double_click_action",
       "app.theme.data_table.table_double_click_action.open_data",
       "app.theme.data_table.table_double_click_action.open_design",

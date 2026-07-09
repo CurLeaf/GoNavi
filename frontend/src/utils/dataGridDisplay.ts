@@ -4,6 +4,8 @@ export type DataTableDensity = 'comfortable' | 'standard' | 'compact';
 
 export interface DataGridDisplaySettings {
   showDataTableVerticalBorders: boolean;
+  /** 数据预览 / SQL 结果表是否显示行号列；默认开启 */
+  showDataTableRowNumber: boolean;
   dataTableDensity: DataTableDensity;
   dataTableFontSize: number | null;
   dataTableFontSizeFollowGlobal: boolean;
@@ -13,6 +15,7 @@ export interface DataGridDisplaySettings {
 
 export const DEFAULT_DATA_GRID_DISPLAY_SETTINGS: DataGridDisplaySettings = {
   showDataTableVerticalBorders: false,
+  showDataTableRowNumber: true,
   dataTableDensity: 'comfortable',
   dataTableFontSize: null,
   dataTableFontSizeFollowGlobal: true,
@@ -117,6 +120,8 @@ export const sanitizeDataGridDisplaySettings = (
 
   return {
     showDataTableVerticalBorders: value.showDataTableVerticalBorders === true,
+    // 缺省/历史数据：默认显示行号（仅显式 false 才关闭）
+    showDataTableRowNumber: value.showDataTableRowNumber !== false,
     dataTableDensity: sanitizeDataTableDensity(value.dataTableDensity),
     dataTableFontSize,
     dataTableFontSizeFollowGlobal: typeof value.dataTableFontSizeFollowGlobal === 'boolean'

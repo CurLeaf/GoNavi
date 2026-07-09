@@ -2329,6 +2329,7 @@ const sanitizeAppearance = (
     redisDbAliases: sanitizeRedisDbAliases(appearance.redisDbAliases),
     showDataTableVerticalBorders:
       dataGridDisplaySettings.showDataTableVerticalBorders,
+    showDataTableRowNumber: dataGridDisplaySettings.showDataTableRowNumber,
     dataTableDensity: dataGridDisplaySettings.dataTableDensity,
     dataTableFontSize: dataGridDisplaySettings.dataTableFontSize,
     dataTableFontSizeFollowGlobal:

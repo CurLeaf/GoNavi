@@ -76,6 +76,7 @@ describe('store appearance persistence', () => {
     expect(appearance.v2SidebarPersistedFilter).toBe('');
     expect(appearance.v2SidebarRailScale).toBe(1);
     expect(appearance.showDataTableVerticalBorders).toBe(false);
+    expect(appearance.showDataTableRowNumber).toBe(true);
     expect(appearance.dataTableDensity).toBe('comfortable');
     expect(appearance.dataTableFontSize).toBeNull();
     expect(appearance.dataTableFontSizeFollowGlobal).toBe(true);
@@ -96,6 +97,7 @@ describe('store appearance persistence', () => {
 
     useStore.getState().setAppearance({
       showDataTableVerticalBorders: true,
+      showDataTableRowNumber: false,
       dataTableDensity: 'compact',
       tableDoubleClickAction: 'open-design',
       v2SidebarRailScale: 1.55,
@@ -103,6 +105,7 @@ describe('store appearance persistence', () => {
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
     expect(persisted.state.appearance.showDataTableVerticalBorders).toBe(true);
+    expect(persisted.state.appearance.showDataTableRowNumber).toBe(false);
     expect(persisted.state.appearance.dataTableDensity).toBe('compact');
     expect(persisted.state.appearance.tableDoubleClickAction).toBe('open-design');
     expect(persisted.state.appearance.v2SidebarRailScale).toBe(1.55);
@@ -112,6 +115,7 @@ describe('store appearance persistence', () => {
     const appearance = reloaded.useStore.getState().appearance;
 
     expect(appearance.showDataTableVerticalBorders).toBe(true);
+    expect(appearance.showDataTableRowNumber).toBe(false);
     expect(appearance.dataTableDensity).toBe('compact');
     expect(appearance.tableDoubleClickAction).toBe('open-design');
     expect(appearance.v2SidebarRailScale).toBe(1.55);

@@ -215,7 +215,8 @@ const CELL_KEY_SEP = '\u0001';
 const CELL_SELECTION_DRAG_THRESHOLD_PX = 4;
 const DATE_TIME_CACHE_LIMIT = 2000;
 const TABLE_CELL_PREVIEW_MAX_CHARS = 240;
-const ROW_NUMBER_COLUMN_WIDTH = 58;
+// 行号列：仅展示序号的窄固定列（约 3~4 位）；多余视口宽度由数据列吸收
+const ROW_NUMBER_COLUMN_WIDTH = 36;
 const DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS = [
     { value: 3000, seconds: 3 },
     { value: 5000, seconds: 5 },

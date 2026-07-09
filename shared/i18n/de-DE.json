@@ -2818,6 +2818,8 @@
   "app.theme.data_table.title": "Datentabellenanzeige",
   "app.theme.data_table.vertical_borders": "Vertikale Trennlinien der Datentabelle anzeigen",
   "app.theme.data_table.vertical_borders_hint": "Wirkt nur auf DataGrid auf Datentabellenseiten und nicht auf andere Tabellenkomponenten.",
+  "app.theme.data_table.row_number": "Zeilennummern der Datentabelle anzeigen",
+  "app.theme.data_table.row_number_hint": "Gilt für Datenvorschau und SQL-Ergebnisraster. Deaktivieren blendet die linke Zeilennummernspalte aus. Standardmäßig aktiviert.",
   "app.theme.font_family.default_mono_option": "Standard-Code-Schrift",
   "app.theme.font_family.default_ui_option": "Standard-UI-Schrift",
   "app.theme.font_family.linux_cjk_install_prefix": "Ubuntu/Linux hat keine chinesischen CJK-Schriften erkannt; die Oberfläche kann fehlende Glyphen als Kästchen anzeigen. Installieren Sie: ",

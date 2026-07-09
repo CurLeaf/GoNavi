@@ -297,7 +297,6 @@ const FloatingQueryResultWindows: React.FC = () => {
                   connectionId={windowState.connectionId}
                   dbName={windowState.dbName || ''}
                   resultSql={windowState.result.exportSql || windowState.result.sql}
-                  showRowNumberColumn={windowState.result.showRowNumberColumn}
                   exportScope="queryResult"
                 />
               )}

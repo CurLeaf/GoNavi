@@ -2818,6 +2818,8 @@
   "app.theme.data_table.title": "Отображение таблицы данных",
   "app.theme.data_table.vertical_borders": "Показывать вертикальные разделители таблицы данных",
   "app.theme.data_table.vertical_borders_hint": "Влияет только на DataGrid на страницах таблиц данных и не затрагивает другие табличные компоненты.",
+  "app.theme.data_table.row_number": "Показывать номера строк таблицы данных",
+  "app.theme.data_table.row_number_hint": "Действует для предпросмотра данных и результатов SQL. Выключите, чтобы скрыть столбец номеров слева. По умолчанию включено.",
   "app.theme.font_family.default_mono_option": "Шрифт кода по умолчанию",
   "app.theme.font_family.default_ui_option": "Шрифт UI по умолчанию",
   "app.theme.font_family.linux_cjk_install_prefix": "Ubuntu/Linux не обнаружил китайские CJK-шрифты, поэтому интерфейс может показывать квадраты вместо символов. Установите: ",
