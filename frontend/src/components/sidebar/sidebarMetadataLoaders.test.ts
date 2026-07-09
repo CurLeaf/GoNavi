@@ -6,9 +6,11 @@ vi.mock("../../../wailsjs/go/app/App", () => ({
 
 import { DBQuery } from "../../../wailsjs/go/app/App";
 import {
+  buildFunctionsMetadataQuerySpecs,
   buildPackagesMetadataQuerySpecs,
   buildSchemasMetadataQuerySpecs,
   buildSequencesMetadataQuerySpecs,
+  loadFunctions,
   loadPackages,
   loadSequences,
   loadViews,
@@ -130,5 +132,99 @@ describe("Oracle object metadata loaders", () => {
         },
       ],
     });
+  });
+});
+
+describe("Kingbase/PG routine metadata loaders", () => {
+  it("builds multi-step function fallback queries for kingbase", () => {
+    const specs = buildFunctionsMetadataQuerySpecs("kingbase", "ldf_server_dbs");
+    expect(specs.length).toBeGreaterThanOrEqual(2);
+    expect(specs[0]?.sql).toContain("pg_proc");
+    expect(specs.some((spec) => spec.sql.includes("information_schema.routines"))).toBe(true);
+  });
+
+  it("does not stack the same kingbase function when multiple catalog fallbacks succeed", async () => {
+    let queryCount = 0;
+    mockedDBQuery.mockImplementation(async (_config: unknown, _dbName: string, sql: string) => {
+      queryCount += 1;
+      if (sql.includes("pg_proc") && sql.includes("prokind")) {
+        return {
+          success: true,
+          message: "",
+          data: [
+            { schema_name: "ldf_server", routine_name: "p1", routine_type: "FUNCTION" },
+            { schema_name: "ldf_server", routine_name: "p1", routine_type: "PROCEDURE" },
+            { schema_name: "ldf_server", routine_name: "pk_zero_fn", routine_type: "FUNCTION" },
+            // overload rows with same name/type must collapse
+            { schema_name: "ldf_server", routine_name: "p1", routine_type: "FUNCTION" },
+            { schema_name: "LDF_SERVER", routine_name: "p1", routine_type: "FUNCTION" },
+          ],
+        };
+      }
+      if (sql.includes("information_schema.routines")) {
+        return {
+          success: true,
+          message: "",
+          data: [
+            { schema_name: "ldf_server", routine_name: "p1", routine_type: "FUNCTION" },
+            { schema_name: "ldf_server", routine_name: "p1", routine_type: "PROCEDURE" },
+            { schema_name: "ldf_server", routine_name: "pk_zero_fn", routine_type: "FUNCTION" },
+          ],
+        };
+      }
+      if (sql.includes("pg_proc")) {
+        return {
+          success: true,
+          message: "",
+          data: [
+            { schema_name: "ldf_server", routine_name: "p1", routine_type: "FUNCTION" },
+            { schema_name: "ldf_server", routine_name: "p1", routine_type: "FUNCTION" },
+            { schema_name: "ldf_server", routine_name: "pk_zero_fn", routine_type: "FUNCTION" },
+          ],
+        };
+      }
+      return { success: false, message: "", data: [] };
+    });
+
+    const result = await loadFunctions({ config: { type: "kingbase" } }, "ldf_server_dbs");
+
+    expect(result.supported).toBe(true);
+    // First full catalog success must short-circuit fallback queries.
+    expect(queryCount).toBe(1);
+    const p1Funcs = result.routines.filter((item) => item.routineName.toLowerCase().endsWith(".p1") && item.routineType === "FUNCTION");
+    const p1Procs = result.routines.filter((item) => item.routineName.toLowerCase().endsWith(".p1") && item.routineType === "PROCEDURE");
+    expect(p1Funcs).toHaveLength(1);
+    expect(p1Procs).toHaveLength(1);
+    expect(result.routines.filter((item) => item.routineName.toLowerCase().includes("pk_zero_fn"))).toHaveLength(1);
+  });
+
+  it("still collects complementary SHOW FUNCTION/PROCEDURE fallbacks for MySQL", async () => {
+    mockedDBQuery.mockImplementation(async (_config: unknown, _dbName: string, sql: string) => {
+      if (sql.includes("information_schema.routines")) {
+        return { success: false, message: "no routines view", data: [] };
+      }
+      if (sql.includes("SHOW FUNCTION STATUS")) {
+        return {
+          success: true,
+          message: "",
+          data: [{ Db: "app", Name: "fn_a", Type: "FUNCTION" }],
+        };
+      }
+      if (sql.includes("SHOW PROCEDURE STATUS")) {
+        return {
+          success: true,
+          message: "",
+          data: [{ Db: "app", Name: "sp_b", Type: "PROCEDURE" }],
+        };
+      }
+      return { success: false, message: "", data: [] };
+    });
+
+    const result = await loadFunctions({ config: { type: "mysql" } }, "app");
+    expect(result.supported).toBe(true);
+    expect(result.routines.map((item) => `${item.routineType}:${item.routineName}`).sort()).toEqual([
+      "FUNCTION:app.fn_a",
+      "PROCEDURE:app.sp_b",
+    ]);
   });
 });

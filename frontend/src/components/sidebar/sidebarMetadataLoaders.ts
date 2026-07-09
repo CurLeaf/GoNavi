@@ -733,8 +733,14 @@ const queryMetadataRowsBySpecs = async (
   const config = buildSidebarRuntimeConfig(conn, dbName);
   const results: MetadataQueryResult[] = [];
   let hasSuccessfulQuery = false;
+  // Full queries (no inferredType) are mutually exclusive fallbacks: first success wins.
+  // Partial queries (inferredType set) are complementary (e.g. SHOW FUNCTION + SHOW PROCEDURE).
+  let hasFullSuccess = false;
 
   for (const spec of normalizedSpecs) {
+    if (hasFullSuccess) {
+      break;
+    }
     try {
       const result = await DBQuery(
         buildRpcConnectionConfig(config) as any,
@@ -749,6 +755,11 @@ const queryMetadataRowsBySpecs = async (
         rows: result.data as Record<string, any>[],
         inferredType: spec.inferredType,
       });
+      if (!spec.inferredType) {
+        // Primary/fallback full catalog query succeeded — do not merge later fallbacks
+        // (Kingbase/PG 上多条成功会把同一函数叠加多次).
+        hasFullSuccess = true;
+      }
     } catch {
       // 忽略单条查询失败，继续尝试后续回退语句
     }
@@ -1013,7 +1024,8 @@ const loadFunctions = async (
         ? "PROCEDURE"
         : "FUNCTION";
       const fullName = buildQualifiedName(schemaName, routineName);
-      const uniqueKey = `${fullName}@@${normalizedType}`;
+      // Case-insensitive dedupe: Kingbase/PG 多条 catalog SQL 或 overload 行容易同名大小写不一致
+      const uniqueKey = `${fullName.toLowerCase()}@@${normalizedType}`;
       if (!fullName || seen.has(uniqueKey)) return;
       seen.add(uniqueKey);
       const typeLabel = normalizedType === "PROCEDURE" ? "P" : "F";

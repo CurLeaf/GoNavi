@@ -705,15 +705,31 @@ export const useSidebarTreeLoaders = ({
                 return deduped;
             })();
 
-            const routineEntries = routineRows.map((routine: any) => {
-                const parsed = splitQualifiedName(routine.routineName);
-                const typeLabel = routine.routineType === 'PROCEDURE' ? 'P' : 'F';
-                return {
-	                    ...routine,
-	                    schemaName: parsed.schemaName,
-                    displayName: `${parsed.objectName || routine.routineName} [${typeLabel}]`,
-                };
-            });
+            const routineEntries = (() => {
+                const deduped: Array<{ routineName: string; routineType: string; schemaName: string; displayName: string }> = [];
+                const routineSeen = new Set<string>();
+                routineRows.forEach((routine: any) => {
+                    const parsed = splitQualifiedName(routine.routineName);
+                    const routineType = String(routine.routineType || 'FUNCTION').toUpperCase().includes('PROC')
+                        ? 'PROCEDURE'
+                        : 'FUNCTION';
+                    const schemaName = String(parsed.schemaName || routine.schemaName || '').trim();
+                    const objectName = String(parsed.objectName || routine.routineName || '').trim();
+                    if (!objectName) return;
+                    const routineName = String(routine.routineName || objectName).trim();
+                    const typeLabel = routineType === 'PROCEDURE' ? 'P' : 'F';
+                    const dedupeKey = `${schemaName.toLowerCase()}@@${objectName.toLowerCase()}@@${routineType}`;
+                    if (routineSeen.has(dedupeKey)) return;
+                    routineSeen.add(dedupeKey);
+                    deduped.push({
+                        routineName,
+                        routineType,
+                        schemaName,
+                        displayName: `${objectName} [${typeLabel}]`,
+                    });
+                });
+                return deduped;
+            })();
 
             const sequenceEntries = sequenceRows.map((sequence: any) => {
                 const parsed = splitQualifiedName(sequence.sequenceName);
@@ -858,14 +874,19 @@ export const useSidebarTreeLoaders = ({
 	                isLeaf: true,
 	            });
 
-	            const buildRoutineNode = (entry: { routineName: string; routineType: string; schemaName: string; displayName: string }): TreeNode => ({
-	                title: entry.displayName,
-	                key: `${conn.id}-${conn.dbName}-routine-${entry.routineName}`,
-	                icon: <CodeOutlined />,
-	                type: 'routine',
-	                dataRef: { ...conn, routineName: entry.routineName, routineType: entry.routineType, schemaName: entry.schemaName },
-	                isLeaf: true,
-	            });
+	            const buildRoutineNode = (entry: { routineName: string; routineType: string; schemaName: string; displayName: string }): TreeNode => {
+	                const typeToken = entry.routineType === 'PROCEDURE' ? 'proc' : 'func';
+	                const keyName = buildSidebarObjectKeyName(conn.dbName, entry.schemaName, entry.routineName);
+	                return {
+	                    title: entry.displayName,
+	                    // 必须带 routineType：同名函数/过程否则 key 冲突，虚拟列表会叠成“同一函数无限重复”
+	                    key: `${conn.id}-${conn.dbName}-routine-${typeToken}-${keyName}`,
+	                    icon: <CodeOutlined />,
+	                    type: 'routine',
+	                    dataRef: { ...conn, routineName: entry.routineName, routineType: entry.routineType, schemaName: entry.schemaName },
+	                    isLeaf: true,
+	                };
+	            };
 
 	            const buildSequenceNode = (entry: { sequenceName: string; schemaName: string; displayName: string }): TreeNode => {
 	                const keyName = buildSidebarObjectKeyName(conn.dbName, entry.schemaName, entry.sequenceName);
