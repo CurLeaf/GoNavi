@@ -148,6 +148,17 @@ func cloneIntSlice(input []int) []int {
 	return cloned
 }
 
+func cloneStringMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(input))
+	for key, value := range input {
+		cloned[key] = value
+	}
+	return cloned
+}
+
 func splitConnectionSecrets(input connection.SavedConnectionInput) (connection.SavedConnectionView, connectionSecretBundle) {
 	id := strings.TrimSpace(input.ID)
 	if id == "" {

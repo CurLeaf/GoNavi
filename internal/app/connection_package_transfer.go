@@ -15,12 +15,13 @@ import (
 	"github.com/google/uuid"
 )
 
-func newConnectionPackageItem(view connection.SavedConnectionView, bundle connectionSecretBundle) connectionPackageItem {
+func newConnectionPackageItem(view connection.SavedConnectionView, bundle connectionSecretBundle, redisDbAliases map[string]string) connectionPackageItem {
 	return connectionPackageItem{
 		ID:                    view.ID,
 		Name:                  view.Name,
 		IncludeDatabases:      cloneStringSlice(view.IncludeDatabases),
 		IncludeRedisDatabases: cloneIntSlice(view.IncludeRedisDatabases),
+		RedisDbAliases:        cloneStringMap(redisDbAliases),
 		IconType:              view.IconType,
 		IconColor:             view.IconColor,
 		Config:                stripConnectionSecretFields(view.Config),
@@ -28,30 +29,98 @@ func newConnectionPackageItem(view connection.SavedConnectionView, bundle connec
 	}
 }
 
-func (a *App) buildConnectionPackagePayload() (connectionPackagePayload, error) {
+func sanitizeConnectionPackageRedisDbAliases(value map[string]map[string]string) map[string]map[string]string {
+	if len(value) == 0 {
+		return nil
+	}
+	result := make(map[string]map[string]string, len(value))
+	for connectionID, aliases := range value {
+		id := strings.TrimSpace(connectionID)
+		if id == "" || len(aliases) == 0 {
+			continue
+		}
+		cleaned := make(map[string]string, len(aliases))
+		for dbIndex, alias := range aliases {
+			dbKey := strings.TrimSpace(dbIndex)
+			if dbKey == "" {
+				continue
+			}
+			// 仅接受数字下标，与前端 redisDbAlias 一致
+			if _, err := strconv.Atoi(dbKey); err != nil {
+				continue
+			}
+			label := strings.Join(strings.Fields(strings.TrimSpace(alias)), " ")
+			if label == "" {
+				continue
+			}
+			if len(label) > 64 {
+				label = label[:64]
+			}
+			cleaned[dbKey] = label
+		}
+		if len(cleaned) > 0 {
+			result[id] = cleaned
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func collectRedisDbAliasesFromPackagePayload(payload connectionPackagePayload) map[string]map[string]string {
+	merged := make(map[string]map[string]string)
+	// 顶层字段（若有）
+	for connectionID, aliases := range sanitizeConnectionPackageRedisDbAliases(payload.RedisDbAliases) {
+		merged[connectionID] = cloneStringMap(aliases)
+	}
+	// 连接项内嵌字段优先覆盖（导出时与连接同级，更可靠）
+	for _, item := range payload.Connections {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		cleaned := sanitizeConnectionPackageRedisDbAliases(map[string]map[string]string{id: item.RedisDbAliases})
+		if aliases, ok := cleaned[id]; ok && len(aliases) > 0 {
+			merged[id] = aliases
+		}
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
+}
+
+func (a *App) buildConnectionPackagePayload(redisDbAliases map[string]map[string]string) (connectionPackagePayload, error) {
 	repo := a.savedConnectionRepository()
 	items, err := repo.List()
 	if err != nil {
 		return connectionPackagePayload{}, err
 	}
 
+	aliasesByConnection := sanitizeConnectionPackageRedisDbAliases(redisDbAliases)
 	connections := make([]connectionPackageItem, 0, len(items))
 	for _, item := range items {
 		bundle, bundleErr := repo.loadSecretBundle(item)
 		if bundleErr != nil {
 			return connectionPackagePayload{}, bundleErr
 		}
-		connections = append(connections, newConnectionPackageItem(item, bundle))
+		var itemAliases map[string]string
+		if aliasesByConnection != nil {
+			itemAliases = aliasesByConnection[strings.TrimSpace(item.ID)]
+		}
+		connections = append(connections, newConnectionPackageItem(item, bundle, itemAliases))
 	}
 
 	return connectionPackagePayload{
-		ExportedAt:  time.Now().UTC().Format(time.RFC3339),
-		Connections: connections,
+		ExportedAt:     time.Now().UTC().Format(time.RFC3339),
+		Connections:    connections,
+		RedisDbAliases: aliasesByConnection,
 	}, nil
 }
 
 func (a *App) buildExportedConnectionPackage(options ConnectionExportOptions) ([]byte, error) {
-	payload, err := a.buildConnectionPackagePayload()
+	payload, err := a.buildConnectionPackagePayload(options.RedisDbAliases)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +284,14 @@ func (a *App) importConnectionPackagePayload(payload connectionPackagePayload) (
 	return a.importSavedConnectionsAtomically(inputs)
 }
 
-func (a *App) ImportConnectionsPayload(raw string, password string) ([]connection.SavedConnectionView, error) {
+func connectionPackageImportResultFromViews(views []connection.SavedConnectionView, redisDbAliases map[string]map[string]string) ConnectionPackageImportResult {
+	return ConnectionPackageImportResult{
+		Connections:    sanitizeSavedConnectionViews(views),
+		RedisDbAliases: sanitizeConnectionPackageRedisDbAliases(redisDbAliases),
+	}
+}
+
+func (a *App) ImportConnectionsPayload(raw string, password string) (ConnectionPackageImportResult, error) {
 	localizeError := func(err error) error {
 		return localizeConnectionPackageError(a.appText, err)
 	}
@@ -223,97 +299,102 @@ func (a *App) ImportConnectionsPayload(raw string, password string) ([]connectio
 		return errors.New(a.appText(key, params))
 	}
 
+	empty := ConnectionPackageImportResult{}
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return nil, localizeError(errConnectionPackageUnsupported)
+		return empty, localizeError(errConnectionPackageUnsupported)
 	}
 	if len(trimmed) > connectionImportMaxFileBytes {
-		return nil, localizeError(errConnectionImportFileTooLarge)
+		return empty, localizeError(errConnectionImportFileTooLarge)
 	}
 
 	if isConnectionPackageV2AppManaged(trimmed) {
 		var file connectionPackageFileV2
 		if err := json.Unmarshal([]byte(trimmed), &file); err != nil {
-			return nil, localizeError(errConnectionPackageUnsupported)
+			return empty, localizeError(errConnectionPackageUnsupported)
 		}
 		payload, err := decryptConnectionPackageV2AppManaged(file)
 		if err != nil {
-			return nil, localizeError(err)
+			return empty, localizeError(err)
 		}
 		views, err := a.importConnectionPackagePayload(payload)
 		if err != nil {
-			return nil, localizeError(err)
+			return empty, localizeError(err)
 		}
-		return sanitizeSavedConnectionViews(views), nil
+		return connectionPackageImportResultFromViews(views, collectRedisDbAliasesFromPackagePayload(payload)), nil
 	}
 
 	if isConnectionPackageV2Protected(trimmed) {
 		var file connectionPackageFileV2Protected
 		if err := json.Unmarshal([]byte(trimmed), &file); err != nil {
-			return nil, localizeError(errConnectionPackageUnsupported)
+			return empty, localizeError(errConnectionPackageUnsupported)
 		}
 		payload, err := decryptConnectionPackageV2Protected(file, password)
 		if err != nil {
-			return nil, localizeError(err)
+			return empty, localizeError(err)
 		}
 		views, err := a.importConnectionPackagePayload(payload)
 		if err != nil {
-			return nil, localizeError(err)
+			return empty, localizeError(err)
 		}
-		return sanitizeSavedConnectionViews(views), nil
+		return connectionPackageImportResultFromViews(views, collectRedisDbAliasesFromPackagePayload(payload)), nil
 	}
 
 	if isConnectionPackageEnvelope(trimmed) {
 		var file connectionPackageFile
 		if err := json.Unmarshal([]byte(trimmed), &file); err != nil {
-			return nil, localizeError(errConnectionPackageUnsupported)
+			return empty, localizeError(errConnectionPackageUnsupported)
 		}
 		payload, err := decryptConnectionPackage(file, password)
 		if err != nil {
-			return nil, localizeError(err)
+			return empty, localizeError(err)
 		}
 		views, err := a.importConnectionPackagePayload(payload)
 		if err != nil {
-			return nil, localizeError(err)
+			return empty, localizeError(err)
 		}
-		return sanitizeSavedConnectionViews(views), nil
+		return connectionPackageImportResultFromViews(views, collectRedisDbAliasesFromPackagePayload(payload)), nil
 	}
 
 	if isMySQLWorkbenchXML(trimmed) {
 		inputs, err := parseMySQLWorkbenchXML(trimmed)
 		if err != nil {
-			return nil, mysqlWorkbenchError("file.backend.error.mysql_workbench_parse_failed", map[string]any{"detail": err.Error()})
+			return empty, mysqlWorkbenchError("file.backend.error.mysql_workbench_parse_failed", map[string]any{"detail": err.Error()})
 		}
 		if len(inputs) == 0 {
-			return nil, mysqlWorkbenchError("file.backend.error.mysql_workbench_no_connections", nil)
+			return empty, mysqlWorkbenchError("file.backend.error.mysql_workbench_no_connections", nil)
 		}
 		views, err := a.importSavedConnectionsAtomically(inputs)
 		if err != nil {
-			return nil, err
+			return empty, err
 		}
-		return sanitizeSavedConnectionViews(views), nil
+		return connectionPackageImportResultFromViews(views, nil), nil
 	}
 
 	if isNavicatNCX(trimmed) {
 		inputs, err := parseNavicatNCXWithText(trimmed, a.appText)
 		if err != nil {
-			return nil, navicatWrapError(a.appText, "file.backend.error.navicat_ncx_parse_failed", nil, err)
+			return empty, navicatWrapError(a.appText, "file.backend.error.navicat_ncx_parse_failed", nil, err)
 		}
 		if len(inputs) == 0 {
-			return nil, navicatError(a.appText, "file.backend.error.navicat_ncx_no_connections", nil)
+			return empty, navicatError(a.appText, "file.backend.error.navicat_ncx_no_connections", nil)
 		}
 		views, err := a.importSavedConnectionsAtomically(inputs)
 		if err != nil {
-			return nil, err
+			return empty, err
 		}
-		return sanitizeSavedConnectionViews(views), nil
+		return connectionPackageImportResultFromViews(views, nil), nil
 	}
 
 	var legacy []connection.LegacySavedConnection
 	if err := json.Unmarshal([]byte(trimmed), &legacy); err != nil {
-		return nil, localizeError(errConnectionPackageUnsupported)
+		return empty, localizeError(errConnectionPackageUnsupported)
 	}
-	return a.ImportLegacyConnections(legacy)
+	views, err := a.ImportLegacyConnections(legacy)
+	if err != nil {
+		return empty, err
+	}
+	return connectionPackageImportResultFromViews(views, nil), nil
 }
 
 type connectionPackageImportRollbackSnapshot struct {

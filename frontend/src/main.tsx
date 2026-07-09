@@ -420,14 +420,29 @@ if (
                     try {
                         const parsed = JSON.parse(raw);
                         if (Array.isArray(parsed)) {
-                            return parsed.map((item) => saveMockConnection(item));
+                            return {
+                                connections: parsed.map((item) => saveMockConnection(item)),
+                                redisDbAliases: {},
+                            };
+                        }
+                        if (parsed && typeof parsed === 'object' && Array.isArray(parsed.connections)) {
+                            return {
+                                connections: parsed.connections.map((item: unknown) => saveMockConnection(item)),
+                                redisDbAliases: parsed.redisDbAliases && typeof parsed.redisDbAliases === 'object'
+                                    ? parsed.redisDbAliases
+                                    : {},
+                            };
                         }
                     } catch {
                         throw new Error(t('app.browser_mock.import_connection_package_unsupported'));
                     }
                     throw new Error(t('app.browser_mock.import_connection_package_unsupported'));
                 },
-                ExportConnectionsPackage: async (_options?: { includeSecrets?: boolean; filePassword?: string }) => ({ success: false, message: t('app.browser_mock.export_connection_package_unsupported') }),
+                ExportConnectionsPackage: async (_options?: {
+                    includeSecrets?: boolean;
+                    filePassword?: string;
+                    redisDbAliases?: Record<string, Record<string, string>>;
+                }) => ({ success: false, message: t('app.browser_mock.export_connection_package_unsupported') }),
                 ExportData: async () => ({ success: false }),
                 GetGlobalProxyConfig: async () => ({ success: true, data: cloneBrowserMockValue(mockGlobalProxy) }),
                 SetUpdateChannel: async (channel: string) => {

@@ -174,7 +174,7 @@ export function GetUpdateChannel():Promise<connection.QueryResult>;
 
 export function ImportConfigFile():Promise<connection.QueryResult>;
 
-export function ImportConnectionsPayload(arg1:string,arg2:string):Promise<Array<connection.SavedConnectionView>>;
+export function ImportConnectionsPayload(arg1:string,arg2:string):Promise<app.ConnectionPackageImportResult>;
 
 export function ImportData(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 

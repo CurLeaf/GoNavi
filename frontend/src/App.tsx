@@ -66,6 +66,11 @@ import {
   normalizeConnectionPackagePassword,
 } from './utils/connectionExport';
 import {
+  mergeRedisDbAliases,
+  sanitizeRedisDbAliases,
+  type RedisDbAliasMap,
+} from './utils/redisDbAlias';
+import {
   bootstrapSecureConfig,
   finalizeSecurityUpdateStatus,
   mergeSecurityUpdateStatusWithLegacySource,
@@ -398,6 +403,32 @@ const mergeSavedConnections = (current: SavedConnection[], imported: SavedConnec
   current.forEach((conn) => merged.set(conn.id, conn));
   imported.forEach((conn) => merged.set(conn.id, conn));
   return Array.from(merged.values());
+};
+
+type ConnectionPackageImportPayload = {
+  connections: SavedConnection[];
+  redisDbAliases: RedisDbAliasMap;
+};
+
+/** Normalize ImportConnectionsPayload results: object (new) or bare array (legacy/mock). */
+const normalizeConnectionPackageImportPayload = (value: unknown): ConnectionPackageImportPayload | null => {
+  if (Array.isArray(value)) {
+    return {
+      connections: value as SavedConnection[],
+      redisDbAliases: {},
+    };
+  }
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const record = value as { connections?: unknown; redisDbAliases?: unknown };
+  if (!Array.isArray(record.connections)) {
+    return null;
+  }
+  return {
+    connections: record.connections as SavedConnection[],
+    redisDbAliases: sanitizeRedisDbAliases(record.redisDbAliases),
+  };
 };
 
 type ConnectionPackageDialogMode = 'import' | 'export';
@@ -2363,9 +2394,9 @@ function App() {
           throw new Error(t('app.connection_package.error.import_capability_unavailable'));
       }
 
-      let importedViews: unknown;
+      let importedRaw: unknown;
       try {
-          importedViews = await backendApp.ImportConnectionsPayload(raw, password);
+          importedRaw = await backendApp.ImportConnectionsPayload(raw, password);
       } catch (error) {
           if (isConnectionPackagePasswordRequiredError(error)) {
               throw error;
@@ -2377,11 +2408,19 @@ function App() {
                   : t('app.connection_package.message.import_failed'),
           );
       }
-      if (!Array.isArray(importedViews)) {
+      const imported = normalizeConnectionPackageImportPayload(importedRaw);
+      if (!imported) {
           throw new Error(t('app.connection_package.error.import_no_connections'));
       }
-      await refreshConnectionsAfterImport(importedViews as SavedConnection[]);
-      return importedViews as SavedConnection[];
+      await refreshConnectionsAfterImport(imported.connections);
+      // Redis DB 别名存在前端 appearance，需随连接包一并恢复
+      if (Object.keys(imported.redisDbAliases).length > 0) {
+          const currentAliases = useStore.getState().appearance.redisDbAliases;
+          useStore.getState().setAppearance({
+              redisDbAliases: mergeRedisDbAliases(currentAliases, imported.redisDbAliases),
+          });
+      }
+      return imported.connections;
   }, [refreshConnectionsAfterImport, t]);
 
   const handleImportConnections = async (sourceGroup?: ToolCenterGroupKey) => {
@@ -2502,6 +2541,8 @@ function App() {
                           connectionPackageDialog.includeSecrets
                           && connectionPackageDialog.useFilePassword
                       ) ? password : '',
+                      // Redis DB 别名仅存前端，导出时注入连接包
+                      redisDbAliases: useStore.getState().appearance.redisDbAliases,
                   });
               } catch (error) {
                   const detail = error instanceof Error ? error.message : String(error ?? '').trim();

@@ -127,6 +127,26 @@ export const setRedisDbAlias = (
 };
 
 /**
+ * Merge imported Redis DB aliases into the local map. Imported labels win for
+ * the same connection + DB index; unrelated local aliases are preserved.
+ */
+export const mergeRedisDbAliases = (
+  current: RedisDbAliasMap | undefined,
+  incoming: RedisDbAliasMap | undefined,
+): RedisDbAliasMap => {
+  const base = sanitizeRedisDbAliases(current);
+  const imported = sanitizeRedisDbAliases(incoming);
+  const next: RedisDbAliasMap = { ...base };
+  Object.entries(imported).forEach(([connectionId, aliases]) => {
+    next[connectionId] = {
+      ...(base[connectionId] || {}),
+      ...aliases,
+    };
+  });
+  return next;
+};
+
+/**
  * Build the sidebar label for a Redis DB node. Returns `dbN` when there is no
  * alias, and `dbN alias` when one is set. Key counts are intentionally not
  * included here: V2 renders them via the node meta slot to avoid duplicates.
