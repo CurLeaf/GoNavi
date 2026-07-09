@@ -423,7 +423,8 @@ describe('tool center menu entries', () => {
   });
 
   it('clamps normal runtime window bounds back into the visible screen after display changes', () => {
-    expect(appSource).toContain('const readCurrentVisibleViewport = () => ({');
+    expect(appSource).toContain('const readCurrentVisibleViewport = () => resolveWailsWindowVisibleViewport(');
+    expect(appSource).toContain('{ useMonitorLocalOrigin: isMacLikePlatform() }');
     expect(appSource).toContain('const repairRuntimeWindowBounds = async () => {');
     expect(appSource).toContain('const nextBounds = resolveVisibleStartupWindowBounds(currentBounds, readCurrentVisibleViewport());');
     expect(appSource).toContain("void emitWindowDiagnostic('adjust:runtime-window-bounds'");

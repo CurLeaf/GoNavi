@@ -36,7 +36,7 @@ import {
   useStore,
 } from './store';
 import { GlobalProxyConfig, SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
-import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
+import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isMacLikePlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
 import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, getLinuxCJKFontInstallHint, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
 import {
   DENSITY_OPTIONS,
@@ -136,6 +136,7 @@ import {
 } from './utils/shortcuts';
 import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldResetWebViewZoomForScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowScaleFixReason, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
 import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
+import { resolveWailsWindowVisibleViewport } from './utils/wailsWindowViewport';
 import {
   SIDEBAR_UTILITY_ITEM_KEYS,
   resolveAIEntryPlacement,
@@ -385,12 +386,11 @@ const detectNavigatorPlatform = (): string => {
   return navigator.userAgent || '';
 };
 
-const readCurrentVisibleViewport = () => ({
-  availWidth: window.screen?.availWidth || window.innerWidth || 0,
-  availHeight: window.screen?.availHeight || window.innerHeight || 0,
-  availLeft: (window.screen as Screen & { availLeft?: number })?.availLeft || 0,
-  availTop: (window.screen as Screen & { availTop?: number })?.availTop || 0,
-});
+const readCurrentVisibleViewport = () => resolveWailsWindowVisibleViewport(
+  window.screen as Screen & { availLeft?: number; availTop?: number },
+  { innerWidth: window.innerWidth, innerHeight: window.innerHeight },
+  { useMonitorLocalOrigin: isMacLikePlatform() },
+);
 
 const getSystemThemeMode = (): 'light' | 'dark' => {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
