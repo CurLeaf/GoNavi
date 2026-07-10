@@ -2797,7 +2797,7 @@
   "app.theme.appearance.transparency_blur_title": "Transparenz- und Weichzeichnungseffekte",
   "app.theme.appearance.ui_scale_hint": "* Für kleine Bildschirme werden 85%-95% empfohlen",
   "app.theme.appearance.ui_scale_title": "UI-Skalierung (UI Scale)",
-  "app.theme.appearance.windows_acrylic_hint": "Windows verwendet den systemeigenen Acrylic-Effekt. Die Unschärfestärke wird vom System gesteuert.",
+  "app.theme.appearance.windows_acrylic_hint": "Windows-Leistungsmodus: Systemhintergrundunschärfe ist deaktiviert.",
   "app.theme.appearance_settings_description": "Skalierung, Schriftgröße, Transparenz und Weichzeichnung zentral anpassen.",
   "app.theme.appearance_settings_title": "Darstellungseinstellungen",
   "app.theme.data_table.column_width_hint": "Der Standardmodus nutzt 200px, der kompakte Modus 140px als Standardspaltenbreite. Manuell angepasste Spaltenbreiten bleiben vorrangig erhalten.",

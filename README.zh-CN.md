@@ -162,8 +162,7 @@ node tools/wails-fast-dev.mjs
 # 修改 Go 导出方法签名后刷新 Wails JS 绑定
 node tools/wails-fast-dev.mjs --refresh-bindings
 
-# Windows PowerShell 低内存视觉模式：关闭透明 WebView 和 Acrylic 背景
-$env:GONAVI_LOW_MEMORY_MODE="1"; node tools/wails-fast-dev.mjs
+# Windows 桌面端默认使用不透明 WebView，并关闭 Acrylic 背景
 ```
 
 ### 编译构建

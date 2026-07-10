@@ -2797,7 +2797,7 @@
   "app.theme.appearance.transparency_blur_title": "Transparency and Blur Effects",
   "app.theme.appearance.ui_scale_hint": "* Recommended for small screens: 85%-95%",
   "app.theme.appearance.ui_scale_title": "UI Scale (UI Scale)",
-  "app.theme.appearance.windows_acrylic_hint": "Windows uses the system Acrylic effect. Blur intensity is controlled by the system.",
+  "app.theme.appearance.windows_acrylic_hint": "Windows performance mode: system background blur is off.",
   "app.theme.appearance_settings_description": "Adjust scale, font size, transparency, and blur effects in one place.",
   "app.theme.appearance_settings_title": "Appearance Settings",
   "app.theme.data_table.column_width_hint": "Standard mode defaults to 200px; compact mode defaults to 140px. Manually adjusted column widths are preserved first.",

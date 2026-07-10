@@ -2797,7 +2797,7 @@
   "app.theme.appearance.transparency_blur_title": "Эффекты прозрачности и размытия",
   "app.theme.appearance.ui_scale_hint": "* Для небольших экранов рекомендуется 85%-95%",
   "app.theme.appearance.ui_scale_title": "Масштаб UI (UI Scale)",
-  "app.theme.appearance.windows_acrylic_hint": "Windows использует системный эффект Acrylic. Сила размытия управляется системой.",
+  "app.theme.appearance.windows_acrylic_hint": "Режим производительности Windows: системное размытие фона отключено.",
   "app.theme.appearance_settings_description": "Единая настройка масштаба, размера шрифта, прозрачности и размытия.",
   "app.theme.appearance_settings_title": "Настройки внешнего вида",
   "app.theme.data_table.column_width_hint": "В стандартном режиме ширина столбца по умолчанию 200px; в компактном режиме 140px. Вручную измененные ширины столбцов сохраняются в приоритете.",

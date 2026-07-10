@@ -5,6 +5,8 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/menu/keys"
+	"github.com/wailsapp/wails/v2/pkg/options"
+	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
 
 func TestIsLowMemoryMode(t *testing.T) {
@@ -30,24 +32,72 @@ func TestIsLowMemoryMode(t *testing.T) {
 	}
 }
 
-func TestShouldRunMCPServerMode(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want bool
+func TestResolveWindowVisualOptions(t *testing.T) {
+	tests := []struct {
+		name                string
+		goos                string
+		lowMemoryMode       bool
+		wantBackground      options.RGBA
+		wantWebviewOpaque   bool
+		wantWindowOpaque    bool
+		wantWindowsBackdrop windows.BackdropType
 	}{
-		{name: "empty", args: nil, want: false},
-		{name: "mcp-server", args: []string{"mcp-server"}, want: true},
-		{name: "flag style", args: []string{"--mcp-server"}, want: true},
-		{name: "mcp-server http mode", args: []string{"mcp-server", "http"}, want: true},
-		{name: "mcp-server remote config", args: []string{"mcp-server", "remote-config"}, want: true},
-		{name: "unknown", args: []string{"serve"}, want: false},
+		{
+			name:                "windows defaults to opaque without acrylic",
+			goos:                "windows",
+			wantBackground:      options.RGBA{R: 255, G: 255, B: 255, A: 255},
+			wantWebviewOpaque:   true,
+			wantWindowOpaque:    true,
+			wantWindowsBackdrop: windows.None,
+		},
+		{
+			name:                "windows low memory remains opaque",
+			goos:                " Windows ",
+			lowMemoryMode:       true,
+			wantBackground:      options.RGBA{R: 255, G: 255, B: 255, A: 255},
+			wantWebviewOpaque:   true,
+			wantWindowOpaque:    true,
+			wantWindowsBackdrop: windows.None,
+		},
+		{
+			name:                "mac default remains transparent",
+			goos:                "darwin",
+			wantBackground:      options.RGBA{R: 0, G: 0, B: 0, A: 0},
+			wantWebviewOpaque:   false,
+			wantWindowOpaque:    false,
+			wantWindowsBackdrop: windows.Acrylic,
+		},
+		{
+			name:                "low memory remains opaque on other platforms",
+			goos:                "darwin",
+			lowMemoryMode:       true,
+			wantBackground:      options.RGBA{R: 255, G: 255, B: 255, A: 255},
+			wantWebviewOpaque:   true,
+			wantWindowOpaque:    true,
+			wantWindowsBackdrop: windows.None,
+		},
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := shouldRunMCPServerMode(tc.args); got != tc.want {
-				t.Fatalf("shouldRunMCPServerMode(%v) = %v, want %v", tc.args, got, tc.want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			background, windowsOptions := resolveWindowVisualOptions(tt.goos, tt.lowMemoryMode)
+			if background == nil {
+				t.Fatal("resolveWindowVisualOptions() background is nil")
+			}
+			if got := *background; got != tt.wantBackground {
+				t.Fatalf("background = %+v, want %+v", got, tt.wantBackground)
+			}
+			if windowsOptions == nil {
+				t.Fatal("resolveWindowVisualOptions() windows options are nil")
+			}
+			if got := !windowsOptions.WebviewIsTransparent; got != tt.wantWebviewOpaque {
+				t.Fatalf("webview opaque = %v, want %v", got, tt.wantWebviewOpaque)
+			}
+			if got := !windowsOptions.WindowIsTranslucent; got != tt.wantWindowOpaque {
+				t.Fatalf("window opaque = %v, want %v", got, tt.wantWindowOpaque)
+			}
+			if got := windowsOptions.BackdropType; got != tt.wantWindowsBackdrop {
+				t.Fatalf("Windows backdrop = %v, want %v", got, tt.wantWindowsBackdrop)
 			}
 		})
 	}
