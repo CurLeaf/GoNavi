@@ -8022,8 +8022,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       >
         <div
           ref={editorShellRef}
-          className={isV2Ui ? 'gn-v2-query-monaco-shell' : undefined}
-          style={isV2Ui ? { flex: '1 1 auto', minHeight: 0 } : undefined}
+          className={isV2Ui ? 'gn-v2-query-monaco-shell gn-query-monaco-shell' : 'gn-query-monaco-shell'}
+          style={{ flex: '1 1 auto', minHeight: 0, minWidth: 0 }}
         >
           <Editor 
             height="100%" 
