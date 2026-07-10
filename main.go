@@ -84,6 +84,9 @@ func main() {
 			runtimeCtx = ctx
 			app.InitializeLifecycle(application, ctx)
 			aiservice.InitializeLifecycle(aiService, ctx)
+			if err := aiservice.RepairInstalledLocalMCPClientConfigs(aiService); err != nil {
+				logger.Warnf("自动修复本地 MCP 客户端配置失败：%v", err)
+			}
 		},
 		OnShutdown: func(ctx context.Context) {
 			aiService.Shutdown()
