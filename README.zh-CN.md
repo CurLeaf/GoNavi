@@ -218,6 +218,8 @@ docker compose --env-file docker.web-server.env -f docker-compose.web-server.yml
 
 浏览器打开 `http://127.0.0.1:34116`（或宿主机映射端口）。设置 `GONAVI_WEB_PASSWORD` 后，新创建的容器会同步该密码并直接进入登录页；未设置时首次访问完成 `/setup`。
 
+Web 工具中心支持通过浏览器上传/下载连接恢复包；数据目录页显示当前容器挂载目录。Docker 的数据根目录由 `GONAVI_HOST_DATA_ROOT` 挂载控制，如需切换请修改 env 后重新创建容器，避免在容器内迁移到未持久化路径。
+
 请把 GoNavi 活动数据目录挂载为 `/data`。建议至少包含 `connections.json`、`daily_secrets.json`；如需可选驱动代理应包含 `drivers/`。Web 认证状态写入同目录下的 `web_auth.json`。
 
 `GONAVI_WEB_PASSWORD` 会覆盖 `web_auth.json` 中已有的密码哈希，但保留 2FA 和会话策略；移除环境变量后继续使用最后一次同步的密码。env 文件包含明文密码，可被有容器检查权限的用户看到，请限制文件读取权限。

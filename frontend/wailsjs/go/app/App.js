@@ -222,6 +222,10 @@ export function ExportConnectionsPackage(arg1) {
   return window['go']['app']['App']['ExportConnectionsPackage'](arg1);
 }
 
+export function ExportConnectionsPayload(arg1) {
+  return window['go']['app']['App']['ExportConnectionsPayload'](arg1);
+}
+
 export function ExportData(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportData'](arg1, arg2, arg3, arg4);
 }

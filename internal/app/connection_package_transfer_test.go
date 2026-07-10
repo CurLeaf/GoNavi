@@ -149,6 +149,35 @@ func TestBuildExportedConnectionPackageWithoutSecretsUsesV2AppManagedAndImportsW
 	}
 }
 
+func TestExportConnectionsPayloadReturnsBrowserDownloadContent(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+	saveConnectionForPackageExport(t, app, "conn-browser-export", "browser-secret")
+
+	result := app.ExportConnectionsPayload(ConnectionExportOptions{IncludeSecrets: false})
+	if !result.Success {
+		t.Fatalf("ExportConnectionsPayload returned failure: %+v", result)
+	}
+
+	raw, ok := result.Data.(string)
+	if !ok || strings.TrimSpace(raw) == "" {
+		t.Fatalf("expected browser download content, got %#v", result.Data)
+	}
+	if !isConnectionPackageV2AppManaged(raw) {
+		t.Fatalf("expected app-managed connection package, got %s", raw)
+	}
+
+	importApp := NewAppWithSecretStore(newFakeAppSecretStore())
+	importApp.configDir = t.TempDir()
+	imported, err := importApp.ImportConnectionsPayload(raw, "")
+	if err != nil {
+		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
+	}
+	if len(imported.Connections) != 1 || imported.Connections[0].ID != "conn-browser-export" {
+		t.Fatalf("expected exported browser content to restore the connection, got %#v", imported.Connections)
+	}
+}
+
 func TestImportConnectionPackagePayloadOverwritesExistingSecrets(t *testing.T) {
 	app := NewAppWithSecretStore(newFakeAppSecretStore())
 	app.configDir = t.TempDir()

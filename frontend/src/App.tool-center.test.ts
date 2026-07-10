@@ -111,6 +111,15 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain("borderBottom: `1px solid ${overlayTheme.divider}`");
   });
 
+  it('keeps browser-compatible connection transfer and mounted data-root entries available in the web runtime', () => {
+    expect(appSource).toContain("accept=\".gonavi-conn,.json,.xml,.ncx\"");
+    expect(appSource).toContain('ExportConnectionsPayload');
+    expect(appSource).toContain('downloadBrowserTextFile');
+    expect(appSource).toContain("__GONAVI_WEB_RUNTIME__?.buildType === 'web'");
+    expect(appSource).toContain('if (isWebRuntime) {\n                  return (');
+    expect(appSource).toContain('items: group.items,');
+  });
+
   it('lets the tool center detail header own embedded tool titles', () => {
     const renderPaneStart = appSource.indexOf('const renderToolCenterPane = () => {');
     const renderPaneSource = appSource.slice(

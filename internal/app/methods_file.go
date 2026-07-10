@@ -1800,6 +1800,23 @@ func (a *App) ExportConnectionsPackage(options ConnectionExportOptions) connecti
 	return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.export_completed", nil)}
 }
 
+// ExportConnectionsPayload builds a recovery package for browser clients. The browser is
+// responsible for saving it locally because a Web Server process cannot open its file dialog.
+func (a *App) ExportConnectionsPayload(options ConnectionExportOptions) connection.QueryResult {
+	content, err := a.buildExportedConnectionPackage(options)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: localizedConnectionPackageExportMessage(a.appText, err)}
+	}
+	if len(content) > connectionImportMaxFileBytes {
+		return connection.QueryResult{Success: false, Message: localizedConnectionPackageExportMessage(a.appText, errConnectionImportFileTooLarge)}
+	}
+	return connection.QueryResult{
+		Success: true,
+		Message: a.appText("file.backend.message.export_completed", nil),
+		Data:    string(content),
+	}
+}
+
 func normalizeConnectionPackageExportFilename(filename string) string {
 	trimmed := strings.TrimSpace(filename)
 	if trimmed == "" {

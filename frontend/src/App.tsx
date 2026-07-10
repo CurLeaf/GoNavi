@@ -65,6 +65,7 @@ import {
   resolveConnectionPackageExportResult,
   normalizeConnectionPackagePassword,
 } from './utils/connectionExport';
+import { downloadBrowserTextFile } from './utils/browserFileTransfer';
 import {
   mergeRedisDbAliases,
   sanitizeRedisDbAliases,
@@ -835,7 +836,8 @@ function App() {
   const [runtimePlatform, setRuntimePlatform] = useState('');
   const [runtimeBuildType, setRuntimeBuildType] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
-  const isWebRuntime = runtimeBuildType === 'web';
+  const isWebRuntime = runtimeBuildType === 'web'
+    || (typeof window !== 'undefined' && (window as any).__GONAVI_WEB_RUNTIME__?.buildType === 'web');
   const [installedFontFamilies, setInstalledFontFamilies] = useState<InstalledFontFamily[]>(EMPTY_INSTALLED_FONT_FAMILIES);
   const [isFontFamiliesLoading, setIsFontFamiliesLoading] = useState(false);
   const [fontFamiliesLoadError, setFontFamiliesLoadError] = useState<string | null>(null);
@@ -867,6 +869,8 @@ function App() {
   const [focusedAIProviderId, setFocusedAIProviderId] = useState<string | undefined>(undefined);
   const [connectionPackageDialog, setConnectionPackageDialog] = useState<ConnectionPackageDialogState>(() => createClosedConnectionPackageDialogState());
   const [pendingConnectionImportPayload, setPendingConnectionImportPayload] = useState<string | null>(null);
+  const browserConnectionImportInputRef = useRef<HTMLInputElement>(null);
+  const browserConnectionImportSourceGroupRef = useRef<ToolCenterGroupKey | undefined>(undefined);
   const [aiPanelRenderNonce, setAiPanelRenderNonce] = useState(0);
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
@@ -2493,17 +2497,7 @@ function App() {
       return imported.connections;
   }, [refreshConnectionsAfterImport, t]);
 
-  const handleImportConnections = async (sourceGroup?: ToolCenterGroupKey) => {
-      setToolCenterBackGroupKey(sourceGroup ?? null);
-      const res = await (window as any).go.app.App.ImportConfigFile();
-      if (!res.success) {
-          if (res.message !== "已取消") {
-              void message.error(t('app.connection_package.message.import_failed_with_error', { error: res.message }));
-          }
-          return;
-      }
-
-      const raw = typeof res.data === 'string' ? res.data : String(res.data ?? '');
+  const importConnectionPayloadFromFile = async (raw: string, sourceGroup?: ToolCenterGroupKey) => {
       const importKind = detectConnectionImportKind(raw);
 
       if (importKind === 'invalid') {
@@ -2539,6 +2533,49 @@ function App() {
           }
           void message.error(e?.message || t('app.connection_package.message.import_failed'));
       }
+  };
+
+  const handleBrowserConnectionImportFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      const sourceGroup = browserConnectionImportSourceGroupRef.current;
+      browserConnectionImportSourceGroupRef.current = undefined;
+      event.target.value = '';
+      if (!file) {
+          return;
+      }
+
+      try {
+          await importConnectionPayloadFromFile(await file.text(), sourceGroup);
+      } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error ?? '').trim();
+          void message.error(detail || t('app.connection_package.message.import_failed'));
+      }
+  };
+
+  const handleImportConnections = async (sourceGroup?: ToolCenterGroupKey) => {
+      setToolCenterBackGroupKey(sourceGroup ?? null);
+      if (isWebRuntime) {
+          const input = browserConnectionImportInputRef.current;
+          if (!input) {
+              void message.error(t('app.connection_package.error.import_capability_unavailable'));
+              return;
+          }
+          browserConnectionImportSourceGroupRef.current = sourceGroup;
+          input.value = '';
+          input.click();
+          return;
+      }
+
+      const res = await (window as any).go.app.App.ImportConfigFile();
+      if (!res.success) {
+          if (res.message !== "已取消") {
+              void message.error(t('app.connection_package.message.import_failed_with_error', { error: res.message }));
+          }
+          return;
+      }
+
+      const raw = typeof res.data === 'string' ? res.data : String(res.data ?? '');
+      await importConnectionPayloadFromFile(raw, sourceGroup);
   };
 
   const handleExportConnections = async (sourceGroup?: ToolCenterGroupKey) => {
@@ -2599,13 +2636,16 @@ function App() {
 
       try {
           if (connectionPackageDialog.mode === 'export') {
-              if (typeof backendApp?.ExportConnectionsPackage !== 'function') {
-                  throw new Error(t('app.connection_package.error.export_capability_unavailable'));
-              }
+               const exportMethod = isWebRuntime
+                   ? backendApp?.ExportConnectionsPayload
+                   : backendApp?.ExportConnectionsPackage;
+               if (typeof exportMethod !== 'function') {
+                   throw new Error(t('app.connection_package.error.export_capability_unavailable'));
+               }
 
-              let res: unknown;
-              try {
-                  res = await backendApp.ExportConnectionsPackage({
+               let res: unknown;
+               try {
+                   res = await exportMethod({
                       includeSecrets: connectionPackageDialog.includeSecrets,
                       filePassword: (
                           connectionPackageDialog.includeSecrets
@@ -2627,11 +2667,17 @@ function App() {
                   setConnectionPackageDialog(exportResult.nextDialog);
                   return;
               }
-              if (exportResult.kind === 'failed') {
-                  throw new Error(exportResult.error);
-              }
+               if (exportResult.kind === 'failed') {
+                   throw new Error(exportResult.error);
+               }
+               if (isWebRuntime) {
+                   const content = typeof (res as any)?.data === 'string' ? (res as any).data : '';
+                   if (!content || !downloadBrowserTextFile(content, 'connections.gonavi-conn', 'application/json;charset=utf-8')) {
+                       throw new Error(t('app.connection_package.error.export_capability_unavailable'));
+                   }
+               }
 
-              closeConnectionPackageDialog();
+               closeConnectionPackageDialog();
               void message.success(t('app.connection_package.message.export_succeeded'));
               return;
           }
@@ -6427,6 +6473,13 @@ function App() {
             backdropFilter: blurFilter,
             WebkitBackdropFilter: blurFilter,
         }}>
+          <input
+            ref={browserConnectionImportInputRef}
+            type="file"
+            accept=".gonavi-conn,.json,.xml,.ncx"
+            style={{ display: 'none' }}
+            onChange={(event) => { void handleBrowserConnectionImportFileChange(event); }}
+          />
           {/* Custom Title Bar */}
           <div
             onDoubleClick={handleTitleBarDoubleClick}
@@ -6960,12 +7013,7 @@ function App() {
             ] as const;
             const filteredToolCenterGroups = toolCenterGroups.map((group) => ({
               ...group,
-              items: group.items.filter((item) => {
-                if (!isWebRuntime) {
-                  return true;
-                }
-                return !['import', 'export', 'data-root'].includes(String(item.key || ''));
-              }),
+              items: group.items,
             })).filter((group) => group.items.length > 0);
             const activeToolCenterGroup = filteredToolCenterGroups.find((group) => group.key === activeToolCenterGroupKey) ?? filteredToolCenterGroups[0];
             const activeToolCenterPaneItem = activeToolCenterPane
@@ -7041,6 +7089,28 @@ function App() {
               }
 
               if (activeToolCenterPane.key === 'data-root') {
+                if (isWebRuntime) {
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
+                      <div style={utilityPanelStyle}>
+                        <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.data_root.current_directory')}</div>
+                        <div style={{ display: 'grid', gap: 10 }}>
+                          <Input readOnly value={dataRootInfo?.path || ''} />
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                            <div>
+                              <div style={{ marginBottom: 6, fontWeight: 500 }}>{t('app.data_root.default_directory')}</div>
+                              <div style={utilityMutedTextStyle}>{dataRootInfo?.defaultPath || '-'}</div>
+                            </div>
+                            <div>
+                              <div style={{ marginBottom: 6, fontWeight: 500 }}>{t('app.data_root.driver_directory')}</div>
+                              <div style={utilityMutedTextStyle}>{dataRootInfo?.driverPath || '-'}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
                 return (
                   <Modal
                     embedded
