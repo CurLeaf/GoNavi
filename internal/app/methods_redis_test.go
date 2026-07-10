@@ -15,6 +15,8 @@ type capturingRedisClient struct {
 	connectConfig     connection.ConnectionConfig
 	deletedHashKey    string
 	deletedHashFields []string
+	removedListKey    string
+	removedListValue  string
 	closed            int
 	closeErr          error
 }
@@ -74,6 +76,12 @@ func (c *capturingRedisClient) GetList(key string, start, stop int64) ([]string,
 func (c *capturingRedisClient) ListPush(key string, values ...string) error { return nil }
 
 func (c *capturingRedisClient) ListSet(key string, index int64, value string) error { return nil }
+
+func (c *capturingRedisClient) ListRemove(key, value string) error {
+	c.removedListKey = key
+	c.removedListValue = value
+	return nil
+}
 
 func (c *capturingRedisClient) GetSet(key string) ([]string, error) { return nil, nil }
 
@@ -839,6 +847,39 @@ func TestRedisDeleteHashFieldAcceptsStringSlice(t *testing.T) {
 	}
 	if len(client.deletedHashFields) != 2 || client.deletedHashFields[0] != "nickname" || client.deletedHashFields[1] != "avatar" {
 		t.Fatalf("unexpected deleted hash fields: %v", client.deletedHashFields)
+	}
+}
+
+func TestRedisListRemoveDeletesOneValue(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+
+	CloseAllRedisClients()
+	client := &capturingRedisClient{}
+	originalNewRedisClientFunc := newRedisClientFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	defer func() {
+		newRedisClientFunc = originalNewRedisClientFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+		CloseAllRedisClients()
+	}()
+	newRedisClientFunc = func() redislib.RedisClient {
+		return client
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	result := app.RedisListRemove(connection.ConnectionConfig{
+		Type: "redis",
+		Host: "redis.local",
+		Port: 6379,
+	}, "tasks", "review")
+	if !result.Success {
+		t.Fatalf("RedisListRemove returned failure: %+v", result)
+	}
+	if client.removedListKey != "tasks" || client.removedListValue != "review" {
+		t.Fatalf("unexpected list remove call: key=%q value=%q", client.removedListKey, client.removedListValue)
 	}
 }
 

@@ -735,6 +735,46 @@ func TestRedisGetDatabasesUsesConfiguredDatabaseCountAboveDefault(t *testing.T) 
 	}
 }
 
+func TestListRemoveUsesLRemForOneMatchingValue(t *testing.T) {
+	var commands [][]string
+	addr := startRedisProtocolTestServer(t, func(args []string) string {
+		commands = append(commands, append([]string(nil), args...))
+		switch strings.ToUpper(strings.TrimSpace(args[0])) {
+		case "HELLO":
+			return "-ERR unknown command 'HELLO'\r\n"
+		case "CLIENT":
+			return "-ERR unknown subcommand\r\n"
+		case "LREM":
+			return ":1\r\n"
+		}
+		return "+OK\r\n"
+	})
+
+	rawClient := goredis.NewClient(&goredis.Options{
+		Addr:     addr,
+		Protocol: 2,
+	})
+	client := &RedisClientImpl{
+		client:       rawClient,
+		singleClient: rawClient,
+	}
+	defer client.Close()
+
+	if err := client.ListRemove("tasks", "review"); err != nil {
+		t.Fatalf("ListRemove returned error: %v", err)
+	}
+
+	for _, command := range commands {
+		if len(command) == 4 && strings.EqualFold(command[0], "LREM") {
+			if command[1] != "tasks" || command[2] != "1" || command[3] != "review" {
+				t.Fatalf("unexpected LREM command: %v", command)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected LREM command, got %v", commands)
+}
+
 func TestRedisSelectDBReconnectsWithSentinelConfig(t *testing.T) {
 	oldConnect := redisDBSwitchConnect
 	defer func() {

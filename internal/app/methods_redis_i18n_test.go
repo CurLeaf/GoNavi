@@ -86,6 +86,10 @@ func TestRedisBackendOperationMessagesUseLocalizedText(t *testing.T) {
 			rawMessages: []string{`Message: "设置成功"`},
 			keys:        []string{"redis.backend.message.set_success"},
 		},
+		"func (a *App) RedisListRemove": {
+			rawMessages: []string{`Message: "删除成功"`},
+			keys:        []string{"redis.backend.message.delete_success"},
+		},
 		"func (a *App) RedisSetAdd": {
 			rawMessages: []string{`Message: "添加成功"`},
 			keys:        []string{"redis.backend.message.add_success"},

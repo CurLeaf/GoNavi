@@ -1517,6 +1517,22 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 }
             };
 
+            const handleDeleteListItem = async (value: string) => {
+                const config = getConfig();
+                if (!config) return;
+                try {
+                    const res = await (window as any).go.app.App.RedisListRemove(buildRpcConnectionConfig(config), selectedKey, value);
+                    if (res.success) {
+                        message.success(tr('redis_viewer.message.delete_success'));
+                        loadKeyValue(selectedKey);
+                    } else {
+                        message.error(tr('redis_viewer.message.delete_failed', { detail: res.message }));
+                    }
+                } catch (e: any) {
+                    message.error(tr('redis_viewer.message.delete_failed', { detail: e?.message || String(e) }));
+                }
+            };
+
             return (
                 <div className={isV2Ui ? 'gn-v2-redis-data-section' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                     <div className={isV2Ui ? 'gn-v2-redis-value-actionbar' : undefined} style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1585,7 +1601,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                             {
                                 title: tr('redis_viewer.table.action'),
                                 key: 'action',
-                                width: 80,
+                                width: 120,
                                 render: (_: any, record: any) => (
                                     <Space size="small">
                                         <Tooltip title={tr('redis_viewer.tooltip.copy_value')}>
@@ -1611,6 +1627,9 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                                 setJsonEditModalOpen(true);
                                             }} />
                                         )}
+                                        <Popconfirm title={tr('redis_viewer.confirm.delete_list_item')} onConfirm={() => handleDeleteListItem(record.value)}>
+                                            <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                                        </Popconfirm>
                                     </Space>
                                 )
                             }

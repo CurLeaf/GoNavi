@@ -6583,6 +6583,7 @@
   "redis_viewer.aria.expand_group": "Gruppe ausklappen",
   "redis_viewer.confirm.delete_field": "Dieses Feld löschen?",
   "redis_viewer.confirm.delete_key": "Key \"{{key}}\" löschen?",
+  "redis_viewer.confirm.delete_list_item": "Dieses Listenelement löschen?",
   "redis_viewer.confirm.delete_member": "Dieses Mitglied löschen?",
   "redis_viewer.confirm.delete_selected": "Die ausgewählten {{count}} Keys löschen?",
   "redis_viewer.confirm.delete_stream_entry": "Diesen Stream-Eintrag löschen?",

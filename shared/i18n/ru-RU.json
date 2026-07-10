@@ -6583,6 +6583,7 @@
   "redis_viewer.aria.expand_group": "Развернуть группу",
   "redis_viewer.confirm.delete_field": "Удалить это поле?",
   "redis_viewer.confirm.delete_key": "Удалить Key \"{{key}}\"?",
+  "redis_viewer.confirm.delete_list_item": "Удалить этот элемент списка?",
   "redis_viewer.confirm.delete_member": "Удалить этого участника?",
   "redis_viewer.confirm.delete_selected": "Удалить выбранные Keys: {{count}}?",
   "redis_viewer.confirm.delete_stream_entry": "Удалить эту запись Stream?",

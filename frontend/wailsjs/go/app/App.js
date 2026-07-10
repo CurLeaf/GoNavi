@@ -550,6 +550,10 @@ export function RedisListPush(arg1, arg2, arg3) {
   return window['go']['app']['App']['RedisListPush'](arg1, arg2, arg3);
 }
 
+export function RedisListRemove(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RedisListRemove'](arg1, arg2, arg3);
+}
+
 export function RedisListSet(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['RedisListSet'](arg1, arg2, arg3, arg4);
 }

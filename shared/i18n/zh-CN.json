@@ -6583,6 +6583,7 @@
   "redis_viewer.aria.expand_group": "展开分组",
   "redis_viewer.confirm.delete_field": "删除此字段？",
   "redis_viewer.confirm.delete_key": "删除 Key \"{{key}}\"？",
+  "redis_viewer.confirm.delete_list_item": "删除此列表元素？",
   "redis_viewer.confirm.delete_member": "删除此成员？",
   "redis_viewer.confirm.delete_selected": "删除选中的 {{count}} 个 Key？",
   "redis_viewer.confirm.delete_stream_entry": "删除此 Stream 条目？",

@@ -6583,6 +6583,7 @@
   "redis_viewer.aria.expand_group": "グループを展開",
   "redis_viewer.confirm.delete_field": "このフィールドを削除しますか？",
   "redis_viewer.confirm.delete_key": "Key \"{{key}}\" を削除しますか？",
+  "redis_viewer.confirm.delete_list_item": "このリスト要素を削除しますか？",
   "redis_viewer.confirm.delete_member": "このメンバーを削除しますか？",
   "redis_viewer.confirm.delete_selected": "選択した {{count}} 件の Key を削除しますか？",
   "redis_viewer.confirm.delete_stream_entry": "この Stream エントリを削除しますか？",

@@ -42,6 +42,7 @@ describe('RedisViewer i18n', () => {
     expect(source).toContain("tr('redis_viewer.action.select_import_file'");
     expect(source).toContain("tr('redis_viewer.action.change_import_file'");
     expect(source).toContain("tr('redis_viewer.action.select_all_import_keys'");
+    expect(source).toContain("tr('redis_viewer.confirm.delete_list_item'");
   });
 
   it('localizes TTL and table labels with catalog keys', () => {

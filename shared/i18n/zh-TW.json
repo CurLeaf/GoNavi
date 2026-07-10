@@ -6583,6 +6583,7 @@
   "redis_viewer.aria.expand_group": "展開群組",
   "redis_viewer.confirm.delete_field": "要刪除此欄位嗎？",
   "redis_viewer.confirm.delete_key": "要刪除 Key \"{{key}}\" 嗎？",
+  "redis_viewer.confirm.delete_list_item": "要刪除此列表元素嗎？",
   "redis_viewer.confirm.delete_member": "要刪除此成員嗎？",
   "redis_viewer.confirm.delete_selected": "要刪除選取的 {{count}} 個 Key 嗎？",
   "redis_viewer.confirm.delete_stream_entry": "要刪除此 Stream 項目嗎？",
