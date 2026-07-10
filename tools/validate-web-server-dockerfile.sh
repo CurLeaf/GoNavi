@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOCKERFILE="${ROOT}/Dockerfile.web-server"
 MCP_DOCKERFILE="${ROOT}/Dockerfile.mcp-server"
+COMPOSE_FILE="${ROOT}/docker-compose.web-server.yml"
+ENV_EXAMPLE="${ROOT}/docker.web-server.env.example"
 
 if [[ ! -f "${DOCKERFILE}" ]]; then
   echo "missing Dockerfile.web-server" >&2
@@ -12,6 +14,10 @@ if [[ ! -f "${DOCKERFILE}" ]]; then
 fi
 if [[ ! -f "${MCP_DOCKERFILE}" ]]; then
   echo "missing Dockerfile.mcp-server" >&2
+  exit 1
+fi
+if [[ ! -f "${COMPOSE_FILE}" || ! -f "${ENV_EXAMPLE}" ]]; then
+  echo "missing web-server Compose or env example" >&2
   exit 1
 fi
 
@@ -62,5 +68,9 @@ grep -Fq '../../../shared/i18n/' "${FRONTEND_CATALOG}" \
 
 assert_target_driver_revisions_generated_before_build "${DOCKERFILE}" "Dockerfile.web-server"
 assert_target_driver_revisions_generated_before_build "${MCP_DOCKERFILE}" "Dockerfile.mcp-server"
+grep -Fq 'GONAVI_WEB_PASSWORD: ${GONAVI_WEB_PASSWORD:-}' "${COMPOSE_FILE}" \
+  || fail "docker-compose.web-server.yml must forward GONAVI_WEB_PASSWORD"
+grep -Eq '^GONAVI_WEB_PASSWORD=$' "${ENV_EXAMPLE}" \
+  || fail "docker.web-server.env.example must declare an empty GONAVI_WEB_PASSWORD"
 
 echo "validate-web-server-dockerfile: ok"

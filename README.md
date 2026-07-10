@@ -195,7 +195,7 @@ go build .
 .\GoNavi-Wails.exe web-server --addr 127.0.0.1:34116
 ```
 
-The first browser visit is redirected to `/setup` to create the web admin password. Google Authenticator is optional but supported out of the box, together with `web_auth.json`, session cookies, recovery codes, and login rate limiting.
+Without a configured password, the first browser visit is redirected to `/setup` to create the web admin password. Google Authenticator is optional but supported out of the box, together with `web_auth.json`, session cookies, recovery codes, and login rate limiting.
 
 Current scope already includes:
 
@@ -216,12 +216,27 @@ Still in progress:
 ```bash
 cp docker.web-server.env.example docker.web-server.env
 # set GONAVI_HOST_DATA_ROOT to an absolute path
+# optionally set GONAVI_WEB_PASSWORD to at least 6 characters
 docker compose --env-file docker.web-server.env -f docker-compose.web-server.yml up -d
 ```
 
-Open `http://127.0.0.1:34116` (or the mapped host port). Complete `/setup` on first visit.
+You can alternatively put the same variables in the project-level `.env` file and omit `--env-file docker.web-server.env`.
+
+Open `http://127.0.0.1:34116` (or the mapped host port). When `GONAVI_WEB_PASSWORD` is set, a newly created container synchronizes it and opens the login page directly. Otherwise, complete `/setup` on first visit.
 
 Mount the GoNavi active data root at `/data`. Prefer including `connections.json`, `daily_secrets.json`, and optional `drivers/`. Web auth state is stored as `web_auth.json` in that directory.
+
+`GONAVI_WEB_PASSWORD` takes precedence over the password hash already stored in `web_auth.json`, while preserving 2FA and session settings. Removing the variable leaves the last synchronized password active. Treat the env file as a secret because the plaintext value is visible to users who can inspect the container; restrict its file permissions.
+
+After changing the env password, recreate the container so Compose reloads the env file:
+
+```bash
+docker compose --env-file docker.web-server.env -f docker-compose.web-server.yml up -d --force-recreate
+```
+
+Docker Desktop Restart and `docker restart` keep the old container environment and do not reload the env file.
+
+On a new deployment, an environment password starts password-only authentication. To enable 2FA, leave `GONAVI_WEB_PASSWORD` empty for the initial `/setup`, then set it to the same password before recreating the container.
 
 The container listens on `0.0.0.0:34116` by default (`GONAVI_WEB_ADDR`). **Do not expose an unhardened Web entrypoint to the public internet**; use a reverse proxy and HTTPS for production.
 

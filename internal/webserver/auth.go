@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"GoNavi-Wails/internal/appdata"
 	"github.com/skip2/go-qrcode"
@@ -39,7 +40,8 @@ const (
 	webDefaultSessionIdleMinutes   = 30
 	webDefaultSessionAbsoluteHours = 24 * 7
 	webDefaultSessionRememberDays  = 7
-	webMinPasswordLength           = 10
+	webMinPasswordLength           = 6
+	webAuthPasswordEnvName         = "GONAVI_WEB_PASSWORD"
 	webTOTPPeriodSeconds           = 30
 	webTOTPDigits                  = 6
 )
@@ -52,6 +54,7 @@ var (
 	errWebAuthInvalidSetup       = errors.New("invalid setup token")
 	errWebAuthInvalidCredentials = errors.New("invalid credentials")
 	errWebAuthRateLimited        = errors.New("too many login attempts")
+	errWebAuthPasswordManaged    = errors.New("web auth password is managed by environment")
 )
 
 type webAuthConfig struct {
@@ -337,13 +340,14 @@ func (m *webSessionManager) DestroyAll() {
 }
 
 type webAuthManager struct {
-	mu            sync.RWMutex
-	store         *webAuthStore
-	config        webAuthConfig
-	pending       map[string]pendingSetup
-	sessions      *webSessionManager
-	loginAttempts *loginAttemptTracker
-	now           func() time.Time
+	mu                           sync.RWMutex
+	store                        *webAuthStore
+	config                       webAuthConfig
+	pending                      map[string]pendingSetup
+	sessions                     *webSessionManager
+	loginAttempts                *loginAttemptTracker
+	now                          func() time.Time
+	passwordManagedByEnvironment bool
 }
 
 type webAuthStatus struct {
@@ -356,29 +360,75 @@ type webAuthStatus struct {
 }
 
 type webAuthSettingsSummary struct {
-	Configured             bool   `json:"configured"`
-	TOTPEnabled            bool   `json:"totpEnabled"`
-	RecoveryCodesRemaining int    `json:"recoveryCodesRemaining"`
-	SessionIdleMinutes     int    `json:"sessionIdleMinutes,omitempty"`
-	SessionAbsoluteHours   int    `json:"sessionAbsoluteHours,omitempty"`
-	SessionRememberDays    int    `json:"sessionRememberDays,omitempty"`
-	UpdatedAt              string `json:"updatedAt,omitempty"`
+	Configured                   bool   `json:"configured"`
+	TOTPEnabled                  bool   `json:"totpEnabled"`
+	RecoveryCodesRemaining       int    `json:"recoveryCodesRemaining"`
+	SessionIdleMinutes           int    `json:"sessionIdleMinutes,omitempty"`
+	SessionAbsoluteHours         int    `json:"sessionAbsoluteHours,omitempty"`
+	SessionRememberDays          int    `json:"sessionRememberDays,omitempty"`
+	UpdatedAt                    string `json:"updatedAt,omitempty"`
+	PasswordManagedByEnvironment bool   `json:"passwordManagedByEnvironment"`
 }
 
 func newWebAuthManager(root string) (*webAuthManager, error) {
+	return newWebAuthManagerWithPassword(root, "")
+}
+
+func newWebAuthManagerFromEnvironment(root string) (*webAuthManager, error) {
+	return newWebAuthManagerWithPassword(root, os.Getenv(webAuthPasswordEnvName))
+}
+
+func newWebAuthManagerWithPassword(root string, configuredPassword string) (*webAuthManager, error) {
 	store := newWebAuthStore(root)
 	cfg, err := store.Load()
 	if err != nil {
 		return nil, err
 	}
-	return &webAuthManager{
+	manager := &webAuthManager{
 		store:         store,
 		config:        cfg,
 		pending:       make(map[string]pendingSetup),
 		sessions:      newWebSessionManager(),
 		loginAttempts: newLoginAttemptTracker(),
 		now:           time.Now,
-	}, nil
+	}
+	if err := manager.applyEnvironmentPassword(configuredPassword); err != nil {
+		return nil, err
+	}
+	return manager, nil
+}
+
+func (m *webAuthManager) applyEnvironmentPassword(password string) error {
+	if strings.TrimSpace(password) == "" {
+		return nil
+	}
+	normalizedPassword, err := normalizeWebAuthPassword(password)
+	if err != nil {
+		return fmt.Errorf("%s: %w", webAuthPasswordEnvName, err)
+	}
+	m.passwordManagedByEnvironment = true
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfg := cloneWebAuthConfig(m.config)
+	if cfg.IsConfigured() && verifyPassword(cfg.PasswordHash, normalizedPassword) {
+		return nil
+	}
+	passwordHash, err := hashPassword(normalizedPassword)
+	if err != nil {
+		return fmt.Errorf("%s: %w", webAuthPasswordEnvName, err)
+	}
+	if !cfg.IsConfigured() {
+		cfg = normalizeWebAuthConfig(webAuthConfig{Enabled: true})
+	}
+	cfg.Enabled = true
+	cfg.PasswordHash = passwordHash
+	cfg.UpdatedAt = m.now().UTC().Format(time.RFC3339)
+	if err := m.store.Save(cfg); err != nil {
+		return fmt.Errorf("persist %s: %w", webAuthPasswordEnvName, err)
+	}
+	m.config = cfg
+	return nil
 }
 
 func (m *webAuthManager) currentConfig() webAuthConfig {
@@ -395,15 +445,16 @@ func cloneWebAuthConfig(cfg webAuthConfig) webAuthConfig {
 	return copied
 }
 
-func buildWebAuthSettingsSummary(cfg webAuthConfig) webAuthSettingsSummary {
+func buildWebAuthSettingsSummary(cfg webAuthConfig, passwordManagedByEnvironment bool) webAuthSettingsSummary {
 	return webAuthSettingsSummary{
-		Configured:             cfg.IsConfigured(),
-		TOTPEnabled:            cfg.TOTPEnabled,
-		RecoveryCodesRemaining: len(cfg.RecoveryCodeHashes),
-		SessionIdleMinutes:     cfg.SessionIdleMinutes,
-		SessionAbsoluteHours:   cfg.SessionAbsoluteHours,
-		SessionRememberDays:    cfg.SessionRememberDays,
-		UpdatedAt:              strings.TrimSpace(cfg.UpdatedAt),
+		Configured:                   cfg.IsConfigured(),
+		TOTPEnabled:                  cfg.TOTPEnabled,
+		RecoveryCodesRemaining:       len(cfg.RecoveryCodeHashes),
+		SessionIdleMinutes:           cfg.SessionIdleMinutes,
+		SessionAbsoluteHours:         cfg.SessionAbsoluteHours,
+		SessionRememberDays:          cfg.SessionRememberDays,
+		UpdatedAt:                    strings.TrimSpace(cfg.UpdatedAt),
+		PasswordManagedByEnvironment: passwordManagedByEnvironment,
 	}
 }
 
@@ -427,7 +478,7 @@ func (m *webAuthManager) Settings() (webAuthSettingsSummary, error) {
 	if !cfg.IsConfigured() {
 		return webAuthSettingsSummary{}, errWebAuthNotConfigured
 	}
-	return buildWebAuthSettingsSummary(cfg), nil
+	return buildWebAuthSettingsSummary(cfg, m.passwordManagedByEnvironment), nil
 }
 
 func (m *webAuthManager) BeginSetup(host string) (pendingSetupResponse, error) {
@@ -497,9 +548,9 @@ func (m *webAuthManager) CompleteSetup(token string, password string, code strin
 		delete(m.pending, strings.TrimSpace(token))
 		return webAuthConfig{}, "", errWebAuthSetupExpired
 	}
-	normalizedPassword := strings.TrimSpace(password)
-	if len(normalizedPassword) < webMinPasswordLength {
-		return webAuthConfig{}, "", fmt.Errorf("password must be at least %d characters", webMinPasswordLength)
+	normalizedPassword, err := normalizeWebAuthPassword(password)
+	if err != nil {
+		return webAuthConfig{}, "", err
 	}
 	if enableTOTP && !validateTOTPCode(setup.Secret, code, m.now()) {
 		return webAuthConfig{}, "", fmt.Errorf("invalid google authenticator code")
@@ -588,6 +639,9 @@ func (m *webAuthManager) Logout(sessionID string) {
 }
 
 func (m *webAuthManager) ChangePassword(currentPassword string, code string, nextPassword string) (webAuthConfig, string, bool, error) {
+	if m.passwordManagedByEnvironment {
+		return webAuthConfig{}, "", false, errWebAuthPasswordManaged
+	}
 	now := m.now()
 
 	m.mu.Lock()
@@ -792,10 +846,21 @@ func generateTOTPCodeAt(secret string, now time.Time) (string, error) {
 	return fmt.Sprintf("%06d", code), nil
 }
 
-func hashPassword(password string) (string, error) {
+func normalizeWebAuthPassword(password string) (string, error) {
 	normalized := strings.TrimSpace(password)
 	if normalized == "" {
 		return "", fmt.Errorf("password is required")
+	}
+	if utf8.RuneCountInString(normalized) < webMinPasswordLength {
+		return "", fmt.Errorf("password must be at least %d characters", webMinPasswordLength)
+	}
+	return normalized, nil
+}
+
+func hashPassword(password string) (string, error) {
+	normalized, err := normalizeWebAuthPassword(password)
+	if err != nil {
+		return "", err
 	}
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {

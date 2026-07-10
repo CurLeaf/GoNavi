@@ -10,6 +10,7 @@ services:
       GONAVI_DATA_ROOT: /data
       GONAVI_LOG_DIR: /var/lib/gonavi/logs
       GONAVI_WEB_ADDR: 0.0.0.0:34116
+      GONAVI_WEB_PASSWORD: ${GONAVI_WEB_PASSWORD:-}
     volumes:
       - type: bind
         source: ${GONAVI_HOST_DATA_ROOT}

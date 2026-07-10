@@ -50,7 +50,14 @@ jobs:
       - name: Validate runtime Dockerfiles
         if: matrix.image_name == 'gonavi-web-server'
         shell: bash
-        run: bash tools/validate-web-server-dockerfile.test.sh
+        run: |
+          set -euo pipefail
+          bash tools/validate-web-server-dockerfile.test.sh
+          env_file="$(mktemp)"
+          trap 'rm -f "$env_file"' EXIT
+          printf 'GONAVI_HOST_DATA_ROOT=%s\nGONAVI_WEB_PASSWORD=123456\n' "${RUNNER_TEMP}/gonavi-data" >"$env_file"
+          rendered="$(docker compose --env-file "$env_file" -f docker-compose.web-server.yml config)"
+          grep -Eq "GONAVI_WEB_PASSWORD: ['\"]?123456['\"]?$" <<<"$rendered"
 
       - name: Prepare build variables
         id: prep
@@ -111,17 +118,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cid="$(docker run -d -p 34116:34116 -e GONAVI_WEB_ADDR=0.0.0.0:34116 codex-smoke/${{ matrix.image_name }}:local web-server)"
-          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          cookie_jar="$(mktemp)"
+          cid=""
+          trap 'rm -f "$cookie_jar"; if [[ -n "$cid" ]]; then docker rm -f "$cid" >/dev/null 2>&1 || true; fi' EXIT
+          cid="$(docker run -d -p 34116:34116 -e GONAVI_WEB_ADDR=0.0.0.0:34116 -e GONAVI_WEB_PASSWORD=123456 codex-smoke/${{ matrix.image_name }}:local web-server)"
+          ready=false
           for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
             if curl --fail --silent http://127.0.0.1:34116/__gonavi/healthz >/dev/null; then
-              exit 0
+              ready=true
+              break
             fi
             sleep 1
           done
-          docker logs "$cid"
-          echo "Web Server image smoke test failed" >&2
-          exit 1
+          if [[ "$ready" != "true" ]]; then
+            docker logs "$cid"
+            echo "Web Server image smoke test failed" >&2
+            exit 1
+          fi
+          status="$(curl --fail --silent --show-error http://127.0.0.1:34116/__gonavi/auth/status)"
+          grep -Fq '"configured":true' <<<"$status"
+          login="$(curl --fail --silent --show-error -c "$cookie_jar" -H 'Content-Type: application/json' -d '{"password":"123456","code":""}' http://127.0.0.1:34116/__gonavi/auth/login)"
+          grep -Fq '"success":true' <<<"$login"
+          app_status="$(curl --silent --show-error -o /dev/null -w '%{http_code}' -b "$cookie_jar" http://127.0.0.1:34116/)"
+          [[ "$app_status" == "200" ]]
 
       - name: Smoke test build environment image
         if: matrix.image_name == 'gonavi-build-env'

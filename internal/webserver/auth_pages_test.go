@@ -59,6 +59,7 @@ func TestRenderAuthPageUsesLocalizedCopyAndSolidColors(t *testing.T) {
 		"初始化 GoNavi Web",
 		"发行方",
 		"账户",
+		"至少 6 位",
 	} {
 		if !strings.Contains(page, fragment) {
 			t.Fatalf("expected rendered page to contain %q", fragment)
@@ -84,5 +85,11 @@ func TestRenderAuthPageUsesLocalizedCopyAndSolidColors(t *testing.T) {
 		if !strings.Contains(page, fragment) {
 			t.Fatalf("expected setup wizard page to contain %q", fragment)
 		}
+	}
+	if strings.Contains(page, "至少 10 位") {
+		t.Fatal("expected setup page to stop advertising the old ten-character minimum")
+	}
+	if !strings.Contains(page, "Array.from(password).length < 6") {
+		t.Fatal("expected setup page to count visible password characters consistently with the backend")
 	}
 }

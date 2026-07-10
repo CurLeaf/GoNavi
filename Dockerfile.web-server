@@ -57,6 +57,6 @@ EXPOSE 34116
 
 USER gonavi
 
-# 首次访问 /setup 初始化 Web 管理员密码；认证状态落在数据目录 web_auth.json
+# 未通过环境变量配置密码时，首次访问 /setup 初始化；认证状态落在数据目录 web_auth.json
 ENTRYPOINT ["/usr/local/bin/gonavi"]
 CMD ["web-server"]

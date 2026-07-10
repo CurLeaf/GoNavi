@@ -2,6 +2,7 @@ package webserver
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +92,167 @@ func TestGenerateQRCodeDataURL(t *testing.T) {
 	}
 	if !strings.HasPrefix(dataURL, "data:image/png;base64,") {
 		t.Fatalf("unexpected QR code data URL prefix: %q", dataURL)
+	}
+}
+
+func TestWebAuthManagerEnforcesSixCharacterPasswords(t *testing.T) {
+	if _, err := normalizeWebAuthPassword("密码"); err == nil {
+		t.Fatal("expected two visible characters to remain below the six-character minimum")
+	}
+	if _, err := normalizeWebAuthPassword("密码设置安全"); err != nil {
+		t.Fatalf("expected six Unicode characters to satisfy the password minimum, got %v", err)
+	}
+
+	manager, err := newWebAuthManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("newWebAuthManager failed: %v", err)
+	}
+	setup, err := manager.BeginSetup("127.0.0.1:34116")
+	if err != nil {
+		t.Fatalf("BeginSetup failed: %v", err)
+	}
+
+	if _, _, err := manager.CompleteSetup(setup.SetupToken, "12345", "", false, 30, 24, 7); err == nil || !strings.Contains(err.Error(), "at least 6") {
+		t.Fatalf("expected five-character setup password to be rejected, got %v", err)
+	}
+	cfg, _, err := manager.CompleteSetup(setup.SetupToken, "123456", "", false, 30, 24, 7)
+	if err != nil {
+		t.Fatalf("expected six-character setup password to succeed, got %v", err)
+	}
+	if !verifyPassword(cfg.PasswordHash, "123456") {
+		t.Fatal("expected six-character setup password to be persisted")
+	}
+
+	if _, _, _, err := manager.ChangePassword("123456", "", "65432"); err == nil || !strings.Contains(err.Error(), "at least 6") {
+		t.Fatalf("expected five-character replacement password to be rejected, got %v", err)
+	}
+	if !verifyPassword(manager.currentConfig().PasswordHash, "123456") {
+		t.Fatal("expected rejected password change to preserve the current password")
+	}
+	nextCfg, _, _, err := manager.ChangePassword("123456", "", "654321")
+	if err != nil {
+		t.Fatalf("expected six-character replacement password to succeed, got %v", err)
+	}
+	if !verifyPassword(nextCfg.PasswordHash, "654321") {
+		t.Fatal("expected six-character replacement password to be persisted")
+	}
+}
+
+func TestNewWebAuthManagerFromEnvironmentInitializesPassword(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(webAuthPasswordEnvName, "123456")
+
+	manager, err := newWebAuthManagerFromEnvironment(root)
+	if err != nil {
+		t.Fatalf("newWebAuthManagerFromEnvironment failed: %v", err)
+	}
+	if status := manager.Status(""); !status.Configured {
+		t.Fatalf("expected environment password to configure web auth, got %+v", status)
+	}
+	settings, err := manager.Settings()
+	if err != nil {
+		t.Fatalf("read environment-managed settings failed: %v", err)
+	}
+	if !settings.PasswordManagedByEnvironment {
+		t.Fatal("expected settings to report that the password is managed by environment")
+	}
+	if _, _, _, _, err := manager.Login("123456", "", "127.0.0.1"); err != nil {
+		t.Fatalf("expected login with environment password to succeed, got %v", err)
+	}
+	if _, _, _, err := manager.ChangePassword("123456", "", "654321"); !errors.Is(err, errWebAuthPasswordManaged) {
+		t.Fatalf("expected environment-managed password change to be rejected, got %v", err)
+	}
+	payload, err := os.ReadFile(manager.store.path)
+	if err != nil {
+		t.Fatalf("read persisted web auth config failed: %v", err)
+	}
+	if strings.Contains(string(payload), "123456") {
+		t.Fatal("environment password must not be persisted in plaintext")
+	}
+
+	t.Setenv(webAuthPasswordEnvName, "")
+	restarted, err := newWebAuthManagerFromEnvironment(root)
+	if err != nil {
+		t.Fatalf("restart after clearing environment password failed: %v", err)
+	}
+	settings, err = restarted.Settings()
+	if err != nil {
+		t.Fatalf("read settings after clearing environment password failed: %v", err)
+	}
+	if settings.PasswordManagedByEnvironment {
+		t.Fatal("expected password management to return to the settings UI after clearing the environment variable")
+	}
+	if _, _, _, _, err := restarted.Login("123456", "", "127.0.0.1"); err != nil {
+		t.Fatalf("expected the last synchronized password to remain active, got %v", err)
+	}
+}
+
+func TestNewWebAuthManagerFromEnvironmentOverridesPasswordAndPreservesSettings(t *testing.T) {
+	root := t.TempDir()
+	manager, err := newWebAuthManager(root)
+	if err != nil {
+		t.Fatalf("newWebAuthManager failed: %v", err)
+	}
+	now := time.Unix(1_720_000_321, 0).UTC()
+	manager.now = func() time.Time { return now }
+	setup, err := manager.BeginSetup("127.0.0.1:34116")
+	if err != nil {
+		t.Fatalf("BeginSetup failed: %v", err)
+	}
+	code, err := generateTOTPCodeAt(setup.Secret, now)
+	if err != nil {
+		t.Fatalf("generateTOTPCodeAt failed: %v", err)
+	}
+	original, _, err := manager.CompleteSetup(setup.SetupToken, "old-password", code, true, 45, 48, 14)
+	if err != nil {
+		t.Fatalf("CompleteSetup failed: %v", err)
+	}
+
+	t.Setenv(webAuthPasswordEnvName, "654321")
+	restarted, err := newWebAuthManagerFromEnvironment(root)
+	if err != nil {
+		t.Fatalf("restart with environment password failed: %v", err)
+	}
+	updated := restarted.currentConfig()
+	if verifyPassword(updated.PasswordHash, "old-password") || !verifyPassword(updated.PasswordHash, "654321") {
+		t.Fatal("expected environment password to replace the persisted password")
+	}
+	if !updated.TOTPEnabled || updated.TOTPSecret != original.TOTPSecret || len(updated.RecoveryCodeHashes) != len(original.RecoveryCodeHashes) {
+		t.Fatal("expected environment password update to preserve TOTP settings")
+	}
+	if updated.SessionIdleMinutes != 45 || updated.SessionAbsoluteHours != 48 || updated.SessionRememberDays != 14 {
+		t.Fatalf("expected environment password update to preserve session settings, got %+v", updated)
+	}
+	settings, err := restarted.Settings()
+	if err != nil || !settings.PasswordManagedByEnvironment {
+		t.Fatalf("expected restarted settings to report environment management, settings=%+v err=%v", settings, err)
+	}
+
+	before, err := os.ReadFile(restarted.store.path)
+	if err != nil {
+		t.Fatalf("read updated web auth config failed: %v", err)
+	}
+	if _, err := newWebAuthManagerFromEnvironment(root); err != nil {
+		t.Fatalf("restart with unchanged environment password failed: %v", err)
+	}
+	after, err := os.ReadFile(restarted.store.path)
+	if err != nil {
+		t.Fatalf("read unchanged web auth config failed: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("unchanged environment password must not rewrite the persisted config")
+	}
+}
+
+func TestNewWebAuthManagerFromEnvironmentRejectsShortPassword(t *testing.T) {
+	t.Setenv(webAuthPasswordEnvName, "12345")
+
+	_, err := newWebAuthManagerFromEnvironment(t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), webAuthPasswordEnvName) || !strings.Contains(err.Error(), "at least 6") {
+		t.Fatalf("expected short environment password error, got %v", err)
+	}
+	if strings.Contains(err.Error(), "12345") {
+		t.Fatal("environment password error must not expose the password")
 	}
 }
 

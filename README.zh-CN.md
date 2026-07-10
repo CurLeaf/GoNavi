@@ -189,7 +189,7 @@ go build .
 .\GoNavi-Wails.exe web-server --addr 127.0.0.1:34116
 ```
 
-首次访问会进入 `/setup` 完成 Web 管理员密码初始化；可选启用 Google Authenticator，服务端会落地 `web_auth.json`、Session Cookie、恢复码与登录失败限流。
+未配置密码时，首次访问会进入 `/setup` 完成 Web 管理员密码初始化；可选启用 Google Authenticator，服务端会落地 `web_auth.json`、Session Cookie、恢复码与登录失败限流。
 
 当前阶段已具备：
 
@@ -210,12 +210,27 @@ go build .
 ```bash
 cp docker.web-server.env.example docker.web-server.env
 # 编辑 GONAVI_HOST_DATA_ROOT 为绝对路径
+# 可选设置至少 6 位的 GONAVI_WEB_PASSWORD
 docker compose --env-file docker.web-server.env -f docker-compose.web-server.yml up -d
 ```
 
-浏览器打开 `http://127.0.0.1:34116`（或宿主机映射端口）。首次访问完成 `/setup`。
+也可以把相同变量写入项目目录下的标准 `.env` 文件，此时可省略 `--env-file docker.web-server.env`。
+
+浏览器打开 `http://127.0.0.1:34116`（或宿主机映射端口）。设置 `GONAVI_WEB_PASSWORD` 后，新创建的容器会同步该密码并直接进入登录页；未设置时首次访问完成 `/setup`。
 
 请把 GoNavi 活动数据目录挂载为 `/data`。建议至少包含 `connections.json`、`daily_secrets.json`；如需可选驱动代理应包含 `drivers/`。Web 认证状态写入同目录下的 `web_auth.json`。
+
+`GONAVI_WEB_PASSWORD` 会覆盖 `web_auth.json` 中已有的密码哈希，但保留 2FA 和会话策略；移除环境变量后继续使用最后一次同步的密码。env 文件包含明文密码，可被有容器检查权限的用户看到，请限制文件读取权限。
+
+修改 env 密码后，需要重新创建容器，让 Compose 重新读取 env 文件：
+
+```bash
+docker compose --env-file docker.web-server.env -f docker-compose.web-server.yml up -d --force-recreate
+```
+
+Docker Desktop 的 Restart 和 `docker restart` 会沿用旧容器环境，不会重新读取 env 文件。
+
+新部署直接设置环境密码时会启用纯密码认证。如需启用 2FA，请先留空 `GONAVI_WEB_PASSWORD` 并通过 `/setup` 初始化，再将它设置为同一密码后重新创建容器。
 
 容器内默认监听 `0.0.0.0:34116`（`GONAVI_WEB_ADDR`）。**不要把未加固的 Web 入口直接暴露到公网**；生产环境请配合反向代理与 HTTPS。
 
