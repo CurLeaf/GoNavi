@@ -1036,6 +1036,54 @@ describe('DataGrid DDL interactions', () => {
     },
   );
 
+  it('selects every editable cell in a column when its header is clicked in cell edit mode', async () => {
+    messageApi.info.mockResolvedValue(undefined);
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', id: 1, name: 'Ada' },
+            { __gonavi_row_key__: 'row-2', id: 2, name: 'Linus' },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      renderer!.root.findByType(DataGridToolbarFrame).props.onToggleCellEditMode();
+    });
+    await waitForEffects();
+
+    const nameColumn = testRenderState.latestColumns.find((column) => column.key === 'name');
+    expect(nameColumn?.editable).toBe(true);
+    const headerProps = nameColumn.onHeaderCell(nameColumn);
+    const event = {
+      target: { closest: vi.fn(() => null) },
+      currentTarget: { querySelector: vi.fn(() => null) },
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      headerProps.onClickCapture(event);
+    });
+
+    const toolbar = renderer!.root.findByType(DataGridToolbarFrame);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(event.stopPropagation).toHaveBeenCalledOnce();
+    expect(toolbar.props.cellEditMode).toBe(true);
+    expect(toolbar.props.selectedCellsSize).toBe(2);
+    renderer!.unmount();
+  });
+
   it('opens the v2 column header context menu from table headers', async () => {
     setCurrentLanguage('en-US');
     storeState.appearance.uiVersion = 'v2';

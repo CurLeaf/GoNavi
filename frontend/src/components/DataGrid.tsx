@@ -1599,6 +1599,27 @@ const DataGrid: React.FC<DataGridProps> = ({
     resetCellSelection();
   }, [resetCellSelection]);
 
+  const selectEditableColumnCells = useCallback((columnName: string) => {
+    if (
+      !cellEditModeRef.current
+      || !canModifyData
+      || !isWritableResultColumn(columnName, effectiveEditLocator)
+    ) {
+      return;
+    }
+
+    resetCellSelection(false);
+    const nextSelection = new Set<string>();
+    displayDataRef.current.forEach((row) => {
+      const rowKey = row?.[GONAVI_ROW_KEY];
+      if (rowKey === undefined || rowKey === null) return;
+      nextSelection.add(makeCellKey(rowKeyStr(rowKey), columnName));
+    });
+    currentSelectionRef.current = nextSelection;
+    setSelectedCells(nextSelection);
+    updateCellSelection(nextSelection);
+  }, [canModifyData, effectiveEditLocator, makeCellKey, resetCellSelection, rowKeyStr, updateCellSelection]);
+
   useEffect(() => {
     closeCellEditModeRef.current = closeCellEditMode;
   }, [closeCellEditMode]);
@@ -2548,12 +2569,19 @@ const DataGrid: React.FC<DataGridProps> = ({
                   showColumnHeaderContextMenu(event, key);
               },
               onClickCapture: (event: React.MouseEvent<HTMLElement>) => {
-                  if (!onSort) return;
                   const eventTarget = event.target as HTMLElement | null;
                   if (eventTarget?.closest?.('[data-grid-fk-jump="true"]')) return;
                   if (eventTarget?.closest?.('[data-grid-column-filter-trigger="true"]')) return;
                   if (eventTarget?.closest?.('[data-grid-column-filter-popover="true"]')) return;
                   if (eventTarget?.closest?.('.ant-select-dropdown')) return;
+                  if (eventTarget?.closest?.('.react-resizable-handle')) return;
+                  if (cellEditMode && canModifyData && isWritableResultColumn(key, effectiveEditLocator)) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      selectEditableColumnCells(key);
+                      return;
+                  }
+                  if (!onSort) return;
                   const headerCell = event.currentTarget as HTMLElement;
                   const upArrow = headerCell.querySelector('.ant-table-column-sorter-up') as HTMLElement | null;
                   const downArrow = headerCell.querySelector('.ant-table-column-sorter-down') as HTMLElement | null;
@@ -2574,7 +2602,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               },
           }),
       }));
-  }, [canModifyData, columnWidths, currentConnConfig, dataTableDensity, displayColumnNames, displayColumnTypeMap, enableVirtual, handleResizeAutoFit, handleResizeStart, isV2Ui, language, normalizedPageFindText, onSort, pinnedLeftColumnSet, renderColumnTitle, showColumnComment, showColumnHeaderContextMenu, showColumnType, sortInfo]);
+  }, [canModifyData, cellEditMode, columnWidths, currentConnConfig, dataTableDensity, displayColumnNames, displayColumnTypeMap, effectiveEditLocator, enableVirtual, handleResizeAutoFit, handleResizeStart, isV2Ui, language, normalizedPageFindText, onSort, pinnedLeftColumnSet, renderColumnTitle, selectEditableColumnCells, showColumnComment, showColumnHeaderContextMenu, showColumnType, sortInfo]);
 
   const mergedColumns = useMemo(() => columns.map((col): ColumnType<any> => {
       const dataIndex = String(col.dataIndex);
