@@ -159,6 +159,7 @@ import {
     splitCompletionSchemaAndTable,
     splitQueryIdentifierPathSegments,
     stripCompletionIdentifierQuotes,
+    shouldHandleQueryEditorRunShortcutFallback,
 } from './queryEditor/QueryEditorHelpers';
 import {
     buildQueryEditorAiInlineSuggestOptions,
@@ -168,6 +169,8 @@ import {
     resolveInlineSqlGhostPreviewText,
     resolveQueryEditorInlineMemoryInsertText,
     resolveQueryEditorInlineCompletionIntentDetails,
+    resolveQueryEditorInlineLocalCompletion,
+    resolveQueryEditorInlineRuntimeReadiness,
     shouldTriggerQueryEditorInlineObjectSuggestFallback,
     shouldRequestQueryEditorInlineCompletion,
     type QueryEditorAiApplyMode,
@@ -189,8 +192,9 @@ const QUERY_EDITOR_MONACO_FIND_OPTIONS = {
 const QUERY_EDITOR_NATIVE_SELECT_CURRENT_LINE_EVENT = 'gonavi:native-select-current-line';
 const QUERY_EDITOR_MAC_FIND_WITH_SELECTION_COMBO = 'Meta+E';
 const QUERY_EDITOR_MAC_FIND_WITH_SELECTION_GUARD_ACTION_ID = 'gonavi.suppressMacFindWithSelection';
-const QUERY_EDITOR_AI_INLINE_DEBOUNCE_MS = 90;
+const QUERY_EDITOR_AI_INLINE_DEBOUNCE_MS = 220;
 const QUERY_EDITOR_AI_INLINE_CONTEXT_KEY = 'gonaviAiInlineSuggestionVisible';
+const QUERY_EDITOR_IME_FALLBACK_DELAY_MS = 80;
 
 const normalizeQueryEditorInlineMemorySqlKey = (sql: string): string => (
     String(sql || '')
@@ -3775,9 +3779,36 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       return;
                   }
                   try {
+                      const aiContext = buildQueryEditorAiContext();
+                      const localCompletion = resolveQueryEditorInlineLocalCompletion({
+                          aiContext,
+                          editorSnapshot,
+                          deferEmptySchemaCompletion: true,
+                      });
+                      if (localCompletion.handled) {
+                          if (localCompletion.insertText.trim()) {
+                              renderAiInlineGhost(model, position, localCompletion.insertText, editorSnapshot);
+                          }
+                          return;
+                      }
+                      const aiService = getQueryEditorAiService();
+                      const readiness = await resolveQueryEditorInlineRuntimeReadiness(aiService);
+                      if (
+                          !readiness.ready
+                          || requestId !== aiInlineGhostRequestSeqRef.current
+                          || editorRef.current !== editor
+                      ) {
+                          return;
+                      }
                       await ensureQueryEditorAiContextMetadata(editorSnapshot);
+                      if (
+                          requestId !== aiInlineGhostRequestSeqRef.current
+                          || editorRef.current !== editor
+                      ) {
+                          return;
+                      }
                       const insertText = await requestQueryEditorInlineCompletion({
-                          service: getQueryEditorAiService(),
+                          service: aiService,
                           aiContext: buildQueryEditorAiContext(),
                           editorSnapshot,
                       });
@@ -4061,7 +4092,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               if (nextPosition) {
                   editor.setPosition?.(nextPosition);
               }
-          }, 0);
+          }, QUERY_EDITOR_IME_FALLBACK_DELAY_MS);
       };
       const handleEditorDragOver = (rawEvent: Event) => {
           const event = rawEvent as DragEvent;
@@ -4222,6 +4253,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       editor.onDidChangeModelContent?.((event: any) => {
           if (recoverTriggerSqlAiCompletionFallback(event)) {
               return;
+          }
+          if (imeCompositionFallbackTimerRef.current !== null) {
+              clearImeCompositionFallbackTimer();
+              syncQueryDraft(getEditorText());
           }
           const hasSlashCommandMarker = Array.isArray(event?.changes)
               && event.changes.some((change: any) => /__AI_\w+__/.test(String(change?.text || '')));
@@ -4458,6 +4493,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   id: 'gonavi.runQuery',
                   label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.runQuery.label'),
                   keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+                  keybindingContext: 'editorTextFocus',
                   run: () => {
                       window.dispatchEvent(new CustomEvent('gonavi:run-active-query', {
                           detail: { requireSelection: true },
@@ -6730,11 +6766,17 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               return;
           }
           const editorHasFocus = !!editorRef.current?.hasTextFocus?.();
-          if (!editorHasFocus && !isEditableElement(event.target)) {
+          const targetNode = resolveEventTargetNode(event.target);
+          if (!shouldHandleQueryEditorRunShortcutFallback({
+              editorHasFocus,
+              targetNode,
+              editorPane: editorPaneRef.current,
+          })) {
               return;
           }
           event.preventDefault();
           event.stopPropagation();
+          event.stopImmediatePropagation?.();
           void handleRunSelectedShortcut();
       };
 
@@ -6851,6 +6893,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               id: 'gonavi.runQuery',
               label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.runQuery.label'),
               keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+              keybindingContext: 'editorTextFocus',
               run: () => {
                   window.dispatchEvent(new CustomEvent('gonavi:run-active-query', {
                       detail: { requireSelection: true },

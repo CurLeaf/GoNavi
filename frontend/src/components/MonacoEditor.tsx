@@ -11,6 +11,7 @@ const DEFAULT_FONT_SIZE = 14;
 const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 20;
 const QUERY_EDITOR_AI_INLINE_CONTEXT_KEY = 'gonaviAiInlineSuggestionVisible';
+const PRINTABLE_INPUT_FALLBACK_DELAY_MS = 80;
 let monacoConfiguredPromise: Promise<void> | null = null;
 let transparentThemesRegistered = false;
 
@@ -229,7 +230,7 @@ const patchQueryEditorAiInlineRightArrowFallback = (editor: any, monaco: any) =>
   editor.addCommand = patchedAddCommand;
 };
 
-const installPrintableInputFallback = (editor: any, monaco: any) => {
+export const installPrintableInputFallback = (editor: any, monaco: any) => {
   const editorDomNode = editor?.getDomNode?.();
   if (!editorDomNode || editor.__gonaviPrintableInputFallbackInstalled) {
     return;
@@ -243,6 +244,143 @@ const installPrintableInputFallback = (editor: any, monaco: any) => {
     value: true,
     configurable: true,
   });
+
+  let pendingInput: {
+    valueBefore: string;
+    positionBefore: any;
+    offsetBefore: number;
+    text: string;
+    timer: number | null;
+  } | null = null;
+
+  const clearPendingInput = () => {
+    if (!pendingInput) {
+      return;
+    }
+    if (pendingInput.timer !== null) {
+      clearTimeout(pendingInput.timer);
+    }
+    pendingInput = null;
+  };
+
+  const getPendingNativeInputDelta = (pending: NonNullable<typeof pendingInput>) => {
+    const afterValue = String(editor.getValue?.() ?? '');
+    if (afterValue === pending.valueBefore) {
+      return null;
+    }
+
+    let startOffset = 0;
+    while (
+      startOffset < pending.valueBefore.length
+      && startOffset < afterValue.length
+      && pending.valueBefore[startOffset] === afterValue[startOffset]
+    ) {
+      startOffset += 1;
+    }
+
+    let beforeEndOffset = pending.valueBefore.length;
+    let afterEndOffset = afterValue.length;
+    while (
+      beforeEndOffset > startOffset
+      && afterEndOffset > startOffset
+      && pending.valueBefore[beforeEndOffset - 1] === afterValue[afterEndOffset - 1]
+    ) {
+      beforeEndOffset -= 1;
+      afterEndOffset -= 1;
+    }
+
+    if (startOffset !== pending.offsetBefore || beforeEndOffset !== startOffset) {
+      return null;
+    }
+
+    return {
+      insertedText: afterValue.slice(startOffset, afterEndOffset),
+    };
+  };
+
+  const isSubsequence = (candidate: string, source: string): boolean => {
+    let sourceIndex = 0;
+    for (const char of candidate) {
+      sourceIndex = source.indexOf(char, sourceIndex);
+      if (sourceIndex < 0) {
+        return false;
+      }
+      sourceIndex += char.length;
+    }
+    return true;
+  };
+
+  const hasNativeInputApplied = (pending: NonNullable<typeof pendingInput>): boolean => (
+    getPendingNativeInputDelta(pending)?.insertedText === pending.text
+  );
+
+  const isPendingInputContextCurrent = (
+    pending: NonNullable<typeof pendingInput>,
+    value: string,
+    position: any,
+  ): boolean => {
+    if (value === pending.valueBefore) {
+      return sameEditorPosition(position, pending.positionBefore);
+    }
+    const nativeDelta = getPendingNativeInputDelta(pending);
+    if (!nativeDelta?.insertedText || !isSubsequence(nativeDelta.insertedText, pending.text)) {
+      return false;
+    }
+    const expectedPosition = editor.getModel?.()?.getPositionAt?.(
+      pending.offsetBefore + nativeDelta.insertedText.length,
+    );
+    return sameEditorPosition(position, expectedPosition);
+  };
+
+  const recoverPendingInputAtOriginalPosition = (
+    pending: NonNullable<typeof pendingInput>,
+    currentPosition: any,
+  ): boolean => {
+    const nativeDelta = getPendingNativeInputDelta(pending);
+    const afterValue = String(editor.getValue?.() ?? '');
+    if (
+      (afterValue !== pending.valueBefore
+        && (!nativeDelta?.insertedText || !isSubsequence(nativeDelta.insertedText, pending.text)))
+      || typeof editor.executeEdits !== 'function'
+    ) {
+      return false;
+    }
+
+    const model = editor.getModel?.();
+    const nativeText = nativeDelta?.insertedText || '';
+    const currentOffset = Number(model?.getOffsetAt?.(currentPosition));
+    const endPosition = model?.getPositionAt?.(
+      pending.offsetBefore + nativeText.length,
+    );
+    if (!endPosition || !Number.isFinite(currentOffset)) {
+      return false;
+    }
+
+    editor.executeEdits('gonavi-printable-input-fallback', [{
+      range: {
+        startLineNumber: pending.positionBefore.lineNumber,
+        startColumn: pending.positionBefore.column,
+        endLineNumber: endPosition.lineNumber,
+        endColumn: endPosition.column,
+      },
+      text: pending.text,
+      forceMoveMarkers: true,
+    }]);
+    const insertedLengthDelta = pending.text.length - nativeText.length;
+    const nextOffset = currentOffset <= pending.offsetBefore
+      ? currentOffset
+      : currentOffset >= pending.offsetBefore + nativeText.length
+        ? currentOffset + insertedLengthDelta
+        : pending.offsetBefore + Math.min(
+          currentOffset - pending.offsetBefore,
+          pending.text.length,
+        );
+    const nextPosition = model?.getPositionAt?.(nextOffset);
+    if (nextPosition) {
+      editor.setPosition?.(nextPosition);
+    }
+    return true;
+  };
 
   const isReadOnly = (): boolean => {
     try {
@@ -270,10 +408,52 @@ const installPrintableInputFallback = (editor: any, monaco: any) => {
     if (!isSelectionEmpty(selectionBefore)) {
       return;
     }
-    const beforeValue = String(editor.getValue?.() ?? '');
-    const beforePosition = editor.getPosition?.();
+    let beforeValue = String(editor.getValue?.() ?? '');
+    let beforePosition = editor.getPosition?.();
+    if (!beforePosition) {
+      return;
+    }
+    let beforeOffset = Number(editor.getModel?.()?.getOffsetAt?.(beforePosition));
+    if (!Number.isFinite(beforeOffset)) {
+      return;
+    }
+    if (pendingInput && hasNativeInputApplied(pendingInput)) {
+      clearPendingInput();
+    }
+    if (pendingInput && !isPendingInputContextCurrent(pendingInput, beforeValue, beforePosition)) {
+      recoverPendingInputAtOriginalPosition(pendingInput, beforePosition);
+      clearPendingInput();
+      beforeValue = String(editor.getValue?.() ?? '');
+      beforePosition = editor.getPosition?.();
+      if (!beforePosition) {
+        return;
+      }
+      beforeOffset = Number(editor.getModel?.()?.getOffsetAt?.(beforePosition));
+      if (!Number.isFinite(beforeOffset)) {
+        return;
+      }
+    }
+    if (pendingInput) {
+      pendingInput.text += text;
+      if (pendingInput.timer !== null) {
+        clearTimeout(pendingInput.timer);
+      }
+    } else {
+      pendingInput = {
+        valueBefore: beforeValue,
+        positionBefore: beforePosition,
+        offsetBefore: beforeOffset,
+        text,
+        timer: null,
+      };
+    }
 
-    window.setTimeout(() => {
+    const pending = pendingInput;
+    pending.timer = window.setTimeout(() => {
+      if (pendingInput !== pending) {
+        return;
+      }
+      pendingInput = null;
       const domNode = editor.getDomNode?.();
       if (!(domNode instanceof HTMLElement) || !domNode.isConnected || isReadOnly()) {
         return;
@@ -283,15 +463,26 @@ const installPrintableInputFallback = (editor: any, monaco: any) => {
       }
       const afterValue = String(editor.getValue?.() ?? '');
       const afterPosition = editor.getPosition?.();
-      if (afterValue !== beforeValue || !sameEditorPosition(beforePosition, afterPosition)) {
+      if (hasNativeInputApplied(pending)) {
         return;
       }
-      editor.trigger?.('gonavi-printable-input-fallback', 'type', { text });
-    }, 16);
+      if (afterValue !== pending.valueBefore || !sameEditorPosition(pending.positionBefore, afterPosition)) {
+        recoverPendingInputAtOriginalPosition(pending, afterPosition);
+        return;
+      }
+      editor.trigger?.('gonavi-printable-input-fallback', 'type', { text: pending.text });
+    }, PRINTABLE_INPUT_FALLBACK_DELAY_MS);
   };
 
   input.addEventListener('beforeinput', handleBeforeInput);
+  const modelContentDisposable = editor.onDidChangeModelContent?.(() => {
+    if (pendingInput && hasNativeInputApplied(pendingInput)) {
+      clearPendingInput();
+    }
+  });
   editor.onDidDispose?.(() => {
+    clearPendingInput();
+    modelContentDisposable?.dispose?.();
     input.removeEventListener('beforeinput', handleBeforeInput);
   });
 };

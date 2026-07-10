@@ -6,7 +6,33 @@ import {
     resolveOracleLikeExecutionSchemaName,
     resolveOracleLikeLookupSchemaCandidates,
     resolveQueryEditorNavigationTarget,
+    shouldHandleQueryEditorRunShortcutFallback,
 } from './QueryEditorHelpers';
+
+describe('QueryEditor run shortcut routing', () => {
+    it('reserves editor-originated shortcuts for Monaco and keeps document targets as a fallback', () => {
+        const editorTarget = {} as Node;
+        const editorPane = {
+            contains: (node: Node) => node === editorTarget,
+        } as Pick<Node, 'contains'>;
+
+        expect(shouldHandleQueryEditorRunShortcutFallback({
+            editorHasFocus: true,
+            targetNode: editorTarget,
+            editorPane,
+        })).toBe(false);
+        expect(shouldHandleQueryEditorRunShortcutFallback({
+            editorHasFocus: true,
+            targetNode: null,
+            editorPane,
+        })).toBe(true);
+        expect(shouldHandleQueryEditorRunShortcutFallback({
+            editorHasFocus: false,
+            targetNode: null,
+            editorPane,
+        })).toBe(false);
+    });
+});
 
 describe('QueryEditorHelpers Oracle-like execution schema', () => {
     it('uses the selected schema when it differs from the login user', () => {

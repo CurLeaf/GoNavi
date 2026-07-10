@@ -2283,6 +2283,24 @@ export const isDocumentLevelShortcutTarget = (targetNode: Node | null): boolean 
     return targetNode === document.body || targetNode === document.documentElement;
 };
 
+export const shouldHandleQueryEditorRunShortcutFallback = ({
+    editorHasFocus,
+    targetNode,
+    editorPane,
+}: {
+    editorHasFocus: boolean;
+    targetNode: Node | null;
+    editorPane?: Pick<Node, 'contains'> | null;
+}): boolean => {
+    if (!editorHasFocus) {
+        return false;
+    }
+    if (targetNode && editorPane?.contains(targetNode)) {
+        return false;
+    }
+    return isDocumentLevelShortcutTarget(targetNode);
+};
+
 export const clearQueryEditorLinkDecorations = (
     editor: any,
     decorationIdsRef: React.MutableRefObject<string[]>,
