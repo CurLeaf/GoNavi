@@ -812,6 +812,10 @@ const DataGrid: React.FC<DataGridProps> = ({
   const lastTableScrollLeftRef = useRef(0);
   const lastExternalScrollLeftRef = useRef(0);
   const externalSyncRafRef = useRef<number | null>(null);
+  const externalScrollSettleRafRef = useRef<number | null>(null);
+  const pendingExternalScrollLeftRef = useRef<number | null>(null);
+  const externalScrollSequenceRef = useRef(0);
+  const externalScrollbarDraggingRef = useRef(false);
   const tableTargetSyncRafRef = useRef<number | null>(null);
   const tableHorizontalWheelRafRef = useRef<number | null>(null);
   const virtualHorizontalAlignmentRafRef = useRef<number | null>(null);
@@ -866,6 +870,10 @@ const DataGrid: React.FC<DataGridProps> = ({
           cancelAnimationFrame(externalSyncRafRef.current);
           externalSyncRafRef.current = null;
       }
+      if (externalScrollSettleRafRef.current !== null) {
+          cancelAnimationFrame(externalScrollSettleRafRef.current);
+          externalScrollSettleRafRef.current = null;
+      }
       if (tableTargetSyncRafRef.current !== null) {
           cancelAnimationFrame(tableTargetSyncRafRef.current);
           tableTargetSyncRafRef.current = null;
@@ -879,6 +887,9 @@ const DataGrid: React.FC<DataGridProps> = ({
           scrollSnapshotRafRef.current = null;
       }
       pendingTableHorizontalDeltaRef.current = 0;
+      pendingExternalScrollLeftRef.current = null;
+      externalScrollbarDraggingRef.current = false;
+      horizontalSyncSourceRef.current = '';
       pendingTableTargetSyncSourceRef.current = null;
   }, []);
 
@@ -3725,7 +3736,11 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const syncExternalScrollFromTargets = useCallback((targets?: HTMLElement[], source?: HTMLElement | null) => {
       const externalScroll = externalHorizontalScrollRef.current;
-      if (!(externalScroll instanceof HTMLDivElement) || horizontalSyncSourceRef.current === 'external') {
+      if (
+          !(externalScroll instanceof HTMLDivElement)
+          || horizontalSyncSourceRef.current === 'external'
+          || externalScrollbarDraggingRef.current
+      ) {
           return;
       }
       const tableContainer = tableContainerRef.current;
@@ -3761,6 +3776,9 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [enableVirtual, readVirtualHorizontalOffset]);
 
   const scheduleSyncExternalScrollFromTargets = useCallback((source?: HTMLElement | null) => {
+      if (externalScrollbarDraggingRef.current) {
+          return;
+      }
       pendingTableTargetSyncSourceRef.current = source ?? null;
       if (tableTargetSyncRafRef.current !== null) {
           return;
@@ -3769,7 +3787,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           tableTargetSyncRafRef.current = null;
           const pendingSource = pendingTableTargetSyncSourceRef.current;
           pendingTableTargetSyncSourceRef.current = null;
-          if (horizontalSyncSourceRef.current === 'external') {
+          if (horizontalSyncSourceRef.current === 'external' || externalScrollbarDraggingRef.current) {
               return;
           }
           horizontalSyncSourceRef.current = 'table';
@@ -3778,39 +3796,23 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
   }, [syncExternalScrollFromTargets]);
 
-  const applyExternalScrollToTableTargets = useCallback(() => {
-      const externalScroll = externalHorizontalScrollRef.current;
-      if (!(externalScroll instanceof HTMLDivElement)) {
-          return;
+  const scheduleExternalHorizontalScrollSettle = useCallback((syncSequence: number) => {
+      if (externalScrollSettleRafRef.current !== null) {
+          cancelAnimationFrame(externalScrollSettleRafRef.current);
       }
-      if (horizontalSyncSourceRef.current === 'table') {
-          return;
-      }
-
-      const tableContainer = tableContainerRef.current;
-      let nextExternalScrollLeft = externalScroll.scrollLeft;
-      if (enableVirtual && tableContainer instanceof HTMLElement) {
-          const synced = syncVirtualHorizontalVisualOffset(tableContainer, externalScroll.scrollLeft);
-          if (synced) {
-              nextExternalScrollLeft = synced.clampedOffset;
-              lastTableScrollLeftRef.current = synced.clampedOffset;
-              if (Math.abs(externalScroll.scrollLeft - synced.clampedOffset) > 1) {
-                  externalScroll.scrollLeft = synced.clampedOffset;
+      externalScrollSettleRafRef.current = requestAnimationFrame(() => {
+          externalScrollSettleRafRef.current = null;
+          if (externalScrollSequenceRef.current !== syncSequence) {
+              if (
+                  !externalScrollbarDraggingRef.current
+                  && externalSyncRafRef.current === null
+                  && pendingExternalScrollLeftRef.current === null
+              ) {
+                  horizontalSyncSourceRef.current = '';
               }
+              return;
           }
-      }
 
-      if (Math.abs(lastExternalScrollLeftRef.current - nextExternalScrollLeft) < 1) {
-          return;
-      }
-      lastExternalScrollLeftRef.current = nextExternalScrollLeft;
-      if (externalSyncRafRef.current !== null) {
-          return;
-      }
-
-      horizontalSyncSourceRef.current = 'external';
-      externalSyncRafRef.current = requestAnimationFrame(() => {
-          externalSyncRafRef.current = null;
           const latestExternalScroll = externalHorizontalScrollRef.current;
           if (!(latestExternalScroll instanceof HTMLDivElement)) {
               horizontalSyncSourceRef.current = '';
@@ -3818,56 +3820,130 @@ const DataGrid: React.FC<DataGridProps> = ({
           }
 
           const tableContainer = tableContainerRef.current;
-          // 虚拟表格路径：通过合成 WheelEvent 驱动 rc-virtual-list 内部状态，
-          // rc-table 自动同步 header scrollLeft。
+          const resolvedScrollLeft = enableVirtual && tableContainer instanceof HTMLElement
+              ? readVirtualHorizontalOffset(tableContainer)
+              : lastTableScrollLeftRef.current;
+          lastTableScrollLeftRef.current = resolvedScrollLeft;
+
+          // 原生滑块仍在拖动时，rc-virtual-list 的异步滚动结果只能更新表格侧，
+          // 不能反写到正在由浏览器控制的 thumb。
+          if (externalScrollbarDraggingRef.current) {
+              lastExternalScrollLeftRef.current = latestExternalScroll.scrollLeft;
+              return;
+          }
+
+          if (Math.abs(latestExternalScroll.scrollLeft - resolvedScrollLeft) > 1) {
+              latestExternalScroll.scrollLeft = resolvedScrollLeft;
+          }
+          lastExternalScrollLeftRef.current = latestExternalScroll.scrollLeft;
+          horizontalSyncSourceRef.current = '';
+      });
+  }, [enableVirtual, readVirtualHorizontalOffset]);
+
+  const applyExternalScrollToTableTargets = useCallback(() => {
+      const externalScroll = externalHorizontalScrollRef.current;
+      if (!(externalScroll instanceof HTMLDivElement) || horizontalSyncSourceRef.current === 'table') {
+          return;
+      }
+
+      const nextExternalScrollLeft = Math.max(0, externalScroll.scrollLeft);
+      if (
+          Math.abs(lastExternalScrollLeftRef.current - nextExternalScrollLeft) < 1
+          && pendingExternalScrollLeftRef.current === null
+      ) {
+          return;
+      }
+
+      pendingExternalScrollLeftRef.current = nextExternalScrollLeft;
+      lastExternalScrollLeftRef.current = nextExternalScrollLeft;
+      externalScrollSequenceRef.current += 1;
+      if (externalSyncRafRef.current !== null) {
+          return;
+      }
+
+      horizontalSyncSourceRef.current = 'external';
+      externalSyncRafRef.current = requestAnimationFrame(() => {
+          externalSyncRafRef.current = null;
+          const syncSequence = externalScrollSequenceRef.current;
+          const latestExternalScroll = externalHorizontalScrollRef.current;
+          if (!(latestExternalScroll instanceof HTMLDivElement)) {
+              pendingExternalScrollLeftRef.current = null;
+              horizontalSyncSourceRef.current = '';
+              return;
+          }
+
+          const requestedExternalScrollLeft = pendingExternalScrollLeftRef.current ?? latestExternalScroll.scrollLeft;
+          pendingExternalScrollLeftRef.current = null;
+          const tableContainer = tableContainerRef.current;
+          // 每一帧只消费最后一个原生拖拽位置，避免频繁布局写入压垮 Windows WebView2。
           if (enableVirtual && tableContainer instanceof HTMLElement) {
-              const applied = applyVirtualHorizontalOffset(tableContainer, latestExternalScroll.scrollLeft, { forceInternalScroll: true });
+              const applied = applyVirtualHorizontalOffset(tableContainer, requestedExternalScrollLeft, { forceInternalScroll: true });
               if (applied) {
-                  // WheelEvent 经 rc-virtual-list 处理后状态异步更新，延迟同步 ref
-                  requestAnimationFrame(() => {
-                      const resolvedScrollLeft = readVirtualHorizontalOffset(tableContainer);
-                      lastTableScrollLeftRef.current = resolvedScrollLeft;
-                      if (Math.abs(latestExternalScroll.scrollLeft - resolvedScrollLeft) > 1) {
-                          latestExternalScroll.scrollLeft = resolvedScrollLeft;
-                      }
-                      lastExternalScrollLeftRef.current = resolvedScrollLeft;
-                      horizontalSyncSourceRef.current = '';
-                  });
+                  scheduleExternalHorizontalScrollSettle(syncSequence);
                   return;
               }
-              // 空数据回退：virtual-holder 不存在时，直接滚动表头
+
+              // 空数据回退：virtual-holder 不存在时，直接滚动表头。
               const headerEl = tableContainer.querySelector('.ant-table-header') as HTMLElement | null;
               const contentEl = tableContainer.querySelector('.ant-table-content') as HTMLElement | null;
               const fallbackTargets = [headerEl, contentEl].filter((el): el is HTMLElement => el instanceof HTMLElement && el.scrollWidth > el.clientWidth + 1);
-              if (fallbackTargets.length > 0) {
-                  fallbackTargets.forEach((target) => {
-                      target.scrollLeft = latestExternalScroll.scrollLeft;
-                  });
-                  lastTableScrollLeftRef.current = latestExternalScroll.scrollLeft;
-                  horizontalSyncSourceRef.current = '';
-                  return;
-              }
-              horizontalSyncSourceRef.current = '';
+              fallbackTargets.forEach((target) => {
+                  if (Math.abs(target.scrollLeft - requestedExternalScrollLeft) > 1) {
+                      target.scrollLeft = requestedExternalScrollLeft;
+                  }
+              });
+              lastTableScrollLeftRef.current = requestedExternalScrollLeft;
+              scheduleExternalHorizontalScrollSettle(syncSequence);
               return;
           }
-          // 非虚拟表格路径：依赖 liveTargets 进行 scrollLeft 同步
+
+          // 非虚拟表格路径：依赖 liveTargets 进行 scrollLeft 同步。
           const liveTargets = tableScrollTargetsRef.current;
-          if (liveTargets.length === 0) {
-              horizontalSyncSourceRef.current = '';
-              return;
-          }
           liveTargets.forEach((target) => {
               if (target.scrollWidth <= target.clientWidth + 1) {
                   return;
               }
-              if (Math.abs(target.scrollLeft - latestExternalScroll.scrollLeft) > 1) {
-                  target.scrollLeft = latestExternalScroll.scrollLeft;
+              if (Math.abs(target.scrollLeft - requestedExternalScrollLeft) > 1) {
+                  target.scrollLeft = requestedExternalScrollLeft;
               }
           });
-          lastTableScrollLeftRef.current = latestExternalScroll.scrollLeft;
-          horizontalSyncSourceRef.current = '';
+          lastTableScrollLeftRef.current = requestedExternalScrollLeft;
+          scheduleExternalHorizontalScrollSettle(syncSequence);
       });
-  }, [applyVirtualHorizontalOffset, enableVirtual, readVirtualHorizontalOffset, syncVirtualHorizontalVisualOffset]);
+  }, [applyVirtualHorizontalOffset, enableVirtual, scheduleExternalHorizontalScrollSettle]);
+
+  const handleExternalHorizontalScrollPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+      externalScrollbarDraggingRef.current = true;
+      horizontalSyncSourceRef.current = 'external';
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+  }, []);
+
+  const finishExternalScrollbarDrag = useCallback(() => {
+      if (!externalScrollbarDraggingRef.current) {
+          return;
+      }
+      externalScrollbarDraggingRef.current = false;
+
+      // 正在排队的外部同步会自行结算；没有待处理任务时才立即安排最终对齐。
+      if (
+          externalSyncRafRef.current === null
+          && pendingExternalScrollLeftRef.current === null
+          && externalScrollSettleRafRef.current === null
+      ) {
+          scheduleExternalHorizontalScrollSettle(externalScrollSequenceRef.current);
+      }
+  }, [scheduleExternalHorizontalScrollSettle]);
+
+  const handleExternalHorizontalScrollPointerRelease = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      finishExternalScrollbarDrag();
+  }, [finishExternalScrollbarDrag]);
+
+  const handleExternalHorizontalScrollLostPointerCapture = useCallback(() => {
+      finishExternalScrollbarDrag();
+  }, [finishExternalScrollbarDrag]);
 
   const focusColumnQuickFindTarget = useCallback((columnName: string): boolean => {
       const root = rootRef.current;
@@ -3991,14 +4067,23 @@ const DataGrid: React.FC<DataGridProps> = ({
       };
 
       externalScroll.addEventListener('wheel', handleExternalWheel, { passive: false, capture: true });
+      window.addEventListener('blur', finishExternalScrollbarDrag);
       return () => {
           externalScroll.removeEventListener('wheel', handleExternalWheel, { capture: true } as EventListenerOptions);
+          window.removeEventListener('blur', finishExternalScrollbarDrag);
           if (externalSyncRafRef.current !== null) {
               cancelAnimationFrame(externalSyncRafRef.current);
               externalSyncRafRef.current = null;
           }
+          if (externalScrollSettleRafRef.current !== null) {
+              cancelAnimationFrame(externalScrollSettleRafRef.current);
+              externalScrollSettleRafRef.current = null;
+          }
+          pendingExternalScrollLeftRef.current = null;
+          externalScrollbarDraggingRef.current = false;
+          horizontalSyncSourceRef.current = '';
       };
-  }, [horizontalScrollVisible]);
+  }, [finishExternalScrollbarDrag, horizontalScrollVisible]);
 
   // 支持在数据区直接使用触摸板/Shift+滚轮进行横向滚动。
   // 虚拟表格与普通表格统一走外部横向滚动条，避免内部轨道覆盖最后一行。
@@ -4421,6 +4506,9 @@ const DataGrid: React.FC<DataGridProps> = ({
         applyAllFiltersDisabled,
         applyAllFiltersEnabled,
         applyExternalScrollToTableTargets,
+        handleExternalHorizontalScrollPointerDown,
+        handleExternalHorizontalScrollPointerRelease,
+        handleExternalHorizontalScrollLostPointerCapture,
         applyFilters,
         applyJsonEditor,
         applyQuickWhereCondition,

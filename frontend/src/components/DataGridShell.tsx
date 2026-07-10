@@ -48,6 +48,9 @@ const DataGridShell: React.FC<DataGridShellProps> = (props) => {
     applyAllFiltersDisabled,
     applyAllFiltersEnabled,
     applyExternalScrollToTableTargets,
+    handleExternalHorizontalScrollPointerDown,
+    handleExternalHorizontalScrollPointerRelease,
+    handleExternalHorizontalScrollLostPointerCapture,
     applyFilters,
     applyJsonEditor,
     applyQuickWhereCondition,
@@ -387,6 +390,10 @@ const renderDataTableView = () => (
               className="data-grid-external-horizontal-scroll"
               aria-hidden={!horizontalScrollVisible}
               onScroll={applyExternalScrollToTableTargets}
+              onPointerDown={handleExternalHorizontalScrollPointerDown}
+              onPointerUp={handleExternalHorizontalScrollPointerRelease}
+              onPointerCancel={handleExternalHorizontalScrollPointerRelease}
+              onLostPointerCapture={handleExternalHorizontalScrollLostPointerCapture}
               style={{
                   opacity: horizontalScrollVisible ? 1 : 0,
                   pointerEvents: horizontalScrollVisible ? 'auto' : 'none',
