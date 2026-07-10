@@ -47,6 +47,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Validate runtime Dockerfiles
+        if: matrix.image_name == 'gonavi-web-server'
+        shell: bash
+        run: bash tools/validate-web-server-dockerfile.test.sh
+
       - name: Prepare build variables
         id: prep
         shell: bash

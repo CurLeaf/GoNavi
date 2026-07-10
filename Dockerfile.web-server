@@ -29,6 +29,7 @@ COPY third_party/go-irisnative/go.mod third_party/go-irisnative/go.sum ./third_p
 RUN go mod download
 
 COPY . .
+RUN ./tools/generate-driver-agent-revisions.sh --platform "${TARGETOS}/${TARGETARCH}"
 COPY --from=frontend /src/frontend/dist ./frontend/dist
 
 # 纯 Go 构建主程序（web-server 模式不需要 Wails WebView / CGO）
