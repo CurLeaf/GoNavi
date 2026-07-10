@@ -55,6 +55,7 @@ const storeState = vi.hoisted(() => ({
   setActiveContext: vi.fn(),
   tableColumnOrders: {},
   tablePinnedLeftColumns: {},
+  setTablePinnedLeftColumns: vi.fn(),
   enableColumnOrderMemory: false,
   setTableColumnOrder: vi.fn(),
   setEnableColumnOrderMemory: vi.fn(),
@@ -860,6 +861,8 @@ describe('DataGrid DDL interactions', () => {
     });
     storeState.addTab.mockReset();
     storeState.setActiveContext.mockReset();
+    storeState.tablePinnedLeftColumns = {};
+    storeState.setTablePinnedLeftColumns.mockReset();
     testRenderState.latestColumns = [];
     testRenderState.latestTableProps = null;
     testRenderState.latestMonacoMouseDownListeners = [];
@@ -1081,6 +1084,64 @@ describe('DataGrid DDL interactions', () => {
     expect(textContent(renderer!.root)).toContain(t('data_grid.context_menu.hide_column_comment'));
     expect(textContent(renderer!.root)).toContain('bigint');
     expect(textContent(renderer!.root)).toContain('主键 ID');
+    renderer!.unmount();
+  });
+
+  it('pins a read-only query-result column with an independent pin scope', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    const columnPinScope = 'query-result:1a2b3c4d';
+    const props = {
+      data: [{ __gonavi_row_key__: 'row-1', id: 1, id_2: 2, order_id: 100 }],
+      columnNames: ['id', 'id_2', 'order_id'],
+      loading: false,
+      dbName: 'main',
+      connectionId: 'conn-1',
+      columnPinScope,
+    };
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<DataGrid {...props} />);
+    });
+    await waitForEffects();
+
+    const duplicateIdColumn = testRenderState.latestColumns.find((column) => column.key === 'id_2');
+    expect(duplicateIdColumn).toBeTruthy();
+    expect(duplicateIdColumn.fixed).toBeUndefined();
+
+    const headerProps = duplicateIdColumn.onHeaderCell(duplicateIdColumn);
+    await act(async () => {
+      headerProps.onContextMenu({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        clientX: 120,
+        clientY: 88,
+      });
+    });
+
+    await act(async () => {
+      findButton(renderer!, t('data_grid.context_menu.pin_column_left')).props.onClick({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    expect(storeState.setTablePinnedLeftColumns).toHaveBeenCalledWith(
+      'conn-1',
+      'main',
+      columnPinScope,
+      ['id_2'],
+    );
+
+    storeState.tablePinnedLeftColumns = {
+      'conn-1-main-query-result:1a2b3c4d': ['id_2'],
+    };
+    await act(async () => {
+      renderer!.update(<DataGrid {...props} data={[...props.data]} />);
+    });
+    await waitForEffects();
+
+    expect(testRenderState.latestColumns.find((column) => column.key === 'id_2').fixed).toBe('left');
     renderer!.unmount();
   });
 

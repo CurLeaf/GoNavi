@@ -101,6 +101,7 @@ export const useDataGridV2Actions = (ctx: DataGridV2ActionsContext) => {
     supportsCopyInsert,
     supportsSqlQueryExport,
     tableName,
+    pinnedLeftColumnScope,
     toggleColumnVisibility,
     pinnedLeftColumnNames,
     setTablePinnedLeftColumns,
@@ -137,7 +138,7 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
               autoFitColumnWidth(columnName);
               break;
           case 'pin-column-left': {
-              if (!connectionId || !dbName || !tableName) {
+              if (!connectionId || !dbName || !pinnedLeftColumnScope) {
                   void message.info(translateDataGrid('data_grid.message.pin_column_unavailable'));
                   break;
               }
@@ -145,13 +146,13 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
                   ...pinnedLeftColumnNames.filter((col: string) => col !== columnName),
                   columnName,
               ];
-              setTablePinnedLeftColumns(connectionId, dbName, tableName, nextPinned);
+              setTablePinnedLeftColumns(connectionId, dbName, pinnedLeftColumnScope, nextPinned);
               break;
           }
           case 'unpin-column-left': {
-              if (!connectionId || !dbName || !tableName) break;
+              if (!connectionId || !dbName || !pinnedLeftColumnScope) break;
               const nextPinned = pinnedLeftColumnNames.filter((col: string) => col !== columnName);
-              setTablePinnedLeftColumns(connectionId, dbName, tableName, nextPinned);
+              setTablePinnedLeftColumns(connectionId, dbName, pinnedLeftColumnScope, nextPinned);
               break;
           }
           case 'hide-column':
@@ -190,7 +191,7 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
       pinnedLeftColumnNames,
       setQueryOptions,
       setTablePinnedLeftColumns,
-      tableName,
+      pinnedLeftColumnScope,
       translateDataGrid,
       toggleColumnVisibility,
   ]);

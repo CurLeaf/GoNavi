@@ -5,6 +5,7 @@ import { BugOutlined, CloseOutlined, CopyOutlined, EyeInvisibleOutlined, RobotOu
 import type { EditRowLocator } from '../utils/rowLocator';
 import type { QueryResultPaginationState } from '../utils/queryResultPagination';
 import { filterColumnNamesByGlobalHiddenColumns, useGlobalHiddenColumns } from '../utils/globalHiddenColumns';
+import { buildQueryResultColumnPinScope } from '../utils/queryResultColumnPinScope';
 import { t as defaultTranslate } from '../i18n';
 import { useOptionalI18n } from '../i18n/provider';
 import {
@@ -440,6 +441,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                 );
             }
             const visibleColumns = resolveVisibleQueryResultColumns(rs.columns, globalHiddenColumns);
+            const resultTableName = rs.metadataTableName || rs.tableName;
             return (
                 <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                     {Array.isArray(rs.messages) && rs.messages.length > 0 ? (
@@ -456,7 +458,12 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                         data={rs.rows}
                         columnNames={visibleColumns}
                         loading={loading || rs.page?.loading === true}
-                        tableName={rs.metadataTableName || rs.tableName}
+                        tableName={resultTableName}
+                        columnPinScope={resultTableName ? undefined : buildQueryResultColumnPinScope({
+                            sql: rs.exportSql || rs.sql,
+                            sourceStatementIndex: rs.sourceStatementIndex,
+                            statementResultIndex: rs.statementResultIndex,
+                        })}
                         exportScope="queryResult"
                         resultSql={rs.exportSql || rs.sql}
                         resultExportAllSql={rs.page?.exportAllSql}

@@ -243,6 +243,7 @@ const DataGridShell: React.FC<DataGridShellProps> = (props) => {
     panelPaddingY,
     panelRadius,
     pendingChangeCount,
+    pinnedLeftColumnScope,
     pinnedLeftColumnSet,
     pkColumns,
     prefersManualTotalCount,
@@ -875,7 +876,7 @@ const renderDataTableView = () => (
                             showColumnType={showColumnType}
                             showColumnComment={showColumnComment}
                             pinnedLeft={Boolean(pinnedLeftColumnSet?.has?.(fieldName))}
-                            canPinLeft={Boolean(connectionId && dbName && tableName)}
+                            canPinLeft={Boolean(connectionId && dbName && pinnedLeftColumnScope)}
                             onAction={handleV2ColumnHeaderContextMenuAction}
                         />
                     );

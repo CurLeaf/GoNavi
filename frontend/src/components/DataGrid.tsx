@@ -283,7 +283,7 @@ export {
     buildDataGridCommitChangeSet,
 } from './DataGridCore';
 const DataGrid: React.FC<DataGridProps> = ({
-    data, columnNames, loading, tableName, objectType = 'table', exportScope = 'table', dbName, connectionId, pkColumns = [], editLocator, readOnly = false,
+    data, columnNames, loading, tableName, columnPinScope, objectType = 'table', exportScope = 'table', dbName, connectionId, pkColumns = [], editLocator, readOnly = false,
     resultSql,
     resultExportAllSql,
     onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions, quickWhereCondition,
@@ -481,16 +481,17 @@ const DataGrid: React.FC<DataGridProps> = ({
     setAllOrderedColumnNames(nextOrder);
   }, [visibleColumnNames, tableColumnOrders, enableColumnOrderMemory, connectionId, dbName, tableName]);
 
-  const tableMemoryKey = useMemo(() => {
-      if (!connectionId || !dbName || !tableName) return '';
-      return `${connectionId}-${dbName}-${tableName}`;
-  }, [connectionId, dbName, tableName]);
+  const pinnedLeftColumnScope = columnPinScope || tableName;
+  const pinnedLeftColumnMemoryKey = useMemo(() => {
+      if (!connectionId || !dbName || !pinnedLeftColumnScope) return '';
+      return `${connectionId}-${dbName}-${pinnedLeftColumnScope}`;
+  }, [connectionId, dbName, pinnedLeftColumnScope]);
 
   const pinnedLeftColumnNames = useMemo(() => {
-      if (!tableMemoryKey) return [] as string[];
-      const stored = tablePinnedLeftColumns?.[tableMemoryKey];
+      if (!pinnedLeftColumnMemoryKey) return [] as string[];
+      const stored = tablePinnedLeftColumns?.[pinnedLeftColumnMemoryKey];
       return Array.isArray(stored) ? stored.map((col) => String(col || '').trim()).filter(Boolean) : [];
-  }, [tableMemoryKey, tablePinnedLeftColumns]);
+  }, [pinnedLeftColumnMemoryKey, tablePinnedLeftColumns]);
 
   const pinnedLeftColumnSet = useMemo(
       () => new Set(pinnedLeftColumnNames),
@@ -3278,6 +3279,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     supportsCopyInsert,
     supportsSqlQueryExport,
     tableName,
+    pinnedLeftColumnScope,
     toggleColumnVisibility,
     pinnedLeftColumnNames,
     setTablePinnedLeftColumns,
@@ -4614,6 +4616,7 @@ const DataGrid: React.FC<DataGridProps> = ({
         panelPaddingY,
         panelRadius,
         pendingChangeCount,
+        pinnedLeftColumnScope,
         pinnedLeftColumnSet,
         pkColumns,
         prefersManualTotalCount,

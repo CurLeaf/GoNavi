@@ -1315,6 +1315,8 @@ interface DataGridProps {
     columnNames: string[];
     loading: boolean;
     tableName?: string;
+    /** Optional display-state identity for query results without a physical table. */
+    columnPinScope?: string;
     objectType?: 'table' | 'view' | 'materialized-view';
     exportScope?: 'table' | 'queryResult';
     resultSql?: string;
