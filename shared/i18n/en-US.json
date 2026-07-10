@@ -3585,6 +3585,7 @@
   "connection_modal.step1.group.timeseries": "Time-series databases",
   "connection_modal.step1.group.vector": "Vector databases",
   "connection_modal.step1.hint.chroma": "Collection browsing, vector retrieval, and metadata filtering",
+  "connection_modal.step1.hint.milvus": "Collection browsing, vector search, and scalar filtering",
   "connection_modal.step1.hint.custom": "Custom driver and DSN",
   "connection_modal.step1.hint.elasticsearch": "Index browsing, Mapping inspection, JSON DSL, and query_string queries",
   "connection_modal.step1.hint.file": "Local file connection",

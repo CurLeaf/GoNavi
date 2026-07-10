@@ -39,6 +39,7 @@ GoNavi 面向开发者与 DBA，核心目标是让数据库操作在桌面端做
 | 缓存 | Redis | 内置 | Key 浏览、命令执行、编码/视图切换 |
 | 向量数据库 | Chroma | 内置 | Collection 浏览、向量检索、元数据过滤 |
 | 向量数据库 | Qdrant | 内置 | Collection 浏览、向量搜索、Payload 过滤 |
+| 向量数据库 | Milvus | 内置 | Collection 浏览、向量搜索、标量过滤 |
 | 消息队列 | RocketMQ | 内置 | Topic 浏览、消费组检查、消息型工作流 |
 | 消息队列 | MQTT | 内置 | Broker / Topic Filter 工作流与 QoS 连接配置 |
 | 消息队列 | Kafka | 内置 | Topic 浏览、Broker 元数据、消费组工作流 |

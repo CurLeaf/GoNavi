@@ -39,6 +39,7 @@ export type SqlDialect =
   | 'elasticsearch'
   | 'chroma'
   | 'qdrant'
+  | 'milvus'
   | 'unknown'
   | string;
 
@@ -137,6 +138,10 @@ export const resolveSqlDialect = (
     case 'qdrant-db':
     case 'qdrant':
       return 'qdrant';
+    case 'milvusdb':
+    case 'milvus-db':
+    case 'milvus':
+      return 'milvus';
     case 'apache-iotdb':
     case 'apache_iotdb':
       return 'iotdb';
@@ -191,6 +196,7 @@ export const resolveSqlDialect = (
   if (source.includes('elastic')) return 'elasticsearch';
   if (source.includes('chroma')) return 'chroma';
   if (source.includes('qdrant')) return 'qdrant';
+  if (source.includes('milvus')) return 'milvus';
 
   return source;
 };

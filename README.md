@@ -40,6 +40,7 @@ GoNavi is designed for developers and DBAs who need a unified desktop experience
 | Cache | Redis | Built-in | Key browsing, command execution, encoding/view switch |
 | Vector Database | Chroma | Built-in | Collection browsing, vector retrieval, metadata filtering |
 | Vector Database | Qdrant | Built-in | Collection browsing, vector search, payload filtering |
+| Vector Database | Milvus | Built-in | Collection browsing, vector search, scalar filtering |
 | Message Queue | RocketMQ | Built-in | Topic browsing, consumer-group inspection, message-oriented workflow |
 | Message Queue | MQTT | Built-in | Broker and topic-filter workflow with QoS-aware connection settings |
 | Message Queue | Kafka | Built-in | Topic browsing, broker metadata, consumer-group workflow |

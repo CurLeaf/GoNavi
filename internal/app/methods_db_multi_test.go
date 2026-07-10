@@ -687,6 +687,41 @@ func TestDBQueryWithCancelReturnsResultSetForExecStoredProcedure(t *testing.T) {
 	}
 }
 
+func TestDBQueryWithCancelRoutesMilvusJSONSearchToQuery(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := `{"search":"products","vector":[0.1,0.2,0.3],"limit":1}`
+	fakeDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {{"id": 1, "distance": 0.01}},
+		},
+		fieldMap: map[string][]string{
+			query: {"id", "distance"},
+		},
+		queryErr: map[string]error{},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	result := app.DBQueryWithCancel(
+		connection.ConnectionConfig{Type: "milvus", Host: "127.0.0.1", Port: 19530},
+		"default",
+		query,
+		"milvus-search-test",
+	)
+	if !result.Success {
+		t.Fatalf("expected Milvus JSON search success, got failure: %s", result.Message)
+	}
+	if fakeDB.queryCalls != 1 || fakeDB.execCalls != 0 {
+		t.Fatalf("expected query path only, queryCalls=%d execCalls=%d", fakeDB.queryCalls, fakeDB.execCalls)
+	}
+}
+
 func TestDBQueryWithCancelReturnsMessagesForSQLServerQuery(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {

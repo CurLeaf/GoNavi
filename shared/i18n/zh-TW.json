@@ -3585,6 +3585,7 @@
   "connection_modal.step1.group.timeseries": "時序資料庫",
   "connection_modal.step1.group.vector": "向量資料庫",
   "connection_modal.step1.hint.chroma": "Collection 瀏覽、向量檢索與中繼資料過濾",
+  "connection_modal.step1.hint.milvus": "Collection 瀏覽、向量搜尋與標量過濾",
   "connection_modal.step1.hint.custom": "自訂驅動與 DSN",
   "connection_modal.step1.hint.elasticsearch": "索引瀏覽、Mapping 檢查、JSON DSL 與 query_string 查詢",
   "connection_modal.step1.hint.file": "本機檔案連線",

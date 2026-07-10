@@ -3585,6 +3585,7 @@
   "connection_modal.step1.group.timeseries": "Zeitreihendatenbanken",
   "connection_modal.step1.group.vector": "Vektordatenbanken",
   "connection_modal.step1.hint.chroma": "Collection-Browsing, Vektorsuche und Metadatenfilter",
+  "connection_modal.step1.hint.milvus": "Collection-Browsing, Vektorsuche und Skalarfilter",
   "connection_modal.step1.hint.custom": "Benutzerdefinierter Treiber und DSN",
   "connection_modal.step1.hint.elasticsearch": "Index-Browsing, Mapping-Prüfung, JSON DSL und query_string-Abfragen",
   "connection_modal.step1.hint.file": "Lokale Dateiverbindung",

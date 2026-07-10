@@ -1836,6 +1836,8 @@ func normalizeDriverType(driverType string) string {
 		return "rabbitmq"
 	case "intersystems", "intersystemsiris", "inter-systems-iris", "inter-systems":
 		return "iris"
+	case "milvusdb", "milvus-db":
+		return "milvus"
 	default:
 		return normalized
 	}

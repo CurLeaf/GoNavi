@@ -74,6 +74,7 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
     items: [
       { key: 'chroma', name: 'Chroma' },
       { key: 'qdrant', name: 'Qdrant' },
+      { key: 'milvus', name: 'Milvus' },
     ],
   },
   {
@@ -166,6 +167,8 @@ export const getConnectionTypeDefaultPort = (type: string): number => {
       return 8000;
     case 'qdrant':
       return 6333;
+    case 'milvus':
+      return 19530;
     case 'rocketmq':
       return 9876;
     case 'mqtt':
@@ -218,6 +221,12 @@ export const getConnectionTypeHint = (
         translate,
         'connection_modal.step1.hint.qdrant',
         'Collection browsing, vector search, and Payload filtering',
+      );
+    case 'milvus':
+      return translateCatalogCopy(
+        translate,
+        'connection_modal.step1.hint.milvus',
+        'Collection browsing, vector search, and scalar filtering',
       );
     case 'iotdb':
       return 'Storage Group / Device / Timeseries';

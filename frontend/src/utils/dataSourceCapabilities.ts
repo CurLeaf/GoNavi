@@ -42,6 +42,9 @@ const normalizeDataSourceToken = (raw: string): string => {
     case 'qdrantdb':
     case 'qdrant-db':
       return 'qdrant';
+    case 'milvusdb':
+    case 'milvus-db':
+      return 'milvus';
     case 'rocketmq':
     case 'rocket-mq':
     case 'rocket_mq':

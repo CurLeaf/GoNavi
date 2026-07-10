@@ -3585,6 +3585,7 @@
   "connection_modal.step1.group.timeseries": "时序数据库",
   "connection_modal.step1.group.vector": "向量数据库",
   "connection_modal.step1.hint.chroma": "Collection 浏览、向量检索和元数据过滤",
+  "connection_modal.step1.hint.milvus": "Collection 浏览、向量搜索和标量过滤",
   "connection_modal.step1.hint.custom": "自定义驱动与 DSN",
   "connection_modal.step1.hint.elasticsearch": "索引浏览、Mapping 检查、JSON DSL 和 query_string 查询",
   "connection_modal.step1.hint.file": "本地文件连接",

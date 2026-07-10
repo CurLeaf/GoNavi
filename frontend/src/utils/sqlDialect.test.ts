@@ -40,6 +40,8 @@ describe('sqlDialect', () => {
     expect(resolveSqlDialect('custom', 'chroma-db')).toBe('chroma');
     expect(resolveSqlDialect('QdrantDB')).toBe('qdrant');
     expect(resolveSqlDialect('custom', 'qdrant-db')).toBe('qdrant');
+    expect(resolveSqlDialect('MilvusDB')).toBe('milvus');
+    expect(resolveSqlDialect('custom', 'milvus-db')).toBe('milvus');
     expect(resolveSqlDialect('Apache-IoTDB')).toBe('iotdb');
     expect(resolveSqlDialect('custom', 'apache_iotdb')).toBe('iotdb');
     expect(resolveSqlDialect('Rocket-MQ')).toBe('rocketmq');

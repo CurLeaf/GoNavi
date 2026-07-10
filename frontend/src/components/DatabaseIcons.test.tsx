@@ -30,6 +30,7 @@ const BRAND_ICON_CASES: Array<[string, string, string]> = [
   ['rabbitmq', 'RabbitMQ', 'rabbitmq.svg'],
   ['chroma', 'Chroma', 'chroma.svg'],
   ['qdrant', 'Qdrant', 'qdrant.svg'],
+  ['milvus', 'Milvus', 'milvus.svg'],
   ['jvm', 'JVM', 'jvm.ico'],
 ];
 

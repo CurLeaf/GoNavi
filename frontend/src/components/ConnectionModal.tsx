@@ -157,6 +157,7 @@ const PRIMARY_USERNAME_OPTIONAL_TYPES = new Set([
   "elasticsearch",
   "chroma",
   "qdrant",
+  "milvus",
   "rocketmq",
   "mqtt",
   "kafka",
@@ -2207,7 +2208,7 @@ const ConnectionModal: React.FC<{
       });
     } else if (type !== "custom") {
       const defaultUser =
-        type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "rocketmq" || type === "mqtt" || type === "kafka" || type === "rabbitmq") ? "" : "root";
+        type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "milvus" || type === "rocketmq" || type === "mqtt" || type === "kafka" || type === "rabbitmq") ? "" : "root";
       const sslCapableType = supportsSSLForType(type);
       setUseSSL(false);
       setUseHttpTunnel(false);

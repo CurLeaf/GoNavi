@@ -3585,6 +3585,7 @@
   "connection_modal.step1.group.timeseries": "時系列データベース",
   "connection_modal.step1.group.vector": "ベクトルデータベース",
   "connection_modal.step1.hint.chroma": "Collection 閲覧、ベクトル検索、メタデータフィルター",
+  "connection_modal.step1.hint.milvus": "Collection 閲覧、ベクトル検索、スカラーフィルター",
   "connection_modal.step1.hint.custom": "カスタムドライバーと DSN",
   "connection_modal.step1.hint.elasticsearch": "インデックス閲覧、Mapping 検査、JSON DSL、query_string クエリ",
   "connection_modal.step1.hint.file": "ローカルファイル接続",

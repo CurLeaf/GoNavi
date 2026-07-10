@@ -83,6 +83,7 @@ const PRIMARY_USERNAME_OPTIONAL_TYPES = new Set([
   "elasticsearch",
   "chroma",
   "qdrant",
+  "milvus",
   "rocketmq",
   "mqtt",
   "kafka",

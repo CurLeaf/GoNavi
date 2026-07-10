@@ -468,6 +468,9 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 	if dbType == "kingbase8" || dbType == "kingbasees" || dbType == "kingbasev8" {
 		return "kingbase"
 	}
+	if dbType == "milvusdb" || dbType == "milvus-db" {
+		return "milvus"
+	}
 	if dbType == "intersystems" || dbType == "intersystemsiris" || dbType == "inter-systems" || dbType == "inter-systems-iris" {
 		return "iris"
 	}
@@ -510,6 +513,8 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 		return "iris"
 	case "oceanbase":
 		return "oceanbase"
+	case "milvus", "milvusdb", "milvus-db":
+		return "milvus"
 	}
 
 	switch {

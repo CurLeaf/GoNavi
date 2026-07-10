@@ -25,6 +25,7 @@ export const normalizeDriverType = (value: string): string => {
   if (normalized === "elastic") return "elasticsearch";
   if (normalized === "chromadb" || normalized === "chroma-db") return "chroma";
   if (normalized === "qdrantdb" || normalized === "qdrant-db") return "qdrant";
+  if (normalized === "milvusdb" || normalized === "milvus-db") return "milvus";
   if (
     normalized === "rocket-mq" ||
     normalized === "rocket_mq" ||

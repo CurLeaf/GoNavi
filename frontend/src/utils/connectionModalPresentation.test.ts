@@ -135,6 +135,7 @@ describe('connectionModalPresentation', () => {
       'elasticsearch',
       'chroma',
       'qdrant',
+      'milvus',
       'redis',
       'tdengine',
       'iotdb',
@@ -224,6 +225,14 @@ describe('connectionModalPresentation', () => {
       'databaseScope',
     ]);
     expect(resolveConnectionConfigLayout('qdrant').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'service',
+      'credentials',
+      'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('milvus').sections).toEqual([
       'identity',
       'uri',
       'target',

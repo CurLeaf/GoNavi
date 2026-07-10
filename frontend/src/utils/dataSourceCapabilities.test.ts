@@ -158,6 +158,24 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('treats Milvus as a queryable vector datasource without SQL export actions', () => {
+    expect(getDataSourceCapabilities({ type: 'milvus' })).toMatchObject({
+      type: 'milvus',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: false,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'milvus-db' })).toMatchObject({
+      type: 'milvus',
+      supportsQueryEditor: true,
+      supportsCopyInsert: false,
+    });
+  });
+
   it('treats Apache IoTDB as a queryable timeseries datasource with IoTDB-specific writes', () => {
     expect(getDataSourceCapabilities({ type: 'iotdb' })).toMatchObject({
       type: 'iotdb',

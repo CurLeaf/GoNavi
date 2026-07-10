@@ -81,6 +81,34 @@ var mongoWriteCommands = map[string]struct{}{
 	"update":           {},
 }
 
+var milvusReadOnlyCommands = map[string]struct{}{
+	"count":               {},
+	"describe_collection": {},
+	"describecollection":  {},
+	"get":                 {},
+	"get_collection":      {},
+	"getcollection":       {},
+	"list_collections":    {},
+	"listcollections":     {},
+	"query":               {},
+	"scroll":              {},
+	"search":              {},
+}
+
+var milvusWriteCommands = map[string]struct{}{
+	"create_collection": {},
+	"create_index":      {},
+	"createcollection":  {},
+	"createindex":       {},
+	"delete":            {},
+	"drop_collection":   {},
+	"drop_index":        {},
+	"dropcollection":    {},
+	"dropindex":         {},
+	"insert":            {},
+	"upsert":            {},
+}
+
 var mongoMetaCommandKeys = map[string]struct{}{
 	"$db":                  {},
 	"$readpreference":      {},
@@ -292,6 +320,35 @@ func isReadOnlyMongoCommand(query string) bool {
 	}
 	_, allowed := mongoReadOnlyCommands[commandKey]
 	return allowed
+}
+
+func isReadOnlyMilvusCommand(query string) bool {
+	trimmed := strings.TrimSpace(query)
+	if !strings.HasPrefix(trimmed, "{") {
+		return false
+	}
+	var doc map[string]interface{}
+	if err := json.Unmarshal([]byte(trimmed), &doc); err != nil {
+		return false
+	}
+
+	readOnly := false
+	for key := range doc {
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		if _, isWrite := milvusWriteCommands[normalized]; isWrite {
+			return false
+		}
+		if _, isRead := milvusReadOnlyCommands[normalized]; isRead {
+			readOnly = true
+		}
+	}
+	if readOnly {
+		return true
+	}
+
+	// The Milvus driver treats a collection-only JSON command as a query preview.
+	_, hasCollection := doc["collection"]
+	return hasCollection
 }
 
 func resolveMongoCommandKey(doc map[string]interface{}) string {

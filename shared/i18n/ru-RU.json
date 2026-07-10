@@ -3585,6 +3585,7 @@
   "connection_modal.step1.group.timeseries": "Базы данных временных рядов",
   "connection_modal.step1.group.vector": "Векторные базы данных",
   "connection_modal.step1.hint.chroma": "Просмотр Collection, векторный поиск и фильтрация метаданных",
+  "connection_modal.step1.hint.milvus": "Просмотр Collection, векторный поиск и скалярная фильтрация",
   "connection_modal.step1.hint.custom": "Пользовательский драйвер и DSN",
   "connection_modal.step1.hint.elasticsearch": "Просмотр индексов, проверка Mapping, JSON DSL и запросы query_string",
   "connection_modal.step1.hint.file": "Подключение к локальному файлу",
