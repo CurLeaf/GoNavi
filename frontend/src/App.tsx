@@ -167,6 +167,7 @@ const MIN_UI_SCALE = 0.8;
 const MAX_UI_SCALE = 1.25;
 const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 20;
+type ApplicationQuitConfirmedAction = () => Promise<boolean>;
 /** 设置页 Slider 底部预设刻度 */
 const UI_SCALE_SLIDER_MARKS: Record<number, string> = {
   0.8: '80%',
@@ -2320,11 +2321,33 @@ function App() {
       }
   }, [t]);
 
-  const handleApplicationQuitRequest = useCallback(async () => {
+  const handleApplicationQuitRequest = useCallback(async (confirmedAction?: ApplicationQuitConfirmedAction) => {
       if (applicationQuitHandlingRef.current) {
           return;
       }
       applicationQuitHandlingRef.current = true;
+
+      const runConfirmedAction = async (): Promise<boolean> => {
+          let accepted = false;
+          try {
+              if (confirmedAction) {
+                  accepted = await confirmedAction();
+              } else {
+                  await forceQuitApplication();
+                  accepted = true;
+              }
+          } catch (error) {
+              resetApplicationQuitRequest();
+              message.error(t('app.quit.message.quit_failed', {
+                  detail: error instanceof Error ? error.message : String(error),
+              }));
+              return false;
+          }
+          if (!accepted) {
+              resetApplicationQuitRequest();
+          }
+          return accepted;
+      };
 
       let targets;
       try {
@@ -2338,14 +2361,7 @@ function App() {
       }
 
       if (targets.length === 0) {
-          try {
-              await forceQuitApplication();
-          } catch (error) {
-              resetApplicationQuitRequest();
-              message.error(t('app.quit.message.quit_failed', {
-                  detail: error instanceof Error ? error.message : String(error),
-              }));
-          }
+          await runConfirmedAction();
           return;
       }
 
@@ -2367,12 +2383,7 @@ function App() {
                     onClick={() => {
                         destroyConfirm?.();
                         applicationQuitConfirmRef.current = null;
-                        void forceQuitApplication().catch((error) => {
-                            resetApplicationQuitRequest();
-                            message.error(t('app.quit.message.quit_failed', {
-                                detail: error instanceof Error ? error.message : String(error),
-                            }));
-                        });
+                        void runConfirmedAction();
                     }}
                   >
                       {t('app.quit.unsaved_sql.confirm_exit')}
@@ -2388,7 +2399,6 @@ function App() {
               try {
                   await saveApplicationQuitUnsavedSQLTargets(targets, saveQuery);
                   message.success(t('app.quit.unsaved_sql.saved'));
-                  await forceQuitApplication();
               } catch (error) {
                   resetApplicationQuitRequest();
                   message.error(t('app.quit.unsaved_sql.save_failed_cancel_exit', {
@@ -2396,11 +2406,16 @@ function App() {
                   }));
                   throw error;
               }
+              await runConfirmedAction();
           },
       });
       destroyConfirm = confirmRef.destroy;
       applicationQuitConfirmRef.current = confirmRef;
   }, [forceQuitApplication, resetApplicationQuitRequest, saveQuery, savedQueries, t, tabs]);
+
+  const handleInstallUpdateRequest = useCallback(async () => {
+      await handleApplicationQuitRequest(handleInstallFromProgress);
+  }, [handleApplicationQuitRequest, handleInstallFromProgress]);
 
   useEffect(() => {
       const offBeforeClose = EventsOn('app:before-close-request', () => {
@@ -4297,7 +4312,12 @@ function App() {
           </Button>
       ) : null,
       isLatestUpdateDownloaded ? (
-          <Button key="restart-to-update" type="primary" icon={<DownloadOutlined />} onClick={handleInstallFromProgress}>
+          <Button
+              key="restart-to-update"
+              type="primary"
+              icon={<DownloadOutlined />}
+              onClick={() => { void handleInstallUpdateRequest(); }}
+          >
               {t('app.about.action.restart_to_update')}
           </Button>
       ) : null,
@@ -8077,7 +8097,7 @@ function App() {
                   <Button key="open-install-directory" onClick={openDownloadedUpdateDirectory}>
                       {t('app.about.action.open_install_directory')}
                   </Button>,
-                  <Button key="restart" type="primary" onClick={handleInstallFromProgress}>
+                  <Button key="restart" type="primary" onClick={() => { void handleInstallUpdateRequest(); }}>
                       {t('app.about.action.restart_to_update')}
                   </Button>
               ] : (updateDownloadProgress.status === 'error' ? [

@@ -728,22 +728,15 @@ func TestShouldWindowsUpdateLaunchDownloadedAssetDirectly(t *testing.T) {
 	}
 }
 
-func TestBuildWindowsScriptReplacesTargetWithDownloadedExe(t *testing.T) {
-	script := buildWindowsScript(
-		`C:\GoNavi\GoNavi-dev-93dc696-Windows-Amd64.exe`,
-		`C:\GoNavi\GoNavi-dev-00d70d2-Windows-Amd64.exe`,
-		`C:\Users\tester\AppData\Local\Temp\gonavi-updates\.gonavi-update-windows-dev-dev-93dc696`,
-		`C:\Users\tester\AppData\Local\Temp\gonavi-updates\gonavi-update-windows.log`,
-		12345,
-	)
+func TestBuildWindowsPowerShellScriptReplacesTargetWithDownloadedExe(t *testing.T) {
+	script := buildWindowsPowerShellScript()
 
 	mustContain := []string{
-		`:replace_binary`,
-		`move /Y "%TARGET%" "%TARGET_OLD%"`,
-		`copy /Y "%SOURCE_EXE%" "%TARGET%"`,
-		`start "" /D "%TARGET_DIR%" "%TARGET%"`,
+		`Move-Item -LiteralPath $Target -Destination $TargetOld -Force`,
+		`Copy-Item -LiteralPath $SourceExe -Destination $Target -Force`,
+		`Start-Process -FilePath $Target -WorkingDirectory $TargetDir`,
 		`package kept for manual install`,
-		`del /F /Q "%SOURCE%"`,
+		`Remove-UpdateArtifact $Source`,
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(script, want) {
@@ -751,13 +744,10 @@ func TestBuildWindowsScriptReplacesTargetWithDownloadedExe(t *testing.T) {
 		}
 	}
 	// relaunch 必须在删除安装包之前
-	startIdx := strings.Index(script, `start "" /D "%TARGET_DIR%" "%TARGET%"`)
-	delIdx := strings.LastIndex(script, `del /F /Q "%SOURCE%"`)
+	startIdx := strings.Index(script, `Start-Process -FilePath $Target -WorkingDirectory $TargetDir`)
+	delIdx := strings.LastIndex(script, `Remove-UpdateArtifact $Source`)
 	if startIdx < 0 || delIdx < 0 || delIdx < startIdx {
 		t.Fatalf("source package must be deleted only after relaunch attempt (start=%d del=%d)", startIdx, delIdx)
-	}
-	if strings.Contains(script, "launch_downloaded_exe") {
-		t.Fatalf("windows update script should not launch downloaded exe side-by-side\nscript:\n%s", script)
 	}
 }
 

@@ -23,8 +23,6 @@ import (
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/logger"
 	"GoNavi-Wails/internal/uievents"
-
-	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const (
@@ -34,6 +32,8 @@ const (
 	updateChecksumAsset         = "SHA256SUMS"
 	updateDownloadProgressEvent = "update:download-progress"
 	updateNetworkRetryDelay     = 250 * time.Millisecond
+	updateQuitRequestDelay      = 300 * time.Millisecond
+	updateQuitForceExitDelay    = 35 * time.Second
 	updateReleaseCacheTTL       = 10 * time.Minute
 	updateGitHubAPIVersion      = "2022-11-28"
 	updateHTTPBodySnippetLimit  = 240
@@ -53,6 +53,8 @@ var (
 	updateLogCheckError        = func(err error) { logger.Error(err, "检查更新失败") }
 	updateResolveInstallTarget = resolveUpdateInstallTarget
 	updateLaunchInstallScript  = launchUpdateScript
+	updateQuitSleep            = time.Sleep
+	updateExitProcess          = os.Exit
 )
 
 type updateState struct {
@@ -301,13 +303,7 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 		}
 	}
 
-	go func() {
-		time.Sleep(300 * time.Millisecond)
-		wailsRuntime.Quit(a.ctx)
-		// 兜底退出，避免某些平台/窗口状态下 Quit 未真正结束进程，导致更新脚本一直等待。
-		time.Sleep(2 * time.Second)
-		os.Exit(0)
-	}()
+	go a.quitForUpdate()
 
 	msg := a.appText("app.update.backend.message.install_started", nil)
 	if staged.InstallLogPath != "" {
@@ -320,6 +316,14 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 			"logPath": staged.InstallLogPath,
 		},
 	}
+}
+
+func (a *App) quitForUpdate() {
+	updateQuitSleep(updateQuitRequestDelay)
+	a.ForceQuitApplication()
+	// Leave enough time for shutdown transaction rollback before forcing the process down.
+	updateQuitSleep(updateQuitForceExitDelay)
+	updateExitProcess(0)
 }
 
 func (a *App) OpenDownloadedUpdateDirectory() connection.QueryResult {
@@ -1577,31 +1581,7 @@ func launchUpdateScript(staged *stagedUpdate) error {
 }
 
 func launchWindowsUpdate(staged *stagedUpdate, targetExe string, pid int) error {
-	if err := os.MkdirAll(staged.StagedDir, 0o755); err != nil {
-		return err
-	}
-	scriptPath := filepath.Join(staged.StagedDir, "update.cmd")
-	logPath := strings.TrimSpace(staged.InstallLogPath)
-	if logPath == "" {
-		logPath = buildUpdateInstallLogPath(filepath.Dir(staged.FilePath))
-		staged.InstallLogPath = logPath
-	}
-	content := buildWindowsScript(staged.FilePath, targetExe, staged.StagedDir, logPath, pid)
-	if err := os.WriteFile(scriptPath, []byte(content), 0o644); err != nil {
-		return err
-	}
-
-	logger.Infof("启动 Windows 更新脚本：target=%s script=%s log=%s", targetExe, scriptPath, logPath)
-	cmd := buildWindowsLaunchCommand(scriptPath)
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	if cmd.Process != nil {
-		if err := cmd.Process.Release(); err != nil {
-			logger.Warnf("释放 Windows 更新脚本进程句柄失败：%v", err)
-		}
-	}
-	return nil
+	return launchWindowsUpdateWithCleanup(staged, targetExe, pid)
 }
 
 func launchMacUpdate(staged *stagedUpdate, targetExe string, pid int) error {
@@ -1655,154 +1635,25 @@ func launchLinuxUpdate(staged *stagedUpdate, targetExe string, pid int) error {
 	return nil
 }
 
-func buildWindowsScript(source, target, stagedDir, logPath string, pid int) string {
-	script := `@echo off
-setlocal EnableExtensions EnableDelayedExpansion
-set "SOURCE=__GONAVI_UPDATE_SOURCE__"
-set "TARGET=__GONAVI_UPDATE_TARGET__"
-set "TARGET_OLD=%TARGET%.old"
-set "STAGED=__GONAVI_UPDATE_STAGED__"
-set "LOG_FILE=__GONAVI_UPDATE_LOG__"
-set PID=__GONAVI_UPDATE_PID__
-set /a WAIT_PID_SECONDS=0
-
-call :log updater started
-if not exist "%SOURCE%" (
-  call :log source file not found: %SOURCE%
-  exit /b 1
-)
-
-for %%I in ("%TARGET%") do set "TARGET_NAME=%%~nxI"
-for %%I in ("%TARGET%") do set "TARGET_DIR=%%~dpI"
-for %%I in ("%SOURCE%") do set "SOURCE_EXT=%%~xI"
-set "SOURCE_EXE="
-
-if /I "%SOURCE_EXT%"==".zip" (
-  set "EXTRACT_DIR=%STAGED%\_extract"
-  if exist "%EXTRACT_DIR%" (
-    rmdir /S /Q "%EXTRACT_DIR%" >> "%LOG_FILE%" 2>&1
-  )
-  mkdir "%EXTRACT_DIR%" >> "%LOG_FILE%" 2>&1
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "$src=$env:SOURCE; $dst=$env:EXTRACT_DIR; Expand-Archive -LiteralPath $src -DestinationPath $dst -Force" >> "%LOG_FILE%" 2>&1
-  if !ERRORLEVEL! NEQ 0 (
-    call :log expand zip failed: %SOURCE%
-    exit /b 1
-  )
-  if exist "%EXTRACT_DIR%\%TARGET_NAME%" (
-    set "SOURCE_EXE=%EXTRACT_DIR%\%TARGET_NAME%"
-  ) else (
-    for /R "%EXTRACT_DIR%" %%F in (*.exe) do (
-      if not defined SOURCE_EXE (
-        set "SOURCE_EXE=%%~fF"
-      )
-    )
-  )
-  if not defined SOURCE_EXE (
-    call :log no executable found in portable zip: %SOURCE%
-    exit /b 1
-  )
-) else (
-  set "SOURCE_EXE=%SOURCE%"
-)
-for %%I in ("%SOURCE_EXE%") do set "SOURCE_DIR=%%~dpI"
-
-:waitloop
-tasklist /FI "PID eq %PID%" | find "%PID%" >nul
-if %ERRORLEVEL%==0 (
-  if !WAIT_PID_SECONDS! GEQ 90 (
-    call :log host process still running after !WAIT_PID_SECONDS! seconds, aborting update
-    exit /b 1
-  )
-  timeout /t 1 /nobreak >nul
-  set /a WAIT_PID_SECONDS+=1
-  goto waitloop
-)
-call :log host process exited
-
-rem -- Win10 needs extra time for kernel to release exe file handles --
-timeout /t 3 /nobreak >nul
-call :log cooldown finished, starting file replace
-
-:replace_binary
-if /I "%SOURCE_EXE%"=="%TARGET%" (
-  call :log downloaded executable already at target path, skip replace
-  goto move_done
-)
-set /a RETRY=0
-:move_retry
-call :log attempt !RETRY!: trying rename-then-copy strategy
-move /Y "%TARGET%" "%TARGET_OLD%" >> "%LOG_FILE%" 2>&1
-if !ERRORLEVEL!==0 (
-  copy /Y "%SOURCE_EXE%" "%TARGET%" >> "%LOG_FILE%" 2>&1
-  if !ERRORLEVEL!==0 (
-    del /F /Q "%TARGET_OLD%" >> "%LOG_FILE%" 2>&1
-    goto move_done
-  )
-  call :log copy after rename failed, restoring old file
-  move /Y "%TARGET_OLD%" "%TARGET%" >> "%LOG_FILE%" 2>&1
-)
-
-call :log rename strategy failed, trying direct move
-move /Y "%SOURCE_EXE%" "%TARGET%" >> "%LOG_FILE%" 2>&1
-if %ERRORLEVEL%==0 goto move_done
-
-copy /Y "%SOURCE_EXE%" "%TARGET%" >> "%LOG_FILE%" 2>&1
-if %ERRORLEVEL%==0 goto move_done
-
-set /a RETRY+=1
-if !RETRY! LSS 15 (
-  set /a WAIT=1
-  if !RETRY! GEQ 3 set /a WAIT=2
-  if !RETRY! GEQ 6 set /a WAIT=3
-  if !RETRY! GEQ 9 set /a WAIT=5
-  call :log waiting !WAIT! seconds before retry
-  timeout /t !WAIT! /nobreak >nul
-  goto move_retry
-)
-
-call :log replace failed after retries (portable mode, no elevation): check directory write permission or file lock
-exit /b 1
-
-:move_done
-del /F /Q "%TARGET_OLD%" >> "%LOG_FILE%" 2>&1
-rem 先重启，成功后再删安装包，避免失败时 latest 包被删、用户只剩旧 dev 可运行
-call :log launching target: %TARGET%
-start "" /D "%TARGET_DIR%" "%TARGET%" >> "%LOG_FILE%" 2>&1
-if %ERRORLEVEL% NEQ 0 (
-  call :log cmd start failed, trying powershell Start-Process
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%TARGET%' -WorkingDirectory '%TARGET_DIR%'" >> "%LOG_FILE%" 2>&1
-  if !ERRORLEVEL! NEQ 0 (
-    call :log relaunch failed - package kept for manual install: %SOURCE%
-    exit /b 1
-  )
-)
-rem relaunch 已发出后再清理下载包与 staging
-if exist "%SOURCE%" (
-  if /I not "%SOURCE%"=="%TARGET%" (
-    if /I not "%SOURCE_EXE%"=="%TARGET%" (
-      del /F /Q "%SOURCE%" >> "%LOG_FILE%" 2>&1
-    )
-  )
-)
-rmdir /S /Q "%STAGED%" >> "%LOG_FILE%" 2>&1
-call :log update finished
-exit /b 0
-
-:log
-echo [%date% %time%] %*>>"%LOG_FILE%"
-exit /b 0
-`
-	return strings.NewReplacer(
-		"__GONAVI_UPDATE_SOURCE__", source,
-		"__GONAVI_UPDATE_TARGET__", target,
-		"__GONAVI_UPDATE_STAGED__", stagedDir,
-		"__GONAVI_UPDATE_LOG__", logPath,
-		"__GONAVI_UPDATE_PID__", strconv.Itoa(pid),
-	).Replace(strings.ReplaceAll(script, "\n", "\r\n"))
-}
-
-func buildWindowsLaunchCommand(scriptPath string) *exec.Cmd {
-	cmd := exec.Command("cmd.exe", "/D", "/C", "call", scriptPath)
+func buildWindowsLaunchCommand(scriptPath string, context windowsUpdateLaunchContext) *exec.Cmd {
+	cmd := exec.Command(
+		"powershell.exe",
+		"-NoProfile",
+		"-NonInteractive",
+		"-ExecutionPolicy",
+		"Bypass",
+		"-File",
+		scriptPath,
+	)
+	cmd.Dir = context.StagedDir
+	cmd.Env = append(cmd.Environ(),
+		"GONAVI_UPDATE_SOURCE="+context.SourcePath,
+		"GONAVI_UPDATE_TARGET="+context.TargetPath,
+		"GONAVI_UPDATE_CURRENT_TARGET="+context.CurrentTargetPath,
+		"GONAVI_UPDATE_STAGED_DIR="+context.StagedDir,
+		"GONAVI_UPDATE_LOG_PATH="+context.LogPath,
+		"GONAVI_UPDATE_PID="+strconv.Itoa(context.PID),
+	)
 	configureWindowsUpdateCommand(cmd)
 	return cmd
 }

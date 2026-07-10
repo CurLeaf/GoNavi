@@ -319,11 +319,11 @@ export const useAppUpdateManager = ({
   const canShowProgressEntry = (isLatestUpdateDownloaded || isBackgroundProgressForLatestUpdate)
     && updateInstallTriggeredVersionRef.current !== (lastUpdateKey || null);
 
-  const handleInstallFromProgress = useCallback(async () => {
+  const handleInstallFromProgress = useCallback(async (): Promise<boolean> => {
     const canInstall = updateDownloadProgress.status === 'done'
       || (Boolean(lastUpdateInfo?.hasUpdate) && (Boolean(lastUpdateInfo?.downloaded) || updateDownloadedVersionRef.current === lastUpdateKey));
     if (!canInstall) {
-      return;
+      return false;
     }
     // 点击后进入「正在应用并重启」态，再拉起安装脚本并退出
     setUpdateDownloadProgress((prev) => ({
@@ -347,7 +347,7 @@ export const useAppUpdateManager = ({
         message: res?.message || t('common.unknown'),
       }));
       void message.error(t('app.about.message.install_failed_with_error', { error: res?.message || t('common.unknown') }));
-      return;
+      return false;
     }
     updateInstallTriggeredVersionRef.current = lastUpdateKey || null;
     // 后端会 Quit；此处保持弹窗文案，避免用户误以为失败
@@ -358,6 +358,7 @@ export const useAppUpdateManager = ({
       percent: 100,
       message: t('app.about.download_progress.restarting'),
     }));
+    return true;
   }, [lastUpdateInfo, lastUpdateKey, t, updateDownloadProgress.status]);
 
   const openDownloadedUpdateDirectory = useCallback(async () => {

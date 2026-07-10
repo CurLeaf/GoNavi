@@ -516,6 +516,11 @@ jobs:
           & "$env:CC" --version
           & "$env:CXX" --version
 
+      - name: Test Windows Online Updater (Windows AMD64)
+        if: ${{ matrix.platform == 'windows/amd64' }}
+        shell: pwsh
+        run: go test ./internal/app -run '^TestWindowsPowerShellUpdater' -count=1 -timeout=3m
+
       # ---- 生成 dev 版本号 ----
       - name: Generate Dev Version
         id: version

@@ -221,11 +221,60 @@ describe('useAppUpdateManager', () => {
       await hook?.checkForUpdates(false);
     });
 
+    let accepted = false;
     await act(async () => {
-      await hook?.handleInstallFromProgress();
+      accepted = await hook!.handleInstallFromProgress();
     });
 
     expect(backendApp.InstallUpdateAndRestart).toHaveBeenCalledTimes(1);
+    expect(accepted).toBe(true);
+  });
+
+  it('returns false when the backend rejects restart-to-update', async () => {
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        downloaded: true,
+        assetSize: 2048,
+      },
+    });
+    backendApp.InstallUpdateAndRestart.mockResolvedValue({
+      success: false,
+      message: 'unable-to-start-updater',
+    });
+
+    renderHook();
+
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+
+    let accepted = true;
+    await act(async () => {
+      accepted = await hook!.handleInstallFromProgress();
+    });
+
+    expect(accepted).toBe(false);
+    expect(backendApp.InstallUpdateAndRestart).toHaveBeenCalledTimes(1);
+    expect(hook?.updateDownloadProgress.status).toBe('error');
+    expect(messageApi.error).toHaveBeenCalledWith(
+      'app.about.message.install_failed_with_error:unable-to-start-updater',
+    );
+  });
+
+  it('returns false without calling the backend when no update is ready', async () => {
+    renderHook();
+
+    let accepted = true;
+    await act(async () => {
+      accepted = await hook!.handleInstallFromProgress();
+    });
+
+    expect(accepted).toBe(false);
+    expect(backendApp.InstallUpdateAndRestart).not.toHaveBeenCalled();
   });
 
   it('switches update channel and re-checks against the selected channel', async () => {

@@ -1,0 +1,38 @@
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const appSource = readFileSync(
+  fileURLToPath(new globalThis.URL('./App.tsx', import.meta.url)),
+  'utf8',
+);
+
+describe('restart-to-update unsaved SQL guard', () => {
+  it('runs the confirmed update action through every application quit path', () => {
+    expect(appSource).toContain('type ApplicationQuitConfirmedAction = () => Promise<boolean>;');
+    expect(appSource).toContain('const handleApplicationQuitRequest = useCallback(async (confirmedAction?: ApplicationQuitConfirmedAction) => {');
+    expect(appSource).toContain('const runConfirmedAction = async (): Promise<boolean> => {');
+    const runnerStart = appSource.indexOf('const runConfirmedAction = async (): Promise<boolean> => {');
+    const runnerEnd = appSource.indexOf('\n      let targets;', runnerStart);
+    const runnerSource = appSource.slice(runnerStart, runnerEnd);
+    expect(runnerSource).toContain('accepted = await confirmedAction();');
+    expect(runnerSource).toContain('await forceQuitApplication();\n                  accepted = true;');
+    expect(runnerSource).toContain('} catch (error) {\n              resetApplicationQuitRequest();');
+    expect(runnerSource).toContain('if (!accepted) {\n              resetApplicationQuitRequest();');
+    expect(runnerSource).toContain('return accepted;');
+    expect(appSource).toContain('if (targets.length === 0) {\n          await runConfirmedAction();');
+    expect(appSource).toContain('void runConfirmedAction();');
+    const saveIndex = appSource.indexOf('await saveApplicationQuitUnsavedSQLTargets(targets, saveQuery);');
+    const actionAfterSaveIndex = appSource.indexOf('await runConfirmedAction();', saveIndex);
+    expect(saveIndex).toBeGreaterThan(-1);
+    expect(actionAfterSaveIndex).toBeGreaterThan(saveIndex);
+  });
+
+  it('uses a no-argument wrapper for both restart-to-update buttons', () => {
+    expect(appSource).toContain('const handleInstallUpdateRequest = useCallback(async () => {');
+    expect(appSource).toContain('await handleApplicationQuitRequest(handleInstallFromProgress);');
+    expect(appSource.match(/void handleInstallUpdateRequest\(\);/g)).toHaveLength(2);
+    expect(appSource).not.toContain('onClick={handleInstallFromProgress}');
+    expect(appSource).not.toContain('handleApplicationQuitRequest(handleInstallFromProgress(');
+  });
+});
