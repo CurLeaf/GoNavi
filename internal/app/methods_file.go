@@ -2430,11 +2430,12 @@ func (a *App) ApplyChanges(config connection.ConnectionConfig, dbName, tableName
 	}
 
 	if applier, ok := dbInst.(db.BatchApplier); ok {
+		preview := buildChangePreview(dbInst, config, tableName, changes)
 		err := applier.ApplyChanges(tableName, changes)
 		if err != nil {
-			return connection.QueryResult{Success: false, Message: err.Error()}
+			return connection.QueryResult{Success: false, Message: err.Error(), Data: preview}
 		}
-		return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.transaction_committed", nil)}
+		return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.transaction_committed", nil), Data: preview}
 	}
 
 	return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.batch_commit_unsupported", nil)}
@@ -2445,6 +2446,18 @@ type ChangePreview struct {
 	Deletes []string `json:"deletes"`
 	Updates []string `json:"updates"`
 	Inserts []string `json:"inserts"`
+}
+
+func buildChangePreview(dbInst db.Database, config connection.ConnectionConfig, tableName string, changes connection.ChangeSet) ChangePreview {
+	if previewer, ok := dbInst.(db.ChangePreviewer); ok {
+		deletes, updates, inserts := previewer.PreviewChanges(tableName, changes)
+		return ChangePreview{Deletes: deletes, Updates: updates, Inserts: inserts}
+	}
+
+	dbType := resolveDDLDBType(config)
+	quoter := func(s string) string { return quoteIdentByType(dbType, s) }
+	deletes, updates, inserts := db.GenerateChangePreview(tableName, changes, quoter)
+	return ChangePreview{Deletes: deletes, Updates: updates, Inserts: inserts}
 }
 
 func (a *App) PreviewChanges(config connection.ConnectionConfig, dbName, tableName string, changes connection.ChangeSet) connection.QueryResult {
@@ -2458,19 +2471,7 @@ func (a *App) PreviewChanges(config connection.ConnectionConfig, dbName, tableNa
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	var cp ChangePreview
-	// 优先使用驱动的 PreviewChanges（若实现了 ChangePreviewer 接口）
-	if previewer, ok := dbInst.(db.ChangePreviewer); ok {
-		deletes, updates, inserts := previewer.PreviewChanges(tableName, changes)
-		cp = ChangePreview{Deletes: deletes, Updates: updates, Inserts: inserts}
-	} else {
-		// 回退到通用生成，使用 quoteIdentByType 处理标识符转义
-		dbType := resolveDDLDBType(config)
-		quoter := func(s string) string { return quoteIdentByType(dbType, s) }
-		deletes, updates, inserts := db.GenerateChangePreview(tableName, changes, quoter)
-		cp = ChangePreview{Deletes: deletes, Updates: updates, Inserts: inserts}
-	}
-	return connection.QueryResult{Success: true, Data: cp}
+	return connection.QueryResult{Success: true, Data: buildChangePreview(dbInst, config, tableName, changes)}
 }
 
 func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tableName string, format string) connection.QueryResult {

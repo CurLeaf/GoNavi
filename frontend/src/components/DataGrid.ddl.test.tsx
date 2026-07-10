@@ -859,6 +859,7 @@ describe('DataGrid DDL interactions', () => {
         ...options,
       };
     });
+    storeState.addSqlLog.mockReset();
     storeState.addTab.mockReset();
     storeState.setActiveContext.mockReset();
     storeState.tablePinnedLeftColumns = {};
@@ -1827,7 +1828,15 @@ describe('DataGrid DDL interactions', () => {
       commitMode: 'auto',
       autoCommitDelayMs: 3000,
     };
-    backendApp.ApplyChanges.mockResolvedValue({ success: true, message: 'ok' });
+    backendApp.ApplyChanges.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      data: {
+        deletes: [],
+        updates: [],
+        inserts: ["INSERT INTO `users` (`id`, `name`) VALUES (1, 'alpha');"],
+      },
+    });
 
     let renderer: ReactTestRenderer;
     await act(async () => {
@@ -1915,6 +1924,15 @@ describe('DataGrid DDL interactions', () => {
       deletes: [],
       locatorStrategy: 'primary-key',
     });
+    expect(storeState.addSqlLog).toHaveBeenLastCalledWith(expect.objectContaining({
+      sql: [
+        '/* Batch Apply on users */',
+        'START TRANSACTION;',
+        "INSERT INTO `users` (`id`, `name`) VALUES (1, 'alpha');",
+        'COMMIT;',
+      ].join('\n'),
+      status: 'success',
+    }));
     expect(messageApi.success).toHaveBeenCalledWith('自动提交成功');
     renderer!.unmount();
   });

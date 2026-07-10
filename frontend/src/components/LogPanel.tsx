@@ -89,7 +89,7 @@ const LogPanel: React.FC<LogPanelProps> = ({
             title: t('log_panel.column.sql_message'),
             dataIndex: 'sql',
             render: (text: string, record: any) => (
-                <div style={{ fontFamily: 'var(--gn-font-mono)', wordBreak: 'break-all', fontSize: '12px', lineHeight: '1.45' }}>
+                <div style={{ fontFamily: 'var(--gn-font-mono)', wordBreak: 'break-all', whiteSpace: 'pre-wrap', fontSize: '12px', lineHeight: '1.45' }}>
                     <div style={{ color: darkMode ? '#a6e22e' : '#005cc5' }}>{text}</div>
                     {record.message && <div style={{ color: '#ff4d4f', marginTop: 2 }}>{record.message}</div>}
                     {record.affectedRows !== undefined && <div style={{ color: panelMutedTextColor, marginTop: 1 }}>{t('log_panel.affected_rows', { count: record.affectedRows })}</div>}

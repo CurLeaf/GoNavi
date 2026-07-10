@@ -138,6 +138,7 @@ import DataGridShell from './DataGridShell';
 import DataGridModals from './DataGridModals';
 import DataGridLegacyCellContextMenu from './DataGridLegacyCellContextMenu';
 import DataGridPreviewPanel from './DataGridPreviewPanel';
+import { buildDataGridTransactionLog } from './dataGridTransactionLog';
 import {
     DEFAULT_DATA_EXPORT_FORMAT,
     DEFAULT_XLSX_ROWS_PER_SHEET,
@@ -3050,11 +3051,12 @@ const DataGrid: React.FC<DataGridProps> = ({
       const res = await ApplyChanges(buildRpcConnectionConfig(config) as any, dbName || '', tableName, { inserts, updates, deletes, locatorStrategy: effectiveEditLocator?.strategy } as any);
       const duration = Date.now() - startTime;
       
-      // Construct a pseudo-SQL representation for the log
-      let logSql = `/* Batch Apply on ${tableName} */\n`;
-      if (inserts.length > 0) logSql += `INSERT ${inserts.length} rows;\n`;
-      if (updates.length > 0) logSql += `UPDATE ${updates.length} rows;\n`;
-      if (deletes.length > 0) logSql += `DELETE ${deletes.length} rows;\n`;
+      const logSql = buildDataGridTransactionLog({
+          dbType,
+          tableName,
+          preview: res.data,
+          committed: res.success,
+      });
       
       if (res.success) {
           autoCommitFailedTokenRef.current = -1;
@@ -3107,6 +3109,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       normalizeCommitCellValue,
       shouldCommitColumn,
       dbName,
+      dbType,
       addSqlLog,
       onReload,
       translateDataGrid,
