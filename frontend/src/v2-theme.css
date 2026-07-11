@@ -1754,7 +1754,7 @@ body[data-ui-version="v2"] .gonavi-v2-brand-chip {
   width: 24px; height: 24px;
   border-radius: 7px;
   background: linear-gradient(135deg, var(--gn-accent) 0%, var(--gn-accent-2) 100%);
-  color: #fff;
+  color: var(--gn-on-accent, #fff);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1916,7 +1916,7 @@ body[data-ui-version="v2"] .gn-v2-rail-group-count {
   padding: 0 calc(4px * var(--gn-v2-rail-scale));
   border: 2px solid var(--gn-bg-panel-2);
   background: var(--gn-accent);
-  color: #fff;
+  color: var(--gn-on-accent, #fff);
   font-family: var(--gn-font-mono);
   font-size: calc(9px * var(--gn-v2-rail-scale));
   font-weight: 800;
@@ -2073,7 +2073,7 @@ body[data-ui-version="v2"] .gn-v2-rail-status {
 }
 
 body[data-ui-version="v2"] .gn-v2-rail-status.is-live {
-  background: #22c55e;
+  background: var(--gn-accent);
 }
 
 body[data-ui-version="v2"] .gn-v2-rail-status.is-error {
@@ -3047,7 +3047,7 @@ body[data-ui-version="v2"] .gn-v2-table-pin-action:hover {
 }
 
 body[data-ui-version="v2"] .gn-v2-table-pin-action.is-pinned {
-  color: #f59e0b;
+  color: var(--gn-warn);
   opacity: 1;
 }
 
@@ -3353,7 +3353,7 @@ body[data-ui-version="v2"] .gn-v2-titlebar-brand {
   height: 18px;
   border-radius: 5px;
   background: linear-gradient(135deg, var(--gn-accent) 0%, var(--gn-accent-2) 100%);
-  color: #fff;
+  color: var(--gn-on-accent, #fff);
   display: inline-flex;
   align-items: center;
   justify-content: center;

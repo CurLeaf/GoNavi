@@ -28,13 +28,19 @@ import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModa
 import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModal';
 import LanguageSettingsPanel from './components/LanguageSettingsPanel';
 import WebAuthSettingsPanel from './components/WebAuthSettingsPanel';
+import CustomThemeManager from './components/settings/CustomThemeManager';
+import CustomThemeStyleHost, {
+  type CustomThemeAntTokenSnapshot,
+} from './components/theme/CustomThemeStyleHost';
 import {
   DEFAULT_APPEARANCE,
   MAX_V2_SIDEBAR_RAIL_SCALE,
   MIN_V2_SIDEBAR_RAIL_SCALE,
   sanitizeV2SidebarRailScale,
+  type ThemePreference,
   useStore,
 } from './store';
+import { useCustomThemeStore } from './customThemeStore';
 import { GlobalProxyConfig, SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isMacLikePlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
 import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, getLinuxCJKFontInstallHint, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
@@ -66,6 +72,10 @@ import {
   normalizeConnectionPackagePassword,
 } from './utils/connectionExport';
 import { downloadBrowserTextFile } from './utils/browserFileTransfer';
+import {
+  extractCustomThemeAntTokens,
+} from './utils/customTheme';
+import { resolveAvailableCustomTheme } from './utils/customThemePresets';
 import {
   mergeRedisDbAliases,
   sanitizeRedisDbAliases,
@@ -634,6 +644,9 @@ function App() {
   const themePreference = useStore(state => state.themePreference);
   const setTheme = useStore(state => state.setTheme);
   const setThemePreference = useStore(state => state.setThemePreference);
+  const customThemes = useCustomThemeStore(state => state.themes);
+  const activeCustomThemeId = useCustomThemeStore(state => state.activeThemeId);
+  const selectCustomTheme = useCustomThemeStore(state => state.selectCustomTheme);
   const appearance = useStore(state => state.appearance);
   const setAppearance = useStore(state => state.setAppearance);
   const uiScale = useStore(state => state.uiScale);
@@ -652,7 +665,27 @@ function App() {
   const updateShortcut = useStore(state => state.updateShortcut);
   const resetShortcutOptions = useStore(state => state.resetShortcutOptions);
   const [systemThemeMode, setSystemThemeMode] = useState<'light' | 'dark'>(() => getSystemThemeMode());
-  const darkMode = themeMode === 'dark';
+  const activeCustomTheme = useMemo(
+      () => resolveAvailableCustomTheme(customThemes, activeCustomThemeId),
+      [activeCustomThemeId, customThemes],
+  );
+  const effectiveThemePreference = activeCustomTheme?.baseMode ?? themePreference;
+  const resolvedThemeMode = effectiveThemePreference === 'system'
+      ? systemThemeMode
+      : effectiveThemePreference;
+  const darkMode = resolvedThemeMode === 'dark';
+  const sourceCustomThemeAntTokens = useMemo(
+      () => activeCustomTheme ? extractCustomThemeAntTokens(activeCustomTheme.css) : {},
+      [activeCustomTheme],
+  );
+  const [computedCustomThemeAntTokens, setComputedCustomThemeAntTokens] = useState<CustomThemeAntTokenSnapshot | null>(null);
+  const customThemeStyleContextKey = `${resolvedThemeMode}:${appearance.uiVersion}`;
+  const customThemeAntTokens = activeCustomTheme
+      && computedCustomThemeAntTokens?.themeId === activeCustomTheme.id
+      && computedCustomThemeAntTokens.themeRevision === activeCustomTheme.updatedAt
+      && computedCustomThemeAntTokens.contextKey === customThemeStyleContextKey
+      ? computedCustomThemeAntTokens.tokens
+      : sourceCustomThemeAntTokens;
   const isV2Ui = appearance.uiVersion === 'v2';
   const effectiveUiScale = Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, Number(uiScale) || DEFAULT_UI_SCALE));
   const effectiveFontSize = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(Number(fontSize) || DEFAULT_FONT_SIZE)));
@@ -740,20 +773,28 @@ function App() {
       };
   }, []);
   useEffect(() => {
-      const resolvedTheme = themePreference === 'system' ? systemThemeMode : themePreference;
-      if (themeMode !== resolvedTheme) {
-          setTheme(resolvedTheme);
+      if (themeMode !== resolvedThemeMode) {
+          setTheme(resolvedThemeMode);
       }
-      if (themePreference === 'system') {
+      if (effectiveThemePreference === 'system') {
           void safeWindowRuntimeCall(() => WindowSetSystemDefaultTheme(), undefined);
           return;
       }
-      if (resolvedTheme === 'dark') {
+      if (resolvedThemeMode === 'dark') {
           void safeWindowRuntimeCall(() => WindowSetDarkTheme(), undefined);
           return;
       }
       void safeWindowRuntimeCall(() => WindowSetLightTheme(), undefined);
-  }, [setTheme, systemThemeMode, themeMode, themePreference]);
+  }, [effectiveThemePreference, resolvedThemeMode, setTheme, themeMode]);
+  const selectPresetTheme = useCallback((preference: ThemePreference) => {
+      // Custom CSS is an independent skin layer. Selecting a built-in preset
+      // first disables that layer, then preserves the existing 3-mode contract.
+      if (activeCustomTheme) {
+          const result = selectCustomTheme(null);
+          if (!result.ok) message.warning(t('app.theme.custom.error.storage_failed'));
+      }
+      setThemePreference(preference);
+  }, [activeCustomTheme, selectCustomTheme, setThemePreference, t]);
   const setTabDisplaySettings = useCallback((settings: Partial<TabDisplaySettings>) => {
       setAppearance({
           tabDisplay: applyTabDisplaySettingsPatch(tabDisplaySettings, settings),
@@ -3615,6 +3656,7 @@ function App() {
   useEffect(() => {
     document.body.style.backgroundColor = 'transparent';
     document.body.style.color = darkMode ? '#ffffff' : '#000000';
+    document.documentElement.style.colorScheme = darkMode ? 'dark' : 'light';
     document.body.setAttribute('data-theme', darkMode ? 'dark' : 'light');
     document.body.setAttribute('data-ui-version', appearance.uiVersion);
     document.body.setAttribute('data-platform', runtimePlatform || '');
@@ -3768,7 +3810,7 @@ function App() {
                   handleToggleLogPanel();
                   break;
               case 'toggleTheme':
-                  setThemePreference(themeMode === 'dark' ? 'light' : 'dark');
+                  selectPresetTheme(themeMode === 'dark' ? 'light' : 'dark');
                   break;
               case 'openShortcutManager':
                   setIsShortcutModalOpen(true);
@@ -3788,7 +3830,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleGlobalShortcut, true);
       };
-  }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, shortcutOptions, switchActiveTabByOffset, themeMode, setThemePreference, toggleAIPanel, useNativeMacWindowControls]);
+  }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, selectPresetTheme, shortcutOptions, switchActiveTabByOffset, themeMode, toggleAIPanel, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!capturingShortcutAction) {
@@ -3870,16 +3912,25 @@ function App() {
   const resizeGuideColor = isV2Ui
       ? 'var(--gn-accent, #16a34a)'
       : (darkMode ? 'rgba(246, 196, 83, 0.55)' : 'rgba(24, 144, 255, 0.5)');
-  const v2AntPrimaryColor = darkMode ? '#22c55e' : '#16a34a';
-  const v2AntPrimaryHoverColor = darkMode ? '#4ade80' : '#15803d';
-  const v2AntPrimaryActiveColor = darkMode ? '#16a34a' : '#166534';
-  const v2AntPrimaryBgColor = darkMode ? 'rgba(34, 197, 94, 0.20)' : '#dcfce7';
-  const v2AntPrimaryBgHoverColor = darkMode ? 'rgba(34, 197, 94, 0.28)' : '#bbf7d0';
-  const v2AntPrimaryBorderColor = darkMode ? 'rgba(34, 197, 94, 0.42)' : '#86efac';
-  const v2AntPrimaryBorderHoverColor = darkMode ? 'rgba(74, 222, 128, 0.58)' : '#4ade80';
-  const v2AntControlActiveBg = darkMode ? 'rgba(34, 197, 94, 0.16)' : 'rgba(34, 197, 94, 0.10)';
-  const v2AntControlActiveHoverBg = darkMode ? 'rgba(34, 197, 94, 0.24)' : 'rgba(34, 197, 94, 0.16)';
-  const v2AntControlOutline = darkMode ? 'rgba(34, 197, 94, 0.42)' : 'rgba(22, 163, 74, 0.22)';
+  const v2AntPrimaryColor = customThemeAntTokens.primary ?? (darkMode ? '#22c55e' : '#16a34a');
+  const v2AntPrimaryContrastColor = customThemeAntTokens.primaryContrast ?? '#ffffff';
+  const v2AntPrimaryHoverColor = customThemeAntTokens.primaryHover ?? (darkMode ? '#4ade80' : '#15803d');
+  const v2AntPrimaryActiveColor = customThemeAntTokens.primaryActive ?? (darkMode ? '#16a34a' : '#166534');
+  const v2AntPrimaryBgColor = customThemeAntTokens.primaryBg ?? (darkMode ? 'rgba(34, 197, 94, 0.20)' : '#dcfce7');
+  const v2AntPrimaryBgHoverColor = customThemeAntTokens.primaryBgHover ?? (darkMode ? 'rgba(34, 197, 94, 0.28)' : '#bbf7d0');
+  const v2AntPrimaryBorderColor = customThemeAntTokens.primaryBorder ?? (darkMode ? 'rgba(34, 197, 94, 0.42)' : '#86efac');
+  const v2AntPrimaryBorderHoverColor = customThemeAntTokens.primaryBorderHover ?? (darkMode ? 'rgba(74, 222, 128, 0.58)' : '#4ade80');
+  const v2AntControlActiveBg = customThemeAntTokens.controlActiveBg ?? (darkMode ? 'rgba(34, 197, 94, 0.16)' : 'rgba(34, 197, 94, 0.10)');
+  const v2AntControlActiveHoverBg = customThemeAntTokens.controlActiveHoverBg ?? (darkMode ? 'rgba(34, 197, 94, 0.24)' : 'rgba(34, 197, 94, 0.16)');
+  const v2AntControlOutline = customThemeAntTokens.controlOutline ?? (darkMode ? 'rgba(34, 197, 94, 0.42)' : 'rgba(22, 163, 74, 0.22)');
+  const v2AntBgContainer = customThemeAntTokens.bgContainer;
+  const v2AntBgElevated = customThemeAntTokens.bgElevated;
+  const v2AntFillAlter = customThemeAntTokens.fillAlter;
+  const v2AntTextPrimary = customThemeAntTokens.textPrimary;
+  const v2AntTextSecondary = customThemeAntTokens.textSecondary;
+  const v2AntBorder = customThemeAntTokens.border;
+  const v2AntRowHoverBg = customThemeAntTokens.rowHoverBg;
+  const v2AntInfoColor = customThemeAntTokens.info ?? v2AntPrimaryColor;
   const antdTheme = useMemo(() => ({
       algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
       token: {
@@ -3892,19 +3943,26 @@ function App() {
           controlHeightSM: tokenControlHeightSM,
           controlHeightLG: tokenControlHeightLG,
           colorBgLayout: 'transparent',
-          colorBgContainer: darkMode
+          colorBgContainer: (isV2Ui ? v2AntBgContainer : undefined) ?? (darkMode
               ? `rgba(29, 29, 29, ${effectiveOpacity})`
-              : `rgba(255, 255, 255, ${effectiveOpacity})`,
-          colorBgElevated: darkMode
+              : `rgba(255, 255, 255, ${effectiveOpacity})`),
+          colorBgElevated: (isV2Ui ? v2AntBgElevated : undefined) ?? (darkMode
               ? '#1f1f1f'
-              : '#ffffff',
-          colorFillAlter: darkMode
+              : '#ffffff'),
+          colorFillAlter: (isV2Ui ? v2AntFillAlter : undefined) ?? (darkMode
               ? `rgba(38, 38, 38, ${effectiveOpacity})`
-              : `rgba(250, 250, 250, ${effectiveOpacity})`,
+              : `rgba(250, 250, 250, ${effectiveOpacity})`),
+          ...(isV2Ui && v2AntTextPrimary ? { colorText: v2AntTextPrimary } : {}),
+          ...(isV2Ui && v2AntTextSecondary ? { colorTextSecondary: v2AntTextSecondary } : {}),
+          ...(isV2Ui && v2AntBorder ? {
+              colorBorder: v2AntBorder,
+              colorBorderSecondary: v2AntBorder,
+          } : {}),
           colorPrimary: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#f6c453' : '#1677ff'),
+          colorTextLightSolid: isV2Ui ? v2AntPrimaryContrastColor : '#ffffff',
           colorPrimaryHover: isV2Ui ? v2AntPrimaryHoverColor : (darkMode ? '#ffd666' : '#4096ff'),
           colorPrimaryActive: isV2Ui ? v2AntPrimaryActiveColor : (darkMode ? '#d8a93b' : '#0958d9'),
-          colorInfo: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#f6c453' : '#1677ff'),
+          colorInfo: isV2Ui ? v2AntInfoColor : (darkMode ? '#f6c453' : '#1677ff'),
           colorLink: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'),
           colorLinkHover: isV2Ui ? v2AntPrimaryHoverColor : (darkMode ? '#ffe58f' : '#4096ff'),
           colorLinkActive: isV2Ui ? v2AntPrimaryActiveColor : (darkMode ? '#d8a93b' : '#0958d9'),
@@ -3925,7 +3983,8 @@ function App() {
           },
           Table: {
               headerBg: 'transparent',
-              rowHoverBg: darkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.02)',
+              rowHoverBg: (isV2Ui ? v2AntRowHoverBg : undefined)
+                  ?? (darkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.02)'),
           },
           Tabs: {
               cardBg: 'transparent',
@@ -3939,16 +3998,25 @@ function App() {
       darkMode,
       effectiveOpacity,
       isV2Ui,
+      v2AntBgContainer,
+      v2AntBgElevated,
+      v2AntBorder,
       v2AntControlActiveBg,
       v2AntControlActiveHoverBg,
       v2AntControlOutline,
+      v2AntFillAlter,
+      v2AntInfoColor,
       v2AntPrimaryActiveColor,
       v2AntPrimaryBgColor,
       v2AntPrimaryBgHoverColor,
       v2AntPrimaryBorderColor,
       v2AntPrimaryBorderHoverColor,
       v2AntPrimaryColor,
+      v2AntPrimaryContrastColor,
       v2AntPrimaryHoverColor,
+      v2AntRowHoverBg,
+      v2AntTextPrimary,
+      v2AntTextSecondary,
       tokenControlHeight,
       tokenControlHeightLG,
       tokenControlHeightSM,
@@ -4831,7 +4899,7 @@ function App() {
                                           { key: 'dark' as const, label: t('app.theme.mode.dark.label'), preview: 'dark' as const },
                                           { key: 'system' as const, label: t('app.theme.mode.system.label'), preview: 'system' as const },
                                       ]).map((item) => {
-                                          const active = themePreference === item.key;
+                                          const active = !activeCustomTheme && themePreference === item.key;
                                           return (
                                               <button
                                                   key={item.key}
@@ -4839,7 +4907,7 @@ function App() {
                                                   role="radio"
                                                   aria-checked={active}
                                                   className={`gonavi-settings-mode-tile${active ? ' is-active' : ''}`}
-                                                  onClick={() => setThemePreference(item.key)}
+                                                  onClick={() => selectPresetTheme(item.key)}
                                               >
                                                   {renderThemeModePreview(item.preview)}
                                                   <div className="gonavi-settings-mode-meta">
@@ -4850,6 +4918,10 @@ function App() {
                                           );
                                       })}
                                   </div>,
+                              )}
+                              {renderThemeSettingsSection(
+                                  t('app.theme.custom.title'),
+                                  <CustomThemeManager />,
                               )}
                               {renderThemeSettingsSection(
                                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -5684,12 +5756,12 @@ function App() {
                                           { key: 'dark', label: t('app.theme.mode.dark.label'), description: t('app.theme.mode.dark.description') },
                                           { key: 'system', label: t('app.theme.mode.system.label'), description: t('app.theme.mode.system.description') },
                                       ].map((item) => {
-                                          const active = themePreference === item.key;
+                                          const active = !activeCustomTheme && themePreference === item.key;
                                           return (
                                               <button
                                                   key={item.key}
                                                   type="button"
-                                                  onClick={() => setThemePreference(item.key as 'light' | 'dark' | 'system')}
+                                                  onClick={() => selectPresetTheme(item.key as ThemePreference)}
                                                   style={{
                                                       textAlign: 'left',
                                                       padding: '14px 14px',
@@ -5719,6 +5791,10 @@ function App() {
                                           );
                                       })}
                                   </div>
+                              </div>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 8, fontWeight: 600 }}>{t('app.theme.custom.title')}</div>
+                                  <CustomThemeManager legacyMode />
                               </div>
                           </div>
                       ) : (
@@ -6462,6 +6538,10 @@ function App() {
         componentSize={appComponentSize}
         theme={antdTheme}
     >
+        <CustomThemeStyleHost
+            contextKey={customThemeStyleContextKey}
+            onAntTokensChange={setComputedCustomThemeAntTokens}
+        />
         <Layout style={{
             height: '100vh',
             overflow: 'hidden',

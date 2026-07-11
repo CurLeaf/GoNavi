@@ -261,13 +261,17 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain("darkMode ? 'rgba(246, 196, 83, 0.55)' : 'rgba(24, 144, 255, 0.5)'");
   });
 
-  it('keeps tool center and settings v2 accents on the green palette instead of legacy yellow or blue tokens', () => {
-    expect(appSource).toContain("const v2AntPrimaryColor = darkMode ? '#22c55e' : '#16a34a';");
+  it('keeps the green v2 accent as fallback while allowing custom CSS tokens to override it', () => {
+    expect(appSource).toContain("const v2AntPrimaryColor = customThemeAntTokens.primary ?? (darkMode ? '#22c55e' : '#16a34a');");
+    expect(appSource).toContain("const v2AntPrimaryContrastColor = customThemeAntTokens.primaryContrast ?? '#ffffff';");
+    expect(appSource).toContain('extractCustomThemeAntTokens(activeCustomTheme.css)');
+    expect(appSource).toContain('resolveAvailableCustomTheme(customThemes, activeCustomThemeId)');
+    expect(appSource).toContain('colorTextLightSolid: isV2Ui ? v2AntPrimaryContrastColor');
     expect(appSource).toContain("colorPrimary: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#f6c453' : '#1677ff')");
-    expect(appSource).toContain("background: active\n                                  ? overlayTheme.selectedBg");
-    expect(appSource).toContain("background: active\n                                    ? overlayTheme.selectedText");
-    expect(appSource).toContain("background: active\n                                        ? overlayTheme.iconBg");
-    expect(appSource).toContain("color: active\n                                        ? overlayTheme.iconColor");
+    expect(appSource).toMatch(/background:\s*active\s*\?\s*overlayTheme\.selectedBg/);
+    expect(appSource).toMatch(/background:\s*active\s*\?\s*overlayTheme\.selectedText/);
+    expect(appSource).toMatch(/background:\s*active\s*\?\s*overlayTheme\.iconBg/);
+    expect(appSource).toMatch(/color:\s*active\s*\?\s*overlayTheme\.iconColor/);
     expect(appSource).toContain("background: isV2Ui ? v2AntPrimaryBgColor : (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.10)')");
     expect(appSource).toContain("color: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff')");
   });
@@ -368,7 +372,7 @@ describe('tool center menu entries', () => {
       ['newConnection', 'handleCreateConnection();'],
       ['toggleAIPanel', 'toggleAIPanel();'],
       ['toggleLogPanel', 'handleToggleLogPanel();'],
-      ['toggleTheme', 'setThemePreference('],
+      ['toggleTheme', 'selectPresetTheme('],
       ['openShortcutManager', 'setIsShortcutModalOpen(true);'],
       ['toggleMacFullscreen', 'handleTitleBarWindowToggle({ allowMacNativeFullscreen: true });'],
       ['resetWindowZoom', 'handleManualResetWindowZoom();'],

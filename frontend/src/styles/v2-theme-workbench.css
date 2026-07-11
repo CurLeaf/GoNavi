@@ -790,7 +790,7 @@ body[data-ui-version="v2"] .gn-v2-table-overview-icon {
   align-items: center;
   justify-content: center;
   border-radius: 7px;
-  color: #fff;
+  color: var(--gn-on-accent, #fff);
   background: linear-gradient(135deg, var(--gn-accent) 0%, var(--gn-accent-2) 100%);
   box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.3);
 }
@@ -1371,7 +1371,7 @@ body[data-ui-version="v2"] .gn-v2-ai-context-toggle strong {
   padding: 0 4px;
   border-radius: 4px;
   background: var(--gn-info);
-  color: #fff;
+  color: var(--gn-on-info, #fff);
   font-family: var(--gn-font-mono);
   font-size: 10px;
 }
@@ -1785,7 +1785,7 @@ body[data-ui-version="v2"] .gn-v2-ai-panel .ai-chat-send-btn {
   border: 0.5px solid var(--gn-info) !important;
   background: var(--gn-info) !important;
   background-color: var(--gn-info) !important;
-  color: #fff !important;
+  color: var(--gn-on-info, #fff) !important;
   opacity: 1 !important;
   cursor: pointer;
 }

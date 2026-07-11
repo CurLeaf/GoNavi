@@ -16,12 +16,15 @@ describe('UI version switch placement', () => {
   it('keeps light/dark first with compact previews and UI version preview tiles', () => {
     const themeBranchIndex = appSource.indexOf("{themeModalSection === 'theme' ? (");
     const lightThemeIndex = appSource.indexOf("t('app.theme.mode.light.label')", themeBranchIndex);
+    const customThemeIndex = appSource.indexOf("t('app.theme.custom.title')", lightThemeIndex);
     const uiVersionIndex = appSource.indexOf("t('app.theme.ui_version.title')", themeBranchIndex);
     const appearanceBranchIndex = appSource.indexOf(") : themeModalSection === 'appearance' ? (", themeBranchIndex);
     const macWindowIndex = appSource.indexOf("t('app.theme.mac_window.title')");
 
     expect(themeBranchIndex).toBeGreaterThan(-1);
     expect(lightThemeIndex).toBeGreaterThan(themeBranchIndex);
+    expect(customThemeIndex).toBeGreaterThan(lightThemeIndex);
+    expect(customThemeIndex).toBeLessThan(uiVersionIndex);
     expect(uiVersionIndex).toBeGreaterThan(lightThemeIndex);
     expect(uiVersionIndex).toBeLessThan(appearanceBranchIndex);
     expect(macWindowIndex).toBeGreaterThan(uiVersionIndex);
@@ -50,6 +53,8 @@ describe('UI version switch placement', () => {
     expect(appSource).toContain('gonavi-settings-tabs');
     expect(appSource).toContain('gonavi-settings-tab');
     expect(appSource).toContain('gonavi-settings-pill');
+    expect(appSource).toContain('<CustomThemeManager />');
+    expect(appSource).toContain('<CustomThemeManager legacyMode />');
     // 旧版布局仍保留侧栏导航
     expect(appSource).toContain("gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0'");
   });

@@ -89,9 +89,22 @@ describe('settings center layout', () => {
     expect(appSource).toContain("gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0'");
     expect(appSource).toContain('className="gonavi-theme-settings"');
     expect(appSource).toContain('ThemeSettingsSlider');
+    expect(appSource).toContain("t('app.theme.custom.title')");
+    expect(appSource).toContain('<CustomThemeManager />');
+    expect(appSource).toContain('<CustomThemeManager legacyMode />');
     expect(appSource).toContain("value: 'workspace'");
     expect(appSource).toContain('gonavi-settings-tabs');
     expect(appSource).toContain('setThemeModalSection(item.value)');
+  });
+
+  it('resolves custom-theme base mode synchronously and bridges its surfaces into Ant Design', () => {
+    expect(appSource).toContain("const resolvedThemeMode = effectiveThemePreference === 'system'");
+    expect(appSource).toContain("const darkMode = resolvedThemeMode === 'dark';");
+    expect(appSource).toContain('const customThemeStyleContextKey = `${resolvedThemeMode}:${appearance.uiVersion}`;');
+    expect(appSource).toContain('colorBgContainer: (isV2Ui ? v2AntBgContainer : undefined)');
+    expect(appSource).toContain('colorBgElevated: (isV2Ui ? v2AntBgElevated : undefined)');
+    expect(appSource).toContain('colorTextSecondary: v2AntTextSecondary');
+    expect(appSource).toContain('rowHoverBg: (isV2Ui ? v2AntRowHoverBg : undefined)');
   });
 
   it('opens theme, AI, and about entries inside settings center detail panes', () => {
