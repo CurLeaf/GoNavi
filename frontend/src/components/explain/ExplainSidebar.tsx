@@ -1,18 +1,17 @@
-import { useMemo } from 'react'
+import { useId, useMemo } from 'react'
+import { CopyOutlined } from '@ant-design/icons'
+import { Button, Tooltip, message } from 'antd'
 import {
   type ExplainNode,
   type ExplainStats,
   type IndexSuggestion,
-  severityColor,
   severityRank,
   formatNumber,
   formatPercent,
   formatMs,
 } from '../../utils/explainTypes'
 import { useI18n } from '../../i18n/provider'
-
-// 诊断侧栏：节点详情 + 统计条 + 索引建议列表的合集组件。
-// 拆分为一个文件减少模块碎片化（plan 原拆 3 个文件）。
+import './ExplainAnalysis.css'
 
 interface ExplainSidebarProps {
   stats: ExplainStats
@@ -22,25 +21,27 @@ interface ExplainSidebarProps {
   onSelectSuggestion?: (suggestion: IndexSuggestion) => void
 }
 
+type Translate = (key: string) => string
+
 export default function ExplainSidebar(props: ExplainSidebarProps) {
   const { stats, warnings, suggestions, selectedNode, onSelectSuggestion } = props
   const sortedSuggestions = useMemo(
     () =>
-      [...suggestions].sort((a, b) => {
-        const ra = severityRank[a.severity] ?? 99
-        const rb = severityRank[b.severity] ?? 99
-        if (ra !== rb) return ra - rb
-        return (b.estRows ?? 0) - (a.estRows ?? 0)
+      [...suggestions].sort((left, right) => {
+        const leftRank = severityRank[left.severity] ?? 99
+        const rightRank = severityRank[right.severity] ?? 99
+        if (leftRank !== rightRank) return leftRank - rightRank
+        return (right.estRows ?? 0) - (left.estRows ?? 0)
       }),
     [suggestions],
   )
 
   return (
-    <div className="gn-explain-sidebar" style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 12 }}>
+    <aside className="gn-explain-sidebar">
       <ExplainStatsBar stats={stats} warnings={warnings} />
       {selectedNode && <ExplainNodeDetail node={selectedNode} />}
       <IndexSuggestionList suggestions={sortedSuggestions} onSelect={onSelectSuggestion} />
-    </div>
+    </aside>
   )
 }
 
@@ -51,100 +52,134 @@ function ExplainStatsBar({
   stats: ExplainStats
   warnings?: string[]
 }) {
-  const { t } = useI18n()
+  const { language, t } = useI18n()
+  const titleId = useId()
   const statsList = [
-    { label: t('sql_analysis.sidebar.stats.total_cost'), value: stats.totalCost ? stats.totalCost.toFixed(1) : '-' },
-    { label: t('sql_analysis.sidebar.stats.total_duration'), value: formatMs(stats.totalDurationMs) },
-    { label: t('sql_analysis.sidebar.stats.rows_read'), value: formatNumber(stats.rowsRead) },
-    { label: t('sql_analysis.sidebar.stats.buffer_hit'), value: formatPercent(stats.bufferHitRate) },
-    { label: t('sql_analysis.sidebar.stats.max_est_rows'), value: formatNumber(stats.maxEstRows) },
+    {
+      label: t('sql_analysis.sidebar.stats.total_cost'),
+      value: hasMetricValue(stats.totalCost) ? stats.totalCost.toFixed(1) : '-',
+    },
+    {
+      label: t('sql_analysis.sidebar.stats.total_duration'),
+      value: formatMs(stats.totalDurationMs, language),
+    },
+    {
+      label: t('sql_analysis.sidebar.stats.rows_read'),
+      value: formatNumber(stats.rowsRead, language),
+    },
+    {
+      label: t('sql_analysis.sidebar.stats.buffer_hit'),
+      value: formatPercent(stats.bufferHitRate, language),
+    },
+    {
+      label: t('sql_analysis.sidebar.stats.max_est_rows'),
+      value: formatNumber(stats.maxEstRows, language),
+    },
   ]
+
   return (
-    <div
-      style={{
-        background: 'var(--gn-card-bg, #f8f9fa)',
-        border: '1px solid var(--gn-border, #dee2e6)',
-        borderRadius: 6,
-        padding: 10,
-      }}
-    >
-      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>{t('sql_analysis.sidebar.stats.title')}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px', fontSize: 12 }}>
-        {statsList.map((s) => (
-          <div key={s.label} style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: 'var(--gn-text-muted, #6c757d)' }}>{s.label}</span>
-            <strong>{s.value}</strong>
+    <section className="gn-explain-card" aria-labelledby={titleId}>
+      <h3 id={titleId} className="gn-explain-card__title">
+        {t('sql_analysis.sidebar.stats.title')}
+      </h3>
+      <dl className="gn-explain-stats">
+        {statsList.map((stat) => (
+          <div key={stat.label} className="gn-explain-stats__item">
+            <dt>{stat.label}</dt>
+            <dd>{stat.value}</dd>
           </div>
         ))}
-      </div>
-      {stats.hasFullScan && <WarningRow color="#fa5252" text={t('sql_analysis.sidebar.warning.full_scan')} />}
-      {stats.hasFilesort && <WarningRow color="#f08c00" text={t('sql_analysis.sidebar.warning.filesort')} />}
-      {stats.hasTempTable && <WarningRow color="#7048e8" text={t('sql_analysis.sidebar.warning.temp_table')} />}
-      {warnings && warnings.length > 0 && (
-        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--gn-text-muted, #6c757d)' }}>
-          {warnings.map((w, i) => (
-            <div key={i}>⚠ {w}</div>
-          ))}
-        </div>
+      </dl>
+      {stats.hasFullScan && (
+        <WarningRow tone="danger" text={t('sql_analysis.sidebar.warning.full_scan')} />
       )}
-    </div>
+      {stats.hasFilesort && (
+        <WarningRow tone="warning" text={t('sql_analysis.sidebar.warning.filesort')} />
+      )}
+      {stats.hasTempTable && (
+        <WarningRow tone="info" text={t('sql_analysis.sidebar.warning.temp_table')} />
+      )}
+      {warnings && warnings.length > 0 && (
+        <ul className="gn-explain-warnings">
+          {warnings.map((warning, index) => (
+            <li key={`${warning}-${index}`}>{warning}</li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
-function WarningRow({ color, text }: { color: string; text: string }) {
+function WarningRow({
+  tone,
+  text,
+}: {
+  tone: 'danger' | 'warning' | 'info'
+  text: string
+}) {
   return (
-    <div style={{ marginTop: 6, fontSize: 11, color }}>
-      <span style={{ display: 'inline-block', width: 8, height: 8, background: color, marginRight: 6, borderRadius: 2 }} />
+    <div className={`gn-explain-warning gn-explain-warning--${tone}`}>
+      <span className="gn-explain-warning__dot" aria-hidden="true" />
       {text}
     </div>
   )
 }
 
 function ExplainNodeDetail({ node }: { node: ExplainNode }) {
-  const { t } = useI18n()
+  const { language, t } = useI18n()
+  const titleId = useId()
   const rows: Array<[string, string]> = []
-  rows.push([t('sql_analysis.sidebar.node.op_type'), node.opType])
+  rows.push([t('sql_analysis.sidebar.node.op_type'), formatExplainEnumLabel(node.opType)])
   if (node.opDetail) rows.push([t('sql_analysis.sidebar.node.op_detail'), node.opDetail])
   if (node.table) rows.push([t('sql_analysis.sidebar.node.table'), node.table])
   if (node.index) rows.push([t('sql_analysis.sidebar.node.index'), node.index])
-  if (node.estRows) rows.push([t('sql_analysis.sidebar.node.est_rows'), formatNumber(node.estRows)])
-  if (node.actualRows) rows.push([t('sql_analysis.sidebar.node.actual_rows'), formatNumber(node.actualRows)])
-  if (node.loops) rows.push([t('sql_analysis.sidebar.node.loops'), formatNumber(node.loops)])
-  if (node.cost) rows.push([t('sql_analysis.sidebar.node.cost'), node.cost.toFixed(2)])
-  if (node.durationMs) rows.push([t('sql_analysis.sidebar.node.duration'), formatMs(node.durationMs)])
-  if (node.bufferHit !== undefined && node.bufferHit > 0)
-    rows.push([t('sql_analysis.sidebar.node.buffer_hit'), formatPercent(node.bufferHit)])
-  if (node.flags && node.flags.length > 0) rows.push([t('sql_analysis.sidebar.node.flags'), node.flags.join(', ')])
+  if (hasMetricValue(node.estRows)) {
+    rows.push([t('sql_analysis.sidebar.node.est_rows'), formatNumber(node.estRows, language)])
+  }
+  if (hasMetricValue(node.actualRows)) {
+    rows.push([t('sql_analysis.sidebar.node.actual_rows'), formatNumber(node.actualRows, language)])
+  }
+  if (hasMetricValue(node.loops)) {
+    rows.push([t('sql_analysis.sidebar.node.loops'), formatNumber(node.loops, language)])
+  }
+  if (hasMetricValue(node.cost)) {
+    rows.push([t('sql_analysis.sidebar.node.cost'), node.cost.toFixed(2)])
+  }
+  if (hasMetricValue(node.durationMs)) {
+    rows.push([t('sql_analysis.sidebar.node.duration'), formatMs(node.durationMs, language)])
+  }
+  if (hasMetricValue(node.bufferHit)) {
+    rows.push([t('sql_analysis.sidebar.node.buffer_hit'), formatPercent(node.bufferHit, language)])
+  }
+  if (node.flags && node.flags.length > 0) {
+    rows.push([
+      t('sql_analysis.sidebar.node.flags'),
+      node.flags.map((flag) => localizeExplainFlag(flag, t)).join(', '),
+    ])
+  }
 
   return (
-    <div
-      style={{
-        background: 'var(--gn-card-bg, #f8f9fa)',
-        border: '1px solid var(--gn-border, #dee2e6)',
-        borderRadius: 6,
-        padding: 10,
-      }}
-    >
-      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>{t('sql_analysis.sidebar.node.title')}</div>
-      <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <section className="gn-explain-card" aria-labelledby={titleId}>
+      <h3 id={titleId} className="gn-explain-card__title">
+        {t('sql_analysis.sidebar.node.title')}
+      </h3>
+      <dl className="gn-explain-details">
         {rows.map(([label, value]) => (
-          <div key={label} style={{ display: 'flex', gap: 8 }}>
-            <span style={{ color: 'var(--gn-text-muted, #6c757d)', minWidth: 80 }}>{label}</span>
-            <span style={{ wordBreak: 'break-all' }}>{value}</span>
+          <div key={label} className="gn-explain-details__row">
+            <dt>{label}</dt>
+            <dd title={value}>{value}</dd>
           </div>
         ))}
-      </div>
+      </dl>
       {node.extra && Object.keys(node.extra).length > 0 && (
-        <details style={{ marginTop: 8, fontSize: 11 }}>
-          <summary style={{ cursor: 'pointer', color: 'var(--gn-text-muted, #6c757d)' }}>
+        <details className="gn-explain-extra">
+          <summary>
             {t('sql_analysis.sidebar.node.extra', { count: Object.keys(node.extra).length })}
           </summary>
-          <pre style={{ marginTop: 4, fontSize: 11, maxHeight: 120, overflow: 'auto' }}>
-            {JSON.stringify(node.extra, null, 2)}
-          </pre>
+          <pre>{JSON.stringify(node.extra, null, 2)}</pre>
         </details>
       )}
-    </div>
+    </section>
   )
 }
 
@@ -153,35 +188,31 @@ function IndexSuggestionList({
   onSelect,
 }: {
   suggestions: IndexSuggestion[]
-  onSelect?: (s: IndexSuggestion) => void
+  onSelect?: (suggestion: IndexSuggestion) => void
 }) {
   const { t } = useI18n()
+  const titleId = useId()
   return (
-    <div
-      style={{
-        background: 'var(--gn-card-bg, #f8f9fa)',
-        border: '1px solid var(--gn-border, #dee2e6)',
-        borderRadius: 6,
-        padding: 10,
-        flex: 1,
-        minHeight: 200,
-      }}
-    >
-      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>
+    <section className="gn-explain-card gn-explain-suggestions" aria-labelledby={titleId}>
+      <h3 id={titleId} className="gn-explain-card__title">
         {t('sql_analysis.sidebar.suggestions.title', { count: suggestions.length })}
-      </div>
+      </h3>
       {suggestions.length === 0 ? (
-        <div style={{ fontSize: 12, color: 'var(--gn-text-muted, #6c757d)', padding: '20px 0', textAlign: 'center' }}>
+        <div className="gn-explain-suggestions__empty">
           {t('sql_analysis.sidebar.suggestions.empty')}
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {suggestions.map((s, idx) => (
-            <SuggestionCard key={`${s.rule}-${idx}`} suggestion={s} onSelect={onSelect} />
+        <div className="gn-explain-suggestions__list">
+          {suggestions.map((suggestion, index) => (
+            <SuggestionCard
+              key={`${suggestion.rule}-${suggestion.affectedNodeId ?? ''}-${index}`}
+              suggestion={suggestion}
+              onSelect={onSelect}
+            />
           ))}
         </div>
       )}
-    </div>
+    </section>
   )
 }
 
@@ -190,51 +221,119 @@ function SuggestionCard({
   onSelect,
 }: {
   suggestion: IndexSuggestion
-  onSelect?: (s: IndexSuggestion) => void
+  onSelect?: (suggestion: IndexSuggestion) => void
 }) {
-  const { t } = useI18n()
-  const color = severityColor(suggestion.severity)
+  const { language, t } = useI18n()
+  const toneColor = resolveSuggestionTone(suggestion.severity)
+  const copyLabel = t('data_grid.toolbar.copy')
+
+  const copyIndexSql = async () => {
+    if (!suggestion.suggestedIndex) return
+    try {
+      if (typeof navigator?.clipboard?.writeText !== 'function') {
+        throw new Error(t('query_editor.results_panel.message.copy_unsupported'))
+      }
+      await navigator.clipboard.writeText(suggestion.suggestedIndex)
+      void message.success(t('data_grid.message.copied_to_clipboard'))
+    } catch {
+      void message.error(t('connection_modal.message.copy_failed'))
+    }
+  }
+
   return (
-    <div
-      onClick={() => onSelect?.(suggestion)}
-      style={{
-        borderLeft: `3px solid ${color}`,
-        padding: '6px 8px',
-        background: 'var(--gn-suggestion-bg, #ffffff)',
-        cursor: onSelect ? 'pointer' : 'default',
-        fontSize: 12,
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-        <span style={{ color, fontWeight: 600, textTransform: 'uppercase', fontSize: 10 }}>
-          {suggestion.severity}
+    <article className="gn-explain-suggestion" style={{ borderLeftColor: toneColor }}>
+      <button
+        type="button"
+        className="gn-explain-suggestion__select"
+        disabled={!onSelect}
+        onClick={() => onSelect?.(suggestion)}
+      >
+        <span className="gn-explain-suggestion__heading">
+          <span className="gn-explain-suggestion__severity" style={{ color: toneColor }}>
+            {localizeSuggestionSeverity(suggestion.severity, t)}
+          </span>
+          {hasMetricValue(suggestion.estRows) && (
+            <span className="gn-explain-suggestion__rows">
+              {t('sql_analysis.sidebar.suggestions.rows', {
+                count: formatNumber(suggestion.estRows, language),
+              })}
+            </span>
+          )}
         </span>
-        {suggestion.estRows !== undefined && suggestion.estRows > 0 && (
-          <span style={{ color: 'var(--gn-text-muted, #6c757d)', fontSize: 11 }}>
-            {t('sql_analysis.sidebar.suggestions.rows', { count: formatNumber(suggestion.estRows) })}
+        <span className="gn-explain-suggestion__reason">{suggestion.reason}</span>
+        {suggestion.affectedTable && (
+          <span className="gn-explain-suggestion__table">
+            {t('sql_analysis.sidebar.suggestions.table', { table: '' }).trim()}{' '}
+            <code>{suggestion.affectedTable}</code>
           </span>
         )}
-      </div>
-      <div style={{ marginBottom: 4 }}>{suggestion.reason}</div>
+      </button>
       {suggestion.suggestedIndex && (
-        <code
-          style={{
-            display: 'block',
-            padding: 4,
-            background: 'var(--gn-code-bg, #f1f3f5)',
-            fontSize: 11,
-            borderRadius: 3,
-          }}
-        >
-          {suggestion.suggestedIndex}
-        </code>
-      )}
-      {suggestion.affectedTable && (
-        <div style={{ marginTop: 4, fontSize: 11, color: 'var(--gn-text-muted, #6c757d)' }}>
-          {t('sql_analysis.sidebar.suggestions.table', { table: suggestion.affectedTable }).replace(suggestion.affectedTable, '')}
-          <code>{suggestion.affectedTable}</code>
+        <div className="gn-explain-suggestion__index">
+          <code title={suggestion.suggestedIndex}>{suggestion.suggestedIndex}</code>
+          <Tooltip title={copyLabel}>
+            <Button
+              type="text"
+              size="small"
+              className="gn-explain-suggestion__copy"
+              icon={<CopyOutlined />}
+              aria-label={copyLabel}
+              onClick={() => void copyIndexSql()}
+            />
+          </Tooltip>
         </div>
       )}
-    </div>
+    </article>
   )
+}
+
+export function hasMetricValue(value?: number): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+export function formatExplainEnumLabel(value: string): string {
+  const normalized = String(value || '')
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[_-]+/g, ' ')
+  return normalized ? normalized.charAt(0).toLocaleUpperCase() + normalized.slice(1) : '-'
+}
+
+export function localizeSuggestionSeverity(severity: string, t: Translate): string {
+  switch (severity) {
+    case 'critical':
+      return t('security_update.severity.high')
+    case 'warning':
+      return t('common.warning')
+    case 'info':
+      return t('data_sync.log.level.info')
+    default:
+      return formatExplainEnumLabel(severity)
+  }
+}
+
+export function localizeExplainFlag(flag: string, t: Translate): string {
+  switch (flag) {
+    case 'FULL_SCAN':
+      return t('sql_analysis.explain_graph.flag.full_scan')
+    case 'FILESORT':
+      return t('sql_analysis.explain_graph.flag.filesort')
+    case 'TEMP_TABLE':
+      return t('sql_analysis.explain_graph.flag.temp_table')
+    default:
+      return formatExplainEnumLabel(flag)
+  }
+}
+
+function resolveSuggestionTone(severity: string): string {
+  switch (severity) {
+    case 'critical':
+      return 'var(--gn-danger)'
+    case 'warning':
+      return 'var(--gn-warn)'
+    case 'info':
+      return 'var(--gn-info)'
+    default:
+      return 'var(--gn-fg-3)'
+  }
 }

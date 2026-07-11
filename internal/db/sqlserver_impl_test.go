@@ -3,6 +3,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"os"
@@ -73,6 +74,37 @@ func TestSQLServerRowsAffectedDoesNotHideDMLRowsAffectedErrors(t *testing.T) {
 	)
 	if !errors.Is(err, rowErr) {
 		t.Fatalf("expected rows affected error to propagate for DML, got %v", err)
+	}
+}
+
+func TestSQLServerSessionExecerDiscardEvictsPhysicalConnection(t *testing.T) {
+	dbConn := openConfiguredPoolForTest(t, "sqlserver")
+
+	conn, err := dbConn.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("acquire pinned SQL Server connection: %v", err)
+	}
+	session := &sqlServerSessionExecer{conn: conn}
+	var _ StatementExecerDiscarter = session
+
+	if err := session.Discard(); err != nil {
+		t.Fatalf("discard pinned SQL Server connection: %v", err)
+	}
+	if session.conn != nil {
+		t.Fatal("discard must clear the wrapper connection reference")
+	}
+	if got := poolRecordingCloseCount.Load(); got != 1 {
+		t.Fatalf("discard must close the contaminated physical connection, closed %d", got)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("deferred close after discard must be harmless: %v", err)
+	}
+
+	if err := dbConn.PingContext(context.Background()); err != nil {
+		t.Fatalf("ping after discard: %v", err)
+	}
+	if got := poolRecordingOpenCount.Load(); got != 2 {
+		t.Fatalf("pool must open a fresh physical connection after discard, opened %d", got)
 	}
 }
 

@@ -1245,6 +1245,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       () => connections.filter(c => getDataSourceCapabilities(c.config).supportsQueryEditor),
       [connections]
   );
+  const currentConnectionCapabilities = useMemo(
+      () => getDataSourceCapabilities(
+          connections.find(connection => connection.id === currentConnectionId)?.config,
+      ),
+      [connections, currentConnectionId],
+  );
 
   const addSqlLog = useStore(state => state.addSqlLog);
   const sqlLogCount = useStore(state => state.sqlLogs.length);
@@ -1358,6 +1364,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               message.warning(translate('query_editor.message.connection_not_found'));
               return;
           }
+          if (view === 'diagnose' && !currentConnectionCapabilities.supportsExplainDiagnosis) {
+              message.warning(translate('sql_analysis.slow_query.unsupported_diagnosis' as any));
+              return;
+          }
           const dbName = String(currentDb || tab.dbName || '').trim();
           addTab(buildSqlAnalysisWorkbenchTab({
               connectionId,
@@ -1366,7 +1376,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               view,
           }));
       },
-      [addTab, currentConnectionId, currentDb, tab.dbName],
+      [addTab, currentConnectionCapabilities.supportsExplainDiagnosis, currentConnectionId, currentDb, tab.dbName],
   );
 
   const handleCloseSqlSnippetPicker = useCallback(() => {
@@ -7498,6 +7508,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   )}
               </span>
           ),
+          disabled: !currentConnectionCapabilities.supportsExplainDiagnosis,
           onClick: () => openSqlAnalysisWorkbench('diagnose', getCurrentQuery()),
       },
       {

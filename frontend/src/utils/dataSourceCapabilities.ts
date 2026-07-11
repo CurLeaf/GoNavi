@@ -18,6 +18,9 @@ const normalizeDataSourceToken = (raw: string): string => {
     case 'starrocks':
       return 'starrocks';
     case 'postgresql':
+    case 'pg':
+    case 'pq':
+    case 'pgx':
       return 'postgres';
     case 'opengauss':
     case 'open_gauss':
@@ -27,6 +30,16 @@ const normalizeDataSourceToken = (raw: string): string => {
     case 'gauss_db':
     case 'gauss-db':
       return 'gaussdb';
+    case 'mssql':
+    case 'sql_server':
+    case 'sql-server':
+      return 'sqlserver';
+    case 'sqlite3':
+      return 'sqlite';
+    case 'kingbase8':
+    case 'kingbasees':
+    case 'kingbasev8':
+      return 'kingbase';
     case 'goldendb':
     case 'greatdb':
     case 'gdb':
@@ -150,6 +163,24 @@ const COPY_INSERT_TYPES = new Set([
 ]);
 
 const QUERY_EDITOR_DISABLED_TYPES = new Set(['redis']);
+const EXPLAIN_DIAGNOSIS_TYPES = new Set([
+  'mysql',
+  'goldendb',
+  'mariadb',
+  'oceanbase',
+  'diros',
+  'starrocks',
+  'postgres',
+  'kingbase',
+  'highgo',
+  'vastbase',
+  'opengauss',
+  'gaussdb',
+  'sqlserver',
+  'sqlite',
+  'oracle',
+  'clickhouse',
+]);
 const FORCE_READ_ONLY_QUERY_TYPES = new Set(['tdengine', 'iotdb', 'clickhouse', 'rocketmq', 'mqtt', 'kafka', 'rabbitmq']);
 const FORCE_READ_ONLY_STRUCTURE_DESIGNER_TYPES = new Set(['elasticsearch', 'mongodb', 'redis', 'iotdb']);
 const MESSAGE_PUBLISH_TYPES = new Set(['rocketmq', 'mqtt', 'kafka', 'rabbitmq']);
@@ -160,6 +191,7 @@ const APPROXIMATE_TOTAL_PAGE_TYPES = new Set(['duckdb']);
 export type DataSourceCapabilities = {
   type: string;
   supportsQueryEditor: boolean;
+  supportsExplainDiagnosis: boolean;
   supportsSqlQueryExport: boolean;
   supportsCopyInsert: boolean;
   supportsCreateDatabase: boolean;
@@ -225,6 +257,7 @@ export const getDataSourceCapabilities = (config: ConnectionLike): DataSourceCap
   return {
     type,
     supportsQueryEditor: !QUERY_EDITOR_DISABLED_TYPES.has(type),
+    supportsExplainDiagnosis: EXPLAIN_DIAGNOSIS_TYPES.has(type),
     supportsSqlQueryExport: SQL_QUERY_EXPORT_TYPES.has(type),
     supportsCopyInsert: COPY_INSERT_TYPES.has(type),
     supportsCreateDatabase: !structureEditRestricted && CREATE_DATABASE_TYPES.has(type),

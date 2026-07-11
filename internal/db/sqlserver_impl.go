@@ -486,6 +486,17 @@ func (e *sqlServerSessionExecer) Close() error {
 	return e.conn.Close()
 }
 
+// Discard permanently evicts the pinned physical connection from database/sql.
+// This is required when restoring session-scoped state such as SHOWPLAN_XML
+// fails: returning that connection to the pool could make later queries return
+// plans instead of executing normally.
+func (e *sqlServerSessionExecer) Discard() error {
+	if e == nil {
+		return nil
+	}
+	return discardSQLConn(&e.conn)
+}
+
 func (s *SqlServerDB) GetDatabases() ([]string, error) {
 	query := "SELECT name FROM sys.databases WHERE state_desc = 'ONLINE' ORDER BY name"
 	data, _, err := s.Query(query)

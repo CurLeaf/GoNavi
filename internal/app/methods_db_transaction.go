@@ -17,7 +17,7 @@ const sqlEditorTransactionFinishTimeout = 30 * time.Second
 // DBQueryMultiTransactional executes SQL editor DML in a managed transaction.
 // The transaction stays open until DBCommitTransaction or DBRollbackTransaction
 // is called by the SQL editor UI.
-func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbName string, query string, queryID string) connection.QueryResult {
+func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbName string, query string, queryID string) (result connection.QueryResult) {
 	runConfig := normalizeRunConfig(config, dbName)
 	transactionDBType := resolveDDLDBType(runConfig)
 	transactionConfig := runConfig
@@ -51,6 +51,14 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 	if !shouldUseManagedSQLTransaction(transactionDBType, query) {
 		return a.DBQueryMulti(config, dbName, query, queryID)
 	}
+	var queryExecutionDuration time.Duration
+	defer func() {
+		if !result.Success {
+			return
+		}
+		durationMs := queryExecutionDuration.Milliseconds()
+		a.recordQueryExecution(config, dbName, transactionDBType, query, durationMs, 0, queryResultRowsReturned(result))
+	}()
 
 	beginSQL, commitSQL, rollbackSQL, hasTextTransaction := sqlFileBatchTransactionSQL(transactionDBType)
 	implicitTextTransaction := false
@@ -160,7 +168,9 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 	}
 
 	statements := splitSQLStatements(query)
+	queryStartedAt := time.Now()
 	resultSets, err := executeManagedSQLTransactionStatements(ctx, sessionExecer, transactionConfig, statements, a.appText)
+	queryExecutionDuration += time.Since(queryStartedAt)
 	if err != nil {
 		var rollbackErr error
 		if transactor != nil {
@@ -186,6 +196,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		execer:      sessionExecer,
 		transactor:  transactor,
 		cancel:      transactionCancel,
+		config:      runConfig,
 		dbType:      transactionDBType,
 		commitSQL:   commitSQL,
 		rollbackSQL: rollbackSQL,
@@ -205,7 +216,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 
 // DBQueryMultiInTransaction executes follow-up SQL in an existing SQL editor managed transaction.
 // The transaction remains open until DBCommitTransaction or DBRollbackTransaction is called.
-func (a *App) DBQueryMultiInTransaction(transactionID string, query string, queryID string) connection.QueryResult {
+func (a *App) DBQueryMultiInTransaction(transactionID string, query string, queryID string) (result connection.QueryResult) {
 	transactionID = strings.TrimSpace(transactionID)
 	if transactionID == "" {
 		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.transaction_id_required", nil), QueryID: queryID}
@@ -221,7 +232,18 @@ func (a *App) DBQueryMultiInTransaction(transactionID string, query string, quer
 		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.transaction_not_found", nil), QueryID: queryID}
 	}
 
-	runConfig := connection.ConnectionConfig{Type: tx.dbType}
+	runConfig := tx.config
+	if strings.TrimSpace(runConfig.Type) == "" {
+		runConfig.Type = tx.dbType
+	}
+	var queryExecutionDuration time.Duration
+	defer func() {
+		if !result.Success {
+			return
+		}
+		durationMs := queryExecutionDuration.Milliseconds()
+		a.recordQueryExecution(runConfig, "", tx.dbType, query, durationMs, 0, queryResultRowsReturned(result))
+	}()
 	query = sanitizeSQLForPgLike(tx.dbType, query)
 	statements := splitSQLStatements(query)
 
@@ -240,7 +262,9 @@ func (a *App) DBQueryMultiInTransaction(transactionID string, query string, quer
 		a.queryMu.Unlock()
 	}()
 
+	queryStartedAt := time.Now()
 	resultSets, err := executeManagedSQLTransactionStatements(ctx, tx.execer, runConfig, statements, a.appText)
+	queryExecutionDuration += time.Since(queryStartedAt)
 	if err != nil {
 		logger.Error(err, "DBQueryMultiInTransaction 执行失败：id=%s dbType=%s SQL片段=%q", transactionID, tx.dbType, sqlSnippet(query))
 		return connection.QueryResult{

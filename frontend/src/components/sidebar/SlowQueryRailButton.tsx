@@ -4,6 +4,7 @@ import { HistoryOutlined } from '@ant-design/icons'
 import { useStore } from '../../store'
 import { useI18n } from '../../i18n/provider'
 import { buildSqlAnalysisWorkbenchTab } from '../../utils/sqlAnalysisTab'
+import './SlowQueryRailButton.css'
 
 // Sidebar 底部的慢 SQL 工作台入口。
 //
@@ -69,7 +70,7 @@ export default function SlowQueryRailButton({
     <Tooltip title={tooltipText} placement={tooltipPlacement}>
       <button
         type="button"
-        className={className}
+        className={['gn-slow-query-rail-button', className].filter(Boolean).join(' ')}
         onClick={() => {
           if (buttonDisabled || !activeTab?.connectionId) {
             return
@@ -81,22 +82,7 @@ export default function SlowQueryRailButton({
           }))
         }}
         disabled={buttonDisabled}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 32,
-          height: 32,
-          border: 'none',
-          background: 'transparent',
-          cursor: buttonDisabled ? 'not-allowed' : 'pointer',
-          color: buttonDisabled
-            ? 'var(--gn-text-muted, #adb5bd)'
-            : 'var(--gn-text, #495057)',
-          opacity: buttonDisabled ? 0.5 : 1,
-          transition: 'opacity 0.15s, color 0.15s',
-          ...style,
-        }}
+        style={style}
         aria-label={t('sql_analysis.slow_query.rail.aria_label')}
       >
         <HistoryOutlined style={{ fontSize: 16 }} />

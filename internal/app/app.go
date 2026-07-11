@@ -72,6 +72,7 @@ type managedSQLTransaction struct {
 	execer      db.StatementExecer
 	transactor  db.TransactionExecer
 	cancel      context.CancelFunc
+	config      connection.ConnectionConfig
 	dbType      string
 	commitSQL   string
 	rollbackSQL string

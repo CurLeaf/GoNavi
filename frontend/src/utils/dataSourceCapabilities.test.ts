@@ -24,10 +24,25 @@ describe('dataSourceCapabilities', () => {
   it('keeps MySQL on automatic total count mode', () => {
     expect(getDataSourceCapabilities({ type: 'mysql' })).toMatchObject({
       type: 'mysql',
+      supportsExplainDiagnosis: true,
       preferManualTotalCount: false,
       supportsApproximateTableCount: false,
       supportsApproximateTotalPages: false,
     });
+  });
+
+  it('only enables execution-plan diagnosis for backend-supported SQL dialects', () => {
+    expect(getDataSourceCapabilities({ type: 'goldendb' }).supportsExplainDiagnosis).toBe(true);
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'greatdb' }).supportsExplainDiagnosis).toBe(true);
+    expect(getDataSourceCapabilities({ type: 'postgresql' }).supportsExplainDiagnosis).toBe(true);
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'pgx' }).supportsExplainDiagnosis).toBe(true);
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'doris' }).supportsExplainDiagnosis).toBe(true);
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'mssql' }).supportsExplainDiagnosis).toBe(true);
+    expect(getDataSourceCapabilities({ type: 'kingbase8' }).supportsExplainDiagnosis).toBe(true);
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'sqlite3' }).supportsExplainDiagnosis).toBe(true);
+    expect(getDataSourceCapabilities({ type: 'mongodb' }).supportsExplainDiagnosis).toBe(false);
+    expect(getDataSourceCapabilities({ type: 'redis' }).supportsExplainDiagnosis).toBe(false);
+    expect(getDataSourceCapabilities({ type: 'trino' }).supportsExplainDiagnosis).toBe(false);
   });
 
   it('treats GoldenDB as an editable MySQL-family datasource with database-level DDL actions', () => {

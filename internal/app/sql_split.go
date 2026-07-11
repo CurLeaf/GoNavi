@@ -8,6 +8,13 @@ import "strings"
 // 避免在这些上下文中错误拆分。
 // 同时支持 SQL 标准的转义单引号（两个连续单引号 ” 表示字面量引号）。
 func splitSQLStatements(sql string) []string {
+	return splitSQLStatementsForDialect("", sql)
+}
+
+// splitSQLStatementsForDialect keeps the legacy generic splitter available to
+// existing execution paths while allowing security-sensitive callers to apply
+// the actual comment and dollar-quote rules of the target database.
+func splitSQLStatementsForDialect(dbType, sql string) []string {
 	text := strings.ReplaceAll(sql, "\r\n", "\n")
 	var statements []string
 
@@ -169,12 +176,12 @@ func splitSQLStatements(sql string) []string {
 		}
 
 		// 行注释开始
-		if ch == '-' && next == '-' {
+		if ch == '-' && next == '-' && isSQLDashLineCommentStart(dbType, text, i) {
 			inLineComment = true
 			cur.WriteByte(ch)
 			continue
 		}
-		if ch == '#' {
+		if ch == '#' && supportsSQLHashLineComment(dbType) {
 			inLineComment = true
 			cur.WriteByte(ch)
 			continue
@@ -198,8 +205,8 @@ func splitSQLStatements(sql string) []string {
 		}
 
 		// Dollar-quoting 开始
-		if ch == '$' {
-			if tag := parseSQLDollarTag(text[i:]); tag != "" {
+		if ch == '$' && supportsSQLDollarQuote(dbType) {
+			if tag := parseSQLDollarTagAt(text, i); tag != "" {
 				dollarTag = tag
 				cur.WriteString(tag)
 				i += len(tag) - 1
@@ -246,6 +253,61 @@ func splitSQLStatements(sql string) []string {
 
 	push()
 	return statements
+}
+
+func isSQLDashLineCommentStart(dbType, text string, index int) bool {
+	switch normalizeExplainLexicalDBType(dbType) {
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "goldendb":
+		return isMySQLDashCommentStart(text, index)
+	default:
+		return true
+	}
+}
+
+func supportsSQLHashLineComment(dbType string) bool {
+	normalized := normalizeExplainLexicalDBType(dbType)
+	if normalized == "" {
+		return true
+	}
+	switch normalized {
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "goldendb", "clickhouse":
+		return true
+	default:
+		return false
+	}
+}
+
+func supportsSQLDollarQuote(dbType string) bool {
+	normalized := normalizeExplainLexicalDBType(dbType)
+	if normalized == "" {
+		return true
+	}
+	switch normalized {
+	case "postgres", "opengauss", "gaussdb", "kingbase", "highgo", "vastbase":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeExplainLexicalDBType(dbType string) string {
+	normalized := strings.ToLower(strings.TrimSpace(dbType))
+	switch normalized {
+	case "postgresql", "pg", "pq", "pgx":
+		return "postgres"
+	case "doris":
+		return "diros"
+	case "open_gauss", "open-gauss":
+		return "opengauss"
+	case "gauss_db", "gauss-db":
+		return "gaussdb"
+	case "kingbase8", "kingbasees", "kingbasev8":
+		return "kingbase"
+	case "greatdb", "gdb":
+		return "goldendb"
+	default:
+		return normalized
+	}
 }
 
 func isSQLIdentifierStart(ch byte) bool {
@@ -502,6 +564,33 @@ func parseSQLDollarTag(s string) string {
 			return s[:i+1]
 		}
 		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+			return ""
+		}
+	}
+	return ""
+}
+
+func parseSQLDollarTagAt(text string, start int) string {
+	if start < 0 || start >= len(text) || text[start] != '$' {
+		return ""
+	}
+	if start > 0 && isSQLIdentifierPart(text[start-1]) {
+		return ""
+	}
+	if start+1 >= len(text) {
+		return ""
+	}
+	if text[start+1] == '$' {
+		return "$$"
+	}
+	if !isSQLIdentifierStart(text[start+1]) {
+		return ""
+	}
+	for end := start + 2; end < len(text); end++ {
+		if text[end] == '$' {
+			return text[start : end+1]
+		}
+		if !isSQLIdentifierPart(text[end]) || text[end] == '$' || text[end] == '#' {
 			return ""
 		}
 	}

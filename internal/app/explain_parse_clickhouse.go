@@ -12,7 +12,7 @@ import (
 //
 // ClickHouse 支持多种 EXPLAIN 模式：
 //   - EXPLAIN（默认 PLAN 模式）：返回 1 行 1 列，列值是缩进文本树
-//   - EXPLAIN JSON：返回 1 行 1 列，列值是 JSON 字符串
+//   - EXPLAIN PLAN json = 1：返回 1 行 1 列，列值是 JSON 字符串
 //   - EXPLAIN AST：返回抽象语法树
 //   - EXPLAIN SYNTAX：返回重写后的 SQL
 //   - EXPLAIN PIPELINE：返回执行算子管道
@@ -24,7 +24,7 @@ import (
 //	{
 //	  "Plan": {
 //	    "Node Type": "ReadFromMergeTree",
-//	    "Joined Plans": [],
+//	    "Plans": [],
 //	    "ReadType": "Default",
 //	    "Parts": 12,
 //	    "Index Granules": 240,
@@ -106,24 +106,26 @@ func parseClickHouseExplain(sourceSQL, raw string, format connection.ExplainForm
 
 // clickHousePlanNode 映射 CH EXPLAIN JSON 的 Plan 结构。
 type clickHousePlanNode struct {
-	NodeType      string                 `json:"Node Type"`
-	Operation     string                 `json:"Operation"`
-	ReadType      string                 `json:"ReadType"`
-	Parts         int64                  `json:"Parts"`
-	IndexGranules int64                  `json:"Index Granules"`
-	SelectedMarks int64                  `json:"Selected Marks"`
-	ResultSchema  map[string]any         `json:"Result Schema"`
-	Aggregation   map[string]any         `json:"Aggregation"`
-	Join          map[string]any         `json:"Join"`
-	Expression    map[string]any         `json:"Expression"`
-	Table         string                 `json:"Table"`
-	Database      string                 `json:"Database"`
-	JoinedPlans   []json.RawMessage      `json:"Joined Plans"`
-	Children      []json.RawMessage      `json:"Children"` // 部分版本用此字段
+	NodeType      string            `json:"Node Type"`
+	Operation     string            `json:"Operation"`
+	ReadType      string            `json:"ReadType"`
+	Parts         int64             `json:"Parts"`
+	IndexGranules int64             `json:"Index Granules"`
+	SelectedMarks int64             `json:"Selected Marks"`
+	ResultSchema  map[string]any    `json:"Result Schema"`
+	Aggregation   map[string]any    `json:"Aggregation"`
+	Join          map[string]any    `json:"Join"`
+	Expression    map[string]any    `json:"Expression"`
+	Indexes       json.RawMessage   `json:"Indexes"`
+	Table         string            `json:"Table"`
+	Database      string            `json:"Database"`
+	JoinedPlans   []json.RawMessage `json:"Joined Plans"`
+	Plans         []json.RawMessage `json:"Plans"`
+	Children      []json.RawMessage `json:"Children"` // 部分版本用此字段
 }
 
 // parseClickHousePlan 递归解析 CH Plan 节点。
-// CH 通常用 "Joined Plans" 数组持有子节点（不同于其他 DB 的 "Plans"）。
+// CH 官方 json=1 输出使用 "Plans" 数组持有子节点。
 func parseClickHousePlan(planRaw json.RawMessage, parentID string, result *connection.ExplainResult, warnings *[]string) {
 	var node clickHousePlanNode
 	if err := json.Unmarshal(planRaw, &node); err != nil {
@@ -153,9 +155,9 @@ func parseClickHousePlan(planRaw json.RawMessage, parentID string, result *conne
 	if node.Parts > 0 || node.IndexGranules > 0 {
 		en.EstRows = node.IndexGranules * 8192
 		en.Extra = map[string]any{
-			"parts":          node.Parts,
-			"indexGranules":  node.IndexGranules,
-			"selectedMarks":  node.SelectedMarks,
+			"parts":         node.Parts,
+			"indexGranules": node.IndexGranules,
+			"selectedMarks": node.SelectedMarks,
 		}
 	}
 
@@ -174,10 +176,27 @@ func parseClickHousePlan(planRaw json.RawMessage, parentID string, result *conne
 		en.Extra["join"] = node.Join
 	}
 
-	// CH 的 ReadFromMergeTree 在没有索引筛选时类似全表扫描
+	// indexes=1 时把索引裁剪详情保留下来。字段缺失代表服务端未提供证据，
+	// 不能据此把正常的 MergeTree 读取误判成全扫或未使用索引。
+	indexesReported := false
+	var indexes []map[string]any
+	if len(node.Indexes) > 0 && string(node.Indexes) != "null" {
+		if err := json.Unmarshal(node.Indexes, &indexes); err != nil {
+			*warnings = append(*warnings, fmt.Sprintf("CH Indexes 反序列化失败：%v", err))
+		} else {
+			indexesReported = true
+			if en.Extra == nil {
+				en.Extra = map[string]any{}
+			}
+			en.Extra["indexes"] = indexes
+		}
+	}
+
+	// CH 的 ReadFromMergeTree 只有在服务端给出明确证据时才标记全扫/无索引。
 	if strings.Contains(strings.ToLower(node.NodeType), "readfrommergetree") {
-		// ReadType=Default 表示未使用 primary key 裁剪
-		if strings.ToLower(node.ReadType) == "default" || node.ReadType == "" {
+		// 旧版本的 ReadType=Default 表示未使用 primary key 裁剪；新版本在
+		// indexes=1 下返回空 Indexes，同样能明确说明没有索引参与裁剪。
+		if strings.EqualFold(node.ReadType, "default") || (indexesReported && len(indexes) == 0) {
 			en.Flags = append(en.Flags, connection.ExplainFlagFullScan, connection.ExplainFlagNoIndex)
 		}
 	}
@@ -189,7 +208,10 @@ func parseClickHousePlan(planRaw json.RawMessage, parentID string, result *conne
 
 	nodeID := appendExplainChild(result, parentID, en)
 
-	// 递归子节点：CH 用 "Joined Plans"，部分版本可能用 "Children"
+	// 官方 json=1 使用 "Plans"；保留 Joined Plans/Children 兼容旧版本输出。
+	for _, childRaw := range node.Plans {
+		parseClickHousePlan(childRaw, nodeID, result, warnings)
+	}
 	for _, childRaw := range node.JoinedPlans {
 		parseClickHousePlan(childRaw, nodeID, result, warnings)
 	}

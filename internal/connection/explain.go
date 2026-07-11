@@ -127,11 +127,18 @@ type DiagnoseReport struct {
 // QueryExecutionRecord 是慢 SQL 历史的一条记录（PR5 慢 SQL 摘要用，提前定义便于 PR1 数据流贯通）。
 type QueryExecutionRecord struct {
 	ID             string    `json:"id"`
-	ConnectionFP   string    `json:"connectionFp"`   // 连接指纹，复用 saved_query_fingerprint
-	SQLFingerprint string    `json:"sqlFp"`          // SQL 文本指纹（归一化后 sha256 取前 16）
-	SQLPreview     string    `json:"sqlPreview"`     // 截断后的 SQL 预览（前 200 字符）
+	ConnectionFP   string    `json:"connectionFp"` // 连接指纹，复用 saved_query_fingerprint
+	SQLFingerprint string    `json:"sqlFp"`        // SQL 文本指纹（归一化后 sha256 取前 16）
+	SQLPreview     string    `json:"sqlPreview"`   // 截断后的 SQL 预览（前 200 字符）
+	SQLText        string    `json:"sqlText,omitempty"`
+	SQLTruncated   bool      `json:"sqlTruncated,omitempty"`
+	Diagnosable    bool      `json:"diagnosable"`
+	StatementCount int       `json:"statementCount,omitempty"`
 	DBType         string    `json:"dbType"`
 	DurationMs     int64     `json:"durationMs"`
+	ExecutionCount int64     `json:"executionCount,omitempty"`
+	AvgDurationMs  float64   `json:"avgDurationMs,omitempty"`
+	MaxDurationMs  int64     `json:"maxDurationMs,omitempty"`
 	RowsRead       int64     `json:"rowsRead,omitempty"`
 	RowsReturned   int64     `json:"rowsReturned,omitempty"`
 	PlanHash       string    `json:"planHash,omitempty"` // 同一 SQL 不同计划的区分（PR5 实现）

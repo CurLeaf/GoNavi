@@ -8,7 +8,7 @@ import (
 	"GoNavi-Wails/internal/connection"
 )
 
-// PostgreSQL EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) 解析。
+// PostgreSQL EXPLAIN (FORMAT JSON) 解析，同时兼容外部驱动返回的 ANALYZE/BUFFERS 字段。
 //
 // 典型结构（PG 13+）：
 //
