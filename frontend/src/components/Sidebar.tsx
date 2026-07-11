@@ -21,6 +21,7 @@ import {
   type SidebarMessagePublishTarget,
 } from './sidebar/useSidebarObjectActions';
 import { useSidebarSearchModel } from './sidebar/useSidebarSearchModel';
+import { useSidebarFilterPersistence } from './sidebar/useSidebarFilterPersistence';
 import { useSidebarV2ActionHandlers } from './sidebar/useSidebarV2ActionHandlers';
 import { useSidebarCommandSearchRunner } from './sidebar/useSidebarCommandSearchRunner';
 import { useSidebarTitleRender } from './sidebar/useSidebarTitleRender';
@@ -645,15 +646,16 @@ const Sidebar: React.FC<{
       setSearchValue(v2PersistedSidebarFilter);
   }, [v2PersistedSidebarFilter]);
 
-  useEffect(() => {
-      if (!v2UseLegacySidebarFilter) {
-          return;
-      }
-      const nextFilter = searchValue.trim();
-      if (nextFilter !== v2PersistedSidebarFilter) {
-          setAppearance({ v2SidebarPersistedFilter: nextFilter });
-      }
-  }, [searchValue, setAppearance, v2PersistedSidebarFilter, v2UseLegacySidebarFilter]);
+  const persistV2SidebarFilter = useCallback((nextFilter: string) => {
+      setAppearance({ v2SidebarPersistedFilter: nextFilter });
+  }, [setAppearance]);
+
+  useSidebarFilterPersistence({
+      enabled: v2UseLegacySidebarFilter,
+      searchValue,
+      persistedFilter: v2PersistedSidebarFilter,
+      onPersist: persistV2SidebarFilter,
+  });
 
   const handleV2CommandSearchValueChange = useCallback((value: string) => {
       setV2CommandSearchValue(value);
@@ -2254,19 +2256,29 @@ const Sidebar: React.FC<{
       handleV2ConnectionGroupContextMenuAction,
   });
   refreshV2TableContextMenuStatsRef.current = refreshV2TableContextMenuStats;
+  const getV2TreeMetaTextRef = useRef(getV2TreeMetaText);
+  getV2TreeMetaTextRef.current = getV2TreeMetaText;
+  const toggleSidebarTablePinnedRef = useRef(toggleSidebarTablePinned);
+  toggleSidebarTablePinnedRef.current = toggleSidebarTablePinned;
 
-  const renderV2TreeTitle = (node: any, hoverTitle: string, statusBadge: React.ReactNode) => renderSidebarV2TreeTitle({
+  const renderV2TreeTitle = useCallback((node: any, hoverTitle: string, statusBadge: React.ReactNode) => renderSidebarV2TreeTitle({
       node,
       hoverTitle,
       statusBadge,
-      getV2TreeMetaText,
+      getV2TreeMetaText: getV2TreeMetaTextRef.current,
       sidebarTableMetadataFields,
-      toggleSidebarTablePinned,
+      toggleSidebarTablePinned: toggleSidebarTablePinnedRef.current,
       snapshotTreeSelectionBeforeDrag,
       restoreTreeSelectionAfterDrag,
       treeDragSelectSuppressUntilRef,
       setIsTreeDragging,
-  });
+  }), [
+      restoreTreeSelectionAfterDrag,
+      setIsTreeDragging,
+      sidebarTableMetadataFields,
+      snapshotTreeSelectionBeforeDrag,
+      treeDragSelectSuppressUntilRef,
+  ]);
 
   const {
       selectConnectionFromRail,
