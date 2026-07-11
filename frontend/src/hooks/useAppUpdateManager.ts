@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { message } from 'antd';
 import { EventsOn } from '../../wailsjs/runtime';
 import { resolveAboutDisplayVersion } from '../utils/appVersionDisplay';
@@ -40,9 +40,36 @@ type UpdateDownloadResultData = {
   autoRelaunch?: boolean;
 };
 
+/** 启动发现更新时打开「设置中心-关于」页（替代旧版关于弹窗） */
+export type UpdateCenterBridge = {
+  open: () => void;
+  close: () => void;
+  isOpen: () => boolean;
+};
+
 type UseAppUpdateManagerOptions = {
   runtimeBuildType: string;
   t: Translator;
+  updateCenterBridgeRef?: MutableRefObject<UpdateCenterBridge | null>;
+};
+
+type AboutInfo = {
+  version: string;
+  author: string;
+  buildTime?: string;
+  repoUrl?: string;
+  issueUrl?: string;
+  releaseUrl?: string;
+  communityUrl?: string;
+};
+
+const DEFAULT_ABOUT_INFO: AboutInfo = {
+  version: '',
+  author: 'Syngnat',
+  repoUrl: 'https://github.com/Syngnat/GoNavi',
+  issueUrl: 'https://github.com/Syngnat/GoNavi/issues',
+  releaseUrl: 'https://github.com/Syngnat/GoNavi/releases',
+  communityUrl: 'https://aibook.ren',
 };
 
 const createEmptyDownloadProgress = () => ({
@@ -64,14 +91,48 @@ const buildUpdateKey = (info: Pick<UpdateInfo, 'channel' | 'latestVersion'> | nu
     ? `${normalizeUpdateChannel(info.channel)}:${String(info.latestVersion || '').trim()}`
     : '';
 
-const shouldAutoInstallDownloadedUpdate = (resultData: UpdateDownloadResultData | null | undefined): boolean => {
-  const platform = String(resultData?.platform || '').trim().toLowerCase();
-  return platform === 'darwin' && resultData?.autoRelaunch !== false;
+const isUnknownAboutValue = (value: string): boolean => {
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'unknown' || normalized === '未知' || normalized === 'common.unknown';
+};
+
+const normalizeAboutText = (value: unknown): string =>
+  String(value || '').trim();
+
+const normalizeAboutVersion = (value: unknown): string => {
+  const text = normalizeAboutText(value);
+  if (!text || text === '0.0.0' || isUnknownAboutValue(text)) {
+    return '';
+  }
+  return text;
+};
+
+const normalizeAboutInfo = (value: unknown): AboutInfo => {
+  const source = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+  const version = normalizeAboutVersion(source.version);
+  const author = normalizeAboutText(source.author);
+  const buildTime = normalizeAboutText(source.buildTime);
+  const repoUrl = normalizeAboutText(source.repoUrl);
+  const issueUrl = normalizeAboutText(source.issueUrl);
+  const releaseUrl = normalizeAboutText(source.releaseUrl);
+  const communityUrl = normalizeAboutText(source.communityUrl);
+
+  return {
+    ...DEFAULT_ABOUT_INFO,
+    version,
+    author: author && !isUnknownAboutValue(author) ? author : DEFAULT_ABOUT_INFO.author,
+    buildTime: buildTime || undefined,
+    repoUrl: repoUrl || DEFAULT_ABOUT_INFO.repoUrl,
+    issueUrl: issueUrl || DEFAULT_ABOUT_INFO.issueUrl,
+    releaseUrl: releaseUrl || DEFAULT_ABOUT_INFO.releaseUrl,
+    communityUrl: communityUrl || DEFAULT_ABOUT_INFO.communityUrl,
+  };
 };
 
 export const useAppUpdateManager = ({
   runtimeBuildType,
   t,
+  updateCenterBridgeRef,
 }: UseAppUpdateManagerOptions) => {
   const updateCheckInFlightRef = useRef(false);
   const updateDownloadInFlightRef = useRef(false);
@@ -83,23 +144,38 @@ export const useAppUpdateManager = ({
   const updateMutedVersionRef = useRef<string | null>(null);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const isAboutOpenRef = useRef(false);
+
+  const isUpdateCenterOpen = useCallback(() => {
+    return Boolean(updateCenterBridgeRef?.current?.isOpen?.() || isAboutOpenRef.current);
+  }, [updateCenterBridgeRef]);
+
+  // 仅打开关于 UI；应用信息加载由 prepareAboutSurface / isAboutOpen effect 负责
+  const openUpdateCenter = useCallback(() => {
+    if (updateCenterBridgeRef?.current?.open) {
+      updateCenterBridgeRef.current.open();
+      return;
+    }
+    // 兼容：未接线时回退旧版关于弹窗
+    setIsAboutOpen(true);
+  }, [updateCenterBridgeRef]);
+
+  const closeUpdateCenter = useCallback(() => {
+    updateCenterBridgeRef?.current?.close?.();
+    setIsAboutOpen(false);
+  }, [updateCenterBridgeRef]);
+
   const [aboutLoading, setAboutLoading] = useState(false);
   const [updateChannel, setUpdateChannelState] = useState<UpdateChannel>('latest');
   const [isUpdateChannelLoading, setIsUpdateChannelLoading] = useState(false);
   const [isUpdateChannelSaving, setIsUpdateChannelSaving] = useState(false);
-  const [aboutInfo, setAboutInfo] = useState<{
-    version: string;
-    author: string;
-    buildTime?: string;
-    repoUrl?: string;
-    issueUrl?: string;
-    releaseUrl?: string;
-    communityUrl?: string;
-  } | null>(null);
-  const aboutDisplayVersion = resolveAboutDisplayVersion(runtimeBuildType, aboutInfo?.version);
+  const [aboutInfo, setAboutInfo] = useState<AboutInfo>(() => DEFAULT_ABOUT_INFO);
   const [aboutUpdateStatus, setAboutUpdateStatus] = useState<string>('');
   const [lastUpdateInfo, setLastUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState(createEmptyDownloadProgress);
+  const aboutDisplayVersion = resolveAboutDisplayVersion(
+    runtimeBuildType,
+    normalizeAboutVersion(aboutInfo.version) || normalizeAboutVersion(lastUpdateInfo?.currentVersion),
+  );
   const lastUpdateKey = buildUpdateKey(lastUpdateInfo);
 
   const formatAboutUpdateStatus = useCallback((info: UpdateInfo | null): string => {
@@ -110,7 +186,7 @@ export const useAppUpdateManager = ({
       const localDownloaded = updateDownloadedVersionRef.current === buildUpdateKey(info);
       const hasDownloaded = Boolean(info.downloaded) || localDownloaded;
       return hasDownloaded
-        ? t('app.about.update_status.new_version_downloaded', { version: info.latestVersion })
+        ? t('app.about.update_status.new_version_ready_restart', { version: info.latestVersion })
         : t('app.about.update_status.new_version_not_downloaded', { version: info.latestVersion });
     }
     return t('app.about.update_status.latest', { version: info.currentVersion || t('common.unknown') });
@@ -192,27 +268,22 @@ export const useAppUpdateManager = ({
           downloadPath: resultData?.downloadPath || prev.downloadPath || info.downloadPath,
         };
       });
-      if (resultData?.downloadPath) {
-        void message.success({ content: t('app.about.message.download_completed_with_path', { path: resultData.downloadPath }), duration: 5 });
-      } else {
-        void message.success({ content: t('app.about.message.download_completed'), duration: 2 });
-      }
+      // 与 Terminus/Codex 一致：下载到 100% 后停留在就绪态，由用户点击「重启应用更新」
+      setUpdateDownloadProgress((prev) => ({
+        ...prev,
+        open: true,
+        status: 'done',
+        percent: 100,
+        downloaded: prev.total > 0 ? prev.total : (info.assetSize || prev.downloaded),
+        message: t('app.about.download_progress.ready_to_restart'),
+      }));
+      void message.success({
+        content: resultData?.downloadPath
+          ? t('app.about.message.download_ready_restart_with_path', { path: resultData.downloadPath })
+          : t('app.about.message.download_ready_restart'),
+        duration: 4,
+      });
       setAboutUpdateStatus(formatAboutUpdateStatus({ ...info, channel: normalizeUpdateChannel(info.channel), downloaded: true }));
-
-      if (shouldAutoInstallDownloadedUpdate(resultData)) {
-        let installRes: any = null;
-        try {
-          installRes = await (window as any).go?.app?.App?.InstallUpdateAndRestart?.();
-        } catch (error: any) {
-          installRes = { success: false, message: error?.message || t('common.unknown') };
-        }
-        if (!installRes?.success) {
-          void message.error(t('app.about.message.install_failed_with_error', { error: installRes?.message || t('common.unknown') }));
-          return;
-        }
-        updateInstallTriggeredVersionRef.current = targetKey || null;
-        setUpdateDownloadProgress((prev) => ({ ...prev, open: false }));
-      }
     } else {
       setUpdateDownloadProgress((prev) => ({
         ...prev,
@@ -248,20 +319,47 @@ export const useAppUpdateManager = ({
   const canShowProgressEntry = (isLatestUpdateDownloaded || isBackgroundProgressForLatestUpdate)
     && updateInstallTriggeredVersionRef.current !== (lastUpdateKey || null);
 
-  const handleInstallFromProgress = useCallback(async () => {
+  const handleInstallFromProgress = useCallback(async (): Promise<boolean> => {
     const canInstall = updateDownloadProgress.status === 'done'
       || (Boolean(lastUpdateInfo?.hasUpdate) && (Boolean(lastUpdateInfo?.downloaded) || updateDownloadedVersionRef.current === lastUpdateKey));
     if (!canInstall) {
-      return;
+      return false;
     }
-    const res = await (window as any).go.app.App.InstallUpdateAndRestart();
+    // 点击后进入「正在应用并重启」态，再拉起安装脚本并退出
+    setUpdateDownloadProgress((prev) => ({
+      ...prev,
+      open: true,
+      status: 'downloading',
+      percent: 100,
+      message: t('app.about.download_progress.applying_restart'),
+    }));
+    let res: any = null;
+    try {
+      res = await (window as any).go?.app?.App?.InstallUpdateAndRestart?.();
+    } catch (error: any) {
+      res = { success: false, message: error?.message || t('common.unknown') };
+    }
     if (!res?.success) {
+      setUpdateDownloadProgress((prev) => ({
+        ...prev,
+        open: true,
+        status: 'error',
+        message: res?.message || t('common.unknown'),
+      }));
       void message.error(t('app.about.message.install_failed_with_error', { error: res?.message || t('common.unknown') }));
-      return;
+      return false;
     }
     updateInstallTriggeredVersionRef.current = lastUpdateKey || null;
-    hideUpdateDownloadProgress();
-  }, [hideUpdateDownloadProgress, lastUpdateInfo, lastUpdateKey, t, updateDownloadProgress.status]);
+    // 后端会 Quit；此处保持弹窗文案，避免用户误以为失败
+    setUpdateDownloadProgress((prev) => ({
+      ...prev,
+      open: true,
+      status: 'done',
+      percent: 100,
+      message: t('app.about.download_progress.restarting'),
+    }));
+    return true;
+  }, [lastUpdateInfo, lastUpdateKey, t, updateDownloadProgress.status]);
 
   const openDownloadedUpdateDirectory = useCallback(async () => {
     const backendApp = (window as any).go?.app?.App;
@@ -303,7 +401,7 @@ export const useAppUpdateManager = ({
     };
     if (!info) return;
     setUpdateChannelState(normalizeUpdateChannel(info.channel));
-    const aboutOpen = isAboutOpenRef.current;
+    const aboutOpen = isUpdateCenterOpen();
     if (info.hasUpdate) {
       const infoKey = buildUpdateKey(info);
       if (!info.downloaded && updateDownloadedVersionRef.current === infoKey) {
@@ -374,7 +472,8 @@ export const useAppUpdateManager = ({
       }
       if (silent && !aboutOpen && updateMutedVersionRef.current !== infoKey && updateNotifiedVersionRef.current !== infoKey) {
         updateNotifiedVersionRef.current = infoKey;
-        setIsAboutOpen(true);
+        // 启动/后台检查发现更新时，打开设置中心「关于」页，不再弹旧版关于对话框
+        openUpdateCenter();
       }
     } else if (!silent) {
       setUpdateDownloadProgress((prev) => {
@@ -400,18 +499,37 @@ export const useAppUpdateManager = ({
     } else {
       setLastUpdateInfo(info);
     }
-  }, [formatAboutUpdateStatus, t]);
+  }, [formatAboutUpdateStatus, isUpdateCenterOpen, openUpdateCenter, t]);
 
   const loadAboutInfo = useCallback(async () => {
     setAboutLoading(true);
-    const res = await (window as any).go.app.App.GetAppInfo();
-    if (res?.success) {
-      setAboutInfo(res.data);
-    } else {
-      void message.error(t('app.about.message.load_failed', { error: res?.message || t('common.unknown') }));
+    try {
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.GetAppInfo !== 'function') {
+        setAboutInfo(DEFAULT_ABOUT_INFO);
+        return;
+      }
+      const res = await backendApp.GetAppInfo();
+      if (res?.success) {
+        setAboutInfo(normalizeAboutInfo(res.data));
+      } else {
+        setAboutInfo(DEFAULT_ABOUT_INFO);
+        void message.error(t('app.about.message.load_failed', { error: res?.message || t('common.unknown') }));
+      }
+    } catch (e: any) {
+      setAboutInfo(DEFAULT_ABOUT_INFO);
+      const error = e?.message || t('common.unknown');
+      void message.error(t('app.about.message.load_failed', { error }));
+    } finally {
+      setAboutLoading(false);
     }
-    setAboutLoading(false);
   }, [t]);
+
+  /** 关于页（设置中心或旧弹窗）打开时刷新状态与应用信息 */
+  const prepareAboutSurface = useCallback(() => {
+    setAboutUpdateStatus(formatAboutUpdateStatus(lastUpdateInfo));
+    void loadAboutInfo();
+  }, [formatAboutUpdateStatus, lastUpdateInfo, loadAboutInfo]);
 
   const loadUpdateChannel = useCallback(async () => {
     const backendApp = (window as any).go?.app?.App;
@@ -468,8 +586,8 @@ export const useAppUpdateManager = ({
     if (lastUpdateKey) {
       updateMutedVersionRef.current = lastUpdateKey;
     }
-    setIsAboutOpen(false);
-  }, [lastUpdateKey]);
+    closeUpdateCenter();
+  }, [closeUpdateCenter, lastUpdateKey]);
 
   const markUpdateProgressDismissed = useCallback(() => {
     updateUserDismissedRef.current = true;
@@ -519,16 +637,31 @@ export const useAppUpdateManager = ({
           ? event.percent
           : (total > 0 ? (downloaded / total) * 100 : 0);
         const percent = Math.max(0, Math.min(100, percentRaw));
-        setUpdateDownloadProgress((prev) => ({
-          open: prev.open,
-          version: prev.version,
-          key: prev.key,
-          status: nextStatus,
-          percent,
-          downloaded,
-          total,
-          message: String(event.message || ''),
-        }));
+        setUpdateDownloadProgress((prev) => {
+          // 用户已点「重启应用更新」时，不让 downloading 事件把 100% 就绪态打回中间态文案
+          if (updateInstallTriggeredVersionRef.current && prev.key && updateInstallTriggeredVersionRef.current === prev.key) {
+            return prev;
+          }
+          const eventMessage = String(event.message || '');
+          let message = eventMessage;
+          if (!message) {
+            if (nextStatus === 'done') {
+              message = t('app.about.download_progress.ready_to_restart');
+            } else if (nextStatus === 'start' || nextStatus === 'downloading') {
+              message = t('app.about.download_progress.downloading');
+            }
+          }
+          return {
+            open: prev.open || nextStatus === 'start' || nextStatus === 'downloading' || nextStatus === 'done' || nextStatus === 'error',
+            version: prev.version,
+            key: prev.key,
+            status: nextStatus,
+            percent: nextStatus === 'done' ? 100 : percent,
+            downloaded: nextStatus === 'done' && total > 0 ? total : downloaded,
+            total: total > 0 ? total : prev.total,
+            message,
+          };
+        });
       });
     } catch (e) {
       console.warn('Wails API: EventsOn unavailable', e);
@@ -536,7 +669,7 @@ export const useAppUpdateManager = ({
     return () => {
       if (offDownloadProgress) offDownloadProgress();
     };
-  }, []);
+  }, [t]);
 
   return {
     aboutDisplayVersion,
@@ -559,6 +692,7 @@ export const useAppUpdateManager = ({
     markUpdateProgressDismissed,
     muteLatestUpdate,
     openDownloadedUpdateDirectory,
+    prepareAboutSurface,
     setIsAboutOpen,
     showUpdateDownloadProgress,
     updateChannel,

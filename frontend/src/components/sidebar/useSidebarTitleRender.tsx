@@ -1,4 +1,4 @@
-import React, { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import React, { useCallback, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { Badge, Button } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 
@@ -36,7 +36,11 @@ export const useSidebarTitleRender = ({
   restoreTreeSelectionAfterDrag,
   treeDragSelectSuppressUntilRef,
   setIsTreeDragging,
-}: UseSidebarTitleRenderArgs) => useCallback((node: any) => {
+}: UseSidebarTitleRenderArgs) => {
+  const handleAddExternalSQLDirectoryRef = useRef(handleAddExternalSQLDirectory);
+  handleAddExternalSQLDirectoryRef.current = handleAddExternalSQLDirectory;
+
+  return useCallback((node: any) => {
   let status: 'loading' | 'success' | 'error' | 'default' = 'default';
   if (node.type === 'connection' || node.type === 'database') {
     if (connectionStates[node.key] === 'loading') status = 'loading';
@@ -118,7 +122,7 @@ export const useSidebarTitleRender = ({
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            void handleAddExternalSQLDirectory(node);
+            void handleAddExternalSQLDirectoryRef.current(node);
           }}
           className="gn-v2-tree-external-root-action"
         />
@@ -165,7 +169,6 @@ export const useSidebarTitleRender = ({
   return <span title={hoverTitle}>{statusBadge}{displayTitle}</span>;
 }, [
   connectionStates,
-  handleAddExternalSQLDirectory,
   isV2Ui,
   renderV2TreeTitle,
   restoreTreeSelectionAfterDrag,
@@ -173,3 +176,4 @@ export const useSidebarTitleRender = ({
   snapshotTreeSelectionBeforeDrag,
   treeDragSelectSuppressUntilRef,
 ]);
+};

@@ -4,6 +4,8 @@ import (
 	"GoNavi-Wails/internal/connection"
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -68,6 +70,13 @@ type StatementExecer interface {
 	Close() error
 }
 
+// StatementExecerDiscarter permanently removes a pinned physical connection
+// from its pool. Session-scoped commands use it when cleanup fails, so leaked
+// state cannot affect a later business query.
+type StatementExecerDiscarter interface {
+	Discard() error
+}
+
 // StatementQueryExecer can run queries on a pinned session/connection.
 // Drivers that return sqlConnStatementExecer automatically satisfy it.
 type StatementQueryExecer interface {
@@ -103,14 +112,16 @@ type StreamQueryExecer interface {
 //
 // Drivers that implement this interface own the full EXPLAIN lifecycle:
 //   - MySQL: prefer EXPLAIN FORMAT=JSON, fallback to vanilla EXPLAIN on 5.7
-//   - PostgreSQL: EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+//   - PostgreSQL: EXPLAIN (FORMAT JSON)
 //   - Oracle: EXPLAIN PLAN SET STATEMENT_ID ... + DBMS_XPLAN.DISPLAY + cleanup
 //   - SQLServer: SET SHOWPLAN_XML ON + sql + SET OFF (defer cleanup mandatory)
 //   - SQLite: EXPLAIN QUERY PLAN
 //   - ClickHouse: EXPLAIN JSON
 //
 // The driver decides which format to use and returns the raw payload plus the
-// detected format tag; the app layer parses via the corresponding parser.
+// detected format tag; the app layer parses via the corresponding parser. This
+// default interface MUST NOT execute the source query (for example via ANALYZE);
+// an explicit, confirmed runtime-analysis API is required for that behavior.
 //
 // Drivers that do NOT implement this interface fall back to the generic path
 // in app.DiagnoseQuery: wrap the SQL as "EXPLAIN <sql>" and run via QueryMulti.
@@ -279,6 +290,29 @@ func (e *sqlConnStatementExecer) Close() error {
 		return nil
 	}
 	return e.conn.Close()
+}
+
+func discardSQLConn(connRef **sql.Conn) error {
+	if connRef == nil || *connRef == nil {
+		return nil
+	}
+	conn := *connRef
+	err := conn.Raw(func(any) error { return driver.ErrBadConn })
+	if errors.Is(err, driver.ErrBadConn) {
+		// Raw returning ErrBadConn makes database/sql permanently evict the
+		// physical connection instead of returning it to the idle pool. Clear
+		// the wrapper reference so a deferred Close cannot touch it again.
+		*connRef = nil
+		return nil
+	}
+	return err
+}
+
+func (e *sqlConnStatementExecer) Discard() error {
+	if e == nil {
+		return nil
+	}
+	return discardSQLConn(&e.conn)
 }
 
 type sqlConnTransactionExecer struct {
@@ -637,6 +671,9 @@ var databaseFactories = map[string]databaseFactory{
 	"qdrant": func() Database {
 		return &QdrantDB{}
 	},
+	"milvus": func() Database {
+		return &MilvusDB{}
+	},
 	"rocketmq": func() Database {
 		return &RocketMQDB{}
 	},
@@ -689,6 +726,8 @@ func normalizeDatabaseType(dbType string) string {
 		return "chroma"
 	case "qdrantdb", "qdrant-db":
 		return "qdrant"
+	case "milvusdb", "milvus-db":
+		return "milvus"
 	case "rocketmq", "rocket-mq", "rocket_mq", "apache-rocketmq", "apache_rocketmq", "rmq":
 		return "rocketmq"
 	case "mqtt", "mqtts":

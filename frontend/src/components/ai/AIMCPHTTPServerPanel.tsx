@@ -11,6 +11,8 @@ export interface AIMCPHTTPServerDraft {
   addr: string;
   path: string;
   authorizationHeader: string;
+  /** false 时注册 execute_sql，允许查少量样例数据 */
+  schemaOnly: boolean;
 }
 
 export interface AIMCPHTTPServerPanelProps {
@@ -71,8 +73,10 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
             <Tag color={running ? 'success' : 'default'} style={{ marginInlineEnd: 0 }}>
               {copy(running ? 'ai_settings.mcp_http.panel.status.running' : 'ai_settings.mcp_http.panel.status.stopped')}
             </Tag>
-            <Tag color="blue" style={{ marginInlineEnd: 0 }}>
-              schema-only
+            <Tag color={draft.schemaOnly || status.schemaOnly ? 'blue' : 'green'} style={{ marginInlineEnd: 0 }}>
+              {draft.schemaOnly || (running && status.schemaOnly)
+                ? copy('ai_settings.mcp_http.panel.mode.schema_only')
+                : copy('ai_settings.mcp_http.panel.mode.limited_query')}
             </Tag>
           </div>
           <div style={{ marginTop: 6, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
@@ -125,6 +129,31 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
               style={inputStyle}
             />
           </div>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>
+              {copy('ai_settings.mcp_http.panel.limited_query.label')}
+            </div>
+            <div style={{ marginTop: 2, fontSize: 11, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+              {copy('ai_settings.mcp_http.panel.limited_query.hint')}
+            </div>
+          </div>
+          <Switch
+            checked={!draft.schemaOnly}
+            disabled={running || loading}
+            onChange={(checked) => onDraftChange({ schemaOnly: !checked })}
+            checkedChildren={copy('ai_settings.mcp_http.panel.limited_query.on')}
+            unCheckedChildren={copy('ai_settings.mcp_http.panel.limited_query.off')}
+          />
         </div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
           {running

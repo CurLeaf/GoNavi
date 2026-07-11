@@ -497,6 +497,36 @@ describe('QueryEditorAiAssist', () => {
         expect(missingProvider.reason).toBe('provider_missing');
     });
 
+    it('caches unavailable inline AI readiness across adjacent automatic requests', async () => {
+        const service: QueryEditorAiService = {
+            AIChatSend: vi.fn(),
+            AIGetProviders: vi.fn(async () => []),
+            AIGetActiveProvider: vi.fn(async () => ''),
+        };
+        const request = {
+            service,
+            aiContext: {
+                connectionName: 'Local MySQL',
+                sourceType: 'mysql',
+                currentDb: 'shop',
+                tables: [],
+                columns: [],
+            },
+            editorSnapshot: {
+                prefix: 'select * from users ',
+                suffix: '',
+                currentLineBeforeCursor: 'select * from users ',
+                currentLineAfterCursor: '',
+            },
+        };
+
+        await requestQueryEditorInlineCompletion(request);
+        await requestQueryEditorInlineCompletion(request);
+
+        expect(service.AIGetProviders).toHaveBeenCalledTimes(1);
+        expect(service.AIGetActiveProvider).toHaveBeenCalledTimes(1);
+    });
+
     it('uses deterministic schema metadata for table-name inline completion and skips AI', async () => {
         const service = readyService('SELECT * FROM orders;');
 
@@ -522,6 +552,8 @@ describe('QueryEditorAiAssist', () => {
 
         expect(insertText).toBe('eos');
         expect(service.AIChatSend).not.toHaveBeenCalled();
+        expect(service.AIGetProviders).not.toHaveBeenCalled();
+        expect(service.AIGetActiveProvider).not.toHaveBeenCalled();
     });
 
     it('uses deterministic schema metadata for alter-table inline completion and skips AI', async () => {

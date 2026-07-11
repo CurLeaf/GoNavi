@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button, Input, Popover, Select, Tooltip } from 'antd';
-import { FilterOutlined, LinkOutlined } from '@ant-design/icons';
+import { FilterOutlined, LinkOutlined, PushpinOutlined } from '@ant-design/icons';
 import { t as defaultTranslate, type I18nParams } from '../i18n';
 
 export type DataGridColumnTitleTranslate = (key: string, params?: I18nParams) => string;
@@ -49,6 +49,8 @@ export interface DataGridColumnTitleProps {
   columnMetaTooltipColor: string;
   darkMode: boolean;
   highlighted?: boolean;
+  /** 左侧钉住列：表头显示固定图标 */
+  pinnedLeft?: boolean;
   translate?: DataGridColumnTitleTranslate;
   onOpenForeignKey?: () => void;
   columnFilter?: DataGridColumnFilterConfig | null;
@@ -69,6 +71,7 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
   columnMetaTooltipColor,
   darkMode,
   highlighted = false,
+  pinnedLeft = false,
   translate = defaultTranslate,
   onOpenForeignKey,
   columnFilter,
@@ -81,6 +84,18 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
   const shouldShowColumnType = showColumnType && columnType.length > 0;
   const shouldShowColumnComment = showColumnComment && columnComment.length > 0;
   const isSingleLineColumnTitle = !shouldShowColumnType && !shouldShowColumnComment;
+  const pinIcon = pinnedLeft ? (
+    <PushpinOutlined
+      data-grid-column-pinned-icon="true"
+      aria-label={translate('data_grid.context_menu.pin_column_left')}
+      title={translate('data_grid.context_menu.pin_column_left')}
+      style={{
+        flex: 'none',
+        fontSize: Math.max(11, metaFontSize),
+        color: darkMode ? 'rgba(250, 204, 21, 0.92)' : 'rgba(202, 138, 4, 0.95)',
+      }}
+    />
+  ) : null;
   const [filterPopoverOpen, setFilterPopoverOpen] = React.useState(false);
   const initialFilterOperator = columnFilter?.initialOperator || columnFilter?.defaultOperator || '=';
   const [draftFilterOperator, setDraftFilterOperator] = React.useState(initialFilterOperator);
@@ -136,13 +151,19 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
         cursor: 'pointer',
       }}
     >
+      {pinIcon}
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
         {normalizedName}
       </span>
       <LinkOutlined style={{ fontSize: metaFontSize + 1, color: columnMetaHintColor, flex: 'none' }} />
     </button>
   ) : (
-    <span style={{ whiteSpace: 'nowrap' }}>{normalizedName}</span>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0, maxWidth: '100%' }}>
+      {pinIcon}
+      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+        {normalizedName}
+      </span>
+    </span>
   );
 
   const titleNode = (
@@ -375,7 +396,8 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
       className="gn-v2-column-title-shell"
       style={{
         display: 'inline-flex',
-        alignItems: 'center',
+        // 顶对齐：有无注释时标题块高度不同，center 会让筛选图标上下错位
+        alignItems: 'flex-start',
         gap: 4,
         maxWidth: '100%',
         minWidth: 0,
@@ -409,6 +431,8 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
+            // 与列名首行光学对齐（约 1.2 行高与 22px 按钮的中线差）
+            marginTop: 0,
             padding: 0,
             border: columnFilter.active ? `1px solid ${activeColor}` : '1px solid transparent',
             borderRadius: 6,

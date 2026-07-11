@@ -14,6 +14,8 @@ export function AIChatSendWithOptions(arg1:Array<ai.Message>,arg2:Array<ai.Tool>
 
 export function AIChatStream(arg1:string,arg2:Array<ai.Message>,arg3:Array<ai.Tool>):Promise<void>;
 
+export function AIChatStreamWithOptions(arg1:string,arg2:Array<ai.Message>,arg3:Array<ai.Tool>,arg4:ai.ChatSendOptions):Promise<void>;
+
 export function AICheckSQL(arg1:string):Promise<ai.SafetyResult>;
 
 export function AIDeleteMCPServer(arg1:string):Promise<void>;

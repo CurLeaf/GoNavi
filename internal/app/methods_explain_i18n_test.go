@@ -213,6 +213,16 @@ func TestDiagnoseQueryUsesCurrentLanguageForValidationAndSuccessMessages(t *test
 		t.Fatalf("expected localized non-select message %q, got %q", expected, nonSelect.Message)
 	}
 
+	for _, unsafeQuery := range []string{
+		"WITH removed AS (DELETE FROM users RETURNING id) SELECT * FROM removed",
+		"SELECT 1; DELETE FROM users",
+	} {
+		result := app.DiagnoseQuery(connection.ConnectionConfig{Type: "postgres"}, "", unsafeQuery)
+		if expected := app.appText("sql_analysis.backend.error.select_only", nil); result.Message != expected {
+			t.Fatalf("expected unsafe query %q to be rejected with %q, got %q", unsafeQuery, expected, result.Message)
+		}
+	}
+
 	unsupported := app.DiagnoseQuery(connection.ConnectionConfig{Type: "redis", Host: "127.0.0.1"}, "", "select 1")
 	if expected := app.appText("sql_analysis.backend.error.unsupported_db_type", map[string]any{"dbType": "redis"}); unsupported.Message != expected {
 		t.Fatalf("expected localized unsupported-db message %q, got %q", expected, unsupported.Message)

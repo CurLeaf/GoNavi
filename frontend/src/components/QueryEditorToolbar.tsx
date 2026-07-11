@@ -1,6 +1,7 @@
 import React from "react";
 import { Button, Dropdown, Select, Tooltip, type MenuProps } from "antd";
 import {
+  DiffOutlined,
   DownOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
@@ -59,6 +60,9 @@ type QueryEditorToolbarProps = {
   onTriggerSqlAiCompletion: () => void;
   onToggleResultPanelVisibility: () => void;
   onAIAction: (action: "generate" | "explain" | "optimize" | "schema") => void;
+  /** object-edit 视图：验证数据变化入口 */
+  showViewDataVerify?: boolean;
+  onViewDataVerify?: () => void;
 };
 
 const FULL_NAME_TOOLTIP_DELAY_SECONDS = 1;
@@ -123,6 +127,8 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
   onTriggerSqlAiCompletion,
   onToggleResultPanelVisibility,
   onAIAction,
+  showViewDataVerify = false,
+  onViewDataVerify,
 }) => {
   const i18n = useOptionalI18n();
   const t = i18n?.t ?? defaultTranslate;
@@ -347,6 +353,17 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
           >
             {t("query_editor.action.run")}
           </Button>
+          {showViewDataVerify && onViewDataVerify && (
+            <Tooltip title={t("result_diff.view_verify.toolbar.tooltip")}>
+              <Button
+                icon={<DiffOutlined />}
+                disabled={loading}
+                onClick={onViewDataVerify}
+              >
+                {t("result_diff.view_verify.toolbar")}
+              </Button>
+            </Tooltip>
+          )}
         </Tooltip>
         {loading && (
           <Button
@@ -376,7 +393,12 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
               : t("query_editor.action.save")
           }
         >
-          <Button icon={<SaveOutlined />} onClick={onQuickSave}>
+          <Button
+            className={isV2Ui ? "gn-v2-query-toolbar-save-action" : undefined}
+            type="primary"
+            icon={<SaveOutlined />}
+            onClick={onQuickSave}
+          >
             {t("query_editor.action.save")}
           </Button>
         </Tooltip>

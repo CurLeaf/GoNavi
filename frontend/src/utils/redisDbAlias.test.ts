@@ -4,6 +4,7 @@ import {
   MAX_REDIS_DB_ALIAS_LENGTH,
   buildRedisDbNodeLabel,
   getRedisDbAlias,
+  mergeRedisDbAliases,
   sanitizeRedisDbAlias,
   sanitizeRedisDbAliases,
   setRedisDbAlias,
@@ -75,5 +76,21 @@ describe('redisDbAlias helpers', () => {
 
   it('does not append key counts to the sidebar label', () => {
     expect(buildRedisDbNodeLabel(0, '12')).toBe('db0 12');
+  });
+
+  it('merges imported aliases over local ones without dropping unrelated labels', () => {
+    const current = {
+      'conn-a': { '0': 'local-cache', '1': 'local-queue' },
+      'conn-b': { '0': 'sessions' },
+    };
+    const incoming = {
+      'conn-a': { '0': 'imported-cache' },
+      'conn-c': { '2': 'metrics' },
+    };
+    expect(mergeRedisDbAliases(current, incoming)).toEqual({
+      'conn-a': { '0': 'imported-cache', '1': 'local-queue' },
+      'conn-b': { '0': 'sessions' },
+      'conn-c': { '2': 'metrics' },
+    });
   });
 });

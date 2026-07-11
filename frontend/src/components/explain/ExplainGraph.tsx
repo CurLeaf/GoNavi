@@ -1,11 +1,10 @@
-import { useCallback, useMemo } from 'react'
+import { memo, useCallback, useEffect, useMemo } from 'react'
 import ReactFlow, {
   Background,
   BackgroundVariant,
   Controls,
   type Edge,
   type Node,
-  type NodeMouseHandler,
   Position,
   ReactFlowProvider,
   useEdgesState,
@@ -13,29 +12,21 @@ import ReactFlow, {
 } from 'reactflow'
 import dagre from 'dagre'
 import 'reactflow/dist/style.css'
+import './ExplainAnalysis.css'
 import {
   type ExplainEdge,
   type ExplainNode,
-  opTypeColor,
   formatNumber,
 } from '../../utils/explainTypes'
 import { useI18n } from '../../i18n/provider'
 
-// 执行计划图主组件。
-// 使用 react-flow 渲染扁平节点数组，dagre 自动计算树形布局。
-//
-// 设计要点：
-//   - 自定义节点（ExplainGraphNodeData）按 opType 着色 + 警告 flag 边框高亮
-//   - 点击节点触发 onSelectNode 回调（详情抽屉联动）
-//   - 节点尺寸自适应内容，避免长 SQL/表名截断
-//   - 通过 React.memo 避免不必要的重渲染（88W 数据下很重要）
-
-const NODE_WIDTH = 220
-const NODE_HEIGHT = 80
+const NODE_WIDTH = 240
+const NODE_HEIGHT = 128
 
 export interface ExplainGraphNodeData {
   node: ExplainNode
   isSelected: boolean
+  onSelect?: (nodeId: string) => void
 }
 
 interface ExplainGraphProps {
@@ -54,37 +45,43 @@ export default function ExplainGraph(props: ExplainGraphProps) {
 }
 
 function ExplainGraphInner({ nodes, edges, selectedNodeId, onSelectNode }: ExplainGraphProps) {
+  // Selection is deliberately excluded: highlighting a node must not run dagre again.
   const { rfNodes, rfEdges } = useMemo(
-    () => layoutWithDagre(nodes, edges, selectedNodeId),
-    [nodes, edges, selectedNodeId],
+    () => layoutWithDagre(nodes, edges),
+    [nodes, edges],
   )
 
-  const [nodeState, , onNodesChange] = useNodesState(rfNodes)
-  const [edgeState, , onEdgesChange] = useEdgesState(rfEdges)
-
-  const handleNodeClick: NodeMouseHandler = useCallback(
-    (_event, node) => {
-      onSelectNode?.(node.id)
-    },
-    [onSelectNode],
+  const [nodeState, setNodeState, onNodesChange] = useNodesState(
+    applyGraphNodeState(rfNodes, selectedNodeId, onSelectNode),
   )
+  const [edgeState, setEdgeState, onEdgesChange] = useEdgesState(rfEdges)
+
+  // useNodesState/useEdgesState only consume their initial value. Keep controlled
+  // ReactFlow state in sync when an asynchronously loaded plan replaces the props.
+  useEffect(() => {
+    setNodeState(applyGraphNodeState(rfNodes, selectedNodeId, onSelectNode))
+  }, [onSelectNode, rfNodes, selectedNodeId, setNodeState])
+
+  useEffect(() => {
+    setEdgeState(rfEdges)
+  }, [rfEdges, setEdgeState])
 
   const handlePaneClick = useCallback(() => {
     onSelectNode?.(null)
   }, [onSelectNode])
 
   return (
-    <div className="gn-explain-graph" style={{ width: '100%', height: '100%' }}>
+    <div className="gn-explain-graph">
       <ReactFlow
         nodes={nodeState}
         edges={edgeState}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onNodeClick={handleNodeClick}
         onPaneClick={handlePaneClick}
-        nodeTypes={{ explain: ExplainGraphNodeRenderer }}
+        nodeTypes={EXPLAIN_NODE_TYPES}
         fitView
         fitViewOptions={{ padding: 0.2 }}
+        minZoom={0.2}
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
@@ -94,133 +91,186 @@ function ExplainGraphInner({ nodes, edges, selectedNodeId, onSelectNode }: Expla
   )
 }
 
-// layoutWithDagre 用 dagre 计算 react-flow 节点位置。
-// 默认从上到下（TB）布局，符合执行计划的"父子层级"心智模型。
-function layoutWithDagre(
+// layoutWithDagre only owns topology and positions. Interactive state is applied
+// afterwards so selection and callback changes do not trigger an expensive layout.
+export function layoutWithDagre(
   nodes: ExplainNode[],
   edges: ExplainEdge[],
-  selectedNodeId?: string,
 ): { rfNodes: Node<ExplainGraphNodeData>[]; rfEdges: Edge[] } {
-  const g = new dagre.graphlib.Graph()
-  g.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 60, marginx: 20, marginy: 20 })
-  g.setDefaultEdgeLabel(() => ({}))
+  const graph = new dagre.graphlib.Graph()
+  graph.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 60, marginx: 20, marginy: 20 })
+  graph.setDefaultEdgeLabel(() => ({}))
 
   for (const node of nodes) {
-    g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT })
+    graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT })
   }
   for (const edge of edges) {
-    g.setEdge(edge.from, edge.to, { label: edge.label })
+    graph.setEdge(edge.from, edge.to, { label: edge.label })
   }
-  dagre.layout(g)
+  dagre.layout(graph)
 
   const rfNodes: Node<ExplainGraphNodeData>[] = nodes.map((node) => {
-    const pos = g.node(node.id)
+    const position = graph.node(node.id)
     return {
       id: node.id,
       type: 'explain',
-      position: { x: pos?.x ?? 0, y: pos?.y ?? 0 },
-      data: { node, isSelected: node.id === selectedNodeId },
+      position: { x: position?.x ?? 0, y: position?.y ?? 0 },
+      data: { node, isSelected: false },
       targetPosition: Position.Top,
       sourcePosition: Position.Bottom,
       draggable: false,
+      selectable: false,
+      focusable: false,
     }
   })
 
-  const rfEdges: Edge[] = edges.map((edge, idx) => ({
-    id: `e-${edge.from}-${edge.to}-${idx}`,
+  const rfEdges: Edge[] = edges.map((edge, index) => ({
+    id: `e-${edge.from}-${edge.to}-${index}`,
     source: edge.from,
     target: edge.to,
     label: edge.label,
     type: 'smoothstep',
-    style: { stroke: 'var(--gn-explain-edge, #adb5bd)', strokeWidth: 1.5 },
+    style: { stroke: 'var(--gn-fg-5)', strokeWidth: 1.5 },
   }))
 
   return { rfNodes, rfEdges }
 }
 
-import { memo } from 'react'
+export function applyGraphNodeState(
+  nodes: Node<ExplainGraphNodeData>[],
+  selectedNodeId?: string,
+  onSelectNode?: (nodeId: string | null) => void,
+): Node<ExplainGraphNodeData>[] {
+  return nodes.map((node) => ({
+    ...node,
+    data: {
+      ...node.data,
+      isSelected: node.id === selectedNodeId,
+      onSelect: onSelectNode,
+    },
+  }))
+}
 
 const ExplainGraphNodeRenderer = memo(function ExplainGraphNodeRenderer({
   data,
 }: {
   data: ExplainGraphNodeData
 }) {
-  const { t } = useI18n()
-  const { node, isSelected } = data
-  const color = opTypeColor(node.opType)
+  const { language, t } = useI18n()
+  const { node, isSelected, onSelect } = data
+  const operationColor = resolveOperationColor(node.opType)
   const hasFullScan = node.flags?.includes('FULL_SCAN')
   const hasFilesort = node.flags?.includes('FILESORT')
   const hasTempTable = node.flags?.includes('TEMP_TABLE')
+  const operationLabel = node.opDetail || formatOperationLabel(node.opType)
 
   return (
-    <div
-      className="gn-explain-node"
-      style={{
-        width: NODE_WIDTH,
-        minHeight: NODE_HEIGHT,
-        border: `2px solid ${isSelected ? 'var(--gn-explain-selected, #1971c2)' : color}`,
-        background: 'var(--gn-explain-node-bg, #ffffff)',
-        boxShadow: isSelected ? '0 0 0 3px rgba(25, 113, 194, 0.2)' : 'none',
-        borderRadius: 6,
-        padding: 8,
-        fontSize: 12,
-        cursor: 'pointer',
+    <button
+      type="button"
+      className={`gn-explain-node${isSelected ? ' gn-explain-node--selected' : ''}`}
+      style={{ borderColor: isSelected ? 'var(--gn-accent)' : operationColor }}
+      aria-pressed={isSelected}
+      title={operationLabel}
+      onClick={(event) => {
+        event.stopPropagation()
+        onSelect?.(node.id)
       }}
     >
-      <div style={{ fontWeight: 600, color, marginBottom: 4 }}>{node.opDetail || node.opType}</div>
+      <span
+        className="gn-explain-node__label"
+        style={{ color: operationColor }}
+        title={operationLabel}
+      >
+        {operationLabel}
+      </span>
       {node.table && (
-        <div style={{ color: 'var(--gn-text-muted, #495057)', marginBottom: 2 }}>
-          <span style={{ opacity: 0.6 }}>{t('sql_analysis.explain_graph.label.table')}</span>
-          <code style={{ fontSize: 11 }}>{node.table}</code>
-        </div>
+        <span className="gn-explain-node__field" title={node.table}>
+          <span className="gn-explain-node__field-label">
+            {t('sql_analysis.explain_graph.label.table')}
+          </span>
+          <code>{node.table}</code>
+        </span>
       )}
       {node.index && (
-        <div style={{ color: 'var(--gn-text-muted, #495057)', marginBottom: 2 }}>
-          <span style={{ opacity: 0.6 }}>{t('sql_analysis.explain_graph.label.index')}</span>
-          <code style={{ fontSize: 11 }}>{node.index}</code>
-        </div>
+        <span className="gn-explain-node__field" title={node.index}>
+          <span className="gn-explain-node__field-label">
+            {t('sql_analysis.explain_graph.label.index')}
+          </span>
+          <code>{node.index}</code>
+        </span>
       )}
-      <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-        {node.estRows !== undefined && node.estRows > 0 && (
-          <span style={{ color: 'var(--gn-text-muted, #495057)' }}>
-            {t('sql_analysis.explain_graph.metric.est_rows')} <strong>{formatNumber(node.estRows)}</strong>
+      <span className="gn-explain-node__metrics">
+        {isFiniteMetric(node.estRows) && (
+          <span>
+            {t('sql_analysis.explain_graph.metric.est_rows')}{' '}
+            <strong>{formatNumber(node.estRows, language)}</strong>
           </span>
         )}
-        {node.actualRows !== undefined && node.actualRows > 0 && (
-          <span style={{ color: 'var(--gn-text-muted, #495057)' }}>
-            {t('sql_analysis.explain_graph.metric.actual_rows')} <strong>{formatNumber(node.actualRows)}</strong>
+        {isFiniteMetric(node.actualRows) && (
+          <span>
+            {t('sql_analysis.explain_graph.metric.actual_rows')}{' '}
+            <strong>{formatNumber(node.actualRows, language)}</strong>
           </span>
         )}
-        {node.cost !== undefined && node.cost > 0 && (
-          <span style={{ color: 'var(--gn-text-muted, #495057)' }}>
-            {t('sql_analysis.explain_graph.metric.cost')} <strong>{node.cost.toFixed(1)}</strong>
+        {isFiniteMetric(node.cost) && (
+          <span>
+            {t('sql_analysis.explain_graph.metric.cost')}{' '}
+            <strong>{node.cost?.toFixed(1)}</strong>
           </span>
         )}
-      </div>
+      </span>
       {(hasFullScan || hasFilesort || hasTempTable) && (
-        <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
-          {hasFullScan && <FlagBadge color="#fa5252" text={t('sql_analysis.explain_graph.flag.full_scan')} />}
-          {hasFilesort && <FlagBadge color="#f08c00" text={t('sql_analysis.explain_graph.flag.filesort')} />}
-          {hasTempTable && <FlagBadge color="#7048e8" text={t('sql_analysis.explain_graph.flag.temp_table')} />}
-        </div>
+        <span className="gn-explain-node__flags">
+          {hasFullScan && (
+            <FlagBadge tone="danger" text={t('sql_analysis.explain_graph.flag.full_scan')} />
+          )}
+          {hasFilesort && (
+            <FlagBadge tone="warning" text={t('sql_analysis.explain_graph.flag.filesort')} />
+          )}
+          {hasTempTable && (
+            <FlagBadge tone="info" text={t('sql_analysis.explain_graph.flag.temp_table')} />
+          )}
+        </span>
       )}
-    </div>
+    </button>
   )
 })
 
-function FlagBadge({ color, text }: { color: string; text: string }) {
-  return (
-    <span
-      style={{
-        background: color,
-        color: 'white',
-        padding: '1px 6px',
-        borderRadius: 3,
-        fontSize: 10,
-        fontWeight: 500,
-      }}
-    >
-      {text}
-    </span>
-  )
+const EXPLAIN_NODE_TYPES = { explain: ExplainGraphNodeRenderer }
+
+function FlagBadge({ tone, text }: { tone: 'danger' | 'warning' | 'info'; text: string }) {
+  return <span className={`gn-explain-flag gn-explain-flag--${tone}`}>{text}</span>
+}
+
+function isFiniteMetric(value?: number): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function formatOperationLabel(operation: string): string {
+  const normalized = String(operation || '')
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[_-]+/g, ' ')
+  return normalized ? normalized.charAt(0).toLocaleUpperCase() + normalized.slice(1) : '-'
+}
+
+function resolveOperationColor(operation: string): string {
+  switch (operation) {
+    case 'SCAN':
+    case 'MATERIALIZE':
+      return 'var(--gn-danger)'
+    case 'INDEX_SCAN':
+    case 'INDEX_ONLY':
+      return 'var(--gn-accent)'
+    case 'JOIN':
+    case 'AGGREGATE':
+    case 'SUBQUERY':
+    case 'UNION':
+    case 'WINDOW':
+      return 'var(--gn-info)'
+    case 'SORT':
+      return 'var(--gn-warn)'
+    default:
+      return 'var(--gn-fg-3)'
+  }
 }

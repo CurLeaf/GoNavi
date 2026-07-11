@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <title>Real DOM Theme Settings Check</title>
+  <link rel="stylesheet" href="./gonavi-theme-settings.extract.css" />
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; background: #eef2f6; padding: 24px; }
+    .frame { width: 720px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 16px 20px 24px; border: 1px solid #e2e8f0; }
+    h1 { margin: 0 0 4px; font-size: 16px; }
+    .sub { margin: 0 0 12px; color: #64748b; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <h1>主题与外观</h1>
+    <p class="sub">切换亮暗主题并调整界面观感。</p>
+    <div class="gonavi-theme-settings">
+      <div class="gonavi-settings-tabs" role="tablist">
+        <button type="button" class="gonavi-settings-tab is-active" role="tab" aria-selected="true">
+          <span class="gonavi-settings-tab-icon">▣</span><span>主题与界面</span>
+        </button>
+        <button type="button" class="gonavi-settings-tab" role="tab" aria-selected="false">
+          <span class="gonavi-settings-tab-icon">◐</span><span>显示与字体</span>
+        </button>
+        <button type="button" class="gonavi-settings-tab" role="tab" aria-selected="false">
+          <span class="gonavi-settings-tab-icon">▦</span><span>工作区</span>
+        </button>
+      </div>
+      <div class="gonavi-settings-inline-meta">更改将立即生效，无需保存。</div>
+
+      <section class="gonavi-settings-section" style="margin-top:16px">
+        <div class="gonavi-settings-section-title">亮暗模式</div>
+        <div class="gonavi-settings-mode-grid">
+          <button type="button" class="gonavi-settings-mode-tile"><div class="gonavi-settings-mode-preview"><div class="gonavi-settings-mode-preview-pane is-light"><span class="gonavi-settings-mode-preview-line"></span><span class="gonavi-settings-mode-preview-line"></span><span class="gonavi-settings-mode-preview-line"></span></div></div><div class="gonavi-settings-mode-meta"><span class="gonavi-settings-mode-label">亮色主题</span></div></button>
+          <button type="button" class="gonavi-settings-mode-tile"><div class="gonavi-settings-mode-preview"><div class="gonavi-settings-mode-preview-pane is-dark"><span class="gonavi-settings-mode-preview-line"></span><span class="gonavi-settings-mode-preview-line"></span><span class="gonavi-settings-mode-preview-line"></span></div></div><div class="gonavi-settings-mode-meta"><span class="gonavi-settings-mode-label">暗色主题</span></div></button>
+          <button type="button" class="gonavi-settings-mode-tile is-active"><div class="gonavi-settings-mode-preview is-system"><div class="gonavi-settings-mode-preview-pane is-light"><span class="gonavi-settings-mode-preview-line"></span><span class="gonavi-settings-mode-preview-line"></span><span class="gonavi-settings-mode-preview-line"></span></div><div class="gonavi-settings-mode-preview-pane is-dark"><span class="gonavi-settings-mode-preview-line"></span><span class="gonavi-settings-mode-preview-line"></span><span class="gonavi-settings-mode-preview-line"></span></div></div><div class="gonavi-settings-mode-meta"><span class="gonavi-settings-mode-label">跟随系统</span><span class="gonavi-settings-mode-check">✓</span></div></button>
+        </div>
+      </section>
+
+      <section class="gonavi-settings-section" style="margin-top:20px">
+        <div class="gonavi-settings-section-title">界面版本 <span class="gonavi-settings-beta-chip">Beta</span></div>
+        <div class="gonavi-settings-ui-version-grid">
+          <button type="button" class="gonavi-settings-ui-version-tile"><div class="gonavi-settings-ui-version-preview is-legacy"><div class="uv-side"><span class="uv-dot"></span><span class="uv-dot"></span><span class="uv-dot"></span></div><div class="uv-main"><div class="uv-bar is-accent"></div><div class="uv-cards"><div class="uv-card"></div><div class="uv-card"></div></div></div></div><div class="gonavi-settings-ui-version-meta"><span class="gonavi-settings-ui-version-title"><span>旧版 UI</span><span class="gonavi-settings-ui-version-badge">默认</span></span></div></button>
+          <button type="button" class="gonavi-settings-ui-version-tile is-active"><div class="gonavi-settings-ui-version-preview is-v2"><div class="uv-side"><span class="uv-dot"></span><span class="uv-dot"></span><span class="uv-dot"></span></div><div class="uv-main"><div class="uv-bar is-accent"></div><div class="uv-cards"><div class="uv-card"></div><div class="uv-card"></div></div></div></div><div class="gonavi-settings-ui-version-meta"><span class="gonavi-settings-ui-version-title"><span>新版 UI</span><span class="gonavi-settings-ui-version-badge is-new">Beta</span></span><span class="gonavi-settings-mode-check">✓</span></div></button>
+        </div>
+        <div class="gonavi-settings-inline-choice-row">
+          <span class="gonavi-settings-label">新版左侧搜索模式</span>
+          <div class="gonavi-settings-pills">
+            <button type="button" class="gonavi-settings-pill is-active">新版命令搜索</button>
+            <button type="button" class="gonavi-settings-pill">旧版侧栏筛选</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</body>
+</html>

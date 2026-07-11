@@ -65,7 +65,7 @@ describe('store appearance persistence', () => {
     const { useStore } = await importStore();
     const appearance = useStore.getState().appearance;
 
-    expect(appearance.uiVersion).toBe('legacy');
+    expect(appearance.uiVersion).toBe('v2');
     expect(appearance.enabled).toBe(false);
     expect(appearance.opacity).toBe(0.75);
     expect(appearance.blur).toBe(6);
@@ -76,6 +76,7 @@ describe('store appearance persistence', () => {
     expect(appearance.v2SidebarPersistedFilter).toBe('');
     expect(appearance.v2SidebarRailScale).toBe(1);
     expect(appearance.showDataTableVerticalBorders).toBe(false);
+    expect(appearance.showDataTableRowNumber).toBe(true);
     expect(appearance.dataTableDensity).toBe('comfortable');
     expect(appearance.dataTableFontSize).toBeNull();
     expect(appearance.dataTableFontSizeFollowGlobal).toBe(true);
@@ -91,11 +92,44 @@ describe('store appearance persistence', () => {
     });
   });
 
+  it('migrates an existing legacy UI selection to V2', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        appearance: {
+          uiVersion: 'legacy',
+        },
+      },
+      version: 13,
+    }));
+
+    const { useStore } = await importStore();
+    expect(useStore.getState().appearance.uiVersion).toBe('v2');
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.version).toBe(14);
+    expect(persisted.state.appearance.uiVersion).toBe('v2');
+  });
+
+  it('keeps a legacy UI selection made after the V2 migration', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        appearance: {
+          uiVersion: 'legacy',
+        },
+      },
+      version: 14,
+    }));
+
+    const { useStore } = await importStore();
+    expect(useStore.getState().appearance.uiVersion).toBe('legacy');
+  });
+
   it('persists DataGrid appearance settings and restores them after reload', async () => {
     const { useStore } = await importStore();
 
     useStore.getState().setAppearance({
       showDataTableVerticalBorders: true,
+      showDataTableRowNumber: false,
       dataTableDensity: 'compact',
       tableDoubleClickAction: 'open-design',
       v2SidebarRailScale: 1.55,
@@ -103,6 +137,7 @@ describe('store appearance persistence', () => {
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
     expect(persisted.state.appearance.showDataTableVerticalBorders).toBe(true);
+    expect(persisted.state.appearance.showDataTableRowNumber).toBe(false);
     expect(persisted.state.appearance.dataTableDensity).toBe('compact');
     expect(persisted.state.appearance.tableDoubleClickAction).toBe('open-design');
     expect(persisted.state.appearance.v2SidebarRailScale).toBe(1.55);
@@ -112,6 +147,7 @@ describe('store appearance persistence', () => {
     const appearance = reloaded.useStore.getState().appearance;
 
     expect(appearance.showDataTableVerticalBorders).toBe(true);
+    expect(appearance.showDataTableRowNumber).toBe(false);
     expect(appearance.dataTableDensity).toBe('compact');
     expect(appearance.tableDoubleClickAction).toBe('open-design');
     expect(appearance.v2SidebarRailScale).toBe(1.55);
@@ -1548,6 +1584,150 @@ describe('store appearance persistence', () => {
     });
   });
 
+  it('detaches and restores workbench tabs as floating windows', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'table-users',
+      title: 'users',
+      type: 'table',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      tableName: 'users',
+    });
+    useStore.getState().addTab({
+      id: 'query-1',
+      title: '新建查询',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      query: 'select 1;',
+    });
+
+    useStore.getState().detachWorkbenchTab('table-users', { x: 80, y: 90, width: 800, height: 500 });
+    expect(useStore.getState().isWorkbenchTabDetached('table-users')).toBe(true);
+    expect(useStore.getState().detachedWorkbenchWindows).toEqual([
+      expect.objectContaining({
+        tabId: 'table-users',
+        x: 80,
+        y: 90,
+        width: 800,
+        height: 500,
+      }),
+    ]);
+    expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual(['table-users', 'query-1']);
+
+    useStore.getState().attachWorkbenchTab('table-users');
+    expect(useStore.getState().isWorkbenchTabDetached('table-users')).toBe(false);
+    expect(useStore.getState().detachedWorkbenchWindows).toEqual([]);
+    expect(useStore.getState().activeTabId).toBe('table-users');
+
+    useStore.getState().detachWorkbenchTab('table-users');
+    useStore.getState().closeTab('table-users');
+    expect(useStore.getState().detachedWorkbenchWindows).toEqual([]);
+    expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual(['query-1']);
+  });
+
+  it('detaches and restores query result floating windows', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().detachQueryResultWindow({
+      id: 'query-result:tab-1:rs-1',
+      sourceQueryTabId: 'tab-1',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      title: '结果 1',
+      result: {
+        key: 'rs-1',
+        sql: 'select 1',
+        rows: [{ a: 1 }],
+        columns: ['a'],
+        pkColumns: [],
+        readOnly: true,
+      },
+    });
+    expect(useStore.getState().detachedQueryResultWindows).toHaveLength(1);
+
+    const restored = useStore.getState().attachQueryResultWindow('query-result:tab-1:rs-1');
+    expect(restored?.result.key).toBe('rs-1');
+    expect(useStore.getState().detachedQueryResultWindows).toEqual([]);
+  });
+
+  it('detaches AI chat panel into a floating window and docks it back', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setAIPanelVisible(true);
+    useStore.getState().detachAIChatPanel({ x: 40, y: 50, width: 420, height: 640 });
+    expect(useStore.getState().isAIChatDetached()).toBe(true);
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    const detached = useStore.getState().detachedAIChatWindow;
+    expect(detached).toBeTruthy();
+    expect(detached?.width).toBe(420);
+    expect(detached?.height).toBe(640);
+    expect(detached?.x).toBeGreaterThanOrEqual(16);
+    expect(detached?.y).toBeGreaterThanOrEqual(16);
+    expect(detached?.zIndex).toBeGreaterThan(0);
+
+    // 使用可落入默认/无 DOM 视口上限的尺寸，避免 createDefaultDetachedBounds clamp 干扰断言
+    useStore.getState().updateDetachedAIChatBounds({ width: 500, height: 560 });
+    expect(useStore.getState().detachedAIChatWindow?.width).toBe(500);
+    expect(useStore.getState().detachedAIChatWindow?.height).toBe(560);
+    expect(useStore.getState().aiChatDetachedBoundsMemory?.width).toBe(500);
+    expect(useStore.getState().aiChatDetachedBoundsMemory?.height).toBe(560);
+
+    useStore.getState().attachAIChatPanel();
+    expect(useStore.getState().isAIChatDetached()).toBe(false);
+    expect(useStore.getState().detachedAIChatWindow).toBeNull();
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    // 还原侧栏后仍保留上次尺寸记忆
+    expect(useStore.getState().aiChatDetachedBoundsMemory?.width).toBe(500);
+    expect(useStore.getState().aiChatDetachedBoundsMemory?.height).toBe(560);
+
+    // 再次弹出应复用记忆尺寸
+    useStore.getState().detachAIChatPanel();
+    expect(useStore.getState().detachedAIChatWindow?.width).toBe(500);
+    expect(useStore.getState().detachedAIChatWindow?.height).toBe(560);
+
+    useStore.getState().setAIPanelVisible(false);
+    expect(useStore.getState().detachedAIChatWindow).toBeNull();
+    expect(useStore.getState().aiPanelVisible).toBe(false);
+    expect(useStore.getState().aiChatDetachedBoundsMemory?.width).toBe(500);
+  });
+
+  it('opens AI chat according to the configured default open mode', async () => {
+    const { useStore } = await importStore();
+
+    expect(useStore.getState().aiChatOpenMode).toBe('dock');
+    useStore.getState().setAIPanelVisible(true);
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    expect(useStore.getState().detachedAIChatWindow).toBeNull();
+
+    useStore.getState().setAIPanelVisible(false);
+    useStore.getState().setAIChatOpenMode('detached');
+    expect(useStore.getState().aiChatOpenMode).toBe('detached');
+
+    useStore.getState().setAIPanelVisible(true);
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    expect(useStore.getState().isAIChatDetached()).toBe(true);
+    expect(useStore.getState().detachedAIChatWindow).toBeTruthy();
+
+    // 手动还原到侧栏不改变默认打开偏好
+    useStore.getState().attachAIChatPanel();
+    expect(useStore.getState().isAIChatDetached()).toBe(false);
+    expect(useStore.getState().aiChatOpenMode).toBe('detached');
+
+    // 再次从入口打开仍按默认偏好弹出独立窗
+    useStore.getState().setAIPanelVisible(false);
+    useStore.getState().toggleAIPanel();
+    expect(useStore.getState().isAIChatDetached()).toBe(true);
+
+    useStore.getState().setAIChatOpenMode('dock');
+    useStore.getState().setAIPanelVisible(false);
+    useStore.getState().setAIPanelVisible(true);
+    expect(useStore.getState().detachedAIChatWindow).toBeNull();
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+  });
+
   it('returns to the source tab after closing an object edit tab opened from a hyperlink', async () => {
     const { useStore } = await importStore();
 
@@ -1907,6 +2087,22 @@ describe('store appearance persistence', () => {
     vi.resetModules();
     const reloaded = await importStore();
     expect(reloaded.useStore.getState().startupFullscreen).toBe(true);
+  });
+
+  it('persists window state and bounds immediately so Windows reopen keeps maximise or size memory', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setWindowState('maximized');
+    useStore.getState().setWindowBounds({ width: 1400, height: 900, x: 80, y: 40 });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.windowState).toBe('maximized');
+    expect(persisted.state.windowBounds).toEqual({ width: 1400, height: 900, x: 80, y: 40 });
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().windowState).toBe('maximized');
+    expect(reloaded.useStore.getState().windowBounds).toEqual({ width: 1400, height: 900, x: 80, y: 40 });
   });
 
   it('falls back to Enter when persisted AI chat send shortcut is invalid', async () => {

@@ -133,11 +133,12 @@ type connectionPackageKDFSpec struct {
 }
 
 type connectionPackageFileV2 struct {
-	V           int                     `json:"v"`
-	Kind        string                  `json:"kind"`
-	P           int                     `json:"p"`
-	ExportedAt  string                  `json:"exportedAt,omitempty"`
-	Connections []connectionPackageItem `json:"connections"`
+	V              int                         `json:"v"`
+	Kind           string                      `json:"kind"`
+	P              int                         `json:"p"`
+	ExportedAt     string                      `json:"exportedAt,omitempty"`
+	Connections    []connectionPackageItem     `json:"connections"`
+	RedisDbAliases map[string]map[string]string `json:"redisDbAliases,omitempty"`
 }
 
 type connectionPackageFileV2Protected struct {
@@ -158,8 +159,10 @@ type connectionPackageKDFSpecV2 struct {
 }
 
 type connectionPackagePayload struct {
-	ExportedAt  string                  `json:"exportedAt,omitempty"`
-	Connections []connectionPackageItem `json:"connections"`
+	ExportedAt     string                              `json:"exportedAt,omitempty"`
+	Connections    []connectionPackageItem             `json:"connections"`
+	// RedisDbAliases：连接 ID → (db 序号字符串 → 别名)。前端展示偏好，随连接包一并迁移。
+	RedisDbAliases map[string]map[string]string        `json:"redisDbAliases,omitempty"`
 }
 
 type connectionPackageItem struct {
@@ -167,6 +170,8 @@ type connectionPackageItem struct {
 	Name                  string                      `json:"name"`
 	IncludeDatabases      []string                    `json:"includeDatabases,omitempty"`
 	IncludeRedisDatabases []int                       `json:"includeRedisDatabases,omitempty"`
+	// RedisDbAliases：该连接下 db 序号 → 别名（如 "0"→"cache"），与前端 redisDbAliases 对齐。
+	RedisDbAliases        map[string]string           `json:"redisDbAliases,omitempty"`
 	IconType              string                      `json:"iconType,omitempty"`
 	IconColor             string                      `json:"iconColor,omitempty"`
 	Config                connection.ConnectionConfig `json:"config"`
@@ -179,6 +184,7 @@ func (i connectionPackageItem) MarshalJSON() ([]byte, error) {
 		Name                  string                      `json:"name"`
 		IncludeDatabases      []string                    `json:"includeDatabases,omitempty"`
 		IncludeRedisDatabases []int                       `json:"includeRedisDatabases,omitempty"`
+		RedisDbAliases        map[string]string           `json:"redisDbAliases,omitempty"`
 		IconType              string                      `json:"iconType,omitempty"`
 		IconColor             string                      `json:"iconColor,omitempty"`
 		Config                connection.ConnectionConfig `json:"config"`
@@ -190,6 +196,7 @@ func (i connectionPackageItem) MarshalJSON() ([]byte, error) {
 		Name:                  i.Name,
 		IncludeDatabases:      i.IncludeDatabases,
 		IncludeRedisDatabases: i.IncludeRedisDatabases,
+		RedisDbAliases:        cloneStringMap(i.RedisDbAliases),
 		IconType:              i.IconType,
 		IconColor:             i.IconColor,
 		Config:                i.Config,
@@ -204,6 +211,15 @@ func (i connectionPackageItem) MarshalJSON() ([]byte, error) {
 type ConnectionExportOptions struct {
 	IncludeSecrets bool   `json:"includeSecrets"`
 	FilePassword   string `json:"filePassword,omitempty"`
+	// RedisDbAliases 由前端传入（appearance.redisDbAliases），导出时写入连接包。
+	RedisDbAliases map[string]map[string]string `json:"redisDbAliases,omitempty"`
+}
+
+// ConnectionPackageImportResult 连接包导入结果；兼容仅返回 connections 数组的旧前端解析逻辑时，
+// 新字段 redisDbAliases 可一并恢复 Redis DB 别名。
+type ConnectionPackageImportResult struct {
+	Connections    []connection.SavedConnectionView `json:"connections"`
+	RedisDbAliases map[string]map[string]string     `json:"redisDbAliases,omitempty"`
 }
 
 func defaultConnectionPackageKDFSpec() connectionPackageKDFSpec {

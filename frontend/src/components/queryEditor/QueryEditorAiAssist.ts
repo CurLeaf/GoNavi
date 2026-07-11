@@ -107,6 +107,7 @@ const MAX_INLINE_INSERT_CHARS = 1800;
 const MAX_INLINE_GHOST_PREVIEW_CHARS = 220;
 const INLINE_COMPLETION_MAX_TOKENS = 192;
 const INLINE_COMPLETION_TEMPERATURE = 0.1;
+const INLINE_RUNTIME_READINESS_CACHE_TTL_MS = 5000;
 
 const SQL_CODE_FENCE_RE = /```(?:sql|mysql|postgresql|postgres|oracle|plsql|sqlite|sqlserver|mssql|tsql|clickhouse|duckdb|starrocks|tdengine)?\s*([\s\S]*?)```/i;
 const INLINE_TABLE_COMPLETION_RE = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|ALTER\s+TABLE|DROP\s+TABLE|TRUNCATE\s+TABLE)\s*([^\s,()]*)$/i;
@@ -172,6 +173,49 @@ export const resolveQueryEditorAiRuntimeReadiness = async (
         provider,
         userPromptSettings,
     };
+};
+
+type InlineRuntimeReadinessCacheEntry = {
+    expiresAt: number;
+    promise: Promise<QueryEditorAiRuntimeReadiness>;
+};
+
+let inlineRuntimeReadinessCache = new WeakMap<object, InlineRuntimeReadinessCacheEntry>();
+
+export const clearQueryEditorInlineRuntimeReadinessCache = (): void => {
+    inlineRuntimeReadinessCache = new WeakMap<object, InlineRuntimeReadinessCacheEntry>();
+};
+
+if (typeof window !== 'undefined') {
+    window.addEventListener('gonavi:ai:provider-changed', clearQueryEditorInlineRuntimeReadinessCache);
+    window.addEventListener('gonavi:ai:config-changed', clearQueryEditorInlineRuntimeReadinessCache);
+}
+
+export const resolveQueryEditorInlineRuntimeReadiness = (
+    service: QueryEditorAiService | undefined,
+): Promise<QueryEditorAiRuntimeReadiness> => {
+    if (!service || typeof service !== 'object') {
+        return resolveQueryEditorAiRuntimeReadiness(service, { requireInlineCompletionModel: true });
+    }
+
+    const now = Date.now();
+    const cached = inlineRuntimeReadinessCache.get(service);
+    if (cached && cached.expiresAt > now) {
+        return cached.promise;
+    }
+
+    const promise = resolveQueryEditorAiRuntimeReadiness(service, { requireInlineCompletionModel: true });
+    const entry = {
+        expiresAt: now + INLINE_RUNTIME_READINESS_CACHE_TTL_MS,
+        promise,
+    };
+    inlineRuntimeReadinessCache.set(service, entry);
+    void promise.catch(() => {
+        if (inlineRuntimeReadinessCache.get(service) === entry) {
+            inlineRuntimeReadinessCache.delete(service);
+        }
+    });
+    return promise;
 };
 
 export const shouldRequestQueryEditorInlineCompletion = (
@@ -259,6 +303,56 @@ export const resolveQueryEditorInlineMemoryInsertText = ({
     return '';
 };
 
+export const resolveQueryEditorInlineLocalCompletion = ({
+    aiContext,
+    editorSnapshot,
+    deferEmptySchemaCompletion = false,
+}: {
+    aiContext: QueryEditorAiContext;
+    editorSnapshot: QueryEditorAiEditorSnapshot;
+    deferEmptySchemaCompletion?: boolean;
+}): { handled: boolean; insertText: string } => {
+    if (!shouldRequestQueryEditorInlineCompletion(editorSnapshot)) {
+        return {
+            handled: true,
+            insertText: '',
+        };
+    }
+
+    const inlineIntent = resolveQueryEditorInlineCompletionIntentDetails(editorSnapshot);
+    const deterministicCompletion = resolveDeterministicInlineSchemaCompletion(
+        aiContext,
+        editorSnapshot,
+        inlineIntent,
+    );
+    if (deterministicCompletion.handled && deterministicCompletion.insertText) {
+        return deterministicCompletion;
+    }
+    if (deterministicCompletion.handled) {
+        if (deferEmptySchemaCompletion) {
+            return {
+                handled: false,
+                insertText: '',
+            };
+        }
+        if (
+            (inlineIntent.intent === 'table_name'
+                && !shouldAllowInlineTableAiFallback(aiContext, inlineIntent.fragment))
+            || (inlineIntent.intent === 'column_name'
+                && !shouldAllowInlineColumnAiFallback(
+                    aiContext,
+                    editorSnapshot,
+                    inlineIntent.qualifier,
+                    inlineIntent.fragment,
+                ))
+        ) {
+            return deterministicCompletion;
+        }
+    }
+
+    return resolveDeterministicInlineSyntaxCompletion(editorSnapshot);
+};
+
 export const requestQueryEditorInlineCompletion = async ({
     service,
     aiContext,
@@ -268,35 +362,12 @@ export const requestQueryEditorInlineCompletion = async ({
     aiContext: QueryEditorAiContext;
     editorSnapshot: QueryEditorAiEditorSnapshot;
 }): Promise<string> => {
-    if (!shouldRequestQueryEditorInlineCompletion(editorSnapshot)) {
-        return '';
+    const localCompletion = resolveQueryEditorInlineLocalCompletion({ aiContext, editorSnapshot });
+    if (localCompletion.handled) {
+        return localCompletion.insertText;
     }
-
     const inlineIntent = resolveQueryEditorInlineCompletionIntentDetails(editorSnapshot);
-    const deterministicCompletion = resolveDeterministicInlineSchemaCompletion(aiContext, editorSnapshot, inlineIntent);
-    if (deterministicCompletion.handled && deterministicCompletion.insertText) {
-        return deterministicCompletion.insertText;
-    }
-    if (deterministicCompletion.handled) {
-        if (inlineIntent.intent === 'table_name') {
-            if (!shouldAllowInlineTableAiFallback(aiContext, inlineIntent.fragment)) {
-                return '';
-            }
-        } else if (inlineIntent.intent === 'column_name') {
-            if (!shouldAllowInlineColumnAiFallback(aiContext, editorSnapshot, inlineIntent.qualifier, inlineIntent.fragment)) {
-                return '';
-            }
-        }
-    }
-
-    const deterministicSyntaxCompletion = resolveDeterministicInlineSyntaxCompletion(editorSnapshot);
-    if (deterministicSyntaxCompletion.handled) {
-        return deterministicSyntaxCompletion.insertText;
-    }
-
-    const readiness = await resolveQueryEditorAiRuntimeReadiness(service, {
-        requireInlineCompletionModel: true,
-    });
+    const readiness = await resolveQueryEditorInlineRuntimeReadiness(service);
     if (!readiness.ready || !readiness.provider) {
         return '';
     }

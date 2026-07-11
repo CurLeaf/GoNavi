@@ -437,7 +437,8 @@ describe('DataViewer safe editing locator', () => {
       readOnly: false,
     });
     expect(dataGridState.latestProps?.readOnly).toBe(false);
-    expect(dataGridState.latestProps?.showRowNumberColumn).toBe(true);
+    // 行号改由 appearance.showDataTableRowNumber 控制，不再按数据源硬编码传入
+    expect(dataGridState.latestProps?.showRowNumberColumn).toBeUndefined();
     expect(messageApi.warning).not.toHaveBeenCalled();
     expect(backendApp.DBQuery.mock.calls.some((call: any[]) => String(call[2]).includes(`ROWID AS "${ORACLE_ROWID_LOCATOR_COLUMN}"`))).toBe(true);
     renderer.unmount();

@@ -54,6 +54,8 @@ const storeState = vi.hoisted(() => ({
   addTab: vi.fn(),
   setActiveContext: vi.fn(),
   tableColumnOrders: {},
+  tablePinnedLeftColumns: {},
+  setTablePinnedLeftColumns: vi.fn(),
   enableColumnOrderMemory: false,
   setTableColumnOrder: vi.fn(),
   setEnableColumnOrderMemory: vi.fn(),
@@ -213,6 +215,7 @@ vi.mock('@ant-design/icons', () => {
     EditOutlined: Icon,
     VerticalAlignBottomOutlined: Icon,
     ColumnWidthOutlined: Icon,
+    PushpinOutlined: Icon,
     EyeInvisibleOutlined: Icon,
     LeftOutlined: Icon,
     RightOutlined: Icon,
@@ -856,8 +859,11 @@ describe('DataGrid DDL interactions', () => {
         ...options,
       };
     });
+    storeState.addSqlLog.mockReset();
     storeState.addTab.mockReset();
     storeState.setActiveContext.mockReset();
+    storeState.tablePinnedLeftColumns = {};
+    storeState.setTablePinnedLeftColumns.mockReset();
     testRenderState.latestColumns = [];
     testRenderState.latestTableProps = null;
     testRenderState.latestMonacoMouseDownListeners = [];
@@ -1030,6 +1036,54 @@ describe('DataGrid DDL interactions', () => {
     },
   );
 
+  it('selects every editable cell in a column when its header is clicked in cell edit mode', async () => {
+    messageApi.info.mockResolvedValue(undefined);
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', id: 1, name: 'Ada' },
+            { __gonavi_row_key__: 'row-2', id: 2, name: 'Linus' },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      renderer!.root.findByType(DataGridToolbarFrame).props.onToggleCellEditMode();
+    });
+    await waitForEffects();
+
+    const nameColumn = testRenderState.latestColumns.find((column) => column.key === 'name');
+    expect(nameColumn?.editable).toBe(true);
+    const headerProps = nameColumn.onHeaderCell(nameColumn);
+    const event = {
+      target: { closest: vi.fn(() => null) },
+      currentTarget: { querySelector: vi.fn(() => null) },
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      headerProps.onClickCapture(event);
+    });
+
+    const toolbar = renderer!.root.findByType(DataGridToolbarFrame);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(event.stopPropagation).toHaveBeenCalledOnce();
+    expect(toolbar.props.cellEditMode).toBe(true);
+    expect(toolbar.props.selectedCellsSize).toBe(2);
+    renderer!.unmount();
+  });
+
   it('opens the v2 column header context menu from table headers', async () => {
     setCurrentLanguage('en-US');
     storeState.appearance.uiVersion = 'v2';
@@ -1079,6 +1133,64 @@ describe('DataGrid DDL interactions', () => {
     expect(textContent(renderer!.root)).toContain(t('data_grid.context_menu.hide_column_comment'));
     expect(textContent(renderer!.root)).toContain('bigint');
     expect(textContent(renderer!.root)).toContain('主键 ID');
+    renderer!.unmount();
+  });
+
+  it('pins a read-only query-result column with an independent pin scope', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    const columnPinScope = 'query-result:1a2b3c4d';
+    const props = {
+      data: [{ __gonavi_row_key__: 'row-1', id: 1, id_2: 2, order_id: 100 }],
+      columnNames: ['id', 'id_2', 'order_id'],
+      loading: false,
+      dbName: 'main',
+      connectionId: 'conn-1',
+      columnPinScope,
+    };
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<DataGrid {...props} />);
+    });
+    await waitForEffects();
+
+    const duplicateIdColumn = testRenderState.latestColumns.find((column) => column.key === 'id_2');
+    expect(duplicateIdColumn).toBeTruthy();
+    expect(duplicateIdColumn.fixed).toBeUndefined();
+
+    const headerProps = duplicateIdColumn.onHeaderCell(duplicateIdColumn);
+    await act(async () => {
+      headerProps.onContextMenu({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        clientX: 120,
+        clientY: 88,
+      });
+    });
+
+    await act(async () => {
+      findButton(renderer!, t('data_grid.context_menu.pin_column_left')).props.onClick({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    expect(storeState.setTablePinnedLeftColumns).toHaveBeenCalledWith(
+      'conn-1',
+      'main',
+      columnPinScope,
+      ['id_2'],
+    );
+
+    storeState.tablePinnedLeftColumns = {
+      'conn-1-main-query-result:1a2b3c4d': ['id_2'],
+    };
+    await act(async () => {
+      renderer!.update(<DataGrid {...props} data={[...props.data]} />);
+    });
+    await waitForEffects();
+
+    expect(testRenderState.latestColumns.find((column) => column.key === 'id_2').fixed).toBe('left');
     renderer!.unmount();
   });
 
@@ -1324,6 +1436,8 @@ describe('DataGrid DDL interactions', () => {
       "t('data_grid.context_menu.current_marker')",
       "t('data_grid.context_menu.column_display_section')",
       "t('data_grid.context_menu.auto_fit_column')",
+      "t('data_grid.context_menu.pin_column_left')",
+      "t('data_grid.context_menu.unpin_column_left')",
       "t('data_grid.context_menu.hide_column')",
       "t('data_grid.context_menu.show_column_type')",
       "t('data_grid.context_menu.hide_column_type')",
@@ -1762,7 +1876,15 @@ describe('DataGrid DDL interactions', () => {
       commitMode: 'auto',
       autoCommitDelayMs: 3000,
     };
-    backendApp.ApplyChanges.mockResolvedValue({ success: true, message: 'ok' });
+    backendApp.ApplyChanges.mockResolvedValue({
+      success: true,
+      message: 'ok',
+      data: {
+        deletes: [],
+        updates: [],
+        inserts: ["INSERT INTO `users` (`id`, `name`) VALUES (1, 'alpha');"],
+      },
+    });
 
     let renderer: ReactTestRenderer;
     await act(async () => {
@@ -1850,6 +1972,15 @@ describe('DataGrid DDL interactions', () => {
       deletes: [],
       locatorStrategy: 'primary-key',
     });
+    expect(storeState.addSqlLog).toHaveBeenLastCalledWith(expect.objectContaining({
+      sql: [
+        '/* Batch Apply on users */',
+        'START TRANSACTION;',
+        "INSERT INTO `users` (`id`, `name`) VALUES (1, 'alpha');",
+        'COMMIT;',
+      ].join('\n'),
+      status: 'success',
+    }));
     expect(messageApi.success).toHaveBeenCalledWith('自动提交成功');
     renderer!.unmount();
   });

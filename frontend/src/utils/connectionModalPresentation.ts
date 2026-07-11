@@ -221,7 +221,7 @@ export const resolveConnectionConfigLayout = (
       ],
     };
   }
-  if (type === 'chroma' || type === 'qdrant') {
+  if (type === 'chroma' || type === 'qdrant' || type === 'milvus') {
     return {
       kind: 'vector',
       sections: [

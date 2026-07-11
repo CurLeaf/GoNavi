@@ -48,6 +48,9 @@ const DataGridShell: React.FC<DataGridShellProps> = (props) => {
     applyAllFiltersDisabled,
     applyAllFiltersEnabled,
     applyExternalScrollToTableTargets,
+    handleExternalHorizontalScrollPointerDown,
+    handleExternalHorizontalScrollPointerRelease,
+    handleExternalHorizontalScrollLostPointerCapture,
     applyFilters,
     applyJsonEditor,
     applyQuickWhereCondition,
@@ -243,6 +246,8 @@ const DataGridShell: React.FC<DataGridShellProps> = (props) => {
     panelPaddingY,
     panelRadius,
     pendingChangeCount,
+    pinnedLeftColumnScope,
+    pinnedLeftColumnSet,
     pkColumns,
     prefersManualTotalCount,
     previewModalOpen,
@@ -385,6 +390,10 @@ const renderDataTableView = () => (
               className="data-grid-external-horizontal-scroll"
               aria-hidden={!horizontalScrollVisible}
               onScroll={applyExternalScrollToTableTargets}
+              onPointerDown={handleExternalHorizontalScrollPointerDown}
+              onPointerUp={handleExternalHorizontalScrollPointerRelease}
+              onPointerCancel={handleExternalHorizontalScrollPointerRelease}
+              onLostPointerCapture={handleExternalHorizontalScrollLostPointerCapture}
               style={{
                   opacity: horizontalScrollVisible ? 1 : 0,
                   pointerEvents: horizontalScrollVisible ? 'auto' : 'none',
@@ -873,6 +882,8 @@ const renderDataTableView = () => (
                             sortOrder={(activeSort?.order === 'ascend' || activeSort?.order === 'descend') ? activeSort.order : null}
                             showColumnType={showColumnType}
                             showColumnComment={showColumnComment}
+                            pinnedLeft={Boolean(pinnedLeftColumnSet?.has?.(fieldName))}
+                            canPinLeft={Boolean(connectionId && dbName && pinnedLeftColumnScope)}
                             onAction={handleV2ColumnHeaderContextMenuAction}
                         />
                     );

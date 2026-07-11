@@ -552,7 +552,7 @@ func classifyMySQLAccessType(accessType string) string {
 	}
 }
 
-// parseMySQLTableExplain 解析 MySQL 5.7 表格 / Doris / StarRocks 的 EXPLAIN 输出。
+// parseMySQLTableExplain 解析 MySQL 5.7 表格 EXPLAIN 输出。
 // 标准 MySQL 表格列：id|select_type|table|type|possible_keys|key|key_len|ref|rows|Extra
 // OceanBase 可能多 range_info；Doris/StarRocks 是完全不同的结构化文本（PR2 优化）。
 func parseMySQLTableExplain(raw string) (*connection.ExplainResult, error) {

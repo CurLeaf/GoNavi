@@ -222,6 +222,10 @@ export function ExportConnectionsPackage(arg1) {
   return window['go']['app']['App']['ExportConnectionsPackage'](arg1);
 }
 
+export function ExportConnectionsPayload(arg1) {
+  return window['go']['app']['App']['ExportConnectionsPayload'](arg1);
+}
+
 export function ExportData(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportData'](arg1, arg2, arg3, arg4);
 }
@@ -546,6 +550,10 @@ export function RedisListPush(arg1, arg2, arg3) {
   return window['go']['app']['App']['RedisListPush'](arg1, arg2, arg3);
 }
 
+export function RedisListRemove(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RedisListRemove'](arg1, arg2, arg3);
+}
+
 export function RedisListSet(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['RedisListSet'](arg1, arg2, arg3, arg4);
 }
@@ -652,6 +660,26 @@ export function ResolveDriverRepositoryURL(arg1) {
 
 export function RestartSecurityUpdate(arg1) {
   return window['go']['app']['App']['RestartSecurityUpdate'](arg1);
+}
+
+export function ResultDiffClose(arg1) {
+  return window['go']['app']['App']['ResultDiffClose'](arg1);
+}
+
+export function ResultDiffCompute(arg1) {
+  return window['go']['app']['App']['ResultDiffCompute'](arg1);
+}
+
+export function ResultDiffPage(arg1) {
+  return window['go']['app']['App']['ResultDiffPage'](arg1);
+}
+
+export function ResultDiffStart(arg1) {
+  return window['go']['app']['App']['ResultDiffStart'](arg1);
+}
+
+export function ResultDiffUploadChunk(arg1) {
+  return window['go']['app']['App']['ResultDiffUploadChunk'](arg1);
 }
 
 export function RetrySecurityUpdateCurrentRound(arg1) {

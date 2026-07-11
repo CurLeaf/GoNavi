@@ -39,6 +39,7 @@ GoNavi 面向开发者与 DBA，核心目标是让数据库操作在桌面端做
 | 缓存 | Redis | 内置 | Key 浏览、命令执行、编码/视图切换 |
 | 向量数据库 | Chroma | 内置 | Collection 浏览、向量检索、元数据过滤 |
 | 向量数据库 | Qdrant | 内置 | Collection 浏览、向量搜索、Payload 过滤 |
+| 向量数据库 | Milvus | 内置 | Collection 浏览、向量搜索、标量过滤 |
 | 消息队列 | RocketMQ | 内置 | Topic 浏览、消费组检查、消息型工作流 |
 | 消息队列 | MQTT | 内置 | Broker / Topic Filter 工作流与 QoS 连接配置 |
 | 消息队列 | Kafka | 内置 | Topic 浏览、Broker 元数据、消费组工作流 |
@@ -162,8 +163,7 @@ node tools/wails-fast-dev.mjs
 # 修改 Go 导出方法签名后刷新 Wails JS 绑定
 node tools/wails-fast-dev.mjs --refresh-bindings
 
-# Windows PowerShell 低内存视觉模式：关闭透明 WebView 和 Acrylic 背景
-$env:GONAVI_LOW_MEMORY_MODE="1"; node tools/wails-fast-dev.mjs
+# Windows 桌面端默认使用不透明 WebView，并关闭 Acrylic 背景
 ```
 
 ### 编译构建
@@ -178,20 +178,18 @@ wails build -clean
 
 构建产物位于 `build/bin`。
 
-### Docker / Podman（仅 MCP Server）
+### 浏览器访问版（Web Server，实验中）
 
-当前容器化支持仅覆盖 `gonavi-mcp-server`，不包含桌面 GUI 主界面。
+仓库主程序提供 `web-server` 运行模式，用同一套 Go 后端 + React 前端提供浏览器访问入口（**不是**桌面 Wails 窗口容器化）。
 
-### 浏览器访问版（实验中）
-
-仓库主程序现在额外提供了一个 `web-server` 运行模式，用同一套 Go 后端 + React 前端提供浏览器访问入口：
+#### 本机直接启动
 
 ```powershell
 go build .
 .\GoNavi-Wails.exe web-server --addr 127.0.0.1:34116
 ```
 
-首次访问会进入 `/setup` 完成 Web 管理员密码初始化；可选启用 Google Authenticator，服务端会落地 `web_auth.json`、Session Cookie、恢复码与登录失败限流。
+未配置密码时，首次访问会进入 `/setup` 完成 Web 管理员密码初始化；可选启用 Google Authenticator，服务端会落地 `web_auth.json`、Session Cookie、恢复码与登录失败限流。
 
 当前阶段已具备：
 
@@ -199,12 +197,59 @@ go build .
 - 首次初始化页、登录页、登出接口
 - Session 空闲超时 / 绝对超时 / 记住登录时长
 - Google Authenticator TOTP 与恢复码
+- Docker / Compose 部署入口（见下方）
 
 当前仍在继续收口：
 
 - 外部 SQL / 连接包导入导出等文件型能力的浏览器上传下载工作台
 - 更多桌面专属能力的 Web 门禁与替代交互
 - 反向代理 / HTTPS / 零信任部署说明
+
+#### Docker / Podman（Web Server）
+
+```bash
+cp docker.web-server.env.example docker.web-server.env
+# 编辑 GONAVI_HOST_DATA_ROOT 为绝对路径
+# 可选设置至少 6 位的 GONAVI_WEB_PASSWORD
+docker compose --env-file docker.web-server.env -f docker-compose.web-server.yml up -d
+```
+
+也可以把相同变量写入项目目录下的标准 `.env` 文件，此时可省略 `--env-file docker.web-server.env`。
+
+浏览器打开 `http://127.0.0.1:34116`（或宿主机映射端口）。设置 `GONAVI_WEB_PASSWORD` 后，新创建的容器会同步该密码并直接进入登录页；未设置时首次访问完成 `/setup`。
+
+Web 工具中心支持通过浏览器上传/下载连接恢复包；数据目录页显示当前容器挂载目录。Docker 的数据根目录由 `GONAVI_HOST_DATA_ROOT` 挂载控制，如需切换请修改 env 后重新创建容器，避免在容器内迁移到未持久化路径。
+
+请把 GoNavi 活动数据目录挂载为 `/data`。建议至少包含 `connections.json`、`daily_secrets.json`；如需可选驱动代理应包含 `drivers/`。Web 认证状态写入同目录下的 `web_auth.json`。
+
+`GONAVI_WEB_PASSWORD` 会覆盖 `web_auth.json` 中已有的密码哈希，但保留 2FA 和会话策略；移除环境变量后继续使用最后一次同步的密码。env 文件包含明文密码，可被有容器检查权限的用户看到，请限制文件读取权限。
+
+修改 env 密码后，需要重新创建容器，让 Compose 重新读取 env 文件：
+
+```bash
+docker compose --env-file docker.web-server.env -f docker-compose.web-server.yml up -d --force-recreate
+```
+
+Docker Desktop 的 Restart 和 `docker restart` 会沿用旧容器环境，不会重新读取 env 文件。
+
+新部署直接设置环境密码时会启用纯密码认证。如需启用 2FA，请先留空 `GONAVI_WEB_PASSWORD` 并通过 `/setup` 初始化，再将它设置为同一密码后重新创建容器。
+
+容器内默认监听 `0.0.0.0:34116`（`GONAVI_WEB_ADDR`）。**不要把未加固的 Web 入口直接暴露到公网**；生产环境请配合反向代理与 HTTPS。
+
+默认 Compose 拉取 GHCR 预构建镜像。本地源码构建叠加 override：
+
+```bash
+docker compose --env-file docker.web-server.env \
+  -f docker-compose.web-server.yml \
+  -f docker-compose.web-server.local.yml \
+  up -d --build
+```
+
+健康检查：`GET /__gonavi/healthz`。
+
+### Docker / Podman（MCP Server）
+
+容器化另提供 `gonavi-mcp-server`（仅 MCP HTTP，不含桌面 GUI / Web UI）。
 
 ```bash
 cp docker.mcp-server.env.example docker.mcp-server.env
@@ -226,7 +271,8 @@ docker compose --env-file docker.mcp-server.env \
 
 部署矩阵：
 
-- Docker Desktop / Linux 服务器 / NAS：`docker-compose.mcp-server.yml`
+- Web UI：`docker-compose.web-server.yml`（镜像 `ghcr.io/syngnat/gonavi-web-server`）
+- MCP：`docker-compose.mcp-server.yml`（镜像 `ghcr.io/syngnat/gonavi-mcp-server`）
 - Podman / Quadlet：[deploy/podman/gonavi-mcp-server](deploy/podman/gonavi-mcp-server)
 - Kubernetes：[deploy/k8s/gonavi-mcp-server](deploy/k8s/gonavi-mcp-server)（`kustomization.yaml` + overlays）
 - Helm Chart：[deploy/helm/gonavi-mcp-server](deploy/helm/gonavi-mcp-server)
@@ -249,6 +295,7 @@ docker run --rm -it -v "$PWD:/workspace" -w /workspace gonavi-build-env:local ba
 
 仓库会把预构建镜像推送到 GHCR：
 
+- `ghcr.io/syngnat/gonavi-web-server:latest`
 - `ghcr.io/syngnat/gonavi-mcp-server:latest`
 - `ghcr.io/syngnat/gonavi-build-env:latest`
 

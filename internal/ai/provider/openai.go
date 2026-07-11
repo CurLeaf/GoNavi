@@ -49,6 +49,8 @@ func NewOpenAIProvider(config ai.ProviderConfig) (Provider, error) {
 	normalized.Model = model
 	normalized.MaxTokens = maxTokens
 	normalized.Temperature = temperature
+	profile := ResolveThinkingProfile(config.Type, config.APIFormat, baseURL, model)
+	normalized.ThinkingIntensity = string(clampThinkingIntensityToProfile(config.ThinkingIntensity, profile))
 
 	return &OpenAIProvider{
 		config:  normalized,
@@ -57,6 +59,29 @@ func NewOpenAIProvider(config ai.ProviderConfig) (Provider, error) {
 			Timeout: openAIHTTPTimeout,
 		},
 	}, nil
+}
+
+func (p *OpenAIProvider) applyThinkingToRequest(body *openAIChatRequest) {
+	if body == nil {
+		return
+	}
+	intensity := NormalizeThinkingIntensity(p.config.ThinkingIntensity)
+	if intensity == "" {
+		return
+	}
+	// DeepSeek OpenAI 兼容：thinking type 开关（effort 通过 Anthropic 格式更完整）
+	if shouldReplayReasoningContent(p.config.Model, p.baseURL) {
+		if intensity == ai.ThinkingIntensityOff || intensity == ai.ThinkingIntensity("none") {
+			body.Thinking = map[string]string{"type": "disabled"}
+			return
+		}
+		body.Thinking = map[string]string{"type": "enabled"}
+		return
+	}
+	// OpenAI / GPT 推理模型：reasoning_effort = none|minimal|low|medium|high|xhigh
+	if effort := openAIReasoningEffort(intensity); effort != "" {
+		body.ReasoningEffort = effort
+	}
 }
 
 func (p *OpenAIProvider) Name() string {
@@ -81,6 +106,10 @@ type openAIChatRequest struct {
 	MaxTokens   int                 `json:"max_tokens,omitempty"`
 	Stream      bool                `json:"stream,omitempty"`
 	Tools       []ai.Tool           `json:"tools,omitempty"`
+	// ReasoningEffort OpenAI GPT/o 系列：none|minimal|low|medium|high|xhigh
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Thinking DeepSeek 等 OpenAI 兼容接口的思考开关：{"type":"enabled"|"disabled"}
+	Thinking map[string]string `json:"thinking,omitempty"`
 }
 
 type openAIChatMessage struct {
@@ -221,6 +250,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.Chat
 		Stream:      false,
 		Tools:       req.Tools,
 	}
+	p.applyThinkingToRequest(&body)
 
 	respBody, err := p.doRequest(ctx, body)
 	if err != nil {
@@ -275,6 +305,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, cal
 		Stream:      true,
 		Tools:       req.Tools,
 	}
+	p.applyThinkingToRequest(&body)
 
 	respBody, err := p.doRequest(ctx, body)
 	if err != nil {

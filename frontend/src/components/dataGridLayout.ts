@@ -68,6 +68,74 @@ export const calculateVirtualTableScrollX = ({
   return safeTotalWidth;
 };
 
+/** 兼容 antd ColumnType.key（React.Key = string | number | bigint） */
+export type AbsorbExtraColumnKey = string | number | bigint;
+
+export type AbsorbExtraColumnWidthOptions<T extends { key?: AbsorbExtraColumnKey; width?: number | string }> = {
+  columns: T[];
+  selectionColumnWidth: number;
+  tableViewportWidth: number;
+  /** 这些列保持声明宽度，不参与吸收多余空间（如行号列） */
+  fixedColumnKeys?: Iterable<string>;
+  defaultColumnWidth: number;
+};
+
+/**
+ * 少字段时 rc-table 会把 scroll.x 扩到视口并均摊拉宽所有列。
+ * 将「视口 − 声明总宽」的差额加到最后一个非固定数据列，避免行号/勾选列被一起撑宽。
+ */
+export const absorbExtraWidthIntoFlexibleColumns = <T extends { key?: AbsorbExtraColumnKey; width?: number | string }>({
+  columns,
+  selectionColumnWidth,
+  tableViewportWidth,
+  fixedColumnKeys,
+  defaultColumnWidth,
+}: AbsorbExtraColumnWidthOptions<T>): T[] => {
+  if (!Array.isArray(columns) || columns.length === 0) {
+    return columns;
+  }
+
+  const safeViewport = Math.max(0, Math.floor(Number(tableViewportWidth) || 0));
+  const safeSelection = Math.max(0, Math.ceil(Number(selectionColumnWidth) || 0));
+  const safeDefault = Math.max(1, Math.ceil(Number(defaultColumnWidth) || 1));
+  const fixedKeys = new Set(
+    Array.from(fixedColumnKeys || [], (key) => String(key || '').trim()).filter(Boolean),
+  );
+
+  const resolveWidth = (column: T): number => {
+    const raw = Number(column.width);
+    return Number.isFinite(raw) && raw > 0 ? Math.ceil(raw) : safeDefault;
+  };
+
+  const declaredTotal = columns.reduce((sum, column) => sum + resolveWidth(column), 0) + safeSelection;
+  if (safeViewport <= 0 || declaredTotal >= safeViewport) {
+    return columns;
+  }
+
+  let flexibleIndex = -1;
+  for (let index = columns.length - 1; index >= 0; index -= 1) {
+    const key = String(columns[index]?.key ?? '').trim();
+    if (!fixedKeys.has(key)) {
+      flexibleIndex = index;
+      break;
+    }
+  }
+  if (flexibleIndex < 0) {
+    return columns;
+  }
+
+  const extra = safeViewport - declaredTotal;
+  return columns.map((column, index) => {
+    if (index !== flexibleIndex) {
+      return column;
+    }
+    return {
+      ...column,
+      width: resolveWidth(column) + extra,
+    };
+  });
+};
+
 export const calculateExternalHorizontalScrollInnerWidth = ({
   tableScrollWidth,
   trackInset,

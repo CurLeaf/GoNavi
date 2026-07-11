@@ -40,6 +40,7 @@ GoNavi is designed for developers and DBAs who need a unified desktop experience
 | Cache | Redis | Built-in | Key browsing, command execution, encoding/view switch |
 | Vector Database | Chroma | Built-in | Collection browsing, vector retrieval, metadata filtering |
 | Vector Database | Qdrant | Built-in | Collection browsing, vector search, payload filtering |
+| Vector Database | Milvus | Built-in | Collection browsing, vector search, scalar filtering |
 | Message Queue | RocketMQ | Built-in | Topic browsing, consumer-group inspection, message-oriented workflow |
 | Message Queue | MQTT | Built-in | Broker and topic-filter workflow with QoS-aware connection settings |
 | Message Queue | Kafka | Built-in | Topic browsing, broker metadata, consumer-group workflow |
@@ -168,8 +169,7 @@ node tools/wails-fast-dev.mjs
 # Refresh Wails JS bindings after changing exported Go method signatures
 node tools/wails-fast-dev.mjs --refresh-bindings
 
-# Windows PowerShell low-memory visual mode: disables transparent WebView/Acrylic backdrop
-$env:GONAVI_LOW_MEMORY_MODE="1"; node tools/wails-fast-dev.mjs
+# Windows desktop builds use an opaque WebView without an Acrylic backdrop by default.
 ```
 
 ### Build
@@ -184,20 +184,18 @@ wails build -clean
 
 Artifacts are generated in `build/bin`.
 
-### Docker / Podman (MCP Server Only)
+### Browser Access Mode (Web Server, Experimental)
 
-The desktop GUI is not packaged as a container service. Current container support targets `gonavi-mcp-server` only.
+GoNavi provides a `web-server` mode that reuses the same Go backend and React frontend for browser access (**not** a containerized desktop Wails window).
 
-### Browser Access Mode (Experimental)
-
-The main GoNavi application now also exposes a `web-server` mode that reuses the same Go backend and React frontend for browser access:
+#### Run locally
 
 ```powershell
 go build .
 .\GoNavi-Wails.exe web-server --addr 127.0.0.1:34116
 ```
 
-The first browser visit is redirected to `/setup` to create the web admin password. Google Authenticator is optional but supported out of the box, together with `web_auth.json`, session cookies, recovery codes, and login rate limiting.
+Without a configured password, the first browser visit is redirected to `/setup` to create the web admin password. Google Authenticator is optional but supported out of the box, together with `web_auth.json`, session cookies, recovery codes, and login rate limiting.
 
 Current scope already includes:
 
@@ -205,12 +203,57 @@ Current scope already includes:
 - First-run setup page, login page, and logout endpoint
 - Session idle timeout / absolute timeout / remember-login window
 - Google Authenticator TOTP plus recovery codes
+- Docker / Compose packaging (below)
 
 Still in progress:
 
 - Browser upload/download workbenches for external SQL and connection-package flows
 - More web capability gating for desktop-only features
 - Reverse-proxy / HTTPS / zero-trust deployment guidance
+
+#### Docker / Podman (Web Server)
+
+```bash
+cp docker.web-server.env.example docker.web-server.env
+# set GONAVI_HOST_DATA_ROOT to an absolute path
+# optionally set GONAVI_WEB_PASSWORD to at least 6 characters
+docker compose --env-file docker.web-server.env -f docker-compose.web-server.yml up -d
+```
+
+You can alternatively put the same variables in the project-level `.env` file and omit `--env-file docker.web-server.env`.
+
+Open `http://127.0.0.1:34116` (or the mapped host port). When `GONAVI_WEB_PASSWORD` is set, a newly created container synchronizes it and opens the login page directly. Otherwise, complete `/setup` on first visit.
+
+Mount the GoNavi active data root at `/data`. Prefer including `connections.json`, `daily_secrets.json`, and optional `drivers/`. Web auth state is stored as `web_auth.json` in that directory.
+
+`GONAVI_WEB_PASSWORD` takes precedence over the password hash already stored in `web_auth.json`, while preserving 2FA and session settings. Removing the variable leaves the last synchronized password active. Treat the env file as a secret because the plaintext value is visible to users who can inspect the container; restrict its file permissions.
+
+After changing the env password, recreate the container so Compose reloads the env file:
+
+```bash
+docker compose --env-file docker.web-server.env -f docker-compose.web-server.yml up -d --force-recreate
+```
+
+Docker Desktop Restart and `docker restart` keep the old container environment and do not reload the env file.
+
+On a new deployment, an environment password starts password-only authentication. To enable 2FA, leave `GONAVI_WEB_PASSWORD` empty for the initial `/setup`, then set it to the same password before recreating the container.
+
+The container listens on `0.0.0.0:34116` by default (`GONAVI_WEB_ADDR`). **Do not expose an unhardened Web entrypoint to the public internet**; use a reverse proxy and HTTPS for production.
+
+Default Compose pulls the GHCR image. For a local source build, add the override:
+
+```bash
+docker compose --env-file docker.web-server.env \
+  -f docker-compose.web-server.yml \
+  -f docker-compose.web-server.local.yml \
+  up -d --build
+```
+
+Health check: `GET /__gonavi/healthz`.
+
+### Docker / Podman (MCP Server)
+
+Container packaging also provides `gonavi-mcp-server` (MCP HTTP only; no desktop GUI / Web UI).
 
 ```bash
 cp docker.mcp-server.env.example docker.mcp-server.env
@@ -232,7 +275,8 @@ For Podman, use the same published OCI image with `podman run`, or the native Qu
 
 Deployment matrix:
 
-- Docker Desktop / Linux server / NAS: `docker-compose.mcp-server.yml`
+- Web UI: `docker-compose.web-server.yml` (`ghcr.io/syngnat/gonavi-web-server`)
+- MCP: `docker-compose.mcp-server.yml` (`ghcr.io/syngnat/gonavi-mcp-server`)
 - Podman / Quadlet: [deploy/podman/gonavi-mcp-server](deploy/podman/gonavi-mcp-server)
 - Kubernetes: [deploy/k8s/gonavi-mcp-server](deploy/k8s/gonavi-mcp-server) (`kustomization.yaml` + overlays)
 - Helm chart: [deploy/helm/gonavi-mcp-server](deploy/helm/gonavi-mcp-server)
@@ -255,6 +299,7 @@ The default image installs the WebKitGTK 4.0 build toolchain for broader Linux/N
 
 Published images are pushed to GHCR:
 
+- `ghcr.io/syngnat/gonavi-web-server:latest`
 - `ghcr.io/syngnat/gonavi-mcp-server:latest`
 - `ghcr.io/syngnat/gonavi-build-env:latest`
 

@@ -15,6 +15,7 @@ COPY third_party/go-irisnative/go.mod third_party/go-irisnative/go.sum ./third_p
 RUN go mod download
 
 COPY . .
+RUN ./tools/generate-driver-agent-revisions.sh --platform "${TARGETOS}/${TARGETARCH}"
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w" -o /out/gonavi-mcp-server ./cmd/gonavi-mcp-server

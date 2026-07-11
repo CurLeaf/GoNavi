@@ -161,7 +161,7 @@ describe('useAppUpdateManager', () => {
     expect(hook?.lastUpdateInfo?.downloaded).toBe(true);
   });
 
-  it('auto-installs a macOS update immediately after download when the backend reports auto relaunch support', async () => {
+  it('keeps download at 100% ready-to-restart without auto-installing after download completes', async () => {
     backendApp.CheckForUpdates.mockResolvedValue({
       success: true,
       data: {
@@ -193,8 +193,88 @@ describe('useAppUpdateManager', () => {
     });
 
     expect(backendApp.DownloadUpdate).toHaveBeenCalledTimes(1);
-    expect(backendApp.InstallUpdateAndRestart).toHaveBeenCalledTimes(1);
+    // 下载完成后不自动安装；用户需点击「重启应用更新」
+    expect(backendApp.InstallUpdateAndRestart).not.toHaveBeenCalled();
     expect(backendApp.OpenDownloadedUpdateDirectory).not.toHaveBeenCalled();
+    expect(hook?.updateDownloadProgress.status).toBe('done');
+    expect(hook?.updateDownloadProgress.percent).toBe(100);
+    expect(hook?.updateDownloadProgress.open).toBe(true);
+    expect(hook?.lastUpdateInfo?.downloaded).toBe(true);
+  });
+
+  it('installs and restarts only after the user confirms restart-to-update', async () => {
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        downloaded: true,
+        assetSize: 2048,
+      },
+    });
+    backendApp.InstallUpdateAndRestart.mockResolvedValue({ success: true });
+
+    renderHook();
+
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+
+    let accepted = false;
+    await act(async () => {
+      accepted = await hook!.handleInstallFromProgress();
+    });
+
+    expect(backendApp.InstallUpdateAndRestart).toHaveBeenCalledTimes(1);
+    expect(accepted).toBe(true);
+  });
+
+  it('returns false when the backend rejects restart-to-update', async () => {
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        downloaded: true,
+        assetSize: 2048,
+      },
+    });
+    backendApp.InstallUpdateAndRestart.mockResolvedValue({
+      success: false,
+      message: 'unable-to-start-updater',
+    });
+
+    renderHook();
+
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+
+    let accepted = true;
+    await act(async () => {
+      accepted = await hook!.handleInstallFromProgress();
+    });
+
+    expect(accepted).toBe(false);
+    expect(backendApp.InstallUpdateAndRestart).toHaveBeenCalledTimes(1);
+    expect(hook?.updateDownloadProgress.status).toBe('error');
+    expect(messageApi.error).toHaveBeenCalledWith(
+      'app.about.message.install_failed_with_error:unable-to-start-updater',
+    );
+  });
+
+  it('returns false without calling the backend when no update is ready', async () => {
+    renderHook();
+
+    let accepted = true;
+    await act(async () => {
+      accepted = await hook!.handleInstallFromProgress();
+    });
+
+    expect(accepted).toBe(false);
+    expect(backendApp.InstallUpdateAndRestart).not.toHaveBeenCalled();
   });
 
   it('switches update channel and re-checks against the selected channel', async () => {
@@ -243,6 +323,83 @@ describe('useAppUpdateManager', () => {
     expect(hook?.lastUpdateInfo?.releaseName).toBe('Dev Build (dev-22fab86)');
     expect(hook?.lastUpdateInfo?.releasePublishedAt).toBe('2026-07-08T11:15:00Z');
     expect(hook?.lastUpdateInfo?.releaseNotesUrl).toBe('https://github.com/Syngnat/GoNavi/releases/tag/dev-latest');
+  });
+
+  it('keeps official about metadata usable when backend app info is incomplete', async () => {
+    backendApp.GetAppInfo.mockResolvedValue({
+      success: true,
+      data: {
+        version: '',
+        author: 'Unknown',
+      },
+    });
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: false,
+        currentVersion: '0.8.5',
+        latestVersion: '0.8.5',
+      },
+    });
+
+    renderHook();
+
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+    await act(async () => {
+      hook?.setIsAboutOpen(true);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(hook?.aboutDisplayVersion).toBe('0.8.5');
+    expect(hook?.aboutInfo?.author).toBe('Syngnat');
+    expect(hook?.aboutInfo?.repoUrl).toBe('https://github.com/Syngnat/GoNavi');
+    expect(hook?.aboutInfo?.issueUrl).toBe('https://github.com/Syngnat/GoNavi/issues');
+    expect(hook?.aboutInfo?.releaseUrl).toBe('https://github.com/Syngnat/GoNavi/releases');
+    expect(messageApi.error).not.toHaveBeenCalled();
+  });
+
+  it('opens settings-center bridge instead of legacy about modal on silent update discovery', async () => {
+    const bridge = {
+      open: vi.fn(),
+      close: vi.fn(),
+      isOpen: vi.fn(() => false),
+    };
+    const bridgeRef = { current: bridge };
+
+    backendApp.CheckForUpdatesSilently.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        assetSize: 1024,
+      },
+    });
+
+    const Harness = () => {
+      hook = useAppUpdateManager({
+        runtimeBuildType: 'release',
+        t,
+        updateCenterBridgeRef: bridgeRef,
+      });
+      return null;
+    };
+
+    act(() => {
+      renderer = create(<Harness />);
+    });
+
+    await act(async () => {
+      await hook?.checkForUpdates(true);
+    });
+
+    expect(bridge.open).toHaveBeenCalledTimes(1);
+    expect(hook?.isAboutOpen).toBe(false);
+    expect(hook?.lastUpdateInfo?.hasUpdate).toBe(true);
+    expect(hook?.lastUpdateInfo?.latestVersion).toBe('0.8.2');
   });
 
   it('opens the downloaded update directory when a package is already downloaded', async () => {

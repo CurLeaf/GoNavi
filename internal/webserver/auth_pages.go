@@ -208,6 +208,8 @@ func (s *Server) handleAuthPasswordChange(w http.ResponseWriter, r *http.Request
 			status = http.StatusPreconditionFailed
 		case errors.Is(err, errWebAuthInvalidCredentials):
 			status = http.StatusUnauthorized
+		case errors.Is(err, errWebAuthPasswordManaged):
+			status = http.StatusConflict
 		}
 		s.writeAuthJSONError(w, status, localizeWebAuthError(localizer, err), 0)
 		return
@@ -217,7 +219,7 @@ func (s *Server) handleAuthPasswordChange(w http.ResponseWriter, r *http.Request
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"success":          true,
 		"usedRecoveryCode": usedRecoveryCode,
-		"settings":         buildWebAuthSettingsSummary(cfg),
+		"settings":         buildWebAuthSettingsSummary(cfg, s.auth.passwordManagedByEnvironment),
 	})
 }
 
@@ -363,6 +365,8 @@ func localizeWebAuthError(localizer *i18n.Localizer, err error) string {
 		return webAuthText(localizer, "web_auth.error.invalid_password_or_code", nil)
 	case errors.Is(err, errWebAuthRateLimited):
 		return webAuthText(localizer, "web_auth.error.too_many_login_attempts", nil)
+	case errors.Is(err, errWebAuthPasswordManaged):
+		return webAuthText(localizer, "web_auth.error.password_managed_by_environment", nil)
 	}
 
 	message := strings.TrimSpace(err.Error())
@@ -1241,7 +1245,7 @@ function validateStep(stepIndex) {
       showError(i18n.passwordRequired);
       return false;
     }
-    if (password.length < ` + fmt.Sprintf("%d", webMinPasswordLength) + `) {
+    if (Array.from(password).length < ` + fmt.Sprintf("%d", webMinPasswordLength) + `) {
       showError(i18n.passwordTooShort);
       return false;
     }

@@ -14,7 +14,7 @@ const clickHouseExplainJSONScanAndAggregate = `{
       "Keys": ["user_id"],
       "Functions": ["count()"]
     },
-    "Joined Plans": [
+    "Plans": [
       {
         "Node Type": "ReadFromMergeTree",
         "ReadType": "Default",
@@ -90,12 +90,52 @@ func TestParseClickHouseExplain_IndexedReadNoFullScanFlag(t *testing.T) {
 	}
 }
 
+func TestParseClickHouseExplain_MissingIndexEvidenceDoesNotReportFullScan(t *testing.T) {
+	raw := `{
+		"Plan": {
+			"Node Type": "ReadFromMergeTree",
+			"Table": "events",
+			"Database": "default"
+		}
+	}`
+	result, err := parseClickHouseExplain("SELECT * FROM events", raw, connection.ExplainFormatJSON)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if len(result.Nodes) != 1 {
+		t.Fatalf("expected one plan node, got %d", len(result.Nodes))
+	}
+	if containsFlag(result.Nodes[0].Flags, connection.ExplainFlagFullScan) ||
+		containsFlag(result.Nodes[0].Flags, connection.ExplainFlagNoIndex) {
+		t.Fatalf("missing optional index evidence must not be reported as a full scan: %v", result.Nodes[0].Flags)
+	}
+}
+
+func TestParseClickHouseExplain_EmptyReportedIndexesAreExplicitNoIndexEvidence(t *testing.T) {
+	raw := `{
+		"Plan": {
+			"Node Type": "ReadFromMergeTree",
+			"Indexes": [],
+			"Table": "events"
+		}
+	}`
+	result, err := parseClickHouseExplain("SELECT * FROM events", raw, connection.ExplainFormatJSON)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	node := result.Nodes[0]
+	if !containsFlag(node.Flags, connection.ExplainFlagFullScan) ||
+		!containsFlag(node.Flags, connection.ExplainFlagNoIndex) {
+		t.Fatalf("an explicitly empty Indexes array should be treated as no-index evidence: %v", node.Flags)
+	}
+}
+
 func TestParseClickHouseExplain_ArrayForm(t *testing.T) {
 	raw := `[
 		{
 			"Plan": {
 				"Node Type": "Limit",
-				"Joined Plans": [
+				"Plans": [
 					{"Node Type": "ReadFromMergeTree", "ReadType": "Default", "Parts": 1, "Index Granules": 10, "Table": "t"}
 				]
 			}

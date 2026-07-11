@@ -349,6 +349,8 @@ func normalizeSQLClassifierDBType(dbType string) string {
 		return "gaussdb"
 	case "kingbase8", "kingbasees", "kingbasev8":
 		return "kingbase"
+	case "milvusdb", "milvus-db":
+		return "milvus"
 	default:
 		return normalized
 	}
@@ -436,8 +438,11 @@ func sqlServerControlFlowMayReturnMessages(query string) bool {
 }
 
 func isReadOnlySQLQuery(dbType string, query string) bool {
-	if strings.ToLower(strings.TrimSpace(dbType)) == "mongodb" {
+	switch normalizeSQLClassifierDBType(dbType) {
+	case "mongodb":
 		return isReadOnlyMongoCommand(query)
+	case "milvus":
+		return isReadOnlyMilvusCommand(query)
 	}
 
 	keyword, withHasWrite := sqlDataOperationInfo(query)

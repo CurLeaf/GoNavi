@@ -88,26 +88,102 @@ func TestPrepareWindowsStagedUpdateAssetMovesPackageIntoStagedDir(t *testing.T) 
 	}
 }
 
-func TestBuildWindowsScriptWithCleanupRemovesLogAndStagedDirectoryAfterSuccess(t *testing.T) {
-	script := buildWindowsScriptWithCleanup(
-		`C:\Users\tester\AppData\Local\Temp\gonavi-updates\.gonavi-update-windows-dev-new\GoNavi-dev-new-Windows-Amd64.exe`,
-		`C:\Users\tester\Desktop\GoNavi-dev-current-Windows-Amd64.exe`,
-		`C:\Users\tester\AppData\Local\Temp\gonavi-updates\.gonavi-update-windows-dev-new`,
-		`C:\Users\tester\AppData\Local\Temp\gonavi-updates\.gonavi-update-windows-dev-new\gonavi-update-windows-123.log`,
-		12345,
-	)
+func TestResolveWindowsUpdateFinalTargetPathPreservesExecutablePath(t *testing.T) {
+	currentTarget := filepath.Join("D:", "软件", "数据库管理工具", "GoNavi", "GoNavi-dev-f930ffe-Windows-Amd64.exe")
+	stagedSource := filepath.Join("C:", "Temp", "gonavi-updates", "GoNavi-0.8.5-Windows-Amd64.exe")
+
+	if got := resolveWindowsUpdateFinalTargetPath(currentTarget, stagedSource); got != currentTarget {
+		t.Fatalf("Windows update target = %q, want current executable path %q", got, currentTarget)
+	}
+}
+
+func TestBuildWindowsPowerShellScriptSchedulesStagedDirectoryCleanupAfterSuccess(t *testing.T) {
+	script := buildWindowsPowerShellScript()
 
 	mustContain := []string{
-		`if exist "%SOURCE%" del /F /Q "%SOURCE%"`,
-		`del /F /Q ""%LOG_FILE%""`,
-		`rmdir /S /Q ""%STAGED%""`,
+		`Write-UpdateLog 'update finished'`,
+		`$CleanupCommand = 'Start-Sleep -Seconds 2; Remove-Item -LiteralPath $env:GONAVI_UPDATE_STAGED_DIR`,
+		`$CleanupWorkingDirectory = [IO.Path]::GetTempPath()`,
+		`-EncodedCommand`,
 	}
 	for _, token := range mustContain {
 		if !strings.Contains(script, token) {
 			t.Fatalf("expected script to contain %q\n%s", token, script)
 		}
 	}
-	if strings.Contains(script, `rmdir /S /Q "%STAGED%" >> "%LOG_FILE%"`) {
-		t.Fatalf("script should not synchronously remove staged dir while logging to it\n%s", script)
+	if strings.Contains(script, `cmd.exe`) {
+		t.Fatalf("PowerShell updater must not route cleanup through cmd.exe\n%s", script)
+	}
+}
+
+func TestBuildWindowsPowerShellScriptDoesNotEmbedUnicodeRuntimePaths(t *testing.T) {
+	source := `C:\Users\tester\AppData\Local\Temp\gonavi-updates\.gonavi-update-windows-latest-0.8.5\GoNavi-0.8.5-Windows-Amd64.exe`
+	target := `D:\软件\数据库管理工具\GoNavi\GoNavi.exe`
+	stagedDir := `C:\Users\tester\AppData\Local\Temp\gonavi-updates\.gonavi-update-windows-latest-0.8.5`
+	logPath := filepath.Join(stagedDir, "gonavi-update-windows.log")
+
+	script := buildWindowsPowerShellScript()
+	for _, path := range []string{source, target, stagedDir, logPath} {
+		if strings.Contains(script, path) {
+			t.Fatalf("Windows PowerShell updater must not embed runtime path %q because legacy cmd.exe decoding would corrupt it\n%s", path, script)
+		}
+	}
+	for _, r := range script {
+		if r > 0x7f {
+			t.Fatalf("Windows PowerShell updater must stay ASCII-only, found %q\n%s", r, script)
+		}
+	}
+}
+
+func TestBuildWindowsPowerShellScriptRelaunchesBeforeDeletingFallbacks(t *testing.T) {
+	script := buildWindowsPowerShellScript()
+
+	startIdx := strings.Index(script, `$NewProcess = Start-Process -FilePath $Target`)
+	deleteCurrentIdx := strings.Index(script, `Remove-UpdateArtifact $CurrentTarget`)
+	deleteSourceIdx := strings.Index(script, `Remove-UpdateArtifact $Source`)
+	if startIdx < 0 || deleteCurrentIdx < 0 || deleteSourceIdx < 0 {
+		t.Fatalf("expected relaunch and cleanup commands in script (start=%d current=%d source=%d)\n%s", startIdx, deleteCurrentIdx, deleteSourceIdx, script)
+	}
+	if deleteCurrentIdx < startIdx || deleteSourceIdx < startIdx {
+		t.Fatalf("fallback files must be deleted only after relaunch (start=%d current=%d source=%d)\n%s", startIdx, deleteCurrentIdx, deleteSourceIdx, script)
+	}
+}
+
+func TestBuildWindowsLaunchCommandPreservesSpecialPathsInEnvironment(t *testing.T) {
+	context := windowsUpdateLaunchContext{
+		SourcePath:        `C:\Users\tester\AppData\Local\Temp\GoNavi %TEMP%\GoNavi-0.8.5-Windows-Amd64.exe`,
+		TargetPath:        `D:\软件 ! 100% & (便携版)\O'Brien\GoNavi.exe`,
+		CurrentTargetPath: `D:\软件 ! 100% & (便携版)\O'Brien\GoNavi-dev-f930ffe.exe`,
+		StagedDir:         `C:\Users\tester\AppData\Local\Temp\GoNavi %TEMP%\stage`,
+		LogPath:           `C:\Users\tester\AppData\Local\Temp\GoNavi %TEMP%\stage\update.log`,
+		PID:               12345,
+	}
+	cmd := buildWindowsLaunchCommand(filepath.Join(context.StagedDir, "update.ps1"), context)
+
+	wantEnvironment := map[string]string{
+		"GONAVI_UPDATE_SOURCE":         context.SourcePath,
+		"GONAVI_UPDATE_TARGET":         context.TargetPath,
+		"GONAVI_UPDATE_CURRENT_TARGET": context.CurrentTargetPath,
+		"GONAVI_UPDATE_STAGED_DIR":     context.StagedDir,
+		"GONAVI_UPDATE_LOG_PATH":       context.LogPath,
+		"GONAVI_UPDATE_PID":            "12345",
+	}
+	gotEnvironment := make(map[string]string, len(wantEnvironment))
+	for _, item := range cmd.Env {
+		name, value, ok := strings.Cut(item, "=")
+		if !ok {
+			continue
+		}
+		if _, exists := wantEnvironment[name]; exists {
+			gotEnvironment[name] = value
+		}
+	}
+	for name, want := range wantEnvironment {
+		if got := gotEnvironment[name]; got != want {
+			t.Fatalf("update environment %s = %q, want %q", name, got, want)
+		}
+	}
+	if cmd.Dir != context.StagedDir {
+		t.Fatalf("update command directory = %q, want %q", cmd.Dir, context.StagedDir)
 	}
 }

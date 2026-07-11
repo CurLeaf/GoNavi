@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApartmentOutlined, CodeOutlined } from '@ant-design/icons'
-import { Empty, Modal, Segmented, Spin, Typography } from 'antd'
+import { Alert, Button, Empty, Modal, Segmented, Spin, Typography, theme } from 'antd'
 import { DiagnoseQuery } from '../../../wailsjs/go/app/App'
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig'
 import { useI18n } from '../../i18n/provider'
@@ -23,7 +24,7 @@ import ExplainSidebar from './ExplainSidebar'
 //   └──────────────────────────────┴──────────────────┘
 //   底部 tab：执行计划 | 原文（调试用）
 
-const { Title, Text, Paragraph } = Typography
+const { Title, Text } = Typography
 
 interface ExplainWorkbenchProps {
   open: boolean
@@ -42,36 +43,52 @@ interface ExplainReportViewProps {
 
 export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReportViewProps) {
   const { t } = useI18n()
+  const { token } = theme.useToken()
   const [loading, setLoading] = useState(false)
   const [report, setReport] = useState<DiagnoseReport | null>(null)
+  const [reportRevision, setReportRevision] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<'plan' | 'raw'>('plan')
   const hasRequestedRun = runKey !== null && runKey !== undefined && runKey !== ''
+  const requestSequenceRef = useRef(0)
+  const requestInputRef = useRef({ config, dbName, sql, t })
+  requestInputRef.current = { config, dbName, sql, t }
 
   const runDiagnose = useCallback(async () => {
-    if (!sql.trim()) {
-      setError(t('sql_analysis.explain.error.query_required'))
+    const currentInput = requestInputRef.current
+    const requestSequence = ++requestSequenceRef.current
+    if (!currentInput.sql.trim()) {
+      setError(currentInput.t('sql_analysis.explain.error.query_required'))
       return
     }
     setLoading(true)
     setError(null)
-    setReport(null)
     setSelectedNodeId(null)
     try {
-      const result = await DiagnoseQuery(buildRpcConnectionConfig(config), dbName, sql)
+      const result = await DiagnoseQuery(
+        buildRpcConnectionConfig(currentInput.config),
+        currentInput.dbName,
+        currentInput.sql,
+      )
+      if (requestSequence !== requestSequenceRef.current) return
       if (!result.success) {
-        setError(result.message || t('sql_analysis.explain.error.run_failed'))
+        setError(result.message || currentInput.t('sql_analysis.explain.error.run_failed'))
       } else {
         const data = result.data as DiagnoseReport
         setReport(data)
+        setReportRevision((revision) => revision + 1)
       }
-    } catch (e) {
-      setError(String(e))
+    } catch (cause) {
+      if (requestSequence === requestSequenceRef.current) {
+        setError(cause instanceof Error ? cause.message : String(cause))
+      }
     } finally {
-      setLoading(false)
+      if (requestSequence === requestSequenceRef.current) {
+        setLoading(false)
+      }
     }
-  }, [config, dbName, sql, t])
+  }, [])
 
   useEffect(() => {
     if (!hasRequestedRun) {
@@ -79,6 +96,10 @@ export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReport
     }
     void runDiagnose()
   }, [hasRequestedRun, runDiagnose, runKey])
+
+  useEffect(() => () => {
+    requestSequenceRef.current += 1
+  }, [])
 
   useEffect(() => {
     if (report) {
@@ -97,25 +118,56 @@ export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReport
     }
   }, [])
 
+  const reportStyle = {
+    '--gn-fg-1': token.colorText,
+    '--gn-fg-2': token.colorText,
+    '--gn-fg-3': token.colorTextSecondary,
+    '--gn-fg-4': token.colorTextTertiary,
+    '--gn-fg-5': token.colorTextQuaternary,
+    '--gn-bg-panel': token.colorBgContainer,
+    '--gn-bg-panel-2': token.colorFillQuaternary,
+    '--gn-bg-input': token.colorBgContainer,
+    '--gn-bg-hover': token.colorFillTertiary,
+    '--gn-bg-selected': token.colorPrimaryBg,
+    '--gn-br-1': token.colorBorderSecondary,
+    '--gn-br-2': token.colorBorder,
+    '--gn-br-3': token.colorBorder,
+    '--gn-shadow-sm': token.boxShadowTertiary,
+    '--gn-shadow-md': token.boxShadowSecondary,
+    '--gn-accent': token.colorPrimary,
+    '--gn-accent-soft': token.colorPrimaryBg,
+    '--gn-danger': token.colorError,
+    '--gn-warn': token.colorWarning,
+    '--gn-warn-soft': token.colorWarningBg,
+    '--gn-info': token.colorInfo,
+    '--gn-info-soft': token.colorInfoBg,
+    '--gn-font-mono': token.fontFamilyCode,
+  } as CSSProperties
+
   return (
-    <div className="gn-explain-report-view">
+    <div className="gn-explain-report-view" style={reportStyle}>
       <style>{reportViewStyles}</style>
-      {loading && (
+      {loading && !report && (
         <div style={{ textAlign: 'center', padding: '60px 0' }}>
           <Spin tip={t('sql_analysis.explain.loading')} />
         </div>
       )}
       {error && (
-        <Paragraph type="danger" style={{ padding: 16 }}>
-          <Text strong>{t('sql_analysis.explain.error.title')}</Text>
-          {error}
-        </Paragraph>
+        <Alert
+          type="error"
+          showIcon
+          message={t('sql_analysis.explain.error.title')}
+          description={error}
+          action={<Button size="small" onClick={() => void runDiagnose()}>{t('sql_analysis.explain.action.retry')}</Button>}
+          style={{ marginBottom: 12 }}
+        />
       )}
       {!loading && !error && !report && !hasRequestedRun && (
         <Empty description={t('sql_analysis.explain.empty')} style={{ padding: '48px 0' }} />
       )}
-      {!loading && !error && report && (
-        <div className="gn-explain-report-shell">
+      {!error && report && (
+        <Spin spinning={loading} tip={t('sql_analysis.explain.loading')} className="gn-explain-report-spinner">
+          <div className="gn-explain-report-shell">
           <div className="gn-explain-report-switcher-row">
             <Segmented
               value={activeView}
@@ -154,6 +206,7 @@ export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReport
               <div className="gn-explain-plan-view">
                 <div className="gn-explain-plan-graph">
                   <ExplainGraph
+                    key={reportRevision}
                     nodes={report.plan.nodes}
                     edges={report.plan.edges ?? []}
                     selectedNodeId={selectedNodeId ?? undefined}
@@ -176,7 +229,8 @@ export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReport
                   height: '100%',
                   margin: 0,
                   overflow: 'auto',
-                  background: 'var(--gn-code-bg, #f1f3f5)',
+                  background: 'var(--gn-bg-panel-2, #f8fafc)',
+                  color: 'var(--gn-fg-1, #111827)',
                   padding: 12,
                   borderRadius: 4,
                   fontSize: 12,
@@ -190,7 +244,8 @@ export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReport
               </pre>
             )}
           </div>
-        </div>
+          </div>
+        </Spin>
       )}
     </div>
   )
@@ -234,6 +289,14 @@ const reportViewStyles = `
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+  .gn-explain-report-spinner {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .gn-explain-report-spinner > .ant-spin-container {
+    height: 100%;
+    min-height: 0;
   }
   .gn-explain-report-switcher-row {
     flex: 0 0 auto;
@@ -299,5 +362,22 @@ const reportViewStyles = `
     flex: 0 0 320px;
     min-height: 0;
     overflow-y: auto;
+  }
+  @media (max-width: 900px) {
+    .gn-explain-plan-view {
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .gn-explain-plan-graph {
+      width: 100%;
+      min-width: 0;
+      min-height: 360px;
+      flex: 0 0 min(55vh, 480px);
+    }
+    .gn-explain-plan-sidebar {
+      width: 100%;
+      flex: 0 0 auto;
+      overflow: visible;
+    }
   }
 `

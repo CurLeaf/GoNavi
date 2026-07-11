@@ -5,6 +5,7 @@ import {sync} from '../models';
 import {app} from '../models';
 import {jvm} from '../models';
 import {redis} from '../models';
+import {resultdiff} from '../models';
 
 export function ApplyChanges(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:connection.ChangeSet):Promise<connection.QueryResult>;
 
@@ -116,6 +117,8 @@ export function ExecuteSQLFile(arg1:connection.ConnectionConfig,arg2:string,arg3
 
 export function ExportConnectionsPackage(arg1:app.ConnectionExportOptions):Promise<connection.QueryResult>;
 
+export function ExportConnectionsPayload(arg1:app.ConnectionExportOptions):Promise<connection.QueryResult>;
+
 export function ExportData(arg1:Array<Record<string, any>>,arg2:Array<string>,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function ExportDataWithOptions(arg1:Array<Record<string, any>>,arg2:Array<string>,arg3:string,arg4:app.ExportFileOptions):Promise<connection.QueryResult>;
@@ -174,7 +177,7 @@ export function GetUpdateChannel():Promise<connection.QueryResult>;
 
 export function ImportConfigFile():Promise<connection.QueryResult>;
 
-export function ImportConnectionsPayload(arg1:string,arg2:string):Promise<Array<connection.SavedConnectionView>>;
+export function ImportConnectionsPayload(arg1:string,arg2:string):Promise<app.ConnectionPackageImportResult>;
 
 export function ImportData(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
@@ -278,6 +281,8 @@ export function RedisKeyExists(arg1:connection.ConnectionConfig,arg2:string):Pro
 
 export function RedisListPush(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
 
+export function RedisListRemove(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
 export function RedisListSet(arg1:connection.ConnectionConfig,arg2:string,arg3:number,arg4:string):Promise<connection.QueryResult>;
 
 export function RedisPreviewImportKeys(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
@@ -331,6 +336,16 @@ export function ResolveDriverPackageDownloadURL(arg1:string,arg2:string):Promise
 export function ResolveDriverRepositoryURL(arg1:string):Promise<connection.QueryResult>;
 
 export function RestartSecurityUpdate(arg1:app.RestartSecurityUpdateRequest):Promise<app.SecurityUpdateStatus>;
+
+export function ResultDiffClose(arg1:string):Promise<connection.QueryResult>;
+
+export function ResultDiffCompute(arg1:string):Promise<connection.QueryResult>;
+
+export function ResultDiffPage(arg1:resultdiff.PageRequest):Promise<connection.QueryResult>;
+
+export function ResultDiffStart(arg1:app.ResultDiffStartRequest):Promise<connection.QueryResult>;
+
+export function ResultDiffUploadChunk(arg1:resultdiff.UploadChunkRequest):Promise<connection.QueryResult>;
 
 export function RetrySecurityUpdateCurrentRound(arg1:app.RetrySecurityUpdateRequest):Promise<app.SecurityUpdateStatus>;
 

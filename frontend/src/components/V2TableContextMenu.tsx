@@ -646,6 +646,8 @@ export type V2ColumnHeaderContextMenuActionKey =
   | 'sort-desc'
   | 'clear-sort'
   | 'auto-fit-column'
+  | 'pin-column-left'
+  | 'unpin-column-left'
   | 'hide-column'
   | 'show-column-type'
   | 'hide-column-type'
@@ -660,6 +662,8 @@ export const V2ColumnHeaderContextMenuView: React.FC<{
   sortOrder?: 'ascend' | 'descend' | null;
   showColumnType?: boolean;
   showColumnComment?: boolean;
+  pinnedLeft?: boolean;
+  canPinLeft?: boolean;
   onAction?: (action: V2ColumnHeaderContextMenuActionKey) => void;
 }> = ({
   fieldName,
@@ -669,6 +673,8 @@ export const V2ColumnHeaderContextMenuView: React.FC<{
   sortOrder,
   showColumnType = true,
   showColumnComment = true,
+  pinnedLeft = false,
+  canPinLeft = true,
   onAction,
 }) => {
   const renderItems = (items: V2TableContextMenuItemConfig[]) => renderV2ContextMenuItems(
@@ -708,6 +714,15 @@ export const V2ColumnHeaderContextMenuView: React.FC<{
         <div className="gn-v2-context-menu-section-title">{t('data_grid.context_menu.column_display_section')}</div>
         {renderItems([
           { action: 'auto-fit-column', icon: <ColumnWidthOutlined />, title: t('data_grid.context_menu.auto_fit_column') },
+          {
+            action: pinnedLeft ? 'unpin-column-left' : 'pin-column-left',
+            icon: <PushpinOutlined />,
+            title: pinnedLeft
+              ? t('data_grid.context_menu.unpin_column_left')
+              : t('data_grid.context_menu.pin_column_left'),
+            selected: pinnedLeft,
+            disabled: !canPinLeft && !pinnedLeft,
+          },
           { action: 'hide-column', icon: <EyeInvisibleOutlined />, title: t('data_grid.context_menu.hide_column') },
           {
             action: showColumnType ? 'hide-column-type' : 'show-column-type',

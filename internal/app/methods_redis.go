@@ -1359,6 +1359,22 @@ func (a *App) RedisListSet(config connection.ConnectionConfig, key string, index
 	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.set_success", nil)}
 }
 
+// RedisListRemove removes one matching value from a list.
+func (a *App) RedisListRemove(config connection.ConnectionConfig, key, value string) connection.QueryResult {
+	config.Type = "redis"
+	client, err := a.getRedisClient(config)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	if err := client.ListRemove(key, value); err != nil {
+		logger.Error(err, "RedisListRemove 删除失败：key=%s", key)
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.delete_success", nil)}
+}
+
 // RedisSetAdd adds members to a set
 func (a *App) RedisSetAdd(config connection.ConnectionConfig, key string, members []string) connection.QueryResult {
 	config.Type = "redis"

@@ -10,6 +10,7 @@ type WebAuthSettingsSummary = {
   sessionAbsoluteHours: number;
   sessionRememberDays: number;
   updatedAt?: string;
+  passwordManagedByEnvironment: boolean;
 };
 
 type WebAuthSettingsPanelProps = {
@@ -80,6 +81,7 @@ const WebAuthSettingsPanel: React.FC<WebAuthSettingsPanelProps> = ({
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [passwordForm, setPasswordForm] = useState<PasswordFormState>(() => createEmptyPasswordFormState());
+  const passwordManagedByEnvironment = summary?.passwordManagedByEnvironment === true;
 
   const summaryItems = useMemo(() => {
     if (!summary) {
@@ -245,9 +247,11 @@ const WebAuthSettingsPanel: React.FC<WebAuthSettingsPanelProps> = ({
         <div style={{ display: 'grid', gap: 4 }}>
           <div style={sectionTitleStyle(titleColor)}>{t('app.settings.web_auth.password.title')}</div>
           <div style={{ color: mutedColor, fontSize: 13, lineHeight: 1.6 }}>
-            {summary?.totpEnabled
-              ? t('app.settings.web_auth.password.description_with_code')
-              : t('app.settings.web_auth.password.description')}
+            {passwordManagedByEnvironment
+              ? t('app.settings.web_auth.password.managed_by_environment')
+              : summary?.totpEnabled
+                ? t('app.settings.web_auth.password.description_with_code')
+                : t('app.settings.web_auth.password.description')}
           </div>
         </div>
         <div
@@ -261,6 +265,7 @@ const WebAuthSettingsPanel: React.FC<WebAuthSettingsPanelProps> = ({
             <span style={{ color: mutedColor, fontSize: 12 }}>{t('app.settings.web_auth.password.current_label')}</span>
             <Input.Password
               autoComplete="current-password"
+              disabled={passwordManagedByEnvironment}
               value={passwordForm.currentPassword}
               placeholder={t('app.settings.web_auth.password.current_placeholder')}
               onChange={(event) => updatePasswordField('currentPassword', event.target.value)}
@@ -271,6 +276,7 @@ const WebAuthSettingsPanel: React.FC<WebAuthSettingsPanelProps> = ({
               <span style={{ color: mutedColor, fontSize: 12 }}>{t('app.settings.web_auth.password.code_label')}</span>
               <Input
                 autoComplete="one-time-code"
+                disabled={passwordManagedByEnvironment}
                 inputMode="numeric"
                 value={passwordForm.code}
                 placeholder={t('app.settings.web_auth.password.code_placeholder')}
@@ -282,6 +288,7 @@ const WebAuthSettingsPanel: React.FC<WebAuthSettingsPanelProps> = ({
             <span style={{ color: mutedColor, fontSize: 12 }}>{t('app.settings.web_auth.password.new_label')}</span>
             <Input.Password
               autoComplete="new-password"
+              disabled={passwordManagedByEnvironment}
               value={passwordForm.newPassword}
               placeholder={t('app.settings.web_auth.password.new_placeholder')}
               onChange={(event) => updatePasswordField('newPassword', event.target.value)}
@@ -291,6 +298,7 @@ const WebAuthSettingsPanel: React.FC<WebAuthSettingsPanelProps> = ({
             <span style={{ color: mutedColor, fontSize: 12 }}>{t('app.settings.web_auth.password.confirm_label')}</span>
             <Input.Password
               autoComplete="new-password"
+              disabled={passwordManagedByEnvironment}
               value={passwordForm.confirmPassword}
               placeholder={t('app.settings.web_auth.password.confirm_placeholder')}
               onChange={(event) => updatePasswordField('confirmPassword', event.target.value)}
@@ -298,7 +306,12 @@ const WebAuthSettingsPanel: React.FC<WebAuthSettingsPanelProps> = ({
           </label>
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-          <Button type="primary" loading={submitting} onClick={() => { void handleSubmit(); }}>
+          <Button
+            type="primary"
+            loading={submitting}
+            disabled={passwordManagedByEnvironment}
+            onClick={() => { void handleSubmit(); }}
+          >
             {t('app.settings.web_auth.password.submit')}
           </Button>
         </div>

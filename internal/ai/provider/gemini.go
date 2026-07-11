@@ -48,6 +48,8 @@ func NewGeminiProvider(config ai.ProviderConfig) (Provider, error) {
 	normalized.Model = model
 	normalized.MaxTokens = maxTokens
 	normalized.Temperature = temperature
+	profile := ResolveThinkingProfile(config.Type, config.APIFormat, baseURL, model)
+	normalized.ThinkingIntensity = string(clampThinkingIntensityToProfile(config.ThinkingIntensity, profile))
 
 	return &GeminiProvider{
 		config:  normalized,
@@ -92,8 +94,43 @@ type geminiBlob struct {
 }
 
 type geminiGenConfig struct {
-	Temperature     float64 `json:"temperature,omitempty"`
-	MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
+	Temperature     float64              `json:"temperature,omitempty"`
+	MaxOutputTokens int                  `json:"maxOutputTokens,omitempty"`
+	ThinkingConfig  *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+}
+
+// geminiThinkingConfig 兼容 Gemini 2.5 budget 与 Gemini 3 thinking_level。
+type geminiThinkingConfig struct {
+	ThinkingBudget *int   `json:"thinkingBudget,omitempty"`
+	ThinkingLevel  string `json:"thinkingLevel,omitempty"`
+}
+
+func (p *GeminiProvider) applyThinkingToGenConfig(cfg *geminiGenConfig) {
+	if cfg == nil {
+		return
+	}
+	intensity := NormalizeThinkingIntensity(p.config.ThinkingIntensity)
+	if intensity == "" {
+		return
+	}
+	level := geminiThinkingLevel(intensity)
+	budget := geminiThinkingBudget(intensity)
+	thinking := &geminiThinkingConfig{}
+	if intensity == ai.ThinkingIntensityOff || intensity == ai.ThinkingIntensity("none") {
+		zero := 0
+		thinking.ThinkingBudget = &zero
+		cfg.ThinkingConfig = thinking
+		return
+	}
+	if level != "" {
+		thinking.ThinkingLevel = strings.ToUpper(level)
+	}
+	// 同时带 budget，兼容仍识别 thinkingBudget 的 2.5 端点
+	if budget >= 0 {
+		b := budget
+		thinking.ThinkingBudget = &b
+	}
+	cfg.ThinkingConfig = thinking
 }
 
 type geminiResponse struct {
@@ -251,12 +288,19 @@ func (p *GeminiProvider) buildRequest(req ai.ChatRequest) geminiRequest {
 		})
 	}
 
+	genCfg := geminiGenConfig{
+		Temperature:     temperature,
+		MaxOutputTokens: p.config.MaxTokens,
+	}
+	if req.MaxTokens > 0 {
+		genCfg.MaxOutputTokens = req.MaxTokens
+	}
+	p.applyThinkingToGenConfig(&genCfg)
+
 	return geminiRequest{
 		Contents:          contents,
 		SystemInstruction: systemInstruction,
-		GenerationConfig: geminiGenConfig{
-			Temperature: temperature,
-		},
+		GenerationConfig:  genCfg,
 	}
 }
 

@@ -361,6 +361,14 @@ vi.mock('./DataGrid', () => ({
   GONAVI_ROW_KEY: '__gonavi_row_key__',
 }));
 
+vi.mock('./resultDiff/ResultDiffWizard', () => ({
+  default: () => null,
+}));
+
+vi.mock('./resultDiff/ViewDataVerifyWizard', () => ({
+  default: () => null,
+}));
+
 vi.mock('./LogPanel', () => ({
   default: ({ executionError }: any) => (
     <div data-log-panel="true">
@@ -381,6 +389,7 @@ vi.mock('@ant-design/icons', () => {
     SettingOutlined: Icon,
     CloseOutlined: Icon,
     StopOutlined: Icon,
+    DownOutlined: Icon,
     RobotOutlined: Icon,
     SearchOutlined: Icon,
     DatabaseOutlined: Icon,
@@ -434,6 +443,7 @@ vi.mock('antd', () => {
       </section>
     ) : null),
     Input: ({ value, onChange, placeholder }: any) => <input value={value} onChange={onChange} placeholder={placeholder} />,
+    Segmented: () => null,
     Form,
     Dropdown: ({ children, menu }: any) => (
       <>
@@ -3537,6 +3547,40 @@ describe('QueryEditor external SQL save', () => {
     });
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).toContain('EHR_USERID AS EHR_USERID_1, a.*');
     expect(messageApi.warning).not.toHaveBeenCalled();
+  });
+
+  it('gives a multiline single-table result an independent column pin scope without making it editable', async () => {
+    const sql = [
+      'SELECT a.COMPID, a.MEMCARDNO,',
+      '  a.MODIFYUSER, a.MODIFYTIME',
+      'FROM D_MEMBER_CARDTYPE_MODFIY_LOG a',
+    ].join('\n');
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{
+        columns: ['COMPID', 'MEMCARDNO', 'MODIFYUSER', 'MODIFYTIME'],
+        rows: [{ COMPID: 1, MEMCARDNO: 'M-1', MODIFYUSER: 'admin', MODIFYTIME: '2026-07-10' }],
+      }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: sql })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.tableName).toBeUndefined();
+    expect(dataGridState.latestProps?.readOnly).toBe(true);
+    expect(dataGridState.latestProps?.columnPinScope).toMatch(/^query-result:[a-f0-9]+$/);
+    expect(dataGridState.latestProps?.columnPinScope).not.toContain('D_MEMBER_CARDTYPE_MODFIY_LOG');
+    renderer!.unmount();
   });
 
   it.each([

@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GoNavi Theme Settings Visual</title>
+  <style>
+    :root {
+      --fg: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --accent: #16a34a;
+      --accent-soft: #dcfce7;
+      --accent-border: #86efac;
+      --radius: 10px;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font);
+      background: #e8edf3;
+      color: var(--fg);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .shell {
+      width: min(920px, 100%);
+      height: 640px;
+      background: var(--panel);
+      border-radius: 16px;
+      border: 1px solid rgba(15,23,42,.08);
+      box-shadow: 0 20px 50px rgba(15,23,42,.10);
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      overflow: hidden;
+    }
+    .side {
+      background: #fbfcfd;
+      border-right: 1px solid var(--line);
+      padding: 18px 12px;
+    }
+    .side .item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .side .item.active {
+      background: #ecfdf5;
+      color: #166534;
+    }
+    .main {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      background: #fff;
+    }
+    .header {
+      padding: 18px 22px 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .header p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .body {
+      flex: 1;
+      overflow: auto;
+      padding: 16px 22px 24px;
+    }
+
+    /* underline tabs */
+    .tabs {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 18px;
+    }
+    .tab {
+      flex: 1;
+      border: 0;
+      background: transparent;
+      padding: 10px 8px 12px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+    }
+    .tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+      font-weight: 700;
+    }
+    .hint {
+      margin: -8px 0 16px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .section {
+      margin-bottom: 20px;
+    }
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 10px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .chip {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 7px;
+      border-radius: 999px;
+      background: #e0f2fe;
+      color: #0369a1;
+    }
+    .chip.beta {
+      background: #ecfdf5;
+      color: #15803d;
+    }
+    .meta {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      background: #fff;
+      cursor: pointer;
+      text-align: left;
+      font: inherit;
+    }
+    .card:hover { border-color: #cbd5e1; }
+    .card.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent-border);
+    }
+    .card .preview {
+      height: 44px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .preview.light {
+      background: linear-gradient(180deg, #f8fafc, #eef2f7);
+      padding: 8px;
+      display: grid;
+      gap: 4px;
+    }
+    .preview.dark {
+      background: linear-gradient(180deg, #0f172a, #111827);
+      padding: 8px;
+      display: grid;
+      gap: 4px;
+    }
+    .preview.system {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+    .bar {
+      height: 5px;
+      border-radius: 99px;
+      background: rgba(15,23,42,.12);
+    }
+    .preview.dark .bar { background: rgba(248,250,252,.18); }
+    .bar.accent { background: rgba(22,163,74,.4); width: 72%; }
+    .preview.dark .bar.accent { background: rgba(74,222,128,.5); width: 72%; }
+    .card .label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .check { color: var(--accent); font-size: 12px; }
+
+    .ui-preview {
+      height: 58px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      overflow: hidden;
+      display: grid;
+      margin-bottom: 8px;
+      background: #f1f5f9;
+    }
+    .ui-preview.legacy { grid-template-columns: 34% 1fr; }
+    .ui-preview.v2 { grid-template-columns: 16px 1fr; }
+    .ui-side {
+      background: #fff;
+      border-right: 1px solid var(--line);
+      padding: 8px 6px;
+      display: grid;
+      gap: 5px;
+      align-content: start;
+    }
+    .ui-preview.v2 .ui-side {
+      background: linear-gradient(180deg, #16a34a, #15803d);
+      border: 0;
+      place-items: center;
+      padding: 8px 2px;
+    }
+    .dot {
+      width: 7px; height: 7px; border-radius: 99px;
+      background: rgba(15,23,42,.16);
+    }
+    .ui-preview.v2 .dot { background: rgba(255,255,255,.9); }
+    .ui-main { padding: 8px; display: grid; gap: 6px; }
+    .ui-main .row { height: 8px; border-radius: 4px; background: rgba(15,23,42,.08); }
+    .ui-main .row.a { width: 46%; background: rgba(22,163,74,.35); }
+    .ui-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; height: 24px; }
+    .ui-cards span {
+      border-radius: 5px;
+      background: #fff;
+      border: 1px solid rgba(15,23,42,.06);
+    }
+
+    .row-inline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+    .row-inline .name {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .pills {
+      display: inline-flex;
+      gap: 6px;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .pill.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell" id="fixture">
+    <aside class="side">
+      <div class="item active">偏好设置</div>
+      <div class="item">服务配置</div>
+      <div class="item">关于</div>
+    </aside>
+    <section class="main">
+      <div class="header">
+        <h1>主题与外观</h1>
+        <p>切换亮暗主题并调整界面观感。</p>
+      </div>
+      <div class="body">
+        <div class="tabs">
+          <button class="tab active" type="button">主题与界面</button>
+          <button class="tab" type="button">显示与字体</button>
+          <button class="tab" type="button">工作区</button>
+        </div>
+        <p class="hint">更改将立即生效，无需保存。</p>
+
+        <div class="section">
+          <div class="section-title">亮暗模式</div>
+          <div class="grid-3">
+            <button class="card" type="button">
+              <div class="preview light">
+                <div class="bar" style="width:55%"></div>
+                <div class="bar accent"></div>
+                <div class="bar" style="width:40%"></div>
+              </div>
+              <div class="label"><span>亮色主题</span></div>
+            </button>
+            <button class="card" type="button">
+              <div class="preview dark">
+                <div class="bar" style="width:55%"></div>
+                <div class="bar accent"></div>
+                <div class="bar" style="width:40%"></div>
+              </div>
+              <div class="label"><span>暗色主题</span></div>
+            </button>
+            <button class="card active" type="button">
+              <div class="preview system">
+                <div class="preview light" style="border:0;height:100%;border-radius:0;margin:0">
+                  <div class="bar" style="width:55%"></div>
+                  <div class="bar accent"></div>
+                  <div class="bar" style="width:40%"></div>
+                </div>
+                <div class="preview dark" style="border:0;height:100%;border-radius:0;margin:0">
+                  <div class="bar" style="width:55%"></div>
+                  <div class="bar accent"></div>
+                  <div class="bar" style="width:40%"></div>
+                </div>
+              </div>
+              <div class="label"><span>跟随系统</span><span class="check">✓</span></div>
+            </button>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">
+            界面版本
+            <span class="chip">NEW</span>
+            <span class="chip beta">Beta</span>
+          </div>
+          <div class="grid-2">
+            <button class="card" type="button">
+              <div class="ui-preview legacy">
+                <div class="ui-side"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+                <div class="ui-main">
+                  <div class="row a"></div>
+                  <div class="ui-cards"><span></span><span></span></div>
+                </div>
+              </div>
+              <div class="label"><span>旧版 UI · 默认</span></div>
+            </button>
+            <button class="card active" type="button">
+              <div class="ui-preview v2">
+                <div class="ui-side"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+                <div class="ui-main">
+                  <div class="row a"></div>
+                  <div class="ui-cards"><span></span><span></span></div>
+                </div>
+              </div>
+              <div class="label"><span>新版 UI · Beta</span><span class="check">✓</span></div>
+            </button>
+          </div>
+          <p class="meta">全平台可切换，立即生效；部分弹窗下次打开时应用新样式。</p>
+          <div class="row-inline">
+            <div class="name">左侧搜索</div>
+            <div class="pills">
+              <button class="pill active" type="button">命令搜索</button>
+              <button class="pill" type="button">侧栏筛选</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

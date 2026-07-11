@@ -76,6 +76,37 @@ describe('settings center layout', () => {
     expect(appSource).toContain("t('common.back_to_previous')");
   });
 
+  it('uses instant-apply footer actions only on v2 theme settings pane', () => {
+    expect(appSource).toContain("isV2Ui && activeSettingsCenterPane.key === 'theme' ? (");
+    expect(appSource).toContain("t('common.close')");
+    expect(appSource).toContain("t('app.theme.instant_apply_hint')");
+  });
+
+  it('gates the new theme layout to v2 and keeps legacy side nav for old UI', () => {
+    expect(appSource).toContain('renderThemeSettingsContentV2');
+    expect(appSource).toContain('renderThemeSettingsContentLegacy');
+    expect(appSource).toContain('isV2Ui ? renderThemeSettingsContentV2() : renderThemeSettingsContentLegacy()');
+    expect(appSource).toContain("gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0'");
+    expect(appSource).toContain('className="gonavi-theme-settings"');
+    expect(appSource).toContain('ThemeSettingsSlider');
+    expect(appSource).toContain("t('app.theme.custom.title')");
+    expect(appSource).toContain('<CustomThemeManager />');
+    expect(appSource).toContain('<CustomThemeManager legacyMode />');
+    expect(appSource).toContain("value: 'workspace'");
+    expect(appSource).toContain('gonavi-settings-tabs');
+    expect(appSource).toContain('setThemeModalSection(item.value)');
+  });
+
+  it('resolves custom-theme base mode synchronously and bridges its surfaces into Ant Design', () => {
+    expect(appSource).toContain("const resolvedThemeMode = effectiveThemePreference === 'system'");
+    expect(appSource).toContain("const darkMode = resolvedThemeMode === 'dark';");
+    expect(appSource).toContain('const customThemeStyleContextKey = `${resolvedThemeMode}:${appearance.uiVersion}`;');
+    expect(appSource).toContain('colorBgContainer: (isV2Ui ? v2AntBgContainer : undefined)');
+    expect(appSource).toContain('colorBgElevated: (isV2Ui ? v2AntBgElevated : undefined)');
+    expect(appSource).toContain('colorTextSecondary: v2AntTextSecondary');
+    expect(appSource).toContain('rowHoverBg: (isV2Ui ? v2AntRowHoverBg : undefined)');
+  });
+
   it('opens theme, AI, and about entries inside settings center detail panes', () => {
     expect(appSource).toContain("handleOpenSettingsCenterPane('preferences', 'theme')");
     expect(appSource).toContain("handleOpenSettingsCenterPane('services', 'ai')");
@@ -87,11 +118,28 @@ describe('settings center layout', () => {
     expect(appSource).toContain('renderSettingsCenterAboutPane()');
   });
 
+  it('opens AI settings from the chat panel via settings center instead of a standalone modal', () => {
+    expect(appSource).toContain('const handleOpenAISettings = useCallback((providerId?: string) => {');
+    expect(appSource).toContain("setActiveSettingsCenterPane({ key: 'ai', group: 'services' })");
+    expect(appSource).toContain('setIsSettingsModalOpen(true)');
+    expect(appSource).not.toContain('setIsAISettingsOpen(true)');
+    expect(appSource).not.toContain('<AISettingsModal');
+  });
+
   it('opens the about group directly instead of showing a one-item list', () => {
     expect(appSource).toContain('const resolveSettingsCenterGroupInitialPane = (group: SettingsCenterGroupKey): SettingsCenterPaneState | null => (');
     expect(appSource).toContain("group === 'about' ? { key: 'about-go-navi', group: 'about' } : null");
     expect(appSource).toContain('setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(group));');
     expect(appSource).toContain('setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(group.key));');
+  });
+
+  it('routes silent update discovery to the settings center about pane via bridge', () => {
+    expect(appSource).toContain('const updateCenterBridgeRef = useRef<{');
+    expect(appSource).toContain('updateCenterBridgeRef,');
+    expect(appSource).toContain('updateCenterBridgeRef.current = {');
+    expect(appSource).toContain("handleOpenSettingsCenterPane('about', 'about-go-navi')");
+    expect(appSource).toContain('prepareAboutSurface');
+    expect(appSource).toContain('isSettingsAboutPaneOpen');
   });
 
   it('renders the settings center about page with the reference card layout', () => {

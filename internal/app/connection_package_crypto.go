@@ -131,11 +131,12 @@ func encryptConnectionPackageV2AppManaged(payload connectionPackagePayload) (con
 	}
 
 	return connectionPackageFileV2{
-		V:           connectionPackageSchemaVersionV2,
-		Kind:        connectionPackageKind,
-		P:           connectionPackageProtectionAppManaged,
-		ExportedAt:  encryptedPayload.ExportedAt,
-		Connections: encryptedPayload.Connections,
+		V:              connectionPackageSchemaVersionV2,
+		Kind:           connectionPackageKind,
+		P:              connectionPackageProtectionAppManaged,
+		ExportedAt:     encryptedPayload.ExportedAt,
+		Connections:    encryptedPayload.Connections,
+		RedisDbAliases: encryptedPayload.RedisDbAliases,
 	}, nil
 }
 
@@ -212,8 +213,9 @@ func decryptConnectionPackageV2AppManaged(file connectionPackageFileV2) (connect
 	}
 
 	payload, err := decryptConnectionPackagePayloadSecrets(connectionPackagePayload{
-		ExportedAt:  file.ExportedAt,
-		Connections: file.Connections,
+		ExportedAt:     file.ExportedAt,
+		Connections:    file.Connections,
+		RedisDbAliases: file.RedisDbAliases,
 	}, appKey)
 	if err != nil {
 		return connectionPackagePayload{}, errConnectionPackageDecryptFailed
@@ -538,12 +540,15 @@ func decryptConnectionPackageV2ProtectedPlaintext(file connectionPackageFileV2Pr
 
 func encryptConnectionPackagePayloadSecrets(payload connectionPackagePayload, appKey []byte) (connectionPackagePayload, error) {
 	encrypted := connectionPackagePayload{
-		ExportedAt:  payload.ExportedAt,
-		Connections: make([]connectionPackageItem, len(payload.Connections)),
+		ExportedAt:     payload.ExportedAt,
+		Connections:    make([]connectionPackageItem, len(payload.Connections)),
+		RedisDbAliases: sanitizeConnectionPackageRedisDbAliases(payload.RedisDbAliases),
 	}
 
 	for index, item := range payload.Connections {
 		encryptedItem := item
+		// 确保别名被拷贝进加密后的连接项（不加密，仅展示偏好）
+		encryptedItem.RedisDbAliases = cloneStringMap(item.RedisDbAliases)
 		bundle, err := encryptSecretBundle(appKey, item.Secrets, connectionPackageItemAAD(item))
 		if err != nil {
 			return connectionPackagePayload{}, err
@@ -557,12 +562,14 @@ func encryptConnectionPackagePayloadSecrets(payload connectionPackagePayload, ap
 
 func decryptConnectionPackagePayloadSecrets(payload connectionPackagePayload, appKey []byte) (connectionPackagePayload, error) {
 	decrypted := connectionPackagePayload{
-		ExportedAt:  payload.ExportedAt,
-		Connections: make([]connectionPackageItem, len(payload.Connections)),
+		ExportedAt:     payload.ExportedAt,
+		Connections:    make([]connectionPackageItem, len(payload.Connections)),
+		RedisDbAliases: sanitizeConnectionPackageRedisDbAliases(payload.RedisDbAliases),
 	}
 
 	for index, item := range payload.Connections {
 		decryptedItem := item
+		decryptedItem.RedisDbAliases = cloneStringMap(item.RedisDbAliases)
 		bundle, err := decryptSecretBundle(appKey, item.Secrets, connectionPackageItemAAD(item))
 		if err != nil {
 			return connectionPackagePayload{}, err

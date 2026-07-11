@@ -1095,7 +1095,7 @@ export const parseUriToValues = (
           parsedValues.useSSL = false;
           parsedValues.sslMode = "disable";
         }
-      } else if (type === "chroma" || type === "qdrant") {
+      } else if (type === "chroma" || type === "qdrant" || type === "milvus") {
         const tls = String(
           parsed.params.get("tls") ||
             parsed.params.get("ssl") ||
@@ -1148,6 +1148,9 @@ export const getUriPlaceholder = (dbType: string) => {
   }
   if (dbType === "qdrant") {
     return "http://127.0.0.1:6333";
+  }
+  if (dbType === "milvus") {
+    return "http://127.0.0.1:19530/default";
   }
   if (dbType === "iotdb") {
     return "iotdb://root:root@127.0.0.1:6667/root.sg";
@@ -1225,6 +1228,8 @@ export const getConnectionParamsPlaceholder = (
       return "tenant=default_tenant&apiKey=...";
     case "qdrant":
       return "apiKey=...";
+    case "milvus":
+      return "token=...";
     case "dameng":
       return "schema=SYSDBA";
     case "tdengine":
@@ -1518,7 +1523,7 @@ export const buildUriFromValues = (values: any) => {
       ? "gaussdb"
       : type === "postgres"
       ? "postgresql"
-      : type === "chroma" || type === "qdrant"
+      : type === "chroma" || type === "qdrant" || type === "milvus"
         ? values.useSSL
           ? "https"
           : "http"
@@ -1572,7 +1577,7 @@ export const buildUriFromValues = (values: any) => {
       if (mode === "skip-verify" || mode === "preferred") {
         params.set("skip_verify", "true");
       }
-    } else if (type === "chroma" || type === "qdrant") {
+    } else if (type === "chroma" || type === "qdrant" || type === "milvus") {
       if (mode === "skip-verify" || mode === "preferred") {
         params.set("skip_verify", "true");
       }

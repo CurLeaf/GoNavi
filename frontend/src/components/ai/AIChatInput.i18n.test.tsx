@@ -95,6 +95,8 @@ const renderAIChatInput = (
       onComposerAction={() => {}}
       onModelChange={() => {}}
       onFetchModels={() => {}}
+      thinkingIntensity="medium"
+      onThinkingIntensityChange={() => {}}
       textareaRef={React.createRef<HTMLTextAreaElement>()}
       darkMode={false}
       textColor="#162033"
@@ -128,6 +130,8 @@ const renderAIChatInputWithoutProvider = (
     onComposerAction={() => {}}
     onModelChange={() => {}}
     onFetchModels={() => {}}
+    thinkingIntensity="medium"
+    onThinkingIntensityChange={() => {}}
     textareaRef={React.createRef<HTMLTextAreaElement>()}
     darkMode={false}
     textColor="#162033"

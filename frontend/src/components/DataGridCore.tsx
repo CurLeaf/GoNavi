@@ -215,7 +215,8 @@ const CELL_KEY_SEP = '\u0001';
 const CELL_SELECTION_DRAG_THRESHOLD_PX = 4;
 const DATE_TIME_CACHE_LIMIT = 2000;
 const TABLE_CELL_PREVIEW_MAX_CHARS = 240;
-const ROW_NUMBER_COLUMN_WIDTH = 58;
+// 行号列：仅展示序号的窄固定列（约 3~4 位）；多余视口宽度由数据列吸收
+const ROW_NUMBER_COLUMN_WIDTH = 36;
 const DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS = [
     { value: 3000, seconds: 3 },
     { value: 5000, seconds: 5 },
@@ -692,8 +693,15 @@ const ResizableTitle = React.forwardRef<HTMLTableCellElement, any>((props, ref) 
     return <th ref={ref} {...restProps} style={nextStyle} />;
   }
 
+  // 缩放手柄 absolute 定位需要 relative 上下文；
+  // 固定列表头的 sticky 由 CSS !important 覆盖，不会被这里的 relative 破坏。
+  const thStyle: React.CSSProperties = {
+      ...nextStyle,
+      position: 'relative',
+  };
+
   return (
-    <th ref={ref} {...restProps} style={{ ...nextStyle, position: 'relative' }}>
+    <th ref={ref} {...restProps} style={thStyle}>
       {restProps.children}
       <span
         className="react-resizable-handle"
@@ -723,7 +731,8 @@ const ResizableTitle = React.forwardRef<HTMLTableCellElement, any>((props, ref) 
             top: 0,
             width: 10,
             cursor: 'col-resize',
-            zIndex: 10,
+            // 必须低于固定列表头 z-index(30)，否则横向滚动时会穿透到勾选/行号上方
+            zIndex: 2,
             touchAction: 'none'
         }}
       />
@@ -778,20 +787,20 @@ const SortableHeaderCell: React.FC<SortableHeaderCellProps> = React.memo((props)
         isDragging,
     } = useSortable({ id: id || '' });
 
+    // 未拖拽时不要写 transform/willChange，否则会破坏表头 sticky 固定列（全选 / 行号）
+    const dndTransform = isDragging ? CSS.Transform.toString(transform) : undefined;
     const style: React.CSSProperties = {
         ...propStyle,
-        transform: CSS.Transform.toString(transform),
+        ...(dndTransform ? { transform: dndTransform, willChange: 'transform' as const } : {}),
         transition,
-        ...(isDragging ? { 
-            position: 'relative', 
-            zIndex: 9999, 
-            opacity: 0.6, 
+        ...(isDragging ? {
+            position: 'relative',
+            zIndex: 9999,
+            opacity: 0.6,
             backgroundColor: 'rgba(24, 144, 255, 0.15)',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
         } : {}),
         touchAction: 'none',
-        willChange: 'transform',
-        // 核心修复：将指针直接绑定到 th 级别，并由 isPressed 控制
         cursor: (isDragging || isPressed) ? 'grabbing' : 'pointer',
     };
 
@@ -801,18 +810,27 @@ const SortableHeaderCell: React.FC<SortableHeaderCellProps> = React.memo((props)
         return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
     }, []);
 
+    // 选择列 / 无 id：保留 propStyle（含 sticky left），不要被 dnd 样式污染
     if (!id || id === 'GONAVI_SELECTION_COLUMN') {
-        return <ResizableTitle {...restProps} style={{ ...propStyle, ...style }}>{children}</ResizableTitle>;
+        return (
+            <ResizableTitle
+                {...restProps}
+                className={propClassName}
+                style={propStyle}
+            >
+                {children}
+            </ResizableTitle>
+        );
     }
 
     return (
-        <ResizableTitle 
-            ref={setNodeRef} 
-            style={style} 
+        <ResizableTitle
+            ref={setNodeRef}
+            style={style}
             className={`${propClassName || ''} ${isDragging ? 'is-dragging' : ''}`}
             data-cursor-grabbing={isDragging || isPressed}
-            {...restProps} 
-            {...attributes} 
+            {...restProps}
+            {...attributes}
             {...listeners}
             onPointerDown={(e: any) => {
                 setIsPressed(true);
@@ -1297,6 +1315,8 @@ interface DataGridProps {
     columnNames: string[];
     loading: boolean;
     tableName?: string;
+    /** Optional display-state identity for query results without a physical table. */
+    columnPinScope?: string;
     objectType?: 'table' | 'view' | 'materialized-view';
     exportScope?: 'table' | 'queryResult';
     resultSql?: string;

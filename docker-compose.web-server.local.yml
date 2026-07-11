@@ -1,0 +1,7 @@
+services:
+  gonavi-web-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.web-server
+    image: ${GONAVI_WEB_IMAGE_LOCAL:-gonavi-web-server:local}
+    pull_policy: never

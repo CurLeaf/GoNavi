@@ -56,6 +56,7 @@ vi.mock('../store', () => ({
       opacity: 1,
       blur: 0,
       showDataTableVerticalBorders: false,
+      showDataTableRowNumber: true,
       dataTableDensity: 'comfortable',
       uiVersion: mockStoreState.uiVersion,
     },
@@ -72,6 +73,7 @@ vi.mock('../store', () => ({
     addTab: vi.fn(),
     setActiveContext: vi.fn(),
     tableColumnOrders: {},
+    tablePinnedLeftColumns: {},
     enableColumnOrderMemory: false,
     setTableColumnOrder: vi.fn(),
     setEnableColumnOrderMemory: vi.fn(),
@@ -2125,10 +2127,49 @@ describe('DataGrid layout', () => {
       expect(markup).toContain('align-items:center');
       expect(markup).toContain('min-height:var(--gonavi-header-min-height, 40px)');
       expect(markup).toContain('text-align:center');
-      expect(markup).toContain('padding-inline:0');
+      expect(markup).toContain('padding-inline:2');
       expect(markup).toContain('vertical-align:middle');
       expect(markup).toContain('data-grid-row-number="true"');
+      expect(markup).toContain('width:36');
+      // ant Table fixed 列会渲染 fix 相关 class
+      expect(markup.includes('ant-table-cell-fix') || markup.includes('fixed')).toBe(true);
       expect(markup).toContain('51');
+    } finally {
+      setCurrentLanguage(previousLanguage);
+    }
+  });
+
+  it('follows appearance.showDataTableRowNumber when prop is omitted', () => {
+    const previousLanguage = getCurrentLanguage();
+    setCurrentLanguage('zh-CN');
+
+    try {
+      const withDefault = renderToStaticMarkup(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="events"
+          dbName="main"
+          connectionId="conn-1"
+          readOnly
+        />,
+      );
+      expect(withDefault).toContain('data-grid-row-number="true"');
+
+      const hidden = renderToStaticMarkup(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="events"
+          dbName="main"
+          connectionId="conn-1"
+          readOnly
+          showRowNumberColumn={false}
+        />,
+      );
+      expect(hidden).not.toContain('data-grid-row-number="true"');
     } finally {
       setCurrentLanguage(previousLanguage);
     }
@@ -2504,7 +2545,7 @@ describe('DataGrid layout', () => {
     expect(filterHookSource).toContain('export type GridColumnFilterDraft');
     expect(filterHookSource).toContain('const applyColumnFilter = React.useCallback');
     expect(filterHookSource).toContain('onApplyFilter(nextConditions)');
-    expect(source).toContain("const columnHeaderFilterEnabled = exportScope === 'table' && !!onApplyFilter;");
+    expect(source).toContain("const columnHeaderFilterEnabled = !!onApplyFilter || exportScope === 'queryResult';");
     expect(source).toContain("filterOpOptions.filter((option) => option.value !== 'CUSTOM')");
     expect(source).toContain("eventTarget?.closest?.('[data-grid-column-filter-trigger=\"true\"]')");
     expect(source).toContain("eventTarget?.closest?.('[data-grid-column-filter-popover=\"true\"]')");
@@ -2545,6 +2586,9 @@ describe('DataGrid layout', () => {
     expect(source).toContain('const tableRef = useRef<VirtualTableScrollReference | null>(null);');
     expect(source).toContain('resolveDataGridHorizontalWheelDelta({');
     expect(source).toContain('const virtualHorizontalAlignmentRafRef = useRef<number | null>(null);');
+    expect(source).toContain('const pendingExternalScrollLeftRef = useRef<number | null>(null);');
+    expect(source).toContain('const externalScrollSequenceRef = useRef(0);');
+    expect(source).toContain('const externalScrollbarDraggingRef = useRef(false);');
     expect(source).toContain('const scheduleVirtualHorizontalWheel = useCallback');
     expect(source).toContain('pendingTableHorizontalDeltaRef.current += delta;');
     expect(source).toContain('tableHorizontalWheelRafRef.current = requestAnimationFrame');
@@ -2553,7 +2597,18 @@ describe('DataGrid layout', () => {
     expect(source).toContain('applyVirtualHorizontalOffset(tableContainer, nextLeft, { forceInternalScroll: true });');
     expect(source).toContain('}, [horizontalScrollVisible, scheduleVirtualHorizontalAlignment, tableRenderData, tableScrollX, virtualEditingCell]);');
     expect(source).toContain('tableInstance.scrollTo({ left: clampedOffset, top: holderEl.scrollTop });');
-    expect(source).toContain('applyVirtualHorizontalOffset(tableContainer, latestExternalScroll.scrollLeft, { forceInternalScroll: true });');
+    expect(source).toContain('const requestedExternalScrollLeft = pendingExternalScrollLeftRef.current ?? latestExternalScroll.scrollLeft;');
+    expect(source).toContain('applyVirtualHorizontalOffset(tableContainer, requestedExternalScrollLeft, { forceInternalScroll: true });');
+    expect(source).not.toContain('const synced = syncVirtualHorizontalVisualOffset(tableContainer, externalScroll.scrollLeft);');
+    expect(source).toContain('const handleExternalHorizontalScrollPointerDown = useCallback');
+    expect(source).toContain('const handleExternalHorizontalScrollPointerRelease = useCallback');
+    expect(source).toContain('const finishExternalScrollbarDrag = useCallback');
+    expect(source).toContain('const handleExternalHorizontalScrollLostPointerCapture = useCallback');
+    expect(source).toContain('if (externalScrollbarDraggingRef.current) {');
+    expect(source).toContain('onPointerDown={handleExternalHorizontalScrollPointerDown}');
+    expect(source).toContain('onPointerUp={handleExternalHorizontalScrollPointerRelease}');
+    expect(source).toContain('onPointerCancel={handleExternalHorizontalScrollPointerRelease}');
+    expect(source).toContain('onLostPointerCapture={handleExternalHorizontalScrollLostPointerCapture}');
     expect(source).toContain('if (externalSyncRafRef.current !== null)');
     expect(source).toContain('externalSyncRafRef.current = requestAnimationFrame');
     expect(source).toContain('const scheduleSyncExternalScrollFromTargets = useCallback');

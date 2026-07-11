@@ -25,6 +25,7 @@ const translatedCopy: Record<string, string> = {
   'connection_modal.step1.hint.elasticsearch': 'T:elasticsearch',
   'connection_modal.step1.hint.chroma': 'T:chroma',
   'connection_modal.step1.hint.qdrant': 'T:qdrant',
+  'connection_modal.step1.hint.milvus': 'T:milvus',
   'connection_modal.step1.hint.oceanBase': 'T:oceanbase',
   'connection_modal.step1.hint.goldendb': 'T:goldendb',
   'connection_modal.step1.hint.file': 'T:file',
@@ -71,6 +72,7 @@ describe('connectionTypeCatalog', () => {
     expect(keys).toContain('elasticsearch');
     expect(keys).toContain('chroma');
     expect(keys).toContain('qdrant');
+    expect(keys).toContain('milvus');
     expect(keys).toContain('iotdb');
     expect(keys).toContain('kafka');
     expect(keys).toContain('jvm');
@@ -92,6 +94,7 @@ describe('connectionTypeCatalog', () => {
     expect(getConnectionTypeDefaultPort('elasticsearch')).toBe(9200);
     expect(getConnectionTypeDefaultPort('chroma')).toBe(8000);
     expect(getConnectionTypeDefaultPort('qdrant')).toBe(6333);
+    expect(getConnectionTypeDefaultPort('milvus')).toBe(19530);
     expect(getConnectionTypeDefaultPort('iotdb')).toBe(6667);
     expect(getConnectionTypeDefaultPort('kafka')).toBe(9092);
     expect(getConnectionTypeDefaultPort('sqlite')).toBe(0);
@@ -105,6 +108,7 @@ describe('connectionTypeCatalog', () => {
     expect(getConnectionTypeHint('elasticsearch', translate)).toBe('T:elasticsearch');
     expect(getConnectionTypeHint('chroma', translate)).toBe('T:chroma');
     expect(getConnectionTypeHint('qdrant', translate)).toBe('T:qdrant');
+    expect(getConnectionTypeHint('milvus', translate)).toBe('T:milvus');
     expect(getConnectionTypeHint('iotdb')).toContain('Timeseries');
     expect(getConnectionTypeHint('kafka')).toContain('Consumer Group');
     expect(getConnectionTypeHint('oceanbase', translate)).toBe('T:oceanbase');

@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Input, Segmented, Typography, message } from 'antd'
 import { HistoryOutlined, SearchOutlined } from '@ant-design/icons'
 import { useStore } from '../../store'
 import type { ConnectionConfig, TabData } from '../../types'
 import { useI18n } from '../../i18n/provider'
+import { getDataSourceCapabilities } from '../../utils/dataSourceCapabilities'
 import { ExplainReportView } from './ExplainWorkbench'
 import { SlowQueryPanelContent } from './SlowQueryPanel'
 
@@ -34,31 +35,49 @@ export default function SqlAnalysisWorkbench({ tab }: { tab: TabData }) {
     () => (connection ? normalizeConnectionConfig(connection) : null),
     [connection],
   )
+  const supportsDiagnosis = connectionConfig
+    ? getDataSourceCapabilities(connectionConfig).supportsExplainDiagnosis
+    : false
   const dbName = String(tab.dbName || '').trim()
   const [activeView, setActiveView] = useState<SqlAnalysisViewKey>(() => resolveRequestedView(tab))
   const [sqlDraft, setSqlDraft] = useState(() => String(tab.query || ''))
+  const [submittedSql, setSubmittedSql] = useState(() => String(tab.query || ''))
   const [diagnoseRunKey, setDiagnoseRunKey] = useState(0)
 
   useEffect(() => {
     const nextView = resolveRequestedView(tab)
     const nextSql = String(tab.query || '')
     setActiveView(nextView)
-    if (nextSql) {
-      setSqlDraft(nextSql)
-    }
+    setSqlDraft(nextSql)
     if (nextView === 'diagnose' && nextSql.trim()) {
+      setSubmittedSql(nextSql)
       setDiagnoseRunKey((previous) => previous + 1)
+    } else if (nextView === 'slow-query') {
+      setSubmittedSql('')
+      setDiagnoseRunKey(0)
     }
   }, [tab.query, tab.sqlAnalysisRequestKey, tab.sqlAnalysisView])
 
+  useEffect(() => {
+    if (!connectionConfig || supportsDiagnosis) return
+    setActiveView('slow-query')
+    setSubmittedSql('')
+    setDiagnoseRunKey(0)
+  }, [connectionConfig, supportsDiagnosis])
+
   const triggerDiagnose = useCallback(() => {
+    if (!supportsDiagnosis) {
+      message.warning(t('sql_analysis.slow_query.unsupported_diagnosis'))
+      return
+    }
     if (!sqlDraft.trim()) {
       message.warning(t('sql_analysis.workbench.validation.sql_required'))
       return
     }
     setActiveView('diagnose')
+    setSubmittedSql(sqlDraft)
     setDiagnoseRunKey((previous) => previous + 1)
-  }, [sqlDraft, t])
+  }, [sqlDraft, supportsDiagnosis, t])
 
   const handlePickSlowQuery = useCallback((sql: string) => {
     const nextSql = String(sql || '')
@@ -66,9 +85,23 @@ export default function SqlAnalysisWorkbench({ tab }: { tab: TabData }) {
       return
     }
     setSqlDraft(nextSql)
+    setSubmittedSql('')
+    setDiagnoseRunKey(0)
     setActiveView('diagnose')
-    setDiagnoseRunKey((previous) => previous + 1)
   }, [])
+
+  const handleViewChange = useCallback((value: string | number) => {
+    const nextView = value as SqlAnalysisViewKey
+    if (nextView === 'diagnose' && !supportsDiagnosis) {
+      message.warning(t('sql_analysis.slow_query.unsupported_diagnosis'))
+      return
+    }
+    if (nextView === 'diagnose') {
+      setSubmittedSql('')
+      setDiagnoseRunKey(0)
+    }
+    setActiveView(nextView)
+  }, [supportsDiagnosis, t])
 
   const slowQueryLoadKey = useMemo(
     () =>
@@ -107,7 +140,7 @@ export default function SqlAnalysisWorkbench({ tab }: { tab: TabData }) {
         </div>
         <Segmented
           value={activeView}
-          onChange={(value) => setActiveView(value as SqlAnalysisViewKey)}
+          onChange={handleViewChange}
           className="gn-sql-analysis-view-switcher"
           options={[
             {
@@ -121,6 +154,7 @@ export default function SqlAnalysisWorkbench({ tab }: { tab: TabData }) {
             },
             {
               value: 'diagnose',
+              disabled: !supportsDiagnosis,
               label: (
                 <span className="gn-sql-analysis-view-switcher-label">
                   <SearchOutlined />
@@ -148,7 +182,17 @@ export default function SqlAnalysisWorkbench({ tab }: { tab: TabData }) {
               <Input.TextArea
                 value={sqlDraft}
                 onChange={(event) => setSqlDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                    event.preventDefault()
+                    triggerDiagnose()
+                  }
+                }}
                 placeholder={t('sql_analysis.workbench.editor.placeholder')}
+                aria-label={t('sql_analysis.workbench.editor.aria_label')}
+                name="sql-analysis-query"
+                autoComplete="off"
+                spellCheck={false}
                 autoSize={{ minRows: 5, maxRows: 10 }}
               />
               <div className="gn-sql-analysis-editor-actions">
@@ -162,7 +206,7 @@ export default function SqlAnalysisWorkbench({ tab }: { tab: TabData }) {
               <ExplainReportView
                 config={connectionConfig}
                 dbName={dbName}
-                sql={sqlDraft}
+                sql={submittedSql}
                 runKey={diagnoseRunKey > 0 ? diagnoseRunKey : null}
               />
             </div>

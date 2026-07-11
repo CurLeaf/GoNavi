@@ -54,6 +54,10 @@ const remainingConnectionModalSliceExpectations: LocalizedExpectation[] = [
     catalogKey: "connection_modal.step1.hint.mongodb",
   },
   {
+    key: "connection.modal.step1.hint.milvus",
+    catalogKey: "connection_modal.step1.hint.milvus",
+  },
+  {
     key: "connection.modal.step1.hint.oceanBase",
     catalogKey: "connection_modal.step1.hint.oceanBase",
   },

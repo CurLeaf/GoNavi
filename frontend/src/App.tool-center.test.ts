@@ -68,7 +68,7 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain("title: t('app.tools.group.config.title')");
     expect(appSource).toContain("title: t('app.tools.group.workflow.title')");
     expect(appSource).toContain("title: t('app.tools.group.workspace.title')");
-    expect(appSource).toContain("toolCenterGroups.find((group) => group.key === activeToolCenterGroupKey)");
+    expect(appSource).toContain("filteredToolCenterGroups.find((group) => group.key === activeToolCenterGroupKey)");
     expect(appUtilityStylesSource).toContain("const toolCenterModalSplitStyle = useMemo<React.CSSProperties>(() => ({");
     expect(appUtilityStylesSource).toContain("gridTemplateColumns: '232px minmax(0, 1fr)'");
     expect(appUtilityStylesSource).toContain("const toolCenterNavPanelStyle = useMemo<React.CSSProperties>(() => ({");
@@ -109,6 +109,15 @@ describe('tool center menu entries', () => {
     expect(appUtilityStylesSource).toContain("overflowY: 'auto'");
     expect(appSource).toContain("borderTop: index === 0 ? `1px solid ${overlayTheme.divider}` : 'none'");
     expect(appSource).toContain("borderBottom: `1px solid ${overlayTheme.divider}`");
+  });
+
+  it('keeps browser-compatible connection transfer and mounted data-root entries available in the web runtime', () => {
+    expect(appSource).toContain("accept=\".gonavi-conn,.json,.xml,.ncx\"");
+    expect(appSource).toContain('ExportConnectionsPayload');
+    expect(appSource).toContain('downloadBrowserTextFile');
+    expect(appSource).toContain("__GONAVI_WEB_RUNTIME__?.buildType === 'web'");
+    expect(appSource).toContain('if (isWebRuntime) {\n                  return (');
+    expect(appSource).toContain('items: group.items,');
   });
 
   it('lets the tool center detail header own embedded tool titles', () => {
@@ -252,13 +261,17 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain("darkMode ? 'rgba(246, 196, 83, 0.55)' : 'rgba(24, 144, 255, 0.5)'");
   });
 
-  it('keeps tool center and settings v2 accents on the green palette instead of legacy yellow or blue tokens', () => {
-    expect(appSource).toContain("const v2AntPrimaryColor = darkMode ? '#22c55e' : '#16a34a';");
+  it('keeps the green v2 accent as fallback while allowing custom CSS tokens to override it', () => {
+    expect(appSource).toContain("const v2AntPrimaryColor = customThemeAntTokens.primary ?? (darkMode ? '#22c55e' : '#16a34a');");
+    expect(appSource).toContain("const v2AntPrimaryContrastColor = customThemeAntTokens.primaryContrast ?? '#ffffff';");
+    expect(appSource).toContain('extractCustomThemeAntTokens(activeCustomTheme.css)');
+    expect(appSource).toContain('resolveAvailableCustomTheme(customThemes, activeCustomThemeId)');
+    expect(appSource).toContain('colorTextLightSolid: isV2Ui ? v2AntPrimaryContrastColor');
     expect(appSource).toContain("colorPrimary: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#f6c453' : '#1677ff')");
-    expect(appSource).toContain("background: active\n                                  ? overlayTheme.selectedBg");
-    expect(appSource).toContain("background: active\n                                    ? overlayTheme.selectedText");
-    expect(appSource).toContain("background: active\n                                        ? overlayTheme.iconBg");
-    expect(appSource).toContain("color: active\n                                        ? overlayTheme.iconColor");
+    expect(appSource).toMatch(/background:\s*active\s*\?\s*overlayTheme\.selectedBg/);
+    expect(appSource).toMatch(/background:\s*active\s*\?\s*overlayTheme\.selectedText/);
+    expect(appSource).toMatch(/background:\s*active\s*\?\s*overlayTheme\.iconBg/);
+    expect(appSource).toMatch(/color:\s*active\s*\?\s*overlayTheme\.iconColor/);
     expect(appSource).toContain("background: isV2Ui ? v2AntPrimaryBgColor : (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.10)')");
     expect(appSource).toContain("color: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff')");
   });
@@ -304,7 +317,7 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('{isSettingsModalOpen && (');
     expect(appSource).toContain('{isThemeModalOpen && (');
     expect(appSource).toContain('{isShortcutModalOpen && (');
-    expect(appSource).toContain('{isAISettingsOpen && (');
+    expect(appSource).not.toContain('{isAISettingsOpen && (');
     expect(appSource).toContain('{isDriverModalOpen && (');
     expect(appSource).toContain('{isSyncModalOpen && (');
   });
@@ -320,8 +333,11 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('setIsModalOpen(true);');
   });
 
-  it('loads editable AI provider details before opening the edit modal so stored api keys can be shown', () => {
-    expect(appSource).toContain('<AISettingsModal');
+  it('loads editable AI provider details inside settings-center AI pane content', () => {
+    // 聊天/入口打开 AI 配置走设置中心 AISettingsContent，不再挂独立 AISettingsModal
+    expect(appSource).toContain('<AISettingsContent');
+    expect(appSource).toContain("activeSettingsCenterPane.key === 'ai'");
+    expect(appSource).not.toContain('<AISettingsModal');
     const modalSource = readFileSync(new URL('./components/AISettingsModal.tsx', import.meta.url), 'utf8');
     expect(modalSource).toContain("typeof Service?.AIGetEditableProvider === 'function'");
     expect(modalSource).toContain('await Service.AIGetEditableProvider(p.id)');
@@ -356,7 +372,7 @@ describe('tool center menu entries', () => {
       ['newConnection', 'handleCreateConnection();'],
       ['toggleAIPanel', 'toggleAIPanel();'],
       ['toggleLogPanel', 'handleToggleLogPanel();'],
-      ['toggleTheme', 'setThemePreference('],
+      ['toggleTheme', 'selectPresetTheme('],
       ['openShortcutManager', 'setIsShortcutModalOpen(true);'],
       ['toggleMacFullscreen', 'handleTitleBarWindowToggle({ allowMacNativeFullscreen: true });'],
       ['resetWindowZoom', 'handleManualResetWindowZoom();'],
@@ -383,6 +399,26 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('该异常不一定表现为 viewport ratio drift');
   });
 
+  it('settles Windows cold-start window layout without requiring a taskbar restore', () => {
+    expect(appSource).toContain("const applyStartupWindowChrome = (attempt: number, mode: 'maximised' | 'fullscreen') => {");
+    expect(appSource).toContain('markStartupWindowRestorePending(3200)');
+    expect(appSource).toContain("applyStartupWindowChrome(1, 'maximised');");
+    expect(appSource).toContain('const delayMs = attempt <= 1 ? 0 : applyRetryDelayMs');
+    expect(appSource).toContain('markAppliedMaximisedOrFullscreen');
+    expect(appSource).toContain('shouldPreferWindowsStartupMaximise(bounds, viewport)');
+    expect(appSource).toContain('applyWindowsWorkAreaFillFallback');
+    expect(appSource).toContain('resolveWorkAreaFillWindowBounds(readCurrentVisibleViewport())');
+    expect(appSource).toContain('restoreNormalWindowBounds');
+    expect(appSource).toContain("void fixWindowScaleIfNeeded('startup');");
+    expect(appSource).toContain('const startupLayoutFixTimers = [220, 1000, 1900].map((delayMs) => (');
+    expect(appSource).toContain('if (isStartupWindowRestorePending())');
+    expect(appSource).toContain('clearStartupWindowRestorePending();');
+    // 启动恢复顺序：开关最大化 → 记忆最大化 → 记忆尺寸
+    expect(appSource).toContain('// 1) 「启动时最大化」开关优先（Windows 按 Maximize 处理）');
+    expect(appSource).toContain('// 2) 记忆用户上次窗口态：最大化/全屏');
+    expect(appSource).toContain('// 3) 普通窗口：恢复用户调整过的尺寸和位置');
+  });
+
   it('captures window state on startup and lifecycle events instead of waiting only for the polling interval', () => {
     expect(appSource).toContain('const scheduleWindowStateSave = (delayMs = 120) => {');
     expect(appSource).toContain('const scheduleWindowBoundsRepair = (delayMs = 80) => {');
@@ -400,7 +436,8 @@ describe('tool center menu entries', () => {
   });
 
   it('clamps normal runtime window bounds back into the visible screen after display changes', () => {
-    expect(appSource).toContain('const readCurrentVisibleViewport = () => ({');
+    expect(appSource).toContain('const readCurrentVisibleViewport = () => resolveWailsWindowVisibleViewport(');
+    expect(appSource).toContain('{ useMonitorLocalOrigin: isMacLikePlatform() }');
     expect(appSource).toContain('const repairRuntimeWindowBounds = async () => {');
     expect(appSource).toContain('const nextBounds = resolveVisibleStartupWindowBounds(currentBounds, readCurrentVisibleViewport());');
     expect(appSource).toContain("void emitWindowDiagnostic('adjust:runtime-window-bounds'");

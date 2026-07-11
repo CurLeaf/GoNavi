@@ -250,7 +250,7 @@ func New(ctx context.Context, assetFS fs.FS, options Options) (*Server, error) {
 	appcore.InitializeLifecycle(app, lifecycleCtx)
 	ai := aiservice.NewService()
 	aiservice.InitializeLifecycle(ai, lifecycleCtx)
-	auth, err := newWebAuthManager("")
+	auth, err := newWebAuthManagerFromEnvironment("")
 	if err != nil {
 		return nil, fmt.Errorf("initialize web auth failed: %w", err)
 	}

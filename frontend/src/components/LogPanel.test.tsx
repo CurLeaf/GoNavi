@@ -145,6 +145,28 @@ describe("LogPanel i18n", () => {
     expect(renderedText).toContain("OK");
   });
 
+  it("keeps detailed transaction statements on separate readable lines", () => {
+    storeState.sqlLogs = [
+      {
+        id: "transaction-log-1",
+        timestamp: Date.UTC(2026, 6, 10, 9, 43, 45),
+        sql: "START TRANSACTION;\nUPDATE `users` SET `name` = 'new-name' WHERE `id` = 8;\nCOMMIT;",
+        status: "success",
+        duration: 295,
+      },
+    ];
+
+    const renderer = renderLogPanel();
+    const sqlNodes = renderer.root.findAll((node) => (
+      node.type === "div"
+      && node.props?.style?.fontFamily === "var(--gn-font-mono)"
+      && node.props?.style?.whiteSpace === "pre-wrap"
+    ));
+
+    expect(sqlNodes).toHaveLength(1);
+    expect(textContent(sqlNodes[0])).toContain("UPDATE `users` SET `name` = 'new-name' WHERE `id` = 8;");
+  });
+
   it("renders the current execution error summary inside the embedded log tab", () => {
     storeState.sqlLogs = [
       {

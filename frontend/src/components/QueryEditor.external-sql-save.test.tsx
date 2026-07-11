@@ -12,6 +12,7 @@ import type { SavedQuery, TabData } from '../types';
 import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
 import { setGlobalImeCompositionActive } from '../utils/shortcuts';
 import { clearQueryTabDraft, clearSQLFileTabDraft, getQueryTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
+import { clearQueryEditorInlineRuntimeReadinessCache } from './queryEditor/QueryEditorAiAssist';
 import QueryEditor, {
   collectQueryEditorObjectDecorationCandidates,
   resolveQueryEditorNavigationDecorations,
@@ -369,7 +370,7 @@ vi.mock('@monaco-editor/react', () => ({
       const mountEditor = () => onMount?.(editorState.editor, {
         editor: { setTheme: vi.fn() },
         KeyMod: { CtrlCmd: 2048, WinCtrl: 256, Alt: 512, Shift: 1024 },
-        KeyCode: { KeyD: 68, KeyE: 69, KeyF: 70, KeyM: 77, KeyQ: 81, KeyS: 83, RightArrow: 39 },
+        KeyCode: { Enter: 13, KeyD: 68, KeyE: 69, KeyF: 70, KeyM: 77, KeyQ: 81, KeyS: 83, RightArrow: 39 },
         languages: {
           CompletionItemKind: { Keyword: 1, Function: 2, Field: 3 },
           CompletionItemInsertTextRule: { InsertAsSnippet: 1 },
@@ -429,6 +430,14 @@ vi.mock('./DataGrid', () => ({
     );
   },
   GONAVI_ROW_KEY: '__gonavi_row_key__',
+}));
+
+vi.mock('./resultDiff/ResultDiffWizard', () => ({
+  default: () => null,
+}));
+
+vi.mock('./resultDiff/ViewDataVerifyWizard', () => ({
+  default: () => null,
 }));
 
 vi.mock('./LogPanel', () => ({
@@ -703,6 +712,7 @@ const createQueryEditorSplitNodeMock = (element: any) => {
 
 describe('QueryEditor external SQL save', () => {
   beforeEach(() => {
+    clearQueryEditorInlineRuntimeReadinessCache();
     const completionState = (globalThis as any).__gonaviSqlCompletionState;
     if (completionState) {
       completionState.registered = false;
@@ -1898,7 +1908,7 @@ describe('QueryEditor external SQL save', () => {
         editorState.modelContentListeners.forEach((listener) => listener({
           changes: [{ text: 'T' }],
         }));
-        vi.advanceTimersByTime(120);
+        vi.advanceTimersByTime(220);
         for (let i = 0; i < 8; i += 1) {
           await Promise.resolve();
         }
@@ -3012,6 +3022,28 @@ describe('QueryEditor external SQL save', () => {
       dbName: 'main',
       tableName: 'dbo.orders',
       schemaName: 'dbo',
+    });
+    // MySQL 跨库手写 db.table：库不在可见列表时，只要元数据已加载也应可跳转
+    expect(resolveQueryEditorNavigationTarget(
+      'select * from front_end_sys_new.fs_mkefu_regist_record',
+      'select * from front_end_sys_new.fs_mkefu_regist_record'.length,
+      'mkefu_test_new',
+      ['mkefu_test_new'],
+      [
+        { dbName: 'mkefu_test_new', tableName: 'uk_back_corp' },
+        { dbName: 'front_end_sys_new', tableName: 'fs_mkefu_regist_record' },
+      ],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+    )).toEqual({
+      type: 'table',
+      dbName: 'front_end_sys_new',
+      tableName: 'fs_mkefu_regist_record',
+      schemaName: undefined,
     });
     expect(resolveQueryEditorNavigationTarget('use analytics', 6, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines, sequences, packages)).toEqual({
       type: 'database',
@@ -6668,6 +6700,122 @@ describe('QueryEditor external SQL save', () => {
     expect(editorState.editor.setValue).toHaveBeenCalledWith('SELECT 2;');
   });
 
+  it('waits for the native IME commit before applying the composition fallback', async () => {
+    vi.useFakeTimers();
+    const domListeners: Record<string, ((event?: any) => void)[]> = {};
+    editorState.domNode.addEventListener.mockImplementation((type: string, listener: (event?: any) => void) => {
+      domListeners[type] ||= [];
+      domListeners[type].push(listener);
+    });
+    editorState.editor.getValue.mockReset();
+    editorState.editor.getValue.mockImplementation(() => editorState.value);
+
+    try {
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: "select '';" })} />);
+      });
+
+      editorState.position = { lineNumber: 1, column: 9 };
+      editorState.selection = null;
+      editorState.editor.executeEdits.mockClear();
+
+      await act(async () => {
+        domListeners.compositionstart?.forEach((listener) => listener({ data: '' }));
+        domListeners.compositionend?.forEach((listener) => listener({ data: '我' }));
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(79);
+      });
+
+      expect(editorState.editor.executeEdits).not.toHaveBeenCalledWith(
+        'gonavi-ime-composition-fallback',
+        expect.anything(),
+      );
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+        'gonavi-ime-composition-fallback',
+        expect.anything(),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('skips inline AI metadata warmup when no inline model is configured', async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: 'select * from users' })} />);
+      });
+
+      backendApp.DBGetTables.mockClear();
+      editorState.position = { lineNumber: 1, column: 'select * from users'.length + 1 };
+      await act(async () => {
+        editorState.modelContentListeners.forEach((listener) => listener({
+          changes: [{ text: 's' }],
+        }));
+        vi.advanceTimersByTime(220);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(backendApp.DBGetTables).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps deterministic inline SQL ghosts available before AI readiness succeeds', async () => {
+    vi.useFakeTimers();
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    try {
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: 'SELEC', dbName: 'main' })} />);
+      });
+
+      editorState.value = 'SELECT';
+      editorState.position = { lineNumber: 1, column: 'SELECT'.length + 1 };
+      editorState.domNode.appendChild.mockClear();
+      backendApp.DBGetTables.mockClear();
+      await act(async () => {
+        editorState.latestOnChange?.('SELECT');
+        editorState.modelContentListeners.forEach((listener) => listener({
+          changes: [{ text: 'T' }],
+        }));
+        vi.advanceTimersByTime(220);
+        await Promise.resolve();
+      });
+
+      const ghostOverlay = editorState.domNode.appendChild.mock.calls[
+        editorState.domNode.appendChild.mock.calls.length - 1
+      ]?.[0];
+      expect(ghostOverlay?.textContent).toBe(' * FROM');
+      expect(backendApp.DBGetTables).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('recovers committed IME text when Monaco composition end leaves the model unchanged', async () => {
     vi.useFakeTimers();
     const domListeners: Record<string, ((event?: any) => void)[]> = {};
@@ -8143,7 +8291,8 @@ describe('QueryEditor external SQL save', () => {
       readOnly: false,
     });
     expect(dataGridState.latestProps?.readOnly).toBe(false);
-    expect(dataGridState.latestProps?.showRowNumberColumn).toBe(true);
+    // 行号改由 appearance.showDataTableRowNumber 控制，不再按数据源硬编码写入结果集
+    expect(dataGridState.latestProps?.showRowNumberColumn).toBeUndefined();
     expect(storeState.addSqlLog).toHaveBeenCalledWith(expect.objectContaining({
       sql: 'SELECT * FROM EDC_LOG',
       status: 'success',
@@ -10098,12 +10247,17 @@ describe('QueryEditor external SQL save', () => {
     expect(appCss).toContain('justify-content: flex-start;');
     expect(appCss).toContain('gap: 6px;');
     expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .left {');
-    expect(appCss).toContain('flex: 0 1 auto;');
-    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .right {');
+    // 主名称优先完整显示：左侧可增长，不先被右侧元数据挤成省略号
     expect(appCss).toContain('flex: 1 1 auto;');
+    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row > .contents > .main > .right {');
+    // 元数据让位：优先压缩/省略右侧表名类型，而不是截断字段名
+    expect(appCss).toContain('flex: 0 1 auto;');
+    expect(appCss).toContain('flex-shrink: 4;');
+    expect(appCss).toContain('max-width: 48%;');
     expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget .monaco-list .monaco-list-row.string-label > .contents > .main > .right > .details-label {');
     expect(appCss).toContain('display: inline !important;');
     expect(appCss).toContain('margin-left: 0;');
+    expect(appCss).toContain('text-overflow: ellipsis;');
     expect(appCss).not.toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget {');
     expect(appCss).not.toContain('width: 680px;');
     expect(appCss).not.toContain('min-width: 560px;');
@@ -10575,6 +10729,74 @@ describe('QueryEditor external SQL save', () => {
     expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(expect.anything(), 'main', expect.stringContaining('select 2 as selected'), 'query-1');
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 1');
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 3');
+  });
+
+  it('keeps a reverse Shift+Home selection and caret when the Monaco run action executes it', async () => {
+    storeState.shortcutOptions.runQuery.mac = { enabled: true, combo: 'Meta+Enter' };
+    storeState.shortcutOptions.runQuery.windows = { enabled: true, combo: 'Ctrl+Enter' };
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn((event: Event) => {
+        windowListeners[event.type]?.forEach((listener) => listener(event));
+        return true;
+      }),
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['selected'], rows: [{ selected: 2 }] }],
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        dbName: 'main',
+        query: 'select 1;\nselect 2 as selected;\nselect 3;',
+      })} />);
+    });
+
+    const reverseSelection = {
+      selectionStartLineNumber: 2,
+      selectionStartColumn: 'select 2 as selected'.length + 1,
+      positionLineNumber: 2,
+      positionColumn: 1,
+      startLineNumber: 2,
+      startColumn: 1,
+      endLineNumber: 2,
+      endColumn: 'select 2 as selected'.length + 1,
+    };
+    editorState.position = { lineNumber: 2, column: 1 };
+    editorState.selection = reverseSelection;
+    editorState.editor.setPosition.mockClear();
+    editorState.editor.setSelection.mockClear();
+
+    const runAction = findEditorAction('gonavi.runQuery');
+    expect(runAction).toBeTruthy();
+    await act(async () => {
+      runAction.run();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(
+      expect.anything(),
+      'main',
+      expect.stringContaining('select 2 as selected'),
+      'query-1',
+    );
+    expect(editorState.position).toEqual({ lineNumber: 2, column: 1 });
+    expect(editorState.selection).toEqual(reverseSelection);
+    expect(editorState.editor.setPosition).not.toHaveBeenCalled();
+    expect(editorState.editor.setSelection).not.toHaveBeenCalled();
   });
 
   it('allows editable table columns while leaving expression columns out of commits', async () => {

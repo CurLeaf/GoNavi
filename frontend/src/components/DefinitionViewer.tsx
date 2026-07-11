@@ -996,6 +996,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         const query = buildEditableDefinitionSql(tab, latestDefinition, normalizedObjectName, editableDefinitionCopy);
         setActiveContext({ connectionId: tab.connectionId, dbName });
         clearQueryTabDraft(tab.id);
+        const isViewObject = tab.type === 'view-def' || Boolean(tab.viewName);
         addTab({
             id: tab.id,
             title: editTabTitle,
@@ -1005,8 +1006,9 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             query,
             queryMode: 'object-edit',
             returnToTabId: undefined,
-            viewName: undefined,
-            viewKind: undefined,
+            // 保留视图名，供「验证数据变化」解析；其它对象编辑仍清空无关字段
+            viewName: isViewObject ? (tab.viewName || normalizedObjectName) : undefined,
+            viewKind: isViewObject ? tab.viewKind : undefined,
             eventName: undefined,
             routineName: undefined,
             routineType: undefined,
@@ -1014,8 +1016,10 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             packageName: undefined,
             triggerName: undefined,
             triggerTableName: undefined,
-            schemaName: undefined,
-            objectType: undefined,
+            schemaName: isViewObject ? tab.schemaName : undefined,
+            objectType: isViewObject
+                ? (tab.viewKind === 'materialized' ? 'materialized-view' : 'view')
+                : undefined,
             tableName: undefined,
             sidebarLocateKey: undefined,
         });

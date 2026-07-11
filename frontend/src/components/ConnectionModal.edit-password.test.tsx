@@ -62,7 +62,7 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain('const PRIMARY_USERNAME_OPTIONAL_TYPES = new Set([');
     expect(source).toContain('"mqtt",');
     expect(source).toContain(
-      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "rocketmq" || type === "mqtt" || type === "kafka" || type === "rabbitmq") ? "" : "root";',
+      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "milvus" || type === "rocketmq" || type === "mqtt" || type === "kafka" || type === "rabbitmq") ? "" : "root";',
     );
     expect(source).toContain('PRIMARY_USERNAME_OPTIONAL_TYPES.has(dbType)');
     expect(source).toContain('connection.modal.field.displayDatabases.label');
@@ -103,6 +103,21 @@ describe('ConnectionModal data source registry', () => {
     );
     expect(source).toContain('return "http://127.0.0.1:6333";');
     expect(source).toContain('return "apiKey=...";');
+  });
+
+  it('exposes Milvus in the create-connection picker with vector defaults', () => {
+    expect(source).toContain("case 'milvus':");
+    expect(source).toContain('return 19530;');
+    expect(source).toContain('milvus: ["http", "https", "milvus"]');
+    expect(source).toContain("key: 'milvus'");
+    expect(source).toContain("name: 'Milvus'");
+    expect(source).toContain('type === "milvus"');
+    expect(source).toContain("'connection_modal.step1.hint.milvus'");
+    expect(source).toContain(
+      "'Collection browsing, vector search, and scalar filtering'",
+    );
+    expect(source).toContain('return "http://127.0.0.1:19530/default";');
+    expect(source).toContain('return "token=...";');
   });
 
   it('exposes Apache IoTDB in the create-connection picker with timeseries defaults', () => {

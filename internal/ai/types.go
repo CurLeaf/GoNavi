@@ -48,9 +48,10 @@ type ChatRequest struct {
 
 // ChatSendOptions 表示一次对话调用的临时覆盖选项，不写回 Provider 配置。
 type ChatSendOptions struct {
-	Model       string  `json:"model,omitempty"`
-	Temperature float64 `json:"temperature,omitempty"`
-	MaxTokens   int     `json:"maxTokens,omitempty"`
+	Model             string  `json:"model,omitempty"`
+	Temperature       float64 `json:"temperature,omitempty"`
+	MaxTokens         int     `json:"maxTokens,omitempty"`
+	ThinkingIntensity string  `json:"thinkingIntensity,omitempty"` // 会话/面板级思考强度，仅本次请求生效
 }
 
 // ChatResponse AI 对话响应
@@ -78,6 +79,22 @@ type StreamChunk struct {
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
+// ThinkingIntensity 控制模型思考/推理强度。
+// 字面量按服务商差异保留，例如：
+//   - OpenAI: none | minimal | low | medium | high | xhigh
+//   - Anthropic: off | low | medium | high | xhigh | max
+//   - DeepSeek: off | low | medium | high
+//   - Gemini: off | minimal | low | medium | high
+// 不同供应商再映射到 reasoning_effort / thinking / output_config.effort / thinking_level 等字段。
+type ThinkingIntensity string
+
+const (
+	ThinkingIntensityOff    ThinkingIntensity = "off"
+	ThinkingIntensityLow    ThinkingIntensity = "low"
+	ThinkingIntensityMedium ThinkingIntensity = "medium"
+	ThinkingIntensityHigh   ThinkingIntensity = "high"
+)
+
 // ProviderConfig AI Provider 配置
 type ProviderConfig struct {
 	ID                    string            `json:"id"`
@@ -94,6 +111,8 @@ type ProviderConfig struct {
 	Headers               map[string]string `json:"headers,omitempty"`
 	MaxTokens             int               `json:"maxTokens"`
 	Temperature           float64           `json:"temperature"`
+	// ThinkingIntensity 可选：off/low/medium/high。空值表示沿用供应商默认（多数等价 medium）。
+	ThinkingIntensity string `json:"thinkingIntensity,omitempty"`
 }
 
 // UserPromptSettings 表示用户级自定义提示词配置

@@ -21,6 +21,7 @@ describe('connectionTypeCapabilities', () => {
     expect(singleHostUriSchemesByType.elasticsearch).toEqual(['http', 'https']);
     expect(singleHostUriSchemesByType.chroma).toEqual(['http', 'https', 'chroma']);
     expect(singleHostUriSchemesByType.qdrant).toEqual(['http', 'https', 'qdrant']);
+    expect(singleHostUriSchemesByType.milvus).toEqual(['http', 'https', 'milvus']);
     expect(singleHostUriSchemesByType.iotdb).toEqual(['iotdb']);
     expect(singleHostUriSchemesByType.redis).toEqual(['redis']);
   });
@@ -34,6 +35,7 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsSSLForType('greatdb')).toBe(true);
     expect(supportsSSLForType('chroma')).toBe(true);
     expect(supportsSSLForType('qdrant')).toBe(true);
+    expect(supportsSSLForType('milvus')).toBe(true);
     expect(supportsSSLForType('kafka')).toBe(true);
     expect(supportsSSLForType('tdengine')).toBe(true);
     expect(supportsSSLForType('iotdb')).toBe(false);
@@ -56,6 +58,8 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsSSLClientCertificateForType('chroma')).toBe(false);
     expect(supportsSSLCAPathForType('qdrant')).toBe(true);
     expect(supportsSSLClientCertificateForType('qdrant')).toBe(false);
+    expect(supportsSSLCAPathForType('milvus')).toBe(true);
+    expect(supportsSSLClientCertificateForType('milvus')).toBe(false);
     expect(supportsSSLCAPathForType('kafka')).toBe(true);
     expect(supportsSSLClientCertificateForType('kafka')).toBe(true);
   });
@@ -93,6 +97,7 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsConnectionParamsForType('elasticsearch')).toBe(true);
     expect(supportsConnectionParamsForType('chroma')).toBe(true);
     expect(supportsConnectionParamsForType('qdrant')).toBe(true);
+    expect(supportsConnectionParamsForType('milvus')).toBe(true);
     expect(supportsConnectionParamsForType('kafka')).toBe(true);
     expect(supportsConnectionParamsForType('redis')).toBe(false);
     expect(supportsConnectionParamsForType('sqlite')).toBe(false);

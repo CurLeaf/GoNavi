@@ -26,6 +26,10 @@ export function AIChatStream(arg1, arg2, arg3) {
   return window['go']['aiservice']['Service']['AIChatStream'](arg1, arg2, arg3);
 }
 
+export function AIChatStreamWithOptions(arg1, arg2, arg3, arg4) {
+  return window['go']['aiservice']['Service']['AIChatStreamWithOptions'](arg1, arg2, arg3, arg4);
+}
+
 export function AICheckSQL(arg1) {
   return window['go']['aiservice']['Service']['AICheckSQL'](arg1);
 }

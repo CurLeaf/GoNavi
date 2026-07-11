@@ -15,7 +15,9 @@ import AIChatComposerStatus from './AIChatComposerStatus';
 import AIChatComposerActions from './AIChatComposerActions';
 import AIChatAttachmentStrip from './AIChatAttachmentStrip';
 import AIChatContextPreview from './AIChatContextPreview';
+import { noAutoCapInputProps } from '../../utils/inputAutoCap';
 import AIChatProviderModelSelect from './AIChatProviderModelSelect';
+import AIChatThinkingIntensitySelect from './AIChatThinkingIntensitySelect';
 import { buildAIChatReadinessSnapshot } from './aiChatReadiness';
 import { useAIChatContextBinding } from './useAIChatContextBinding';
 import { useAIChatDraftAttachments } from './useAIChatDraftAttachments';
@@ -42,6 +44,8 @@ interface AIChatInputProps {
     onComposerAction?: (actionKey: AIComposerNoticeAction) => void;
     onModelChange: (val: string) => void;
     onFetchModels: () => void;
+    thinkingIntensity: string;
+    onThinkingIntensityChange: (val: string) => void;
     textareaRef: React.RefObject<HTMLTextAreaElement>;
     darkMode: boolean;
     textColor: string;
@@ -56,7 +60,8 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
     input, setInput, draftAttachments, setDraftAttachments, sending, onSend, onStop, handleKeyDown,
     activeConnName, activeContext, activeProvider, dynamicModels, loadingModels,
     sendShortcutBinding, shortcutPlatform = 'windows', composerNotice, onComposerAction,
-    onModelChange, onFetchModels, textareaRef, darkMode, textColor, mutedColor, overlayTheme,
+    onModelChange, onFetchModels, thinkingIntensity, onThinkingIntensityChange,
+    textareaRef, darkMode, textColor, mutedColor, overlayTheme,
     contextUsageChars, maxContextChars, isV2Ui = false
 }) => {
     const i18n = useOptionalI18n();
@@ -248,7 +253,9 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                             onKeyDown={handleKeyDown as any}
                             placeholder={t('ai_chat.input.placeholder', { shortcut: sendShortcutLabel })}
                             variant="borderless"
-                            autoSize={{ minRows: 1, maxRows: 8 }}
+                            autoSize={{ minRows: 3, maxRows: 8 }}
+                            autoComplete="off"
+                            {...noAutoCapInputProps}
                             style={{ color: textColor, width: '100%', padding: 0, resize: 'none' }}
                         />
                     </div>
@@ -260,10 +267,11 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                                         display: 'flex', alignItems: 'center', gap: 4,
                                         fontSize: 11, padding: '2px 8px', borderRadius: 12,
                                         background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
-                                        color: overlayTheme.mutedText, cursor: 'default'
+                                        color: overlayTheme.mutedText, cursor: 'default',
+                                        minWidth: 96, maxWidth: 200, overflow: 'hidden', flex: '1 1 auto',
                                     }}>
-                                        <DatabaseOutlined style={{ fontSize: 10 }} />
-                                        <span style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        <DatabaseOutlined style={{ fontSize: 10, flex: '0 0 auto' }} />
+                                        <span style={{ minWidth: 0, flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                             {activeConnName}{activeContext?.dbName ? ` / ${activeContext.dbName}` : ''}
                                         </span>
                                     </div>
@@ -277,6 +285,13 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                                 variant="legacy"
                                 onModelChange={onModelChange}
                                 onFetchModels={onFetchModels}
+                            />
+
+                            <AIChatThinkingIntensitySelect
+                                activeProvider={activeProvider}
+                                value={thinkingIntensity}
+                                variant="legacy"
+                                onChange={onThinkingIntensityChange}
                             />
 
                             {contextUsageChars !== undefined && maxContextChars !== undefined && (
@@ -401,7 +416,9 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                             onKeyDown={handleKeyDown as any}
                             placeholder={t('ai_chat.input.placeholder_compact', { shortcut: sendShortcutLabel })}
                             variant="borderless"
-                            autoSize={{ minRows: 1, maxRows: 8 }}
+                            autoSize={{ minRows: 3, maxRows: 8 }}
+                            autoComplete="off"
+                            {...noAutoCapInputProps}
                             style={{ color: textColor, width: '100%', padding: 0, resize: 'none' }}
                         />
                         <AIChatComposerActions
@@ -423,16 +440,18 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                     </div>
                 </div>
                 <div className="gn-v2-ai-model-bar">
+                    {/* 单行紧凑：连接 | 模型 | 思考 | 用量；模型固定宽，不撑满 */}
                     {activeConnName && (
                         <Tooltip title={connectionTooltipLabel}>
                             <div className="gn-v2-ai-context-chip">
                                 <span className="gn-v2-ai-context-live-dot" />
                                 <DatabaseOutlined />
-                                <span>{activeConnName}{activeContext?.dbName ? ` / ${activeContext.dbName}` : ''}</span>
+                                <span className="gn-v2-ai-context-chip-text">
+                                    {activeConnName}{activeContext?.dbName ? ` / ${activeContext.dbName}` : ''}
+                                </span>
                             </div>
                         </Tooltip>
                     )}
-
                     <AIChatProviderModelSelect
                         activeProvider={activeProvider}
                         dynamicModels={dynamicModels}
@@ -441,16 +460,21 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                         onModelChange={onModelChange}
                         onFetchModels={onFetchModels}
                     />
-
-                    <div className="gn-v2-ai-model-spacer" />
-
+                    <AIChatThinkingIntensitySelect
+                        activeProvider={activeProvider}
+                        value={thinkingIntensity}
+                        variant="v2"
+                        onChange={onThinkingIntensityChange}
+                    />
                     {contextUsageChars !== undefined && maxContextChars !== undefined && (
                         <Tooltip title={memoryTooltipLabel}>
                             <div className={`gn-v2-ai-token-meter${contextUsageChars > maxContextChars * 0.8 ? ' is-warn' : ''}`}>
                                 <span className="gn-v2-ai-token-bar" aria-hidden="true">
                                     <span style={{ width: `${Math.min(100, (contextUsageChars / Math.max(1, maxContextChars)) * 100)}%` }} />
                                 </span>
-                                <span>{(contextUsageChars / 1000).toFixed(1)}k/{(maxContextChars / 1000).toFixed(0)}k</span>
+                                <span className="gn-v2-ai-token-meter-text">
+                                    {(contextUsageChars / 1000).toFixed(1)}k/{(maxContextChars / 1000).toFixed(0)}k
+                                </span>
                             </div>
                         </Tooltip>
                     )}

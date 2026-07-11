@@ -662,7 +662,7 @@ func TestProviderImageFallbackPromptUsesCatalogKeyAndNoRawChinese(t *testing.T) 
 		},
 		{
 			path:      "anthropic.go",
-			signature: "func buildAnthropicMessages(reqMessages []ai.Message) []anthropicMessage {",
+			signature: "func buildAnthropicMessagesWithOptions(reqMessages []ai.Message, includeThinkingBlocks bool) []anthropicMessage {",
 		},
 		{
 			path:      "gemini.go",

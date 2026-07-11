@@ -472,6 +472,11 @@ jobs:
           & "$env:CC" --version
           & "$env:CXX" --version
 
+      - name: Test Windows Online Updater (Windows AMD64)
+        if: ${{ matrix.platform == 'windows/amd64' }}
+        shell: pwsh
+        run: go test ./internal/app -run '^TestWindowsPowerShellUpdater' -count=1 -timeout=3m
+
       - name: Build
         shell: bash
         run: |
@@ -1071,6 +1076,9 @@ jobs:
           FILES=()
           while IFS= read -r file; do
             if [ -n "$file" ]; then
+              case "$file" in
+                SHA256SUMS|latest.json|latest-dev.json) continue ;;
+              esac
               FILES+=("$file")
             fi
           done < <(find . -maxdepth 1 -type f ! -name SHA256SUMS -exec basename {} \; | sort)
@@ -1080,6 +1088,24 @@ jobs:
           else
             sha256sum "${FILES[@]}" > SHA256SUMS
           fi
+
+      # 静态更新清单：客户端优先下载 github.com/.../latest/download/latest.json，
+      # 避免终端用户检查更新打爆 api.github.com 未认证配额。
+      - name: Generate static update manifest (latest.json)
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          python3 tools/generate-update-latest-manifest.py \
+            --assets-dir release-assets \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --channel latest \
+            --output release-assets/latest.json
+          test -s release-assets/latest.json
+          echo "📄 latest.json ready:"
+          head -n 40 release-assets/latest.json
 
       - name: Generate Driver SHA256SUMS
         if: steps.driver_assets.outputs.has_driver_assets == 'true'

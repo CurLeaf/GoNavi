@@ -24,7 +24,8 @@ func TestImportConnectionsPayloadNavicatNCXImportsConfigsAndSecrets(t *testing.T
   <Connection ConnType="SQLITE" ConnectionName="History DB" DatabaseFileName="C:\navicat\history.db" />
 </Connections>`, mysqlPassword, postgresPassword, sshPassword, proxyPassword)
 
-	imported, err := app.ImportConnectionsPayload(raw, "")
+	importedResult, err := app.ImportConnectionsPayload(raw, "")
+	imported := importedResult.Connections
 	if err != nil {
 		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
 	}
@@ -225,7 +226,8 @@ func TestImportConnectionsPayloadNavicatNCXMapsOracleSIDAndRedisDB(t *testing.T)
   <Connection ConnType="REDIS" ConnectionName="Redis Cache" Host="redis.local" Port="6379" Database="5" UserName="default" Password="%s" SavePassword="true" />
 </Connections>`, oraclePassword, redisPassword)
 
-	imported, err := app.ImportConnectionsPayload(raw, "")
+	importedResult, err := app.ImportConnectionsPayload(raw, "")
+	imported := importedResult.Connections
 	if err != nil {
 		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
 	}

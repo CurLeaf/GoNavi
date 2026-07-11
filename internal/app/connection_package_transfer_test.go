@@ -40,7 +40,7 @@ func TestBuildConnectionPackagePayloadIncludesSecretBundles(t *testing.T) {
 		t.Fatalf("SaveConnection returned error: %v", err)
 	}
 
-	payload, err := app.buildConnectionPackagePayload()
+	payload, err := app.buildConnectionPackagePayload(nil)
 	if err != nil {
 		t.Fatalf("buildConnectionPackagePayload returned error: %v", err)
 	}
@@ -128,7 +128,8 @@ func TestBuildExportedConnectionPackageWithoutSecretsUsesV2AppManagedAndImportsW
 	importApp := NewAppWithSecretStore(newFakeAppSecretStore())
 	importApp.configDir = t.TempDir()
 
-	imported, err := importApp.ImportConnectionsPayload(string(raw), "")
+	importedResult, err := importApp.ImportConnectionsPayload(string(raw), "")
+	imported := importedResult.Connections
 	if err != nil {
 		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
 	}
@@ -145,6 +146,35 @@ func TestBuildExportedConnectionPackageWithoutSecretsUsesV2AppManagedAndImportsW
 	}
 	if resolved.Password != "" {
 		t.Fatalf("expected imported password to be empty, got %q", resolved.Password)
+	}
+}
+
+func TestExportConnectionsPayloadReturnsBrowserDownloadContent(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+	saveConnectionForPackageExport(t, app, "conn-browser-export", "browser-secret")
+
+	result := app.ExportConnectionsPayload(ConnectionExportOptions{IncludeSecrets: false})
+	if !result.Success {
+		t.Fatalf("ExportConnectionsPayload returned failure: %+v", result)
+	}
+
+	raw, ok := result.Data.(string)
+	if !ok || strings.TrimSpace(raw) == "" {
+		t.Fatalf("expected browser download content, got %#v", result.Data)
+	}
+	if !isConnectionPackageV2AppManaged(raw) {
+		t.Fatalf("expected app-managed connection package, got %s", raw)
+	}
+
+	importApp := NewAppWithSecretStore(newFakeAppSecretStore())
+	importApp.configDir = t.TempDir()
+	imported, err := importApp.ImportConnectionsPayload(raw, "")
+	if err != nil {
+		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
+	}
+	if len(imported.Connections) != 1 || imported.Connections[0].ID != "conn-browser-export" {
+		t.Fatalf("expected exported browser content to restore the connection, got %#v", imported.Connections)
 	}
 }
 
@@ -353,7 +383,8 @@ func TestImportConnectionsPayloadLegacyJSONRollsBackOnSaveFailure(t *testing.T) 
 		t.Fatalf("json.Marshal returned error: %v", err)
 	}
 
-	imported, err := app.ImportConnectionsPayload(string(raw), "ignored")
+	importedResult, err := app.ImportConnectionsPayload(string(raw), "ignored")
+	imported := importedResult.Connections
 	if err != nil {
 		t.Fatalf("expected ImportConnectionsPayload to succeed without secret store, got %v", err)
 	}
@@ -574,7 +605,8 @@ func TestImportConnectionsPayloadLegacyJSONClearsExistingSecretWhenMissing(t *te
 		t.Fatalf("json.Marshal returned error: %v", err)
 	}
 
-	imported, err := app.ImportConnectionsPayload(string(raw), "ignored")
+	importedResult, err := app.ImportConnectionsPayload(string(raw), "ignored")
+	imported := importedResult.Connections
 	if err != nil {
 		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
 	}
@@ -628,7 +660,8 @@ func TestImportConnectionsPayloadLegacyJSONLatestEntryWinsForSameID(t *testing.T
 		t.Fatalf("json.Marshal returned error: %v", err)
 	}
 
-	imported, err := app.ImportConnectionsPayload(string(raw), "ignored")
+	importedResult, err := app.ImportConnectionsPayload(string(raw), "ignored")
+	imported := importedResult.Connections
 	if err != nil {
 		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
 	}
@@ -692,7 +725,8 @@ func TestImportConnectionsPayloadLegacyJSONLatestEntryWithoutPasswordDoesNotKeep
 		t.Fatalf("json.Marshal returned error: %v", err)
 	}
 
-	imported, err := app.ImportConnectionsPayload(string(raw), "ignored")
+	importedResult, err := app.ImportConnectionsPayload(string(raw), "ignored")
+	imported := importedResult.Connections
 	if err != nil {
 		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
 	}
@@ -828,7 +862,8 @@ func TestImportConnectionsPayloadEnvelopeImportsAndOverwritesSecrets(t *testing.
 		t.Fatalf("json.Marshal returned error: %v", err)
 	}
 
-	imported, err := app.ImportConnectionsPayload(string(raw), "package-password")
+	importedResult, err := app.ImportConnectionsPayload(string(raw), "package-password")
+	imported := importedResult.Connections
 	if err != nil {
 		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
 	}
@@ -890,7 +925,8 @@ func TestBuildExportedConnectionPackageWithSecretsUsesV2AppManagedEncryption(t *
 		}
 	}
 
-	imported, err := app.ImportConnectionsPayload(rawString, "")
+	importedResult, err := app.ImportConnectionsPayload(rawString, "")
+	imported := importedResult.Connections
 	if err != nil {
 		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
 	}
@@ -933,7 +969,8 @@ func TestBuildExportedConnectionPackageWithFilePasswordUsesV2ProtectedEnvelope(t
 		t.Fatalf("wrong v2 p=2 password should return unified error, got %v", err)
 	}
 
-	imported, err := app.ImportConnectionsPayload(rawString, "package-password")
+	importedResult, err := app.ImportConnectionsPayload(rawString, "package-password")
+	imported := importedResult.Connections
 	if err != nil {
 		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
 	}
@@ -959,6 +996,86 @@ func TestNormalizeConnectionPackageExportFilenameAddsExtension(t *testing.T) {
 	alreadyExtended := normalizeConnectionPackageExportFilename(`C:\tmp\connections` + connectionPackageExtension)
 	if alreadyExtended != `C:\tmp\connections`+connectionPackageExtension {
 		t.Fatalf("expected existing extension to be preserved, got %q", alreadyExtended)
+	}
+}
+
+func TestBuildExportedConnectionPackageCarriesRedisDbAliases(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+
+	_, err := app.SaveConnection(connection.SavedConnectionInput{
+		ID:   "redis-1",
+		Name: "Cache",
+		Config: connection.ConnectionConfig{
+			ID:   "redis-1",
+			Type: "redis",
+			Host: "127.0.0.1",
+			Port: 6379,
+		},
+		IncludeRedisDatabases: []int{0, 1},
+	})
+	if err != nil {
+		t.Fatalf("SaveConnection returned error: %v", err)
+	}
+
+	aliases := map[string]map[string]string{
+		"redis-1": {
+			"0": "cache",
+			"1": "sessions",
+		},
+		// malformed entries must be dropped by sanitize
+		"":      {"0": "orphan"},
+		"other": {"x": "bad-index", "2": "  "},
+	}
+
+	raw, err := app.buildExportedConnectionPackage(ConnectionExportOptions{
+		IncludeSecrets: false,
+		RedisDbAliases: aliases,
+	})
+	if err != nil {
+		t.Fatalf("buildExportedConnectionPackage returned error: %v", err)
+	}
+
+	importApp := NewAppWithSecretStore(newFakeAppSecretStore())
+	importApp.configDir = t.TempDir()
+
+	importedResult, err := importApp.ImportConnectionsPayload(string(raw), "")
+	if err != nil {
+		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
+	}
+	if len(importedResult.Connections) != 1 {
+		t.Fatalf("expected 1 imported connection, got %d", len(importedResult.Connections))
+	}
+	if importedResult.Connections[0].ID != "redis-1" {
+		t.Fatalf("expected redis-1, got %q", importedResult.Connections[0].ID)
+	}
+	if importedResult.RedisDbAliases == nil {
+		t.Fatal("expected RedisDbAliases in import result")
+	}
+	got := importedResult.RedisDbAliases["redis-1"]
+	if got == nil {
+		t.Fatalf("expected aliases for redis-1, got %#v", importedResult.RedisDbAliases)
+	}
+	if got["0"] != "cache" || got["1"] != "sessions" {
+		t.Fatalf("unexpected redis aliases: %#v", got)
+	}
+	if _, ok := importedResult.RedisDbAliases[""]; ok {
+		t.Fatal("empty connection id should not appear in imported aliases")
+	}
+	if _, ok := importedResult.RedisDbAliases["other"]; ok {
+		t.Fatal("malformed aliases should be dropped")
+	}
+
+	// payload 内连接项也应携带别名（便于单项迁移）
+	payload, err := app.buildConnectionPackagePayload(aliases)
+	if err != nil {
+		t.Fatalf("buildConnectionPackagePayload returned error: %v", err)
+	}
+	if payload.Connections[0].RedisDbAliases["0"] != "cache" {
+		t.Fatalf("expected item-level alias cache, got %#v", payload.Connections[0].RedisDbAliases)
+	}
+	if payload.RedisDbAliases["redis-1"]["1"] != "sessions" {
+		t.Fatalf("expected top-level alias sessions, got %#v", payload.RedisDbAliases)
 	}
 }
 

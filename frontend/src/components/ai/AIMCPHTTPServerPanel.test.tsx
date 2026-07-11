@@ -32,6 +32,12 @@ const REQUIRED_KEYS = [
   'ai_settings.mcp_http.panel.stopped_hint',
   'ai_settings.mcp_http.panel.copy_url',
   'ai_settings.mcp_http.panel.copy_authorization',
+  'ai_settings.mcp_http.panel.mode.schema_only',
+  'ai_settings.mcp_http.panel.mode.limited_query',
+  'ai_settings.mcp_http.panel.limited_query.label',
+  'ai_settings.mcp_http.panel.limited_query.hint',
+  'ai_settings.mcp_http.panel.limited_query.on',
+  'ai_settings.mcp_http.panel.limited_query.off',
 ];
 
 const buildPanelProps = () => ({
@@ -40,7 +46,7 @@ const buildPanelProps = () => ({
     addr: '127.0.0.1:8765',
     path: '/mcp',
     url: 'http://127.0.0.1:8765/mcp',
-    schemaOnly: true,
+    schemaOnly: false,
     authorizationHeader: 'Bearer gnv_test',
     message: '',
   },
@@ -48,6 +54,7 @@ const buildPanelProps = () => ({
     addr: '127.0.0.1:8765',
     path: '/mcp',
     authorizationHeader: 'Bearer gnv_test',
+    schemaOnly: false,
   },
   loading: false,
   cardBg: '#fff',
@@ -98,7 +105,7 @@ describe('AIMCPHTTPServerPanel', () => {
 
     expect(markup).toContain('GoNavi MCP HTTP service');
     expect(markup).toContain('Running');
-    expect(markup).toContain('schema-only');
+    expect(markup).toContain('Limited query');
     expect(markup).toContain('Listen address / port');
     expect(markup).toContain('Authorization');
     expect(markup).toContain('127.0.0.1:8765');

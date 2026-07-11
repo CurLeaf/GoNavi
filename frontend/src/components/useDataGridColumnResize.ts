@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import { resolveDataTableColumnWidth } from '../utils/dataGridDisplay';
 import { calculateAutoFitColumnWidth } from './dataGridAutoWidth';
-import { DEFAULT_GRID_MONO_FONT_FAMILY } from './DataGridCore';
+import { DEFAULT_GRID_MONO_FONT_FAMILY, GONAVI_ROW_NUMBER_COLUMN_KEY } from './DataGridCore';
+
+const ROW_NUMBER_DEFAULT_WIDTH = 36;
+const ROW_NUMBER_MIN_WIDTH = 28;
+const ROW_NUMBER_MAX_WIDTH = 120;
 
 type UseDataGridColumnResizeContext = Record<string, any>;
 
@@ -48,10 +52,14 @@ export const useDataGridColumnResize = (ctx: UseDataGridColumnResizeContext) => 
     isResizingRef.current = true;
 
     const startX = e.clientX;
-    const currentWidth = resolveDataTableColumnWidth({
-      manualWidth: columnWidths[key],
-      density: dataTableDensity,
-    });
+    // 序号列默认宽度与数据列不同，不能走 density 默认列宽
+    const isRowNumberColumn = key === GONAVI_ROW_NUMBER_COLUMN_KEY;
+    const currentWidth = isRowNumberColumn
+      ? (typeof columnWidths[key] === 'number' && columnWidths[key] > 0 ? columnWidths[key] : ROW_NUMBER_DEFAULT_WIDTH)
+      : resolveDataTableColumnWidth({
+          manualWidth: columnWidths[key],
+          density: dataTableDensity,
+        });
     const containerLeft = containerRef.current?.getBoundingClientRect().left ?? 0;
     draggingRef.current = { startX, startWidth: currentWidth, key, containerLeft };
     latestClientXRef.current = startX;
@@ -161,10 +169,15 @@ export const useDataGridColumnResize = (ctx: UseDataGridColumnResizeContext) => 
   const handleResizeAutoFit = useCallback((key: string) => (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    // 序号列双击还原默认窄宽，不按数据内容撑开
+    if (key === GONAVI_ROW_NUMBER_COLUMN_KEY) {
+      setColumnWidths((prev: Record<string, number>) => ({ ...prev, [key]: ROW_NUMBER_DEFAULT_WIDTH }));
+      return;
+    }
     const handleEl = e.currentTarget as HTMLElement | null;
     const headerEl = handleEl?.closest('th') as HTMLElement | null;
     autoFitColumnWidth(key, headerEl);
-  }, [autoFitColumnWidth]);
+  }, [autoFitColumnWidth, setColumnWidths]);
 
   const handleResizeMove = useCallback((e: MouseEvent) => {
     if (!draggingRef.current) return;
@@ -178,7 +191,10 @@ export const useDataGridColumnResize = (ctx: UseDataGridColumnResizeContext) => 
 
     const { startX, startWidth, key } = draggingRef.current;
     const deltaX = e.clientX - startX;
-    const newWidth = Math.max(50, startWidth + deltaX);
+    const isRowNumberColumn = key === GONAVI_ROW_NUMBER_COLUMN_KEY;
+    const minWidth = isRowNumberColumn ? ROW_NUMBER_MIN_WIDTH : 50;
+    const maxWidth = isRowNumberColumn ? ROW_NUMBER_MAX_WIDTH : Number.POSITIVE_INFINITY;
+    const newWidth = Math.min(maxWidth, Math.max(minWidth, startWidth + deltaX));
 
     setColumnWidths((prev: Record<string, number>) => ({ ...prev, [key]: newWidth }));
 

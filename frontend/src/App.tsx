@@ -8,6 +8,9 @@ import { CSS } from '@dnd-kit/utilities';
 import { BrowserOpenURL, Environment, EventsOn, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetDarkTheme, WindowSetLightTheme, WindowSetPosition, WindowSetSize, WindowSetSystemDefaultTheme, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
+import FloatingWorkbenchWindows from './components/FloatingWorkbenchWindows';
+import FloatingAIChatWindow from './components/FloatingAIChatWindow';
+import FloatingQueryResultWindows from './components/FloatingQueryResultWindows';
 import ConnectionModal from './components/ConnectionModal';
 import SnippetSettingsModal from './components/SnippetSettingsModal';
 import ConnectionPackagePasswordModal from './components/ConnectionPackagePasswordModal';
@@ -16,7 +19,7 @@ import { type DataSyncEntryMode } from './components/dataSyncEntryMode';
 import DriverManagerModal from './components/DriverManagerModal';
 import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';
 import LogPanel from './components/LogPanel';
-import AISettingsModal, { AISettingsContent } from './components/AISettingsModal';
+import { AISettingsContent } from './components/AISettingsModal';
 import AIChatPanel from './components/AIChatPanel';
 import AIPanelErrorBoundary from './components/ai/AIPanelErrorBoundary';
 import SecurityUpdateBanner from './components/SecurityUpdateBanner';
@@ -25,15 +28,21 @@ import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModa
 import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModal';
 import LanguageSettingsPanel from './components/LanguageSettingsPanel';
 import WebAuthSettingsPanel from './components/WebAuthSettingsPanel';
+import CustomThemeManager from './components/settings/CustomThemeManager';
+import CustomThemeStyleHost, {
+  type CustomThemeAntTokenSnapshot,
+} from './components/theme/CustomThemeStyleHost';
 import {
   DEFAULT_APPEARANCE,
   MAX_V2_SIDEBAR_RAIL_SCALE,
   MIN_V2_SIDEBAR_RAIL_SCALE,
   sanitizeV2SidebarRailScale,
+  type ThemePreference,
   useStore,
 } from './store';
+import { useCustomThemeStore } from './customThemeStore';
 import { GlobalProxyConfig, SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
-import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
+import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isMacLikePlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
 import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, getLinuxCJKFontInstallHint, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
 import {
   DENSITY_OPTIONS,
@@ -62,6 +71,16 @@ import {
   resolveConnectionPackageExportResult,
   normalizeConnectionPackagePassword,
 } from './utils/connectionExport';
+import { downloadBrowserTextFile } from './utils/browserFileTransfer';
+import {
+  extractCustomThemeAntTokens,
+} from './utils/customTheme';
+import { resolveAvailableCustomTheme } from './utils/customThemePresets';
+import {
+  mergeRedisDbAliases,
+  sanitizeRedisDbAliases,
+  type RedisDbAliasMap,
+} from './utils/redisDbAlias';
 import {
   bootstrapSecureConfig,
   finalizeSecurityUpdateStatus,
@@ -101,6 +120,14 @@ import {
 } from './utils/securityUpdateRepairFlow';
 import { getWindowsScaleFixNudgedWidth, hasWindowsViewportScaleDrift } from './utils/windowsScaleFix';
 import {
+  clearStartupWindowRestorePending,
+  isStartupWindowRestorePending,
+  markStartupWindowRestorePending,
+  resolveDefaultStartupWindowBounds,
+  resolveWorkAreaFillWindowBounds,
+  shouldPreferWindowsStartupMaximise,
+} from './utils/windowStartupLayout';
+import {
   SHORTCUT_ACTION_META,
   SHORTCUT_ACTION_ORDER,
   ShortcutAction,
@@ -120,6 +147,7 @@ import {
 } from './utils/shortcuts';
 import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldResetWebViewZoomForScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowScaleFixReason, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
 import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
+import { resolveWailsWindowVisibleViewport } from './utils/wailsWindowViewport';
 import {
   SIDEBAR_UTILITY_ITEM_KEYS,
   resolveAIEntryPlacement,
@@ -150,9 +178,200 @@ const MIN_UI_SCALE = 0.8;
 const MAX_UI_SCALE = 1.25;
 const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 20;
+type ApplicationQuitConfirmedAction = () => Promise<boolean>;
+/** 设置页 Slider 底部预设刻度 */
+const UI_SCALE_SLIDER_MARKS: Record<number, string> = {
+  0.8: '80%',
+  0.9: '90%',
+  1: '100%',
+  1.1: '110%',
+  1.25: '125%',
+};
+const FONT_SIZE_SLIDER_MARKS: Record<number, string> = {
+  12: '12',
+  14: '14',
+  16: '16',
+  18: '18',
+  20: '20',
+};
+const SIDEBAR_RAIL_SCALE_SLIDER_MARKS: Record<number, string> = {
+  1: '100%',
+  1.25: '125%',
+  1.5: '150%',
+  1.8: '180%',
+};
+const OPACITY_SLIDER_MARKS: Record<number, string> = {
+  0.1: '10%',
+  0.5: '50%',
+  1: '100%',
+};
+const BLUR_SLIDER_MARKS: Record<number, string> = {
+  0: '0',
+  6: '6',
+  12: '12',
+  20: '20',
+};
+const DATA_TABLE_FONT_SLIDER_MARKS: Record<number, string> = {
+  10: '10',
+  12: '12',
+  14: '14',
+  16: '16',
+  18: '18',
+};
 const DEFAULT_UI_SCALE = 1.0;
 const DEFAULT_FONT_SIZE = 14;
 const EMPTY_INSTALLED_FONT_FAMILIES: InstalledFontFamily[] = [];
+
+type ThemeSettingsSliderUnit = 'percent' | 'px' | 'none';
+
+type ThemeSettingsSliderProps = {
+  min: number;
+  max: number;
+  step?: number;
+  value: number;
+  onChange: (value: number) => void;
+  disabled?: boolean;
+  marks?: Record<number, string>;
+  /** percent：右侧按百分比输入（内部仍用 0~1 / 0.8~1.25 比例） */
+  unit?: ThemeSettingsSliderUnit;
+};
+
+const clampThemeSliderValue = (value: number, min: number, max: number, step?: number): number => {
+  let next = Math.min(max, Math.max(min, value));
+  if (step && step > 0) {
+    const steps = Math.round((next - min) / step);
+    next = min + steps * step;
+    // 消除浮点误差
+    const decimals = String(step).includes('.') ? (String(step).split('.')[1]?.length ?? 0) : 0;
+    if (decimals > 0) {
+      next = Number(next.toFixed(decimals));
+    }
+    next = Math.min(max, Math.max(min, next));
+  }
+  return next;
+};
+
+/** 主题设置页：滑条 + 底部预设 + 可编辑数值 */
+const ThemeSettingsSlider: React.FC<ThemeSettingsSliderProps> = ({
+  min,
+  max,
+  step,
+  value,
+  onChange,
+  disabled,
+  marks,
+  unit = 'none',
+}) => {
+  const isPercent = unit === 'percent';
+  const minN = Number(min);
+  const maxN = Number(max);
+  const span = maxN - minN || 1;
+  const stepN = step === undefined || step === null ? undefined : Number(step);
+  const current = Number(value);
+  const displayMin = isPercent ? minN * 100 : minN;
+  const displayMax = isPercent ? maxN * 100 : maxN;
+  const displayStep = isPercent
+    ? (stepN !== undefined ? stepN * 100 : 1)
+    : (stepN !== undefined ? stepN : 1);
+  const displayValue = Number.isFinite(current)
+    ? (isPercent ? Number((current * 100).toFixed(4)) : current)
+    : displayMin;
+
+  const commitDisplayValue = (raw: number | string | null) => {
+    if (raw === null || raw === undefined || raw === '') {
+      return;
+    }
+    const parsed = typeof raw === 'number' ? raw : Number(String(raw).trim().replace(/%/g, ''));
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+    const modelValue = isPercent ? parsed / 100 : parsed;
+    onChange(clampThemeSliderValue(modelValue, minN, maxN, stepN));
+  };
+
+  const markEntries = marks
+    ? Object.entries(marks).map(([raw, label]) => ({
+        value: Number(raw),
+        label,
+      }))
+    : [];
+
+  return (
+    <div className={`gonavi-settings-slider-row${marks ? ' has-marks' : ''}`}>
+      <div className="gonavi-settings-slider-main">
+        <div className="gonavi-settings-slider-track-wrap">
+          <Slider
+            min={minN}
+            max={maxN}
+            step={stepN}
+            value={current}
+            onChange={(next) => {
+              const n = Array.isArray(next) ? next[0] : next;
+              if (typeof n === 'number' && Number.isFinite(n)) {
+                onChange(clampThemeSliderValue(n, minN, maxN, stepN));
+              }
+            }}
+            disabled={disabled}
+            tooltip={{ open: false }}
+          />
+        </div>
+        {markEntries.length > 0 ? (
+          <div className="gonavi-settings-slider-presets" role="group">
+            {markEntries.map((mark) => {
+              const pct = ((mark.value - minN) / span) * 100;
+              const active = Number.isFinite(current)
+                ? (stepN && stepN > 0
+                  ? Math.abs(current - mark.value) <= stepN / 2 + 1e-9
+                  : Math.abs(current - mark.value) < 1e-6)
+                : false;
+              return (
+                <button
+                  key={String(mark.value)}
+                  type="button"
+                  className={`gonavi-settings-slider-preset${active ? ' is-active' : ''}`}
+                  style={{ left: `${pct}%` }}
+                  disabled={Boolean(disabled)}
+                  onClick={() => {
+                    if (disabled) return;
+                    onChange(clampThemeSliderValue(mark.value, minN, maxN, stepN));
+                  }}
+                >
+                  {mark.label}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+      <InputNumber
+        className="gonavi-settings-slider-value-input"
+        size="small"
+        min={displayMin}
+        max={displayMax}
+        step={displayStep}
+        value={displayValue}
+        disabled={disabled}
+        controls={false}
+        keyboard
+        stringMode={false}
+        style={{ width: unit === 'none' ? 48 : 62 }}
+        addonAfter={unit === 'percent' ? '%' : unit === 'px' ? 'px' : undefined}
+        onChange={(next) => {
+          if (typeof next === 'number') {
+            commitDisplayValue(next);
+          }
+        }}
+        onBlur={(event) => {
+          commitDisplayValue(event.target.value);
+        }}
+        onPressEnter={(event) => {
+          commitDisplayValue((event.target as HTMLInputElement).value);
+          (event.target as HTMLInputElement).blur();
+        }}
+      />
+    </div>
+  );
+};
 
 const createEmptySecurityUpdateStatus = (): SecurityUpdateStatus => ({
   overallStatus: 'not_detected',
@@ -179,12 +398,11 @@ const detectNavigatorPlatform = (): string => {
   return navigator.userAgent || '';
 };
 
-const readCurrentVisibleViewport = () => ({
-  availWidth: window.screen?.availWidth || window.innerWidth || 0,
-  availHeight: window.screen?.availHeight || window.innerHeight || 0,
-  availLeft: (window.screen as Screen & { availLeft?: number })?.availLeft || 0,
-  availTop: (window.screen as Screen & { availTop?: number })?.availTop || 0,
-});
+const readCurrentVisibleViewport = () => resolveWailsWindowVisibleViewport(
+  window.screen as Screen & { availLeft?: number; availTop?: number },
+  { innerWidth: window.innerWidth, innerHeight: window.innerHeight },
+  { useMonitorLocalOrigin: isMacLikePlatform() },
+);
 
 const getSystemThemeMode = (): 'light' | 'dark' => {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -199,6 +417,32 @@ const mergeSavedConnections = (current: SavedConnection[], imported: SavedConnec
   current.forEach((conn) => merged.set(conn.id, conn));
   imported.forEach((conn) => merged.set(conn.id, conn));
   return Array.from(merged.values());
+};
+
+type ConnectionPackageImportPayload = {
+  connections: SavedConnection[];
+  redisDbAliases: RedisDbAliasMap;
+};
+
+/** Normalize ImportConnectionsPayload results: object (new) or bare array (legacy/mock). */
+const normalizeConnectionPackageImportPayload = (value: unknown): ConnectionPackageImportPayload | null => {
+  if (Array.isArray(value)) {
+    return {
+      connections: value as SavedConnection[],
+      redisDbAliases: {},
+    };
+  }
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const record = value as { connections?: unknown; redisDbAliases?: unknown };
+  if (!Array.isArray(record.connections)) {
+    return null;
+  }
+  return {
+    connections: record.connections as SavedConnection[],
+    redisDbAliases: sanitizeRedisDbAliases(record.redisDbAliases),
+  };
 };
 
 type ConnectionPackageDialogMode = 'import' | 'export';
@@ -400,6 +644,9 @@ function App() {
   const themePreference = useStore(state => state.themePreference);
   const setTheme = useStore(state => state.setTheme);
   const setThemePreference = useStore(state => state.setThemePreference);
+  const customThemes = useCustomThemeStore(state => state.themes);
+  const activeCustomThemeId = useCustomThemeStore(state => state.activeThemeId);
+  const selectCustomTheme = useCustomThemeStore(state => state.selectCustomTheme);
   const appearance = useStore(state => state.appearance);
   const setAppearance = useStore(state => state.setAppearance);
   const uiScale = useStore(state => state.uiScale);
@@ -418,7 +665,27 @@ function App() {
   const updateShortcut = useStore(state => state.updateShortcut);
   const resetShortcutOptions = useStore(state => state.resetShortcutOptions);
   const [systemThemeMode, setSystemThemeMode] = useState<'light' | 'dark'>(() => getSystemThemeMode());
-  const darkMode = themeMode === 'dark';
+  const activeCustomTheme = useMemo(
+      () => resolveAvailableCustomTheme(customThemes, activeCustomThemeId),
+      [activeCustomThemeId, customThemes],
+  );
+  const effectiveThemePreference = activeCustomTheme?.baseMode ?? themePreference;
+  const resolvedThemeMode = effectiveThemePreference === 'system'
+      ? systemThemeMode
+      : effectiveThemePreference;
+  const darkMode = resolvedThemeMode === 'dark';
+  const sourceCustomThemeAntTokens = useMemo(
+      () => activeCustomTheme ? extractCustomThemeAntTokens(activeCustomTheme.css) : {},
+      [activeCustomTheme],
+  );
+  const [computedCustomThemeAntTokens, setComputedCustomThemeAntTokens] = useState<CustomThemeAntTokenSnapshot | null>(null);
+  const customThemeStyleContextKey = `${resolvedThemeMode}:${appearance.uiVersion}`;
+  const customThemeAntTokens = activeCustomTheme
+      && computedCustomThemeAntTokens?.themeId === activeCustomTheme.id
+      && computedCustomThemeAntTokens.themeRevision === activeCustomTheme.updatedAt
+      && computedCustomThemeAntTokens.contextKey === customThemeStyleContextKey
+      ? computedCustomThemeAntTokens.tokens
+      : sourceCustomThemeAntTokens;
   const isV2Ui = appearance.uiVersion === 'v2';
   const effectiveUiScale = Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, Number(uiScale) || DEFAULT_UI_SCALE));
   const effectiveFontSize = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(Number(fontSize) || DEFAULT_FONT_SIZE)));
@@ -506,20 +773,28 @@ function App() {
       };
   }, []);
   useEffect(() => {
-      const resolvedTheme = themePreference === 'system' ? systemThemeMode : themePreference;
-      if (themeMode !== resolvedTheme) {
-          setTheme(resolvedTheme);
+      if (themeMode !== resolvedThemeMode) {
+          setTheme(resolvedThemeMode);
       }
-      if (themePreference === 'system') {
+      if (effectiveThemePreference === 'system') {
           void safeWindowRuntimeCall(() => WindowSetSystemDefaultTheme(), undefined);
           return;
       }
-      if (resolvedTheme === 'dark') {
+      if (resolvedThemeMode === 'dark') {
           void safeWindowRuntimeCall(() => WindowSetDarkTheme(), undefined);
           return;
       }
       void safeWindowRuntimeCall(() => WindowSetLightTheme(), undefined);
-  }, [setTheme, systemThemeMode, themeMode, themePreference]);
+  }, [effectiveThemePreference, resolvedThemeMode, setTheme, themeMode]);
+  const selectPresetTheme = useCallback((preference: ThemePreference) => {
+      // Custom CSS is an independent skin layer. Selecting a built-in preset
+      // first disables that layer, then preserves the existing 3-mode contract.
+      if (activeCustomTheme) {
+          const result = selectCustomTheme(null);
+          if (!result.ok) message.warning(t('app.theme.custom.error.storage_failed'));
+      }
+      setThemePreference(preference);
+  }, [activeCustomTheme, selectCustomTheme, setThemePreference, t]);
   const setTabDisplaySettings = useCallback((settings: Partial<TabDisplaySettings>) => {
       setAppearance({
           tabDisplay: applyTabDisplaySettingsPatch(tabDisplaySettings, settings),
@@ -602,7 +877,8 @@ function App() {
   const [runtimePlatform, setRuntimePlatform] = useState('');
   const [runtimeBuildType, setRuntimeBuildType] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
-  const isWebRuntime = runtimeBuildType === 'web';
+  const isWebRuntime = runtimeBuildType === 'web'
+    || (typeof window !== 'undefined' && (window as any).__GONAVI_WEB_RUNTIME__?.buildType === 'web');
   const [installedFontFamilies, setInstalledFontFamilies] = useState<InstalledFontFamily[]>(EMPTY_INSTALLED_FONT_FAMILIES);
   const [isFontFamiliesLoading, setIsFontFamiliesLoading] = useState(false);
   const [fontFamiliesLoadError, setFontFamiliesLoadError] = useState<string | null>(null);
@@ -634,10 +910,15 @@ function App() {
   const [focusedAIProviderId, setFocusedAIProviderId] = useState<string | undefined>(undefined);
   const [connectionPackageDialog, setConnectionPackageDialog] = useState<ConnectionPackageDialogState>(() => createClosedConnectionPackageDialogState());
   const [pendingConnectionImportPayload, setPendingConnectionImportPayload] = useState<string | null>(null);
+  const browserConnectionImportInputRef = useRef<HTMLInputElement>(null);
+  const browserConnectionImportSourceGroupRef = useRef<ToolCenterGroupKey | undefined>(undefined);
   const [aiPanelRenderNonce, setAiPanelRenderNonce] = useState(0);
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
   const aiPanelVisible = useStore(state => state.aiPanelVisible);
+  const detachedAIChatWindow = useStore(state => state.detachedAIChatWindow);
+  const detachAIChatPanel = useStore(state => state.detachAIChatPanel);
+  const aiChatDetached = Boolean(detachedAIChatWindow);
   const toggleAIPanel = useStore(state => state.toggleAIPanel);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const windowDiagSequenceRef = React.useRef(0);
@@ -839,9 +1120,10 @@ function App() {
   useEffect(() => {
       let cancelled = false;
       let startupWindowTimer: number | null = null;
-      const maxApplyAttempts = 6;
-      const applyRetryDelayMs = 400;
-      const settleDelayMs = 160;
+      let restoredOnce = false;
+      const maxApplyAttempts = 8;
+      const applyRetryDelayMs = 350;
+      const settleDelayMs = 180;
       const useMaximiseForStartup = isWindowsPlatform();
 
       const checkStartupPreferenceApplied = async (): Promise<boolean> => {
@@ -862,32 +1144,64 @@ function App() {
           return false;
       };
 
-      const applyStartupWindowPreference = (attempt: number) => {
+      const markAppliedMaximisedOrFullscreen = (mode: 'maximised' | 'fullscreen') => {
+          // 启动偏好成功后立刻固化 windowState，避免宽限期内被写成 normal 导致下次半窗
+          if (mode === 'maximised' || useMaximiseForStartup) {
+              useStore.getState().setWindowState('maximized');
+          } else {
+              useStore.getState().setWindowState('fullscreen');
+          }
+          clearStartupWindowRestorePending();
+      };
+
+      /** Maximise 多次失败时：把窗口铺满工作区，避免残留 1024×768 / 84% 浮动半窗。 */
+      const applyWindowsWorkAreaFillFallback = () => {
+          if (!isWindowsPlatform()) {
+              return;
+          }
+          try {
+              const nextBounds = resolveWorkAreaFillWindowBounds(readCurrentVisibleViewport());
+              WindowSetSize(nextBounds.width, nextBounds.height);
+              WindowSetPosition(nextBounds.x, nextBounds.y);
+              useStore.getState().setWindowBounds(nextBounds);
+              // 仍记为 maximized：视觉上已铺满，下次继续走最大化恢复
+              useStore.getState().setWindowState('maximized');
+              void emitWindowDiagnostic('adjust:startup-work-area-fill-fallback', {
+                  to: nextBounds,
+              });
+          } catch (e) {
+              console.warn('Failed to apply Windows work-area fill fallback', e);
+          }
+      };
+
+      // mode:
+      // - maximised: 始终最大化（Windows 启动偏好 / 记忆的 maximized / Windows 上的 fullscreen 记忆）
+      // - fullscreen: 非 Windows 优先真全屏，失败再最大化
+      // 第 1 次立即执行（delay=0），避免 Windows 先闪 1024×768 半窗再最大化
+      const applyStartupWindowChrome = (attempt: number, mode: 'maximised' | 'fullscreen') => {
           if (startupWindowTimer !== null) {
               window.clearTimeout(startupWindowTimer);
           }
+          const delayMs = attempt <= 1 ? 0 : applyRetryDelayMs;
           startupWindowTimer = window.setTimeout(() => {
               if (cancelled) {
-                  return;
-              }
-              if (!useStore.getState().startupFullscreen) {
                   return;
               }
               void Promise.resolve()
                   .then(async () => {
                       if (await checkStartupPreferenceApplied()) {
+                          markAppliedMaximisedOrFullscreen(mode);
                           return;
                       }
-                      // Windows 使用最大化，避免进入真正全屏后无法通过标题栏交互退出。
-                      // 其他平台保持全屏优先、最大化兜底。
                       try {
-                          if (useMaximiseForStartup) {
+                          if (mode === 'maximised') {
                               await WindowMaximise();
                               await new Promise((resolve) => window.setTimeout(resolve, settleDelayMs));
                           } else {
                               await WindowFullscreen();
                               await new Promise((resolve) => window.setTimeout(resolve, settleDelayMs));
                               if (await checkStartupPreferenceApplied()) {
+                                  markAppliedMaximisedOrFullscreen(mode);
                                   return;
                               }
                               await WindowMaximise();
@@ -898,52 +1212,126 @@ function App() {
                       }
 
                       if (await checkStartupPreferenceApplied()) {
+                          markAppliedMaximisedOrFullscreen(mode);
                           return;
                       }
                       if (attempt < maxApplyAttempts) {
-                          applyStartupWindowPreference(attempt + 1);
+                          applyStartupWindowChrome(attempt + 1, mode);
+                      } else {
+                          // 最终仍失败：Windows 铺满工作区兜底，再结束宽限
+                          void emitWindowDiagnostic('warn:startup-maximise-failed', {
+                              mode,
+                              attempts: attempt,
+                          });
+                          applyWindowsWorkAreaFillFallback();
+                          clearStartupWindowRestorePending();
                       }
                   });
-          }, applyRetryDelayMs);
+          }, delayMs);
+      };
+
+      const restoreNormalWindowBounds = async (bounds: {
+          width: number;
+          height: number;
+          x: number;
+          y: number;
+      }) => {
+          // Windows 可能以原生 Maximised 首帧启动，恢复普通窗前先取消最大化
+          if (isWindowsPlatform()) {
+              try {
+                  if (await WindowIsMaximised()) {
+                      WindowUnmaximise();
+                      await new Promise((resolve) => window.setTimeout(resolve, settleDelayMs));
+                  }
+              } catch (e) {
+                  console.warn('Failed to unmaximise before restoring normal bounds', e);
+              }
+          }
+          const state = useStore.getState();
+          const nextBounds = resolveVisibleStartupWindowBounds(bounds, readCurrentVisibleViewport());
+          if (
+              nextBounds.x !== bounds.x ||
+              nextBounds.y !== bounds.y ||
+              nextBounds.width !== bounds.width ||
+              nextBounds.height !== bounds.height
+          ) {
+              void emitWindowDiagnostic('adjust:startup-window-bounds', {
+                  from: bounds,
+                  to: nextBounds,
+              });
+              state.setWindowBounds(nextBounds);
+          }
+          WindowSetSize(nextBounds.width, nextBounds.height);
+          WindowSetPosition(nextBounds.x, nextBounds.y);
+          state.setWindowState('normal');
       };
 
       const restoreWindowState = async () => {
           if (cancelled) return;
-          const state = useStore.getState();
-          // startupFullscreen 设置优先
-          if (state.startupFullscreen) {
-              applyStartupWindowPreference(1);
+          // 仅在 hydration 完成后跑一次（或显式重入）；避免未水合默认态先写半窗 bounds
+          if (!useStore.persist.hasHydrated()) {
               return;
           }
-          // 根据上次保存的窗口状态恢复
+          if (restoredOnce) {
+              return;
+          }
+          restoredOnce = true;
+
+          const state = useStore.getState();
+          // 1) 「启动时最大化」开关优先（Windows 按 Maximize 处理）
+          if (state.startupFullscreen) {
+              markStartupWindowRestorePending(3200);
+              applyStartupWindowChrome(1, useMaximiseForStartup ? 'maximised' : 'fullscreen');
+              return;
+          }
+          // 2) 记忆用户上次窗口态：最大化/全屏
           const savedState = state.windowState;
           if (savedState === 'fullscreen') {
-              applyStartupWindowPreference(1);
+              // Windows 上记忆的 fullscreen 也走最大化，避免真全屏后标题栏交互困难
+              markStartupWindowRestorePending(3200);
+              applyStartupWindowChrome(1, useMaximiseForStartup ? 'maximised' : 'fullscreen');
               return;
           }
           if (savedState === 'maximized') {
-              try { await WindowMaximise(); } catch (_) {}
+              // 必须重试：Windows 冷启动 HWND/WebView2 未就绪时单次 Maximise 经常失败，
+              // 会残留 main.go 默认 1024x768 贴左上角；任务栏恢复后才“突然正常”。
+              markStartupWindowRestorePending(3200);
+              applyStartupWindowChrome(1, 'maximised');
               return;
           }
-          // 普通窗口：恢复尺寸和位置
+          // 3) 普通窗口：恢复用户调整过的尺寸和位置
+          // Windows：无记忆 / 历史半窗 / 84% 默认小窗 → 直接最大化，而不是再落到浮动半窗
           const bounds = state.windowBounds;
-          if (!bounds || bounds.width < 400 || bounds.height < 300) return;
-          try {
-              const nextBounds = resolveVisibleStartupWindowBounds(bounds, readCurrentVisibleViewport());
-              if (
-                  nextBounds.x !== bounds.x ||
-                  nextBounds.y !== bounds.y ||
-                  nextBounds.width !== bounds.width ||
-                  nextBounds.height !== bounds.height
-              ) {
-                  void emitWindowDiagnostic('adjust:startup-window-bounds', {
-                      from: bounds,
-                      to: nextBounds,
-                  });
-                  state.setWindowBounds(nextBounds);
+          const viewport = readCurrentVisibleViewport();
+          if (isWindowsPlatform() && shouldPreferWindowsStartupMaximise(bounds, viewport)) {
+              markStartupWindowRestorePending(3200);
+              applyStartupWindowChrome(1, 'maximised');
+              void emitWindowDiagnostic('adjust:startup-prefer-maximise', {
+                  from: bounds,
+                  reason: !bounds ? 'missing-bounds' : 'undersized-bounds',
+              });
+              return;
+          }
+          if (!bounds || bounds.width < 400 || bounds.height < 300) {
+              // 非 Windows：无记忆时保持系统默认；Windows 已在上方走最大化
+              if (isWindowsPlatform()) {
+                  try {
+                      const nextBounds = resolveDefaultStartupWindowBounds(viewport);
+                      WindowSetSize(nextBounds.width, nextBounds.height);
+                      WindowSetPosition(nextBounds.x, nextBounds.y);
+                      state.setWindowBounds(nextBounds);
+                      state.setWindowState('normal');
+                      void emitWindowDiagnostic('adjust:startup-default-window-bounds', {
+                          to: nextBounds,
+                      });
+                  } catch (e) {
+                      console.warn('Failed to apply default Windows startup bounds', e);
+                  }
               }
-              WindowSetSize(nextBounds.width, nextBounds.height);
-              WindowSetPosition(nextBounds.x, nextBounds.y);
+              return;
+          }
+          try {
+              await restoreNormalWindowBounds(bounds);
           } catch (e) {
               console.warn('Failed to restore window bounds', e);
           }
@@ -956,6 +1344,8 @@ function App() {
           if (cancelled) {
               return;
           }
+          // hydration 完成后再恢复，确保读到 startupFullscreen / windowState / windowBounds
+          restoredOnce = false;
           void restoreWindowState();
       });
 
@@ -986,6 +1376,15 @@ function App() {
                   safeWindowRuntimeCall(() => WindowIsFullscreen(), false),
                   safeWindowRuntimeCall(() => WindowIsMaximised(), false),
               ]);
+
+              // 启动最大化/全屏尚未 settle 时，禁止把状态写回 normal，
+              // 否则下次冷启动会落到默认 1024x768 左上角（Windows 首次打开“只显示一半”）。
+              if (isStartupWindowRestorePending()) {
+                  if (!isFs && !isMax) {
+                      return;
+                  }
+                  clearStartupWindowRestorePending();
+              }
 
               // 保存窗口状态
               const store = useStore.getState();
@@ -1039,6 +1438,10 @@ function App() {
 
       const repairRuntimeWindowBounds = async () => {
           if (cancelled || !hydrated) {
+              return;
+          }
+          // 启动最大化 settle 期间不要抢跑普通 bounds 校正
+          if (isStartupWindowRestorePending()) {
               return;
           }
           try {
@@ -1384,6 +1787,15 @@ function App() {
           void rememberMinimisedState();
           checkDevicePixelRatio();
       }, 900);
+      // Windows 冷启动：WebView2 首次布局常只铺满左上角一部分，任务栏恢复才会走 restore 修复。
+      // 这里在启动后主动按 startup 原因做几次轻量 settle，避免用户必须双击任务栏。
+      // 间隔需大于 fixWindowScaleIfNeeded 的 700ms 节流，确保多次都能真正执行。
+      const startupLayoutFixTimers = [220, 1000, 1900].map((delayMs) => (
+          window.setTimeout(() => {
+              if (cancelled) return;
+              void fixWindowScaleIfNeeded('startup');
+          }, delayMs)
+      ));
       window.addEventListener('resize', handleWindowResize);
       window.addEventListener('focus', handleWindowFocus);
       window.addEventListener('blur', handleWindowBlur);
@@ -1397,6 +1809,9 @@ function App() {
           }
           if (resizeTimer !== null) {
               window.clearTimeout(resizeTimer);
+          }
+          for (const timer of startupLayoutFixTimers) {
+              window.clearTimeout(timer);
           }
           window.clearInterval(pollTimer);
           window.removeEventListener('resize', handleWindowResize);
@@ -1659,7 +2074,9 @@ function App() {
           setIsSecurityUpdateSettingsOpen(false);
           setSecurityUpdateRepairSource(repairEntry.repairSource);
           setFocusedAIProviderId(repairEntry.providerId);
-          setIsAISettingsOpen(true);
+          setActiveSettingsCenterGroupKey('services');
+          setActiveSettingsCenterPane({ key: 'ai', group: 'services' });
+          setIsSettingsModalOpen(true);
           return;
       }
       if (repairEntry.type === 'retry') {
@@ -1683,6 +2100,12 @@ function App() {
   useEffect(() => {
       return installGlobalImeCompositionTracking(window, document);
   }, []);
+  // 启动发现更新时打开设置中心「关于」页（由 useAppUpdateManager 通过 bridge 调用）
+  const updateCenterBridgeRef = useRef<{
+      open: () => void;
+      close: () => void;
+      isOpen: () => boolean;
+  } | null>(null);
   const {
       aboutDisplayVersion,
       aboutInfo,
@@ -1704,6 +2127,7 @@ function App() {
       markUpdateProgressDismissed,
       muteLatestUpdate,
       openDownloadedUpdateDirectory,
+      prepareAboutSurface,
       setIsAboutOpen,
       showUpdateDownloadProgress,
       updateChannel,
@@ -1711,6 +2135,7 @@ function App() {
   } = useAppUpdateManager({
       runtimeBuildType,
       t,
+      updateCenterBridgeRef,
   });
   const [aboutLastCheckedAt, setAboutLastCheckedAt] = useState('');
   useEffect(() => {
@@ -1941,11 +2366,33 @@ function App() {
       }
   }, [t]);
 
-  const handleApplicationQuitRequest = useCallback(async () => {
+  const handleApplicationQuitRequest = useCallback(async (confirmedAction?: ApplicationQuitConfirmedAction) => {
       if (applicationQuitHandlingRef.current) {
           return;
       }
       applicationQuitHandlingRef.current = true;
+
+      const runConfirmedAction = async (): Promise<boolean> => {
+          let accepted = false;
+          try {
+              if (confirmedAction) {
+                  accepted = await confirmedAction();
+              } else {
+                  await forceQuitApplication();
+                  accepted = true;
+              }
+          } catch (error) {
+              resetApplicationQuitRequest();
+              message.error(t('app.quit.message.quit_failed', {
+                  detail: error instanceof Error ? error.message : String(error),
+              }));
+              return false;
+          }
+          if (!accepted) {
+              resetApplicationQuitRequest();
+          }
+          return accepted;
+      };
 
       let targets;
       try {
@@ -1959,14 +2406,7 @@ function App() {
       }
 
       if (targets.length === 0) {
-          try {
-              await forceQuitApplication();
-          } catch (error) {
-              resetApplicationQuitRequest();
-              message.error(t('app.quit.message.quit_failed', {
-                  detail: error instanceof Error ? error.message : String(error),
-              }));
-          }
+          await runConfirmedAction();
           return;
       }
 
@@ -1988,12 +2428,7 @@ function App() {
                     onClick={() => {
                         destroyConfirm?.();
                         applicationQuitConfirmRef.current = null;
-                        void forceQuitApplication().catch((error) => {
-                            resetApplicationQuitRequest();
-                            message.error(t('app.quit.message.quit_failed', {
-                                detail: error instanceof Error ? error.message : String(error),
-                            }));
-                        });
+                        void runConfirmedAction();
                     }}
                   >
                       {t('app.quit.unsaved_sql.confirm_exit')}
@@ -2009,7 +2444,6 @@ function App() {
               try {
                   await saveApplicationQuitUnsavedSQLTargets(targets, saveQuery);
                   message.success(t('app.quit.unsaved_sql.saved'));
-                  await forceQuitApplication();
               } catch (error) {
                   resetApplicationQuitRequest();
                   message.error(t('app.quit.unsaved_sql.save_failed_cancel_exit', {
@@ -2017,11 +2451,16 @@ function App() {
                   }));
                   throw error;
               }
+              await runConfirmedAction();
           },
       });
       destroyConfirm = confirmRef.destroy;
       applicationQuitConfirmRef.current = confirmRef;
   }, [forceQuitApplication, resetApplicationQuitRequest, saveQuery, savedQueries, t, tabs]);
+
+  const handleInstallUpdateRequest = useCallback(async () => {
+      await handleApplicationQuitRequest(handleInstallFromProgress);
+  }, [handleApplicationQuitRequest, handleInstallFromProgress]);
 
   useEffect(() => {
       const offBeforeClose = EventsOn('app:before-close-request', () => {
@@ -2070,9 +2509,9 @@ function App() {
           throw new Error(t('app.connection_package.error.import_capability_unavailable'));
       }
 
-      let importedViews: unknown;
+      let importedRaw: unknown;
       try {
-          importedViews = await backendApp.ImportConnectionsPayload(raw, password);
+          importedRaw = await backendApp.ImportConnectionsPayload(raw, password);
       } catch (error) {
           if (isConnectionPackagePasswordRequiredError(error)) {
               throw error;
@@ -2084,24 +2523,22 @@ function App() {
                   : t('app.connection_package.message.import_failed'),
           );
       }
-      if (!Array.isArray(importedViews)) {
+      const imported = normalizeConnectionPackageImportPayload(importedRaw);
+      if (!imported) {
           throw new Error(t('app.connection_package.error.import_no_connections'));
       }
-      await refreshConnectionsAfterImport(importedViews as SavedConnection[]);
-      return importedViews as SavedConnection[];
+      await refreshConnectionsAfterImport(imported.connections);
+      // Redis DB 别名存在前端 appearance，需随连接包一并恢复
+      if (Object.keys(imported.redisDbAliases).length > 0) {
+          const currentAliases = useStore.getState().appearance.redisDbAliases;
+          useStore.getState().setAppearance({
+              redisDbAliases: mergeRedisDbAliases(currentAliases, imported.redisDbAliases),
+          });
+      }
+      return imported.connections;
   }, [refreshConnectionsAfterImport, t]);
 
-  const handleImportConnections = async (sourceGroup?: ToolCenterGroupKey) => {
-      setToolCenterBackGroupKey(sourceGroup ?? null);
-      const res = await (window as any).go.app.App.ImportConfigFile();
-      if (!res.success) {
-          if (res.message !== "已取消") {
-              void message.error(t('app.connection_package.message.import_failed_with_error', { error: res.message }));
-          }
-          return;
-      }
-
-      const raw = typeof res.data === 'string' ? res.data : String(res.data ?? '');
+  const importConnectionPayloadFromFile = async (raw: string, sourceGroup?: ToolCenterGroupKey) => {
       const importKind = detectConnectionImportKind(raw);
 
       if (importKind === 'invalid') {
@@ -2137,6 +2574,49 @@ function App() {
           }
           void message.error(e?.message || t('app.connection_package.message.import_failed'));
       }
+  };
+
+  const handleBrowserConnectionImportFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      const sourceGroup = browserConnectionImportSourceGroupRef.current;
+      browserConnectionImportSourceGroupRef.current = undefined;
+      event.target.value = '';
+      if (!file) {
+          return;
+      }
+
+      try {
+          await importConnectionPayloadFromFile(await file.text(), sourceGroup);
+      } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error ?? '').trim();
+          void message.error(detail || t('app.connection_package.message.import_failed'));
+      }
+  };
+
+  const handleImportConnections = async (sourceGroup?: ToolCenterGroupKey) => {
+      setToolCenterBackGroupKey(sourceGroup ?? null);
+      if (isWebRuntime) {
+          const input = browserConnectionImportInputRef.current;
+          if (!input) {
+              void message.error(t('app.connection_package.error.import_capability_unavailable'));
+              return;
+          }
+          browserConnectionImportSourceGroupRef.current = sourceGroup;
+          input.value = '';
+          input.click();
+          return;
+      }
+
+      const res = await (window as any).go.app.App.ImportConfigFile();
+      if (!res.success) {
+          if (res.message !== "已取消") {
+              void message.error(t('app.connection_package.message.import_failed_with_error', { error: res.message }));
+          }
+          return;
+      }
+
+      const raw = typeof res.data === 'string' ? res.data : String(res.data ?? '');
+      await importConnectionPayloadFromFile(raw, sourceGroup);
   };
 
   const handleExportConnections = async (sourceGroup?: ToolCenterGroupKey) => {
@@ -2197,18 +2677,23 @@ function App() {
 
       try {
           if (connectionPackageDialog.mode === 'export') {
-              if (typeof backendApp?.ExportConnectionsPackage !== 'function') {
-                  throw new Error(t('app.connection_package.error.export_capability_unavailable'));
-              }
+               const exportMethod = isWebRuntime
+                   ? backendApp?.ExportConnectionsPayload
+                   : backendApp?.ExportConnectionsPackage;
+               if (typeof exportMethod !== 'function') {
+                   throw new Error(t('app.connection_package.error.export_capability_unavailable'));
+               }
 
-              let res: unknown;
-              try {
-                  res = await backendApp.ExportConnectionsPackage({
+               let res: unknown;
+               try {
+                   res = await exportMethod({
                       includeSecrets: connectionPackageDialog.includeSecrets,
                       filePassword: (
                           connectionPackageDialog.includeSecrets
                           && connectionPackageDialog.useFilePassword
                       ) ? password : '',
+                      // Redis DB 别名仅存前端，导出时注入连接包
+                      redisDbAliases: useStore.getState().appearance.redisDbAliases,
                   });
               } catch (error) {
                   const detail = error instanceof Error ? error.message : String(error ?? '').trim();
@@ -2223,11 +2708,17 @@ function App() {
                   setConnectionPackageDialog(exportResult.nextDialog);
                   return;
               }
-              if (exportResult.kind === 'failed') {
-                  throw new Error(exportResult.error);
-              }
+               if (exportResult.kind === 'failed') {
+                   throw new Error(exportResult.error);
+               }
+               if (isWebRuntime) {
+                   const content = typeof (res as any)?.data === 'string' ? (res as any).data : '';
+                   if (!content || !downloadBrowserTextFile(content, 'connections.gonavi-conn', 'application/json;charset=utf-8')) {
+                       throw new Error(t('app.connection_package.error.export_capability_unavailable'));
+                   }
+               }
 
-              closeConnectionPackageDialog();
+               closeConnectionPackageDialog();
               void message.success(t('app.connection_package.message.export_succeeded'));
               return;
           }
@@ -2260,7 +2751,29 @@ function App() {
   const [activeSettingsCenterGroupKey, setActiveSettingsCenterGroupKey] = useState<SettingsCenterGroupKey>('preferences');
   const [activeSettingsCenterPane, setActiveSettingsCenterPane] = useState<SettingsCenterPaneState | null>(null);
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
-  const [themeModalSection, setThemeModalSection] = useState<'theme' | 'appearance'>('theme');
+  type ThemeSettingsSection = 'theme' | 'appearance' | 'workspace';
+  const THEME_SETTINGS_SECTION_STORAGE_KEY = 'gonavi.themeSettingsSection';
+  const sanitizeThemeSettingsSection = useCallback((value: unknown): ThemeSettingsSection => {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (normalized === 'appearance' || normalized === 'workspace') {
+          return normalized;
+      }
+      return 'theme';
+  }, []);
+  const [themeModalSection, setThemeModalSection] = useState<ThemeSettingsSection>(() => {
+      try {
+          return sanitizeThemeSettingsSection(window.localStorage.getItem(THEME_SETTINGS_SECTION_STORAGE_KEY));
+      } catch {
+          return 'theme';
+      }
+  });
+  useEffect(() => {
+      try {
+          window.localStorage.setItem(THEME_SETTINGS_SECTION_STORAGE_KEY, themeModalSection);
+      } catch {
+          // ignore persistence failures
+      }
+  }, [themeModalSection]);
   const [isLinuxCJKFontBannerDismissed, setIsLinuxCJKFontBannerDismissed] = useState(false);
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
@@ -2323,7 +2836,7 @@ function App() {
   }, [isThemeModalOpen, isThemeSettingsPaneOpen, runtimePlatform, t, themeModalSection]);
 
   useEffect(() => {
-      if ((!isThemeModalOpen && !isThemeSettingsPaneOpen) || themeModalSection !== 'appearance' || tabDisplaySettingsFocusRequest === 0) {
+      if ((!isThemeModalOpen && !isThemeSettingsPaneOpen) || themeModalSection !== 'workspace' || tabDisplaySettingsFocusRequest === 0) {
           return;
       }
       const timer = window.setTimeout(() => {
@@ -2360,7 +2873,7 @@ function App() {
   const [selectedDataRootPath, setSelectedDataRootPath] = useState('');
   const [dataRootLoading, setDataRootLoading] = useState(false);
   const [dataRootApplying, setDataRootApplying] = useState(false);
-  const [isAISettingsOpen, setIsAISettingsOpen] = useState(false);
+
   const aiEntryPlacement = resolveAIEntryPlacement();
   const legacyAiEdgeHandleAttachment = resolveLegacyAIEdgeHandleAttachment(aiPanelVisible);
   const aiPanelOverlayActive = aiPanelVisible && shouldOverlayAIPanel({
@@ -2616,15 +3129,62 @@ function App() {
       setActiveSettingsCenterPane({ key, group });
       setIsSettingsModalOpen(true);
   }, []);
+  const finalizeSecurityRepairReturnFromAISettings = useCallback(() => {
+      const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
+      setFocusedAIProviderId(undefined);
+      setSecurityUpdateRepairSource(null);
+      if (reopenSecurityUpdateDetails) {
+          setIsSecurityUpdateSettingsOpen(true);
+      }
+  }, [securityUpdateRepairSource]);
   const handleBackFromSettingsCenterPane = useCallback(() => {
+      const leavingAI = activeSettingsCenterPane?.key === 'ai';
       const returnGroup = activeSettingsCenterPane?.group ?? activeSettingsCenterGroupKey;
       setActiveSettingsCenterGroupKey(returnGroup);
       setActiveSettingsCenterPane(null);
-  }, [activeSettingsCenterGroupKey, activeSettingsCenterPane?.group]);
+      if (leavingAI) {
+          finalizeSecurityRepairReturnFromAISettings();
+      }
+  }, [
+      activeSettingsCenterGroupKey,
+      activeSettingsCenterPane?.group,
+      activeSettingsCenterPane?.key,
+      finalizeSecurityRepairReturnFromAISettings,
+  ]);
   const handleCancelSettingsCenterPane = useCallback(() => {
+      const leavingAI = activeSettingsCenterPane?.key === 'ai';
       setActiveSettingsCenterPane(null);
       setIsSettingsModalOpen(false);
-  }, []);
+      if (leavingAI) {
+          finalizeSecurityRepairReturnFromAISettings();
+      }
+  }, [activeSettingsCenterPane?.key, finalizeSecurityRepairReturnFromAISettings]);
+  const isSettingsAboutPaneOpen = isSettingsModalOpen && activeSettingsCenterPane?.key === 'about-go-navi';
+  const isSettingsAboutPaneOpenRef = useRef(false);
+  useEffect(() => {
+      isSettingsAboutPaneOpenRef.current = isSettingsAboutPaneOpen;
+  }, [isSettingsAboutPaneOpen]);
+  useEffect(() => {
+      updateCenterBridgeRef.current = {
+          open: () => {
+              handleOpenSettingsCenterPane('about', 'about-go-navi');
+          },
+          close: () => {
+              setActiveSettingsCenterPane(null);
+              setIsSettingsModalOpen(false);
+          },
+          isOpen: () => isSettingsAboutPaneOpenRef.current,
+      };
+      return () => {
+          updateCenterBridgeRef.current = null;
+      };
+  }, [handleOpenSettingsCenterPane]);
+  useEffect(() => {
+      if (!isSettingsAboutPaneOpen) {
+          return;
+      }
+      prepareAboutSurface();
+  }, [isSettingsAboutPaneOpen, prepareAboutSurface]);
   const handleOpenToolCenterPane = useCallback((group: ToolCenterGroupKey, key: ToolCenterPaneKey) => {
       setToolCenterBackGroupKey(group);
       setActiveToolCenterGroupKey(group);
@@ -2943,10 +3503,13 @@ function App() {
       }
   }, [securityUpdateRepairSource]);
 
+  /** 从聊天面板等入口打开 AI 配置：走设置中心，不再弹独立 AISettingsModal */
   const handleOpenAISettings = useCallback((providerId?: string) => {
       setSecurityUpdateRepairSource(null);
       setFocusedAIProviderId(providerId);
-      setIsAISettingsOpen(true);
+      setActiveSettingsCenterGroupKey('services');
+      setActiveSettingsCenterPane({ key: 'ai', group: 'services' });
+      setIsSettingsModalOpen(true);
   }, []);
 
   const handleAIPanelRenderError = useCallback((error: Error, errorInfo: React.ErrorInfo) => {
@@ -2965,16 +3528,6 @@ function App() {
   const handleRetryAIPanelRender = useCallback(() => {
       setAiPanelRenderNonce((current) => current + 1);
   }, []);
-
-  const handleCloseAISettings = useCallback(() => {
-      const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
-      setIsAISettingsOpen(false);
-      setFocusedAIProviderId(undefined);
-      setSecurityUpdateRepairSource(null);
-      if (reopenSecurityUpdateDetails) {
-          setIsSecurityUpdateSettingsOpen(true);
-      }
-  }, [securityUpdateRepairSource]);
 
   const handleWebLogout = useCallback(async () => {
       try {
@@ -3103,6 +3656,7 @@ function App() {
   useEffect(() => {
     document.body.style.backgroundColor = 'transparent';
     document.body.style.color = darkMode ? '#ffffff' : '#000000';
+    document.documentElement.style.colorScheme = darkMode ? 'dark' : 'light';
     document.body.setAttribute('data-theme', darkMode ? 'dark' : 'light');
     document.body.setAttribute('data-ui-version', appearance.uiVersion);
     document.body.setAttribute('data-platform', runtimePlatform || '');
@@ -3161,7 +3715,7 @@ function App() {
   useEffect(() => {
       const handleOpenTabDisplaySettingsEvent = () => {
           setIsSettingsModalOpen(false);
-          setThemeModalSection('appearance');
+          setThemeModalSection('workspace');
           setIsThemeModalOpen(true);
           setTabDisplaySettingsFocusRequest((current) => current + 1);
       };
@@ -3256,7 +3810,7 @@ function App() {
                   handleToggleLogPanel();
                   break;
               case 'toggleTheme':
-                  setThemePreference(themeMode === 'dark' ? 'light' : 'dark');
+                  selectPresetTheme(themeMode === 'dark' ? 'light' : 'dark');
                   break;
               case 'openShortcutManager':
                   setIsShortcutModalOpen(true);
@@ -3276,7 +3830,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleGlobalShortcut, true);
       };
-  }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, shortcutOptions, switchActiveTabByOffset, themeMode, setThemePreference, toggleAIPanel, useNativeMacWindowControls]);
+  }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, selectPresetTheme, shortcutOptions, switchActiveTabByOffset, themeMode, toggleAIPanel, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!capturingShortcutAction) {
@@ -3358,16 +3912,25 @@ function App() {
   const resizeGuideColor = isV2Ui
       ? 'var(--gn-accent, #16a34a)'
       : (darkMode ? 'rgba(246, 196, 83, 0.55)' : 'rgba(24, 144, 255, 0.5)');
-  const v2AntPrimaryColor = darkMode ? '#22c55e' : '#16a34a';
-  const v2AntPrimaryHoverColor = darkMode ? '#4ade80' : '#15803d';
-  const v2AntPrimaryActiveColor = darkMode ? '#16a34a' : '#166534';
-  const v2AntPrimaryBgColor = darkMode ? 'rgba(34, 197, 94, 0.20)' : '#dcfce7';
-  const v2AntPrimaryBgHoverColor = darkMode ? 'rgba(34, 197, 94, 0.28)' : '#bbf7d0';
-  const v2AntPrimaryBorderColor = darkMode ? 'rgba(34, 197, 94, 0.42)' : '#86efac';
-  const v2AntPrimaryBorderHoverColor = darkMode ? 'rgba(74, 222, 128, 0.58)' : '#4ade80';
-  const v2AntControlActiveBg = darkMode ? 'rgba(34, 197, 94, 0.16)' : 'rgba(34, 197, 94, 0.10)';
-  const v2AntControlActiveHoverBg = darkMode ? 'rgba(34, 197, 94, 0.24)' : 'rgba(34, 197, 94, 0.16)';
-  const v2AntControlOutline = darkMode ? 'rgba(34, 197, 94, 0.42)' : 'rgba(22, 163, 74, 0.22)';
+  const v2AntPrimaryColor = customThemeAntTokens.primary ?? (darkMode ? '#22c55e' : '#16a34a');
+  const v2AntPrimaryContrastColor = customThemeAntTokens.primaryContrast ?? '#ffffff';
+  const v2AntPrimaryHoverColor = customThemeAntTokens.primaryHover ?? (darkMode ? '#4ade80' : '#15803d');
+  const v2AntPrimaryActiveColor = customThemeAntTokens.primaryActive ?? (darkMode ? '#16a34a' : '#166534');
+  const v2AntPrimaryBgColor = customThemeAntTokens.primaryBg ?? (darkMode ? 'rgba(34, 197, 94, 0.20)' : '#dcfce7');
+  const v2AntPrimaryBgHoverColor = customThemeAntTokens.primaryBgHover ?? (darkMode ? 'rgba(34, 197, 94, 0.28)' : '#bbf7d0');
+  const v2AntPrimaryBorderColor = customThemeAntTokens.primaryBorder ?? (darkMode ? 'rgba(34, 197, 94, 0.42)' : '#86efac');
+  const v2AntPrimaryBorderHoverColor = customThemeAntTokens.primaryBorderHover ?? (darkMode ? 'rgba(74, 222, 128, 0.58)' : '#4ade80');
+  const v2AntControlActiveBg = customThemeAntTokens.controlActiveBg ?? (darkMode ? 'rgba(34, 197, 94, 0.16)' : 'rgba(34, 197, 94, 0.10)');
+  const v2AntControlActiveHoverBg = customThemeAntTokens.controlActiveHoverBg ?? (darkMode ? 'rgba(34, 197, 94, 0.24)' : 'rgba(34, 197, 94, 0.16)');
+  const v2AntControlOutline = customThemeAntTokens.controlOutline ?? (darkMode ? 'rgba(34, 197, 94, 0.42)' : 'rgba(22, 163, 74, 0.22)');
+  const v2AntBgContainer = customThemeAntTokens.bgContainer;
+  const v2AntBgElevated = customThemeAntTokens.bgElevated;
+  const v2AntFillAlter = customThemeAntTokens.fillAlter;
+  const v2AntTextPrimary = customThemeAntTokens.textPrimary;
+  const v2AntTextSecondary = customThemeAntTokens.textSecondary;
+  const v2AntBorder = customThemeAntTokens.border;
+  const v2AntRowHoverBg = customThemeAntTokens.rowHoverBg;
+  const v2AntInfoColor = customThemeAntTokens.info ?? v2AntPrimaryColor;
   const antdTheme = useMemo(() => ({
       algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
       token: {
@@ -3380,19 +3943,26 @@ function App() {
           controlHeightSM: tokenControlHeightSM,
           controlHeightLG: tokenControlHeightLG,
           colorBgLayout: 'transparent',
-          colorBgContainer: darkMode
+          colorBgContainer: (isV2Ui ? v2AntBgContainer : undefined) ?? (darkMode
               ? `rgba(29, 29, 29, ${effectiveOpacity})`
-              : `rgba(255, 255, 255, ${effectiveOpacity})`,
-          colorBgElevated: darkMode
+              : `rgba(255, 255, 255, ${effectiveOpacity})`),
+          colorBgElevated: (isV2Ui ? v2AntBgElevated : undefined) ?? (darkMode
               ? '#1f1f1f'
-              : '#ffffff',
-          colorFillAlter: darkMode
+              : '#ffffff'),
+          colorFillAlter: (isV2Ui ? v2AntFillAlter : undefined) ?? (darkMode
               ? `rgba(38, 38, 38, ${effectiveOpacity})`
-              : `rgba(250, 250, 250, ${effectiveOpacity})`,
+              : `rgba(250, 250, 250, ${effectiveOpacity})`),
+          ...(isV2Ui && v2AntTextPrimary ? { colorText: v2AntTextPrimary } : {}),
+          ...(isV2Ui && v2AntTextSecondary ? { colorTextSecondary: v2AntTextSecondary } : {}),
+          ...(isV2Ui && v2AntBorder ? {
+              colorBorder: v2AntBorder,
+              colorBorderSecondary: v2AntBorder,
+          } : {}),
           colorPrimary: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#f6c453' : '#1677ff'),
+          colorTextLightSolid: isV2Ui ? v2AntPrimaryContrastColor : '#ffffff',
           colorPrimaryHover: isV2Ui ? v2AntPrimaryHoverColor : (darkMode ? '#ffd666' : '#4096ff'),
           colorPrimaryActive: isV2Ui ? v2AntPrimaryActiveColor : (darkMode ? '#d8a93b' : '#0958d9'),
-          colorInfo: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#f6c453' : '#1677ff'),
+          colorInfo: isV2Ui ? v2AntInfoColor : (darkMode ? '#f6c453' : '#1677ff'),
           colorLink: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'),
           colorLinkHover: isV2Ui ? v2AntPrimaryHoverColor : (darkMode ? '#ffe58f' : '#4096ff'),
           colorLinkActive: isV2Ui ? v2AntPrimaryActiveColor : (darkMode ? '#d8a93b' : '#0958d9'),
@@ -3413,7 +3983,8 @@ function App() {
           },
           Table: {
               headerBg: 'transparent',
-              rowHoverBg: darkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.02)',
+              rowHoverBg: (isV2Ui ? v2AntRowHoverBg : undefined)
+                  ?? (darkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.02)'),
           },
           Tabs: {
               cardBg: 'transparent',
@@ -3427,16 +3998,25 @@ function App() {
       darkMode,
       effectiveOpacity,
       isV2Ui,
+      v2AntBgContainer,
+      v2AntBgElevated,
+      v2AntBorder,
       v2AntControlActiveBg,
       v2AntControlActiveHoverBg,
       v2AntControlOutline,
+      v2AntFillAlter,
+      v2AntInfoColor,
       v2AntPrimaryActiveColor,
       v2AntPrimaryBgColor,
       v2AntPrimaryBgHoverColor,
       v2AntPrimaryBorderColor,
       v2AntPrimaryBorderHoverColor,
       v2AntPrimaryColor,
+      v2AntPrimaryContrastColor,
       v2AntPrimaryHoverColor,
+      v2AntRowHoverBg,
+      v2AntTextPrimary,
+      v2AntTextSecondary,
       tokenControlHeight,
       tokenControlHeightLG,
       tokenControlHeightSM,
@@ -3846,8 +4426,13 @@ function App() {
           </Button>
       ) : null,
       isLatestUpdateDownloaded ? (
-          <Button key="install-direct" type="primary" icon={<DownloadOutlined />} onClick={handleInstallFromProgress}>
-              {t('app.about.action.install_update')}
+          <Button
+              key="restart-to-update"
+              type="primary"
+              icon={<DownloadOutlined />}
+              onClick={() => { void handleInstallUpdateRequest(); }}
+          >
+              {t('app.about.action.restart_to_update')}
           </Button>
       ) : null,
   ].filter(Boolean);
@@ -4177,7 +4762,836 @@ function App() {
       </>
   );
 
-  const renderThemeSettingsContent = () => (
+  const renderThemeSettingsSection = (title: React.ReactNode, children: React.ReactNode, hint?: React.ReactNode) => (
+      <section className="gonavi-settings-section">
+          <div className="gonavi-settings-section-title">{title}</div>
+          {hint ? <div className="gonavi-settings-section-hint">{hint}</div> : null}
+          <div>{children}</div>
+      </section>
+  );
+
+  const renderThemeSettingsRow = ({
+      label,
+      hint,
+      control,
+      stacked = false,
+      controlOnly = false,
+  }: {
+      label?: React.ReactNode;
+      hint?: React.ReactNode;
+      control: React.ReactNode;
+      stacked?: boolean;
+      /** 分区标题已说明用途时，只渲染控件，避免标题重复 */
+      controlOnly?: boolean;
+  }) => (
+      <div className={`gonavi-settings-row${stacked || controlOnly ? ' is-stacked' : ''}${controlOnly ? ' is-control-only' : ''}`}>
+          {!controlOnly ? (
+              <div>
+                  <div className="gonavi-settings-label">{label}</div>
+                  {hint ? <div className="gonavi-settings-label-hint">{hint}</div> : null}
+              </div>
+          ) : null}
+          <div className="gonavi-settings-control">{control}</div>
+      </div>
+  );
+
+  const renderThemeModePreview = (preview: 'light' | 'dark' | 'system') => (
+      <div
+        aria-hidden
+        className={`gonavi-settings-mode-preview${preview === 'system' ? ' is-system' : ''}`}
+      >
+          {(preview === 'light' || preview === 'system') ? (
+              <div className="gonavi-settings-mode-preview-pane is-light">
+                  <span className="gonavi-settings-mode-preview-line" />
+                  <span className="gonavi-settings-mode-preview-line" />
+                  <span className="gonavi-settings-mode-preview-line" />
+              </div>
+          ) : null}
+          {(preview === 'dark' || preview === 'system') ? (
+              <div className="gonavi-settings-mode-preview-pane is-dark">
+                  <span className="gonavi-settings-mode-preview-line" />
+                  <span className="gonavi-settings-mode-preview-line" />
+                  <span className="gonavi-settings-mode-preview-line" />
+              </div>
+          ) : null}
+      </div>
+  );
+
+  const renderUiVersionPreview = (version: 'legacy' | 'v2') => (
+      <div aria-hidden className={`gonavi-settings-ui-version-preview is-${version}`}>
+          <div className="uv-side">
+              <span className="uv-dot" />
+              <span className="uv-dot" />
+              <span className="uv-dot" />
+              {version === 'legacy' ? <span className="uv-dot" /> : null}
+          </div>
+          <div className="uv-main">
+              <div className="uv-bar is-accent" />
+              <div className="uv-cards">
+                  <div className="uv-card" />
+                  <div className="uv-card" />
+              </div>
+          </div>
+      </div>
+  );
+
+  const renderThemeSettingsContentV2 = () => (
+              <div className="gonavi-theme-settings" style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                  padding: '4px 4px 0',
+                  height: '100%',
+                  minHeight: 0,
+                  overflow: 'hidden',
+                  boxSizing: 'border-box',
+              }}>
+                  <div style={{ flexShrink: 0, display: 'grid', gap: 4 }}>
+                      {/* 自绘 Tab：避开 antd Segmented CSS-in-JS 压掉选中态 */}
+                      <div className="gonavi-settings-tabs" role="tablist" aria-label={t('app.settings.entry.theme.title')}>
+                          {([
+                              { value: 'theme' as const, label: t('app.theme.nav.theme.title'), icon: <SkinOutlined /> },
+                              { value: 'appearance' as const, label: t('app.theme.nav.appearance.title'), icon: <BgColorsOutlined /> },
+                              { value: 'workspace' as const, label: t('app.theme.nav.workspace.title'), icon: <AppstoreOutlined /> },
+                          ]).map((item) => {
+                              const active = themeModalSection === item.value;
+                              return (
+                                  <button
+                                      key={item.value}
+                                      type="button"
+                                      role="tab"
+                                      aria-selected={active}
+                                      className={`gonavi-settings-tab${active ? ' is-active' : ''}`}
+                                      onClick={() => setThemeModalSection(item.value)}
+                                  >
+                                      <span className="gonavi-settings-tab-icon">{item.icon}</span>
+                                      <span>{item.label}</span>
+                                  </button>
+                              );
+                          })}
+                      </div>
+                      <div className="gonavi-settings-inline-meta" style={{ marginTop: 2 }}>
+                          {t('app.theme.instant_apply_hint')}
+                      </div>
+                  </div>
+                  <div
+                    key={themeModalSection}
+                    style={{
+                        minWidth: 0,
+                        minHeight: 0,
+                        flex: 1,
+                        overflowY: 'auto',
+                        /* visible：避免 Slider 两端手柄被横向裁切 */
+                        overflowX: 'visible',
+                        overscrollBehavior: 'contain',
+                        paddingRight: 8,
+                        paddingLeft: 2,
+                        paddingBottom: 20,
+                    }}
+                  >
+                      {themeModalSection === 'theme' ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {renderThemeSettingsSection(
+                                  t('app.theme.mode_title'),
+                                  <div className="gonavi-settings-mode-grid" role="radiogroup" aria-label={t('app.theme.mode_title')}>
+                                      {([
+                                          { key: 'light' as const, label: t('app.theme.mode.light.label'), preview: 'light' as const },
+                                          { key: 'dark' as const, label: t('app.theme.mode.dark.label'), preview: 'dark' as const },
+                                          { key: 'system' as const, label: t('app.theme.mode.system.label'), preview: 'system' as const },
+                                      ]).map((item) => {
+                                          const active = !activeCustomTheme && themePreference === item.key;
+                                          return (
+                                              <button
+                                                  key={item.key}
+                                                  type="button"
+                                                  role="radio"
+                                                  aria-checked={active}
+                                                  className={`gonavi-settings-mode-tile${active ? ' is-active' : ''}`}
+                                                  onClick={() => selectPresetTheme(item.key)}
+                                              >
+                                                  {renderThemeModePreview(item.preview)}
+                                                  <div className="gonavi-settings-mode-meta">
+                                                      <span className="gonavi-settings-mode-label">{item.label}</span>
+                                                      {active ? <CheckOutlined className="gonavi-settings-mode-check" /> : null}
+                                                  </div>
+                                              </button>
+                                          );
+                                      })}
+                                  </div>,
+                              )}
+                              {renderThemeSettingsSection(
+                                  t('app.theme.custom.title'),
+                                  <CustomThemeManager />,
+                              )}
+                              {renderThemeSettingsSection(
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                      <span>{t('app.theme.ui_version.title')}</span>
+                                      <span style={{
+                                          fontSize: 10,
+                                          fontWeight: 700,
+                                          padding: '1px 6px',
+                                          background: darkMode ? 'rgba(56,189,248,0.18)' : 'rgba(2,132,199,0.10)',
+                                          color: darkMode ? '#7dd3fc' : '#0284c7',
+                                          borderRadius: 4,
+                                      }}>
+                                          {t('app.theme.ui_version.badge.new')}
+                                      </span>
+                                      {appearance.uiVersion === 'v2' ? (
+                                          <span className="gonavi-settings-beta-chip">{t('app.theme.ui_version.v2.badge')}</span>
+                                      ) : null}
+                                  </span>,
+                                  <>
+                                      <div
+                                        className="gonavi-settings-ui-version-grid"
+                                        role="radiogroup"
+                                        aria-label={t('app.theme.ui_version.title')}
+                                      >
+                                          {([
+                                              {
+                                                  key: 'legacy' as const,
+                                                  label: t('app.theme.ui_version.legacy.label'),
+                                                  badge: t('app.theme.ui_version.legacy.badge'),
+                                                  badgeClass: '',
+                                              },
+                                              {
+                                                  key: 'v2' as const,
+                                                  label: t('app.theme.ui_version.v2.label'),
+                                                  badge: t('app.theme.ui_version.v2.badge'),
+                                                  badgeClass: ' is-new',
+                                              },
+                                          ]).map((item) => {
+                                              const active = (appearance.uiVersion ?? 'legacy') === item.key;
+                                              return (
+                                                  <button
+                                                      key={item.key}
+                                                      type="button"
+                                                      role="radio"
+                                                      aria-checked={active}
+                                                      className={`gonavi-settings-ui-version-tile${active ? ' is-active' : ''}`}
+                                                      onClick={() => setAppearance({ uiVersion: item.key })}
+                                                  >
+                                                      {renderUiVersionPreview(item.key)}
+                                                      <div className="gonavi-settings-ui-version-meta">
+                                                          <span className="gonavi-settings-ui-version-title">
+                                                              <span>{item.label}</span>
+                                                              <span className={`gonavi-settings-ui-version-badge${item.badgeClass}`}>{item.badge}</span>
+                                                          </span>
+                                                          {active ? <CheckOutlined className="gonavi-settings-mode-check" /> : null}
+                                                      </div>
+                                                  </button>
+                                              );
+                                          })}
+                                      </div>
+                                      <div className="gonavi-settings-inline-meta" style={{ marginTop: 8 }}>
+                                          {t('app.theme.ui_version.platform_hint')}
+                                      </div>
+                                      {appearance.uiVersion === 'v2' ? (
+                                          <div className="gonavi-settings-inline-choice-row">
+                                              <Tooltip title={t('app.theme.ui_version.sidebar_search.hint')}>
+                                                  <span className="gonavi-settings-label" style={{ cursor: 'help' }}>
+                                                      {t('app.theme.ui_version.sidebar_search.title')}
+                                                  </span>
+                                              </Tooltip>
+                                              <div className="gonavi-settings-pills" role="group" aria-label={t('app.theme.ui_version.sidebar_search.title')}>
+                                                  {([
+                                                      { value: 'command' as const, label: t('app.theme.ui_version.sidebar_search.command') },
+                                                      { value: 'filter' as const, label: t('app.theme.ui_version.sidebar_search.filter') },
+                                                  ]).map((item) => {
+                                                      const active = (appearance.v2SidebarSearchMode ?? 'command') === item.value;
+                                                      return (
+                                                          <button
+                                                              key={item.value}
+                                                              type="button"
+                                                              className={`gonavi-settings-pill${active ? ' is-active' : ''}`}
+                                                              aria-pressed={active}
+                                                              onClick={() => setAppearance({ v2SidebarSearchMode: item.value })}
+                                                          >
+                                                              {item.label}
+                                                          </button>
+                                                      );
+                                                  })}
+                                              </div>
+                                          </div>
+                                      ) : null}
+                                  </>,
+                              )}
+                          </div>
+                      ) : themeModalSection === 'appearance' ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {renderThemeSettingsSection(
+                                  t('app.theme.nav.appearance.title'),
+                                  <>
+                                      {renderThemeSettingsRow({
+                                          label: t('app.theme.appearance.ui_scale_title'),
+                                          hint: t('app.theme.appearance.ui_scale_hint'),
+                                          stacked: true,
+                                          control: (
+                                              <ThemeSettingsSlider
+                                                  min={MIN_UI_SCALE}
+                                                  max={MAX_UI_SCALE}
+                                                  step={0.05}
+                                                  marks={UI_SCALE_SLIDER_MARKS}
+                                                  value={effectiveUiScale}
+                                                  unit="percent"
+                                                  onChange={(v) => setUiScale(v)}
+                                              />
+                                          ),
+                                      })}
+                                      {renderThemeSettingsRow({
+                                          label: t('app.theme.appearance.font_size_title'),
+                                          stacked: true,
+                                          control: (
+                                              <ThemeSettingsSlider
+                                                  min={MIN_FONT_SIZE}
+                                                  max={MAX_FONT_SIZE}
+                                                  step={1}
+                                                  marks={FONT_SIZE_SLIDER_MARKS}
+                                                  value={effectiveFontSize}
+                                                  unit="px"
+                                                  onChange={(v) => setFontSize(v)}
+                                              />
+                                          ),
+                                      })}
+                                      {appearance.uiVersion === 'v2' ? renderThemeSettingsRow({
+                                          label: t('app.theme.appearance.sidebar_rail_scale_title'),
+                                          hint: t('app.theme.appearance.sidebar_rail_scale_hint'),
+                                          stacked: true,
+                                          control: (
+                                              <ThemeSettingsSlider
+                                                  min={MIN_V2_SIDEBAR_RAIL_SCALE}
+                                                  max={MAX_V2_SIDEBAR_RAIL_SCALE}
+                                                  step={0.05}
+                                                  marks={SIDEBAR_RAIL_SCALE_SLIDER_MARKS}
+                                                  value={effectiveSidebarRailScale}
+                                                  unit="percent"
+                                                  onChange={(value) => setAppearance({
+                                                      v2SidebarRailScale: sanitizeV2SidebarRailScale(value),
+                                                  })}
+                                              />
+                                          ),
+                                      }) : null}
+                                  </>,
+                              )}
+                              {renderThemeSettingsSection(
+                                  t('app.theme.font_family.title'),
+                                  <>
+                                      <div style={{ padding: '8px 0' }}>
+                                          <div className="gonavi-settings-label" style={{ marginBottom: 8 }}>{t('app.theme.font_family.ui_title')}</div>
+                                          <Select
+                                              allowClear
+                                              showSearch
+                                              optionFilterProp="label"
+                                              loading={isFontFamiliesLoading}
+                                              placeholder={DEFAULT_UI_FONT_FAMILY}
+                                              value={appearance.customUIFontFamily ?? undefined}
+                                              onChange={(value) => setAppearance({
+                                                  customUIFontFamily: sanitizeFontFamilyInput(value),
+                                              })}
+                                              onClear={() => setAppearance({ customUIFontFamily: null })}
+                                              options={uiFontOptions.map((option) => ({
+                                                  value: option.value,
+                                                  label: option.label,
+                                              }))}
+                                              filterOption={filterFontOption}
+                                              popupMatchSelectWidth
+                                              style={{ width: '100%' }}
+                                              optionRender={(option) => renderFontOptionLabel({
+                                                  value: String(option.data.value),
+                                                  label: String(option.data.label),
+                                              })}
+                                          />
+                                          <div className="gonavi-settings-inline-meta">
+                                              {fontFamiliesLoadError
+                                                  ? t('app.theme.font_family.load_failed_fallback', { error: fontFamiliesLoadError })
+                                                  : (installedFontFamilies.length > 0
+                                                      ? t('app.theme.font_family.loaded_ui_hint', { count: installedFontFamilies.length })
+                                                      : t('app.theme.font_family.loading_ui_hint'))}
+                                          </div>
+                                          {linuxCJKFontInstallHint && hasLoadedInstalledFontsRef.current && !isFontFamiliesLoading && !fontFamiliesLoadError ? (
+                                              <div className="gonavi-settings-alert" style={{ borderColor: darkMode ? 'rgba(250,204,21,0.28)' : 'rgba(217,119,6,0.22)', background: darkMode ? 'rgba(250,204,21,0.08)' : 'rgba(251,191,36,0.12)', color: darkMode ? 'rgba(254,249,195,0.92)' : '#92400e' }}>
+                                                  {t('app.theme.font_family.linux_cjk_install_prefix')}
+                                                  <span style={{ fontFamily: 'var(--gn-font-mono)', marginLeft: 6 }}>{linuxCJKFontInstallHint}</span>
+                                                  {t('app.theme.font_family.linux_cjk_install_suffix')}
+                                              </div>
+                                          ) : null}
+                                      </div>
+                                      <div style={{ padding: '8px 0', borderTop: '1px solid var(--gn-settings-line)' }}>
+                                          <div className="gonavi-settings-label" style={{ marginBottom: 8 }}>{t('app.theme.font_family.mono_title')}</div>
+                                          <Select
+                                              allowClear
+                                              showSearch
+                                              optionFilterProp="label"
+                                              loading={isFontFamiliesLoading}
+                                              placeholder={DEFAULT_MONO_FONT_FAMILY}
+                                              value={appearance.customMonoFontFamily ?? undefined}
+                                              onChange={(value) => setAppearance({
+                                                  customMonoFontFamily: sanitizeFontFamilyInput(value),
+                                              })}
+                                              onClear={() => setAppearance({ customMonoFontFamily: null })}
+                                              options={monoFontOptions.map((option) => ({
+                                                  value: option.value,
+                                                  label: option.label,
+                                              }))}
+                                              filterOption={filterFontOption}
+                                              popupMatchSelectWidth
+                                              style={{ width: '100%' }}
+                                              optionRender={(option) => renderFontOptionLabel({
+                                                  value: String(option.data.value),
+                                                  label: String(option.data.label),
+                                              })}
+                                          />
+                                          <div className="gonavi-settings-inline-meta">
+                                              {fontFamiliesLoadError
+                                                  ? t('app.theme.font_family.mono_fallback_hint')
+                                                  : t('app.theme.font_family.mono_hint')}
+                                          </div>
+                                      </div>
+                                  </>,
+                              )}
+                              {renderThemeSettingsSection(
+                                  t('app.theme.appearance.transparency_blur_title'),
+                                  <>
+                                      {renderThemeSettingsRow({
+                                          label: t('app.theme.appearance.enable_transparency_blur'),
+                                          hint: t('app.theme.appearance.enable_transparency_blur_hint'),
+                                          control: (
+                                              <Switch
+                                                  checked={appearance.enabled !== false}
+                                                  onChange={(checked) => setAppearance({ enabled: checked })}
+                                              />
+                                          ),
+                                      })}
+                                      <div style={{ opacity: appearance.enabled !== false ? 1 : 0.55 }}>
+                                          {renderThemeSettingsRow({
+                                              label: t('app.theme.appearance.opacity_title'),
+                                              stacked: true,
+                                              control: (
+                                                  <ThemeSettingsSlider
+                                                      min={0.1}
+                                                      max={1.0}
+                                                      step={0.05}
+                                                      marks={OPACITY_SLIDER_MARKS}
+                                                      disabled={appearance.enabled === false}
+                                                      value={appearance.opacity ?? 1.0}
+                                                      unit="percent"
+                                                      onChange={(v) => setAppearance({ opacity: v })}
+                                                  />
+                                              ),
+                                          })}
+                                          {isWindowsPlatform() ? (
+                                              <div className="gonavi-settings-inline-meta">{t('app.theme.appearance.windows_acrylic_hint')}</div>
+                                          ) : (
+                                              renderThemeSettingsRow({
+                                                  label: t('app.theme.appearance.blur_title'),
+                                                  hint: t('app.theme.appearance.blur_hint'),
+                                                  stacked: true,
+                                                  control: (
+                                                      <ThemeSettingsSlider
+                                                          min={0}
+                                                          max={20}
+                                                          step={1}
+                                                          marks={BLUR_SLIDER_MARKS}
+                                                          disabled={appearance.enabled === false}
+                                                          value={appearance.blur ?? 0}
+                                                          unit="px"
+                                                          onChange={(v) => setAppearance({ blur: v })}
+                                                      />
+                                                  ),
+                                              })
+                                          )}
+                                      </div>
+                                  </>,
+                              )}
+                          </div>
+                      ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {renderThemeSettingsSection(
+                                  t('app.theme.query_template.title'),
+                                  <>
+                                      <div className="gonavi-settings-section-hint" style={{ marginTop: 0 }}>{t('app.theme.query_template.description')}</div>
+                                      <Input.TextArea
+                                          value={newQuerySqlTemplate}
+                                          autoSize={{ minRows: 3, maxRows: 8 }}
+                                          spellCheck={false}
+                                          onChange={(event) => setAppearance({ newQuerySqlTemplate: event.target.value })}
+                                          style={{ fontFamily: 'var(--gn-font-mono)' }}
+                                      />
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
+                                          <div className="gonavi-settings-inline-meta" style={{ marginTop: 0 }}>{t('app.theme.query_template.hint')}</div>
+                                          <Button
+                                              size="small"
+                                              disabled={appearance.newQuerySqlTemplate === null}
+                                              onClick={() => setAppearance({ newQuerySqlTemplate: null })}
+                                          >
+                                              {t('app.theme.query_template.reset_default')}
+                                          </Button>
+                                      </div>
+                                  </>,
+                              )}
+                              <section className="gonavi-settings-section" ref={tabDisplaySettingsPanelRef}>
+                                  <div className="gonavi-settings-section-title">{t('app.theme.tab_display.title')}</div>
+                                  <div className="gonavi-settings-section-hint">{t('app.theme.tab_display.description')}</div>
+                                  {renderThemeSettingsRow({
+                                      label: t('app.theme.tab_display.title'),
+                                      stacked: true,
+                                      control: (
+                                          <Segmented
+                                              className="gonavi-settings-segmented-choice"
+                                              block
+                                              options={[
+                                                  { label: t('app.theme.tab_display.layout.single'), value: 'single' },
+                                                  { label: t('app.theme.tab_display.layout.double'), value: 'double' },
+                                              ]}
+                                              value={tabDisplaySettings.layout}
+                                              onChange={(value) => setTabDisplayLayout(value as TabDisplayLayout)}
+                                          />
+                                      ),
+                                  })}
+                                  <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+{tabDisplayElementOrder.map((key) => {
+                                          const checked = visibleTabDisplayElementKeys.has(key);
+                                          const row = tabDisplaySettings.secondaryElements.includes(key) ? 'secondary' : 'primary';
+                                          const currentRowElements = row === 'secondary'
+                                              ? tabDisplaySettings.secondaryElements
+                                              : tabDisplaySettings.primaryElements;
+                                          const indexInRow = currentRowElements.indexOf(key);
+                                          const canMoveUp = checked && indexInRow > 0;
+                                          const canMoveDown = checked && indexInRow >= 0 && indexInRow < currentRowElements.length - 1;
+                                          const isFocused = focusedTabDisplayElementKey === key;
+                                          return (
+                                              <div
+                                                  key={key}
+                                                  role="button"
+                                                  tabIndex={0}
+                                                  onClick={() => setFocusedTabDisplayElementKey(key)}
+                                                  onKeyDown={(event) => {
+                                                      if (event.key === 'Enter' || event.key === ' ') {
+                                                          event.preventDefault();
+                                                          setFocusedTabDisplayElementKey(key);
+                                                      }
+                                                  }}
+                                                  style={{
+                                                      display: 'grid',
+                                                      gridTemplateColumns: 'minmax(0, 1fr) auto',
+                                                      gap: 10,
+                                                      alignItems: 'center',
+                                                      padding: '9px 10px',
+                                                      borderRadius: 10,
+                                                      border: `1px solid ${isFocused
+                                                          ? (isV2Ui
+                                                              ? v2AntPrimaryBorderHoverColor
+                                                              : (darkMode ? 'rgba(255,214,102,0.54)' : 'rgba(24,144,255,0.54)'))
+                                                          : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
+                                                      boxShadow: isFocused
+                                                          ? (isV2Ui
+                                                              ? `0 0 0 2px ${v2AntControlActiveBg}`
+                                                              : (darkMode ? '0 0 0 2px rgba(255,214,102,0.14)' : '0 0 0 2px rgba(24,144,255,0.12)'))
+                                                          : 'none',
+                                                      background: isFocused
+                                                          ? (isV2Ui
+                                                              ? `linear-gradient(90deg, ${v2AntPrimaryBgHoverColor} 0%, rgba(255,255,255,0.045) 100%)`
+                                                              : (darkMode ? 'linear-gradient(90deg, rgba(255,214,102,0.12) 0%, rgba(255,255,255,0.045) 100%)' : 'linear-gradient(90deg, rgba(24,144,255,0.10) 0%, rgba(255,255,255,0.78) 100%)'))
+                                                          : checked
+                                                          ? (darkMode ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.62)')
+                                                          : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(16,24,40,0.025)'),
+                                                      cursor: 'pointer',
+                                                      transition: 'border-color 140ms ease, box-shadow 140ms ease, background 140ms ease',
+                                                  }}
+                                              >
+                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                                      <span style={{
+                                                          width: 22,
+                                                          height: 22,
+                                                          borderRadius: 999,
+                                                          display: 'inline-flex',
+                                                          alignItems: 'center',
+                                                          justifyContent: 'center',
+                                                          flexShrink: 0,
+                                                          fontFamily: resolvedMonoFontFamily,
+                                                          fontSize: 11,
+                                                          fontWeight: 800,
+                                                          background: isFocused
+                                                              ? (isV2Ui ? v2AntPrimaryBgHoverColor : (darkMode ? 'rgba(255,214,102,0.22)' : 'rgba(24,144,255,0.14)'))
+                                                              : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(16,24,40,0.05)'),
+                                                          color: isFocused
+                                                              ? (isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'))
+                                                              : (darkMode ? 'rgba(255,255,255,0.56)' : 'rgba(16,24,40,0.5)'),
+                                                      }}>
+                                                          {checked && indexInRow >= 0 ? indexInRow + 1 : '-'}
+                                                      </span>
+                                                      <Switch
+                                                          size="small"
+                                                          checked={checked}
+                                                          onClick={(_, event) => event.stopPropagation()}
+                                                          onChange={(nextChecked) => updateTabDisplayElementVisibility(key, nextChecked)}
+                                                      />
+                                                      <div style={{ minWidth: 0 }}>
+                                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                                              <span style={{ fontWeight: 600 }}>{getTabDisplayElementLabel(key)}</span>
+                                                              {isFocused ? (
+                                                                  <span style={{
+                                                                      fontSize: 10,
+                                                                      lineHeight: '16px',
+                                                                      padding: '0 6px',
+                                                                      borderRadius: 999,
+                                                                      background: isV2Ui ? v2AntPrimaryBgColor : (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.10)'),
+                                                                      color: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'),
+                                                                  }}>
+                                                                      {t('app.theme.tab_display.badge.current')}
+                                                                  </span>
+                                                              ) : null}
+                                                              {checked && tabDisplaySettings.layout === 'double' ? (
+                                                                  <span style={{
+                                                                      fontSize: 10,
+                                                                      lineHeight: '16px',
+                                                                      padding: '0 6px',
+                                                                      borderRadius: 999,
+                                                                      background: row === 'secondary'
+                                                                          ? (darkMode ? 'rgba(56,189,248,0.14)' : 'rgba(2,132,199,0.08)')
+                                                                          : (darkMode ? 'rgba(34,197,94,0.14)' : 'rgba(22,163,74,0.08)'),
+                                                                      color: row === 'secondary'
+                                                                          ? (darkMode ? '#7dd3fc' : '#0369a1')
+                                                                          : (darkMode ? '#86efac' : '#15803d'),
+                                                                  }}>
+                                                                      {row === 'secondary'
+                                                                          ? t('app.theme.tab_display.row.secondary')
+                                                                          : t('app.theme.tab_display.row.primary')}
+                                                                  </span>
+                                                              ) : null}
+                                                          </div>
+                                                          <div style={{ ...utilityMutedTextStyle, marginTop: 2 }}>{getTabDisplayElementDescription(key)}</div>
+                                                      </div>
+                                                  </div>
+                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                      {tabDisplaySettings.layout === 'double' && checked ? (
+                                                          <Segmented
+                                                              size="small"
+                                                              options={[
+                                                                  { label: t('app.theme.tab_display.row.primary'), value: 'primary' },
+                                                                  { label: t('app.theme.tab_display.row.secondary'), value: 'secondary' },
+                                                              ]}
+                                                              value={row}
+                                                              onChange={(value) => setTabDisplayElementRow(key, value as 'primary' | 'secondary')}
+                                                              onClick={(event) => event.stopPropagation()}
+                                                          />
+                                                      ) : null}
+                                                      <Button
+                                                          size="small"
+                                                          disabled={!canMoveUp}
+                                                          onClick={(event) => {
+                                                              event.stopPropagation();
+                                                              moveTabDisplayElement(key, -1);
+                                                          }}
+                                                      >
+                                                          {t('app.theme.tab_display.action.move_up')}
+                                                      </Button>
+                                                      <Button
+                                                          size="small"
+                                                          disabled={!canMoveDown}
+                                                          onClick={(event) => {
+                                                              event.stopPropagation();
+                                                              moveTabDisplayElement(key, 1);
+                                                          }}
+                                                      >
+                                                          {t('app.theme.tab_display.action.move_down')}
+                                                      </Button>
+                                                  </div>
+                                              </div>
+                                          );
+                                      })}
+                                  </div>
+                                  <div className="gonavi-settings-inline-meta">
+                                      {t('app.theme.tab_display.preview.prefix')}
+                                      {tabDisplaySettings.layout === 'double' ? `${t('app.theme.tab_display.row.primary')} ` : ''}
+                                      {tabDisplaySettings.primaryElements.map(getTabDisplayElementLabel).join(' / ') || t('app.theme.tab_display.preview.default_label')}
+                                      {tabDisplaySettings.layout === 'double' && tabDisplaySettings.secondaryElements.length > 0
+                                          ? t('app.theme.tab_display.preview.secondary', {
+                                              labels: tabDisplaySettings.secondaryElements.map(getTabDisplayElementLabel).join(' / '),
+                                          })
+                                          : ''}
+                                      {focusedTabDisplayElementKey
+                                          ? t('app.theme.tab_display.preview.focused', {
+                                              label: getTabDisplayElementLabel(focusedTabDisplayElementKey),
+                                          })
+                                          : ''}
+                                  </div>
+                              </section>
+                              {renderThemeSettingsSection(
+                                  t('app.theme.data_table.title'),
+                                  <>
+                                      {renderThemeSettingsRow({
+                                          label: t('app.theme.data_table.vertical_borders'),
+                                          hint: t('app.theme.data_table.vertical_borders_hint'),
+                                          control: (
+                                              <Switch
+                                                  checked={appearance.showDataTableVerticalBorders === true}
+                                                  onChange={(checked) => setAppearance({ showDataTableVerticalBorders: checked })}
+                                              />
+                                          ),
+                                      })}
+                                      {renderThemeSettingsRow({
+                                          label: t('app.theme.data_table.row_number'),
+                                          hint: t('app.theme.data_table.row_number_hint'),
+                                          control: (
+                                              <Switch
+                                                  checked={appearance.showDataTableRowNumber !== false}
+                                                  onChange={(checked) => setAppearance({ showDataTableRowNumber: checked })}
+                                              />
+                                          ),
+                                      })}
+                                      {renderThemeSettingsRow({
+                                          label: t('app.theme.data_table.table_double_click_action'),
+                                          hint: t('app.theme.data_table.table_double_click_action_hint'),
+                                          stacked: true,
+                                          control: (
+                                              <Segmented
+                                                  className="gonavi-settings-segmented-choice"
+                                                  block
+                                                  options={[
+                                                      { label: t('app.theme.data_table.table_double_click_action.open_data'), value: 'open-data' },
+                                                      { label: t('app.theme.data_table.table_double_click_action.open_design'), value: 'open-design' },
+                                                  ]}
+                                                  value={tableDoubleClickAction}
+                                                  onChange={(value) => setAppearance({ tableDoubleClickAction: value as 'open-data' | 'open-design' })}
+                                              />
+                                          ),
+                                      })}
+                                      {renderThemeSettingsRow({
+                                          label: t('app.theme.data_table.density'),
+                                          hint: t('app.theme.data_table.density_hint'),
+                                          stacked: true,
+                                          control: (
+                                              <Segmented
+                                                  className="gonavi-settings-segmented-choice"
+                                                  block
+                                                  options={DENSITY_OPTIONS.map((option) => ({
+                                                      ...option,
+                                                      label: t(`app.theme.data_table.density.${option.value}`),
+                                                  }))}
+                                                  value={appearance.dataTableDensity}
+                                                  onChange={(value) => setAppearance({ dataTableDensity: sanitizeDataTableDensity(value) })}
+                                              />
+                                          ),
+                                      })}
+                                      {renderThemeSettingsRow({
+                                          label: (
+                                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                                  <span>{t('app.theme.data_table.font_size')}</span>
+                                                  <Button
+                                                      size="small"
+                                                      type={dataTableFontSizeFollowsGlobal ? 'primary' : 'default'}
+                                                      onClick={() => setAppearance({
+                                                          dataTableFontSizeFollowGlobal: !dataTableFontSizeFollowsGlobal,
+                                                          dataTableFontSize: dataTableFontSizeFollowsGlobal
+                                                              ? sanitizeDataTableFontSize(appearance.dataTableFontSize)
+                                                              : null,
+                                                      })}
+                                                  >
+                                                      {t('app.theme.data_table.follow_global')}
+                                                  </Button>
+                                              </span>
+                                          ),
+                                          stacked: true,
+                                          control: (
+                                              <ThemeSettingsSlider
+                                                  min={10}
+                                                  max={18}
+                                                  step={1}
+                                                  marks={DATA_TABLE_FONT_SLIDER_MARKS}
+                                                  disabled={dataTableFontSizeFollowsGlobal}
+                                                  value={effectiveDataTableFontSize}
+                                                  unit="px"
+                                                  onChange={(value) => setAppearance({
+                                                      dataTableFontSize: sanitizeDataTableFontSize(value),
+                                                      dataTableFontSizeFollowGlobal: false,
+                                                  })}
+                                              />
+                                          ),
+                                      })}
+                                      {renderThemeSettingsRow({
+                                          label: (
+                                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                                  <span>{t('app.theme.data_table.sidebar_tree_font_size')}</span>
+                                                  <Button
+                                                      size="small"
+                                                      type={sidebarTreeFontSizeFollowsGlobal ? 'primary' : 'default'}
+                                                      onClick={() => setAppearance({
+                                                          sidebarTreeFontSizeFollowGlobal: !sidebarTreeFontSizeFollowsGlobal,
+                                                          sidebarTreeFontSize: sidebarTreeFontSizeFollowsGlobal
+                                                              ? sanitizeSidebarTreeFontSize(appearance.sidebarTreeFontSize)
+                                                              : null,
+                                                      })}
+                                                  >
+                                                      {t('app.theme.data_table.follow_global')}
+                                                  </Button>
+                                              </span>
+                                          ),
+                                          stacked: true,
+                                          control: (
+                                              <ThemeSettingsSlider
+                                                  min={10}
+                                                  max={18}
+                                                  step={1}
+                                                  marks={DATA_TABLE_FONT_SLIDER_MARKS}
+                                                  disabled={sidebarTreeFontSizeFollowsGlobal}
+                                                  value={effectiveSidebarTreeFontSize}
+                                                  unit="px"
+                                                  onChange={(value) => setAppearance({
+                                                      sidebarTreeFontSize: sanitizeSidebarTreeFontSize(value),
+                                                      sidebarTreeFontSizeFollowGlobal: false,
+                                                  })}
+                                              />
+                                          ),
+                                      })}
+                                  </>,
+                              )}
+                              {isMacRuntime ? renderThemeSettingsSection(
+                                  t('app.theme.mac_window.title'),
+                                  renderThemeSettingsRow({
+                                      label: t('app.theme.mac_window.use_native_controls'),
+                                      hint: t('app.theme.mac_window.restart_hint'),
+                                      control: (
+                                          <Switch
+                                              checked={appearance.useNativeMacWindowControls === true}
+                                              onChange={(checked) => setAppearance({ useNativeMacWindowControls: checked })}
+                                          />
+                                      ),
+                                  }),
+                                  t('app.theme.mac_window.use_native_controls_hint'),
+                              ) : null}
+                              {renderThemeSettingsSection(
+                                  t('app.theme.startup_window.title'),
+                                  renderThemeSettingsRow({
+                                      label: isWindowsRuntime
+                                          ? t('app.theme.startup_window.fullscreen_windows')
+                                          : t('app.theme.startup_window.fullscreen'),
+                                      hint: isWindowsRuntime
+                                          ? t('app.theme.startup_window.windows_hint')
+                                          : t('app.theme.startup_window.hint'),
+                                      control: (
+                                          <Switch checked={startupFullscreen} onChange={(checked) => setStartupFullscreen(checked)} />
+                                      ),
+                                  }),
+                              )}
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 12 }}>
+                                  <Button
+                                      onClick={() => {
+                                          setUiScale(DEFAULT_UI_SCALE);
+                                          setFontSize(DEFAULT_FONT_SIZE);
+                                          setAppearance({ ...DEFAULT_APPEARANCE });
+                                      }}
+                                  >
+                                      {t('app.theme.action.restore_defaults')}
+                                  </Button>
+                              </div>
+                          </div>
+                      )}
+                  </div>
+              </div>
+  );
+
+
+  const renderThemeSettingsContentLegacy = () => (
               <div style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0', height: '100%', minHeight: 0, overflow: 'hidden', alignItems: 'stretch', boxSizing: 'border-box' }}>
                   <div style={{ ...utilityPanelStyle, padding: 12, height: 'fit-content' }}>
                       <div style={{ marginBottom: 12, fontWeight: 600 }}>{t('app.theme.navigation_title')}</div>
@@ -4342,12 +5756,12 @@ function App() {
                                           { key: 'dark', label: t('app.theme.mode.dark.label'), description: t('app.theme.mode.dark.description') },
                                           { key: 'system', label: t('app.theme.mode.system.label'), description: t('app.theme.mode.system.description') },
                                       ].map((item) => {
-                                          const active = themePreference === item.key;
+                                          const active = !activeCustomTheme && themePreference === item.key;
                                           return (
                                               <button
                                                   key={item.key}
                                                   type="button"
-                                                  onClick={() => setThemePreference(item.key as 'light' | 'dark' | 'system')}
+                                                  onClick={() => selectPresetTheme(item.key as ThemePreference)}
                                                   style={{
                                                       textAlign: 'left',
                                                       padding: '14px 14px',
@@ -4377,6 +5791,10 @@ function App() {
                                           );
                                       })}
                                   </div>
+                              </div>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 8, fontWeight: 600 }}>{t('app.theme.custom.title')}</div>
+                                  <CustomThemeManager legacyMode />
                               </div>
                           </div>
                       ) : (
@@ -4799,6 +6217,16 @@ function App() {
                                               onChange={(checked) => setAppearance({ showDataTableVerticalBorders: checked })}
                                           />
                                       </div>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                                          <div>
+                                              <div style={{ fontWeight: 500 }}>{t('app.theme.data_table.row_number')}</div>
+                                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>{t('app.theme.data_table.row_number_hint')}</div>
+                                          </div>
+                                          <Switch
+                                              checked={appearance.showDataTableRowNumber !== false}
+                                              onChange={(checked) => setAppearance({ showDataTableRowNumber: checked })}
+                                          />
+                                      </div>
                                       <div>
                                           <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.data_table.table_double_click_action')}</div>
                                           <Segmented
@@ -4940,6 +6368,12 @@ function App() {
               </div>
   );
 
+  
+
+  const renderThemeSettingsContent = () => (
+    isV2Ui ? renderThemeSettingsContentV2() : renderThemeSettingsContentLegacy()
+  );
+
   const settingsCenterGroups = [
       {
           key: 'preferences' as const,
@@ -5030,12 +6464,15 @@ function App() {
       : null;
   const isSettingsCenterContainedScrollPane =
       activeSettingsCenterPane?.key === 'theme' || activeSettingsCenterPane?.key === 'ai';
+  const isV2ThemeSettingsPane = isV2Ui && activeSettingsCenterPane?.key === 'theme';
   const settingsCenterDetailBodyStyle: React.CSSProperties = isSettingsCenterContainedScrollPane
       ? {
           ...toolCenterDetailBodyStyle,
           overflowY: 'hidden',
-          overflowX: 'hidden',
-          paddingRight: 0,
+          // v2 主题设置页含 Slider 手柄横向伸出，hidden 会裁切贴边圆点
+          overflowX: isV2ThemeSettingsPane ? 'visible' : 'hidden',
+          paddingRight: isV2ThemeSettingsPane ? 8 : 0,
+          paddingLeft: isV2ThemeSettingsPane ? 4 : undefined,
       }
       : toolCenterDetailBodyStyle;
   const renderSettingsCenterPane = () => {
@@ -5101,6 +6538,10 @@ function App() {
         componentSize={appComponentSize}
         theme={antdTheme}
     >
+        <CustomThemeStyleHost
+            contextKey={customThemeStyleContextKey}
+            onAntTokensChange={setComputedCustomThemeAntTokens}
+        />
         <Layout style={{
             height: '100vh',
             overflow: 'hidden',
@@ -5112,6 +6553,13 @@ function App() {
             backdropFilter: blurFilter,
             WebkitBackdropFilter: blurFilter,
         }}>
+          <input
+            ref={browserConnectionImportInputRef}
+            type="file"
+            accept=".gonavi-conn,.json,.xml,.ncx"
+            style={{ display: 'none' }}
+            onChange={(event) => { void handleBrowserConnectionImportFileChange(event); }}
+          />
           {/* Custom Title Bar */}
           <div
             onDoubleClick={handleTitleBarDoubleClick}
@@ -5360,6 +6808,8 @@ function App() {
              <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'row', position: 'relative' }}>
                <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? 'var(--gonavi-border-radius)' : 0, clipPath: isLogPanelOpen ? 'inset(0 round var(--gonavi-border-radius))' : 'none' }}>
                   <TabManager />
+                  <FloatingWorkbenchWindows />
+                  <FloatingQueryResultWindows />
                </div>
                {!isV2Ui && !aiPanelVisible && (
                <>
@@ -5370,7 +6820,7 @@ function App() {
                )}
                </>
                )}
-               {aiPanelVisible && (
+               {aiPanelVisible && !aiChatDetached && (
                   <div
                     className={aiPanelOverlayActive ? 'gn-v2-ai-panel-overlay' : undefined}
                     style={aiPanelOverlayActive
@@ -5473,12 +6923,32 @@ function App() {
                           </div>
                         )}
                       >
-                        <AIChatPanel width={aiPanelRenderWidth} darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
-                          handleOpenAISettings();
-                        }} overlayTheme={overlayTheme} />
+                        <AIChatPanel
+                          width={aiPanelRenderWidth}
+                          darkMode={darkMode}
+                          bgColor={bgContent}
+                          presentation="dock"
+                          onClose={() => setAIPanelVisible(false)}
+                          onDetach={() => detachAIChatPanel()}
+                          onOpenSettings={() => {
+                            handleOpenAISettings();
+                          }}
+                          overlayTheme={overlayTheme}
+                        />
                       </AIPanelErrorBoundary>
                       </div>
                   </div>
+               )}
+               {aiPanelVisible && aiChatDetached && (
+                  <FloatingAIChatWindow
+                    darkMode={darkMode}
+                    bgColor={bgContent}
+                    overlayTheme={overlayTheme}
+                    renderNonce={aiPanelRenderNonce}
+                    onOpenSettings={() => handleOpenAISettings()}
+                    onRenderError={handleAIPanelRenderError}
+                    onRetryRender={handleRetryAIPanelRender}
+                  />
                )}
              </div>
              {!isV2Ui && isLogPanelOpen && (
@@ -5623,12 +7093,7 @@ function App() {
             ] as const;
             const filteredToolCenterGroups = toolCenterGroups.map((group) => ({
               ...group,
-              items: group.items.filter((item) => {
-                if (!isWebRuntime) {
-                  return true;
-                }
-                return !['import', 'export', 'data-root'].includes(String(item.key || ''));
-              }),
+              items: group.items,
             })).filter((group) => group.items.length > 0);
             const activeToolCenterGroup = filteredToolCenterGroups.find((group) => group.key === activeToolCenterGroupKey) ?? filteredToolCenterGroups[0];
             const activeToolCenterPaneItem = activeToolCenterPane
@@ -5704,6 +7169,28 @@ function App() {
               }
 
               if (activeToolCenterPane.key === 'data-root') {
+                if (isWebRuntime) {
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
+                      <div style={utilityPanelStyle}>
+                        <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.data_root.current_directory')}</div>
+                        <div style={{ display: 'grid', gap: 10 }}>
+                          <Input readOnly value={dataRootInfo?.path || ''} />
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                            <div>
+                              <div style={{ marginBottom: 6, fontWeight: 500 }}>{t('app.data_root.default_directory')}</div>
+                              <div style={utilityMutedTextStyle}>{dataRootInfo?.defaultPath || '-'}</div>
+                            </div>
+                            <div>
+                              <div style={{ marginBottom: 6, fontWeight: 500 }}>{t('app.data_root.driver_directory')}</div>
+                              <div style={utilityMutedTextStyle}>{dataRootInfo?.driverPath || '-'}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
                 return (
                   <Modal
                     embedded
@@ -6154,10 +7641,7 @@ function App() {
           <Modal
             title={renderUtilityModalTitle(<SettingOutlined />, t('app.settings.title'), t('app.settings.description'))}
             open={isSettingsModalOpen}
-            onCancel={() => {
-                setActiveSettingsCenterPane(null);
-                setIsSettingsModalOpen(false);
-            }}
+            onCancel={handleCancelSettingsCenterPane}
             footer={null}
             centered
             width={1080}
@@ -6297,6 +7781,15 @@ function App() {
                       >
                         {activeSettingsCenterPane.key === 'about-go-navi' ? (
                           renderSettingsCenterAboutFooter()
+                        ) : isV2Ui && activeSettingsCenterPane.key === 'theme' ? (
+                          <>
+                            <Button onClick={handleBackFromSettingsCenterPane}>
+                              {t('common.back_to_previous')}
+                            </Button>
+                            <Button type="primary" onClick={handleCancelSettingsCenterPane}>
+                              {t('common.close')}
+                            </Button>
+                          </>
                         ) : (
                           <>
                             <Button onClick={handleCancelSettingsCenterPane}>
@@ -6495,16 +7988,6 @@ function App() {
             overlayTheme={overlayTheme}
             surfaceOpacity={effectiveOpacity}
           />
-          {isAISettingsOpen && (
-          <AISettingsModal
-            open={isAISettingsOpen}
-            onClose={handleCloseAISettings}
-            darkMode={darkMode}
-            overlayTheme={overlayTheme}
-            focusProviderId={focusedAIProviderId}
-            onBeforeExternalMCPUse={handlePrepareExternalMCPUse}
-          />
-          )}
           <ConnectionPackagePasswordModal
             open={connectionPackageDialog.open && !(isToolsModalOpen && activeToolCenterPane?.key === 'connection-package')}
             title={connectionPackageDialog.mode === 'export'
@@ -6564,14 +8047,24 @@ function App() {
           {isThemeModalOpen && (
           <Modal
               title={renderUtilityModalTitle(
-                  themeModalSection === 'theme' ? <SkinOutlined /> : <BgColorsOutlined />,
-                  themeModalSection === 'theme' ? t('app.theme.theme_settings_title') : t('app.theme.appearance_settings_title'),
+                  themeModalSection === 'theme'
+                      ? <SkinOutlined />
+                      : themeModalSection === 'appearance'
+                          ? <BgColorsOutlined />
+                          : <AppstoreOutlined />,
+                  themeModalSection === 'theme'
+                      ? t('app.theme.theme_settings_title')
+                      : themeModalSection === 'appearance'
+                          ? t('app.theme.appearance_settings_title')
+                          : t('app.theme.workspace_settings_title'),
                   themeModalSection === 'theme'
                       ? t('app.theme.theme_settings_description')
-                      : t('app.theme.appearance_settings_description')
+                      : themeModalSection === 'appearance'
+                          ? t('app.theme.appearance_settings_description')
+                          : t('app.theme.workspace_settings_description')
               )}
               open={isThemeModalOpen}
-              onCancel={() => { setIsThemeModalOpen(false); setThemeModalSection('theme'); }}
+              onCancel={() => { setIsThemeModalOpen(false); }}
               footer={null}
               width={820}
               styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8, height: 620, overflow: 'hidden' }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
@@ -6754,8 +8247,8 @@ function App() {
                   <Button key="open-install-directory" onClick={openDownloadedUpdateDirectory}>
                       {t('app.about.action.open_install_directory')}
                   </Button>,
-                  <Button key="install" type="primary" onClick={handleInstallFromProgress}>
-                      {t('app.about.action.install_update')}
+                  <Button key="restart" type="primary" onClick={() => { void handleInstallUpdateRequest(); }}>
+                      {t('app.about.action.restart_to_update')}
                   </Button>
               ] : (updateDownloadProgress.status === 'error' ? [
                   <Button key="close" onClick={hideUpdateDownloadProgress}>{t('common.close')}</Button>
@@ -6767,10 +8260,20 @@ function App() {
                       status={updateDownloadProgress.status === 'error' ? 'exception' : (updateDownloadProgress.status === 'done' ? 'success' : 'active')}
                   />
                   <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
-                      {`${formatBytes(updateDownloadProgress.downloaded)} / ${formatBytes(updateDownloadProgress.total)}`}
+                      {updateDownloadProgress.status === 'done'
+                          ? t('app.about.download_progress.complete_hint')
+                          : `${formatBytes(updateDownloadProgress.downloaded)} / ${formatBytes(updateDownloadProgress.total)}`}
                   </div>
                   {updateDownloadProgress.message ? (
-                      <div style={{ fontSize: 12, color: '#ff4d4f' }}>{updateDownloadProgress.message}</div>
+                      <div style={{
+                          fontSize: 12,
+                          color: updateDownloadProgress.status === 'error'
+                              ? '#ff4d4f'
+                              : (darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(16,24,40,0.65)'),
+                      }}
+                      >
+                          {updateDownloadProgress.message}
+                      </div>
                   ) : null}
               </div>
           </Modal>

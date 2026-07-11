@@ -253,6 +253,19 @@ func TestNormalizeRunConfig_TrinoUsesNamespaceFromTree(t *testing.T) {
 	}
 }
 
+func TestNormalizeRunConfig_MilvusUsesDatabaseFromTree(t *testing.T) {
+	t.Parallel()
+
+	runConfig := normalizeRunConfig(connection.ConnectionConfig{
+		Type:     "milvus",
+		Database: "default",
+	}, "analytics")
+
+	if runConfig.Database != "analytics" {
+		t.Fatalf("expected Milvus database from tree, got %q", runConfig.Database)
+	}
+}
+
 func TestNormalizeRunConfig_GoldenDBUsesDatabaseFromTree(t *testing.T) {
 	t.Parallel()
 

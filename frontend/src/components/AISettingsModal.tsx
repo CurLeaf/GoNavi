@@ -35,6 +35,7 @@ import {
     matchProviderPreset,
     waitForAIService,
 } from './ai/aiSettingsModalConfig';
+import { useStore } from '../store';
 interface AISettingsModalProps {
     open: boolean;
     onClose: () => void;
@@ -57,7 +58,8 @@ const DEFAULT_MCP_HTTP_SERVER_STATUS: AIMCPHTTPServerStatus = {
     addr: '127.0.0.1:8765',
     path: '/mcp',
     url: 'http://127.0.0.1:8765/mcp',
-    schemaOnly: true,
+    // 默认允许 execute_sql 查少量数据
+    schemaOnly: false,
     message: '',
 };
 
@@ -65,6 +67,7 @@ const DEFAULT_MCP_HTTP_SERVER_DRAFT: AIMCPHTTPServerDraft = {
     addr: DEFAULT_MCP_HTTP_SERVER_STATUS.addr,
     path: DEFAULT_MCP_HTTP_SERVER_STATUS.path,
     authorizationHeader: '',
+    schemaOnly: false,
 };
 
 const buildMCPHTTPServerDraftFromStatus = (
@@ -79,6 +82,10 @@ const buildMCPHTTPServerDraftFromStatus = (
         fallback.authorizationHeader ||
         '',
     ).trim(),
+    // 运行中用状态；未运行保留草稿选择
+    schemaOnly: typeof status.schemaOnly === 'boolean'
+        ? status.schemaOnly
+        : (typeof fallback.schemaOnly === 'boolean' ? fallback.schemaOnly : false),
 });
 
 const normalizeMCPHTTPAuthorizationToken = (value: string): string => {
@@ -115,6 +122,8 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
     const [form] = Form.useForm();
     const modalBodyRef = useRef<HTMLDivElement>(null);
     const missingAIServiceWarnedRef = useRef(false);
+    const aiChatOpenMode = useStore((state) => state.aiChatOpenMode);
+    const setAIChatOpenMode = useStore((state) => state.setAIChatOpenMode);
 
     // Modal 内部 toast 通知
     const [messageApi, messageContextHolder] = antdMessage.useMessage({ getContainer: () => modalBodyRef.current || document.body });
@@ -549,7 +558,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                     addr: mcpHTTPServerDraft.addr || DEFAULT_MCP_HTTP_SERVER_STATUS.addr,
                     path: mcpHTTPServerDraft.path || DEFAULT_MCP_HTTP_SERVER_STATUS.path,
                     token: normalizeMCPHTTPAuthorizationToken(mcpHTTPServerDraft.authorizationHeader),
-                    schemaOnly: true,
+                    schemaOnly: mcpHTTPServerDraft.schemaOnly === true,
                 })
                 : await Service.AIStopMCPHTTPServer();
             if (nextStatus) {
@@ -764,11 +773,20 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                 {activeSection === 'context' && (
                     <AISettingsContextSection
                         contextLevel={contextLevel}
+                        openMode={aiChatOpenMode}
                         darkMode={darkMode}
                         overlayTheme={overlayTheme}
                         cardBg={cardBg}
                         cardBorder={cardBorder}
                         onChange={handleContextChange}
+                        onOpenModeChange={(mode) => {
+                            setAIChatOpenMode(mode);
+                            void messageApi.success(
+                                mode === 'detached'
+                                    ? t('ai_settings.open_mode.message.detached')
+                                    : t('ai_settings.open_mode.message.dock'),
+                            );
+                        }}
                     />
                 )}
                 {activeSection === 'mcp' && (

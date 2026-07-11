@@ -468,6 +468,9 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 	if dbType == "kingbase8" || dbType == "kingbasees" || dbType == "kingbasev8" {
 		return "kingbase"
 	}
+	if dbType == "milvusdb" || dbType == "milvus-db" {
+		return "milvus"
+	}
 	if dbType == "intersystems" || dbType == "intersystemsiris" || dbType == "inter-systems" || dbType == "inter-systems-iris" {
 		return "iris"
 	}
@@ -510,6 +513,8 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 		return "iris"
 	case "oceanbase":
 		return "oceanbase"
+	case "milvus", "milvusdb", "milvus-db":
+		return "milvus"
 	}
 
 	switch {
@@ -877,8 +882,21 @@ func (a *App) DBQuery(config connection.ConnectionConfig, dbName string, query s
 	return a.DBQueryWithCancel(config, dbName, query, "")
 }
 
-func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName string, query string, queryID string) connection.QueryResult {
+func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName string, query string, queryID string) (result connection.QueryResult) {
+	// DBQuery() 以及后台元数据读取会传空 queryID；只记录 SQL 编辑器显式传入 ID 的查询，
+	// 避免把表结构探测等内部查询混入用户慢 SQL 历史。
+	trackQueryHistory := strings.TrimSpace(queryID) != ""
+	var queryExecutionDuration time.Duration
 	runConfig := normalizeRunConfig(config, dbName)
+	if trackQueryHistory {
+		defer func() {
+			if !result.Success {
+				return
+			}
+			durationMs := queryExecutionDuration.Milliseconds()
+			a.recordQueryExecution(config, dbName, resolveDDLDBType(runConfig), query, durationMs, 0, queryResultRowsReturned(result))
+		}()
+	}
 
 	// Generate query ID if not provided
 	if queryID == "" {
@@ -918,6 +936,8 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 	tryQueryFirst := shouldTryQueryResultFirst(runConfig.Type, query)
 
 	runReadQuery := func(inst db.Database) ([]map[string]interface{}, []string, error) {
+		startedAt := time.Now()
+		defer func() { queryExecutionDuration += time.Since(startedAt) }()
 		if q, ok := inst.(interface {
 			QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
 		}); ok {
@@ -928,13 +948,18 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 
 	runReadQueryWithMessages := func(inst db.Database) ([]map[string]interface{}, []string, []string, error) {
 		if q, ok := inst.(db.QueryMessageExecer); ok {
-			return q.QueryContextWithMessages(ctx, query)
+			startedAt := time.Now()
+			data, columns, messages, err := q.QueryContextWithMessages(ctx, query)
+			queryExecutionDuration += time.Since(startedAt)
+			return data, columns, messages, err
 		}
 		data, columns, err := runReadQuery(inst)
 		return data, columns, nil, err
 	}
 
 	runExecQuery := func(inst db.Database) (int64, error) {
+		startedAt := time.Now()
+		defer func() { queryExecutionDuration += time.Since(startedAt) }()
 		if e, ok := inst.(interface {
 			ExecContext(context.Context, string) (int64, error)
 		}); ok {
@@ -986,19 +1011,24 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 // 如果底层驱动支持 MultiResultQuerier，一次性执行所有语句；
 // 否则按分号拆分后逐条执行，模拟多结果集。
 func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, query string, queryID string) (result connection.QueryResult) {
-	// 慢 SQL 埋点：成功执行后异步记录（低于阈值 500ms 自动跳过），不阻塞返回。
+	runConfig := normalizeRunConfig(config, dbName)
+	resolvedDBType := resolveDDLDBType(runConfig)
+	// 慢 SQL 埋点：成功执行后记录（低于阈值 500ms 自动跳过）。
 	// 用 named return + defer 覆盖所有 return path，避免遗漏。
-	queryStartedAt := time.Now()
+	var queryExecutionDuration time.Duration
 	defer func() {
 		if !result.Success {
 			return
 		}
-		durationMs := time.Since(queryStartedAt).Milliseconds()
-		a.recordQueryExecutionAsync(config, resolveDDLDBType(config), query, durationMs, 0, 0)
+		durationMs := queryExecutionDuration.Milliseconds()
+		a.recordQueryExecution(config, dbName, resolvedDBType, query, durationMs, 0, queryResultRowsReturned(result))
 	}()
+	measureQueryExecution := func(run func()) {
+		startedAt := time.Now()
+		run()
+		queryExecutionDuration += time.Since(startedAt)
+	}
 
-	runConfig := normalizeRunConfig(config, dbName)
-	resolvedDBType := resolveDDLDBType(runConfig)
 	buildStatementExecutionFailedMessage := func(index int, err error, previousSuccessCount int) string {
 		message := a.appText("db.backend.error.multi_statement_execution_failed", map[string]any{
 			"index":  index,
@@ -1066,15 +1096,27 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		if !useNativeMultiResult {
 			return nil, nil, nil // 包含写操作，走逐条执行路径
 		}
+		var (
+			results  []connection.ResultSetData
+			messages []string
+			err      error
+		)
 		if q, ok := inst.(db.MultiResultQueryMessageExecer); ok {
-			return q.QueryMultiContextWithMessages(ctx, query)
+			measureQueryExecution(func() {
+				results, messages, err = q.QueryMultiContextWithMessages(ctx, query)
+			})
+			return results, messages, err
 		}
 		if q, ok := inst.(db.MultiResultQuerierContext); ok {
-			results, err := q.QueryMultiContext(ctx, query)
+			measureQueryExecution(func() {
+				results, err = q.QueryMultiContext(ctx, query)
+			})
 			return results, nil, err
 		}
 		if q, ok := inst.(db.MultiResultQuerier); ok {
-			results, err := q.QueryMulti(query)
+			measureQueryExecution(func() {
+				results, err = q.QueryMulti(query)
+			})
 			return results, nil, err
 		}
 		return nil, nil, nil // 返回 nil 表示不支持
@@ -1187,7 +1229,13 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 				}
 			}
 			if batcher != nil {
-				affected, batchErr := batcher.ExecBatchContext(ctx, query)
+				var (
+					affected int64
+					batchErr error
+				)
+				measureQueryExecution(func() {
+					affected, batchErr = batcher.ExecBatchContext(ctx, query)
+				})
 				if batchErr != nil && shouldRefreshCachedConnection(batchErr) {
 					if a.invalidateCachedDatabase(runConfig, batchErr) {
 						retryInst, retryErr := a.getDatabaseForcePing(runConfig)
@@ -1196,7 +1244,9 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 							return connection.QueryResult{Success: false, Message: retryErr.Error(), QueryID: queryID}
 						}
 						if retryBatcher, ok2 := retryInst.(db.BatchWriteExecer); ok2 {
-							affected, batchErr = retryBatcher.ExecBatchContext(ctx, query)
+							measureQueryExecution(func() {
+								affected, batchErr = retryBatcher.ExecBatchContext(ctx, query)
+							})
 						}
 					}
 				}
@@ -1236,37 +1286,49 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 				usedMultiResult  bool
 			)
 			runStatementQuery := func() error {
-				if sessionQueryMessageTarget != nil {
-					data, columns, messages, err = sessionQueryMessageTarget.QueryContextWithMessages(ctx, stmt)
-				} else if sessionQueryTarget != nil {
-					data, columns, err = sessionQueryTarget.QueryContext(ctx, stmt)
-				} else if q, ok := dbInst.(db.QueryMessageExecer); ok {
-					data, columns, messages, err = q.QueryContextWithMessages(ctx, stmt)
-				} else if q, ok := dbInst.(interface {
-					QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
-				}); ok {
-					data, columns, err = q.QueryContext(ctx, stmt)
-				} else {
-					data, columns, err = dbInst.Query(stmt)
-				}
+				measureQueryExecution(func() {
+					if sessionQueryMessageTarget != nil {
+						data, columns, messages, err = sessionQueryMessageTarget.QueryContextWithMessages(ctx, stmt)
+					} else if sessionQueryTarget != nil {
+						data, columns, err = sessionQueryTarget.QueryContext(ctx, stmt)
+					} else if q, ok := dbInst.(db.QueryMessageExecer); ok {
+						data, columns, messages, err = q.QueryContextWithMessages(ctx, stmt)
+					} else if q, ok := dbInst.(interface {
+						QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
+					}); ok {
+						data, columns, err = q.QueryContext(ctx, stmt)
+					} else {
+						data, columns, err = dbInst.Query(stmt)
+					}
+				})
 				return err
 			}
 			if preferPlainReadQuery {
 				err = runStatementQuery()
 			} else if sessionMultiQueryMessageTarget != nil {
-				statementResults, messages, err = sessionMultiQueryMessageTarget.QueryMultiContextWithMessages(ctx, stmt)
+				measureQueryExecution(func() {
+					statementResults, messages, err = sessionMultiQueryMessageTarget.QueryMultiContextWithMessages(ctx, stmt)
+				})
 				usedMultiResult = true
 			} else if sessionMultiQueryTarget != nil {
-				statementResults, err = sessionMultiQueryTarget.QueryMultiContext(ctx, stmt)
+				measureQueryExecution(func() {
+					statementResults, err = sessionMultiQueryTarget.QueryMultiContext(ctx, stmt)
+				})
 				usedMultiResult = true
 			} else if q, ok := dbInst.(db.MultiResultQueryMessageExecer); ok {
-				statementResults, messages, err = q.QueryMultiContextWithMessages(ctx, stmt)
+				measureQueryExecution(func() {
+					statementResults, messages, err = q.QueryMultiContextWithMessages(ctx, stmt)
+				})
 				usedMultiResult = true
 			} else if q, ok := dbInst.(db.MultiResultQuerierContext); ok {
-				statementResults, err = q.QueryMultiContext(ctx, stmt)
+				measureQueryExecution(func() {
+					statementResults, err = q.QueryMultiContext(ctx, stmt)
+				})
 				usedMultiResult = true
 			} else if q, ok := dbInst.(db.MultiResultQuerier); ok {
-				statementResults, err = q.QueryMulti(stmt)
+				measureQueryExecution(func() {
+					statementResults, err = q.QueryMulti(stmt)
+				})
 				usedMultiResult = true
 			} else {
 				err = runStatementQuery()
@@ -1323,15 +1385,17 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		}
 
 		var affected int64
-		if sessionExecTarget != nil {
-			affected, err = sessionExecTarget.ExecContext(ctx, stmt)
-		} else if e, ok := dbInst.(interface {
-			ExecContext(context.Context, string) (int64, error)
-		}); ok {
-			affected, err = e.ExecContext(ctx, stmt)
-		} else {
-			affected, err = dbInst.Exec(stmt)
-		}
+		measureQueryExecution(func() {
+			if sessionExecTarget != nil {
+				affected, err = sessionExecTarget.ExecContext(ctx, stmt)
+			} else if e, ok := dbInst.(interface {
+				ExecContext(context.Context, string) (int64, error)
+			}); ok {
+				affected, err = e.ExecContext(ctx, stmt)
+			} else {
+				affected, err = dbInst.Exec(stmt)
+			}
+		})
 		if err != nil {
 			logger.Error(err, "DBQueryMulti 逐条执行失败（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
 			errMsg := buildStatementExecutionFailedMessage(idx+1, err, len(resultSets))

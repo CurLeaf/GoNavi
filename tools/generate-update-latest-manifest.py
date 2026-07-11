@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Generate GoNavi static update manifest (latest.json / latest-dev.json).
+
+The client prefers this file over GitHub REST API so end users are not subject
+to unauthenticated api.github.com rate limits (60/hour/IP).
+
+Usage:
+  python3 tools/generate-update-latest-manifest.py \\
+    --assets-dir dist \\
+    --version 1.2.3 \\
+    --tag v1.2.3 \\
+    --channel latest \\
+    --output dist/latest.json
+
+  # dev channel
+  python3 tools/generate-update-latest-manifest.py \\
+    --assets-dir dist \\
+    --version dev-a1b2c3d \\
+    --tag dev-latest \\
+    --channel dev \\
+    --output dist/latest-dev.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO = "Syngnat/GoNavi"
+SCHEMA_VERSION = 1
+SKIP_NAMES = {
+    "SHA256SUMS",
+    "latest.json",
+    "latest-dev.json",
+    ".DS_Store",
+}
+
+
+def parse_sha256sums(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    result: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # "hash  filename" or "hash *filename"
+        m = re.match(r"^([0-9a-fA-F]{64})\s+\*?(.+)$", line)
+        if not m:
+            continue
+        digest, name = m.group(1).lower(), m.group(2).strip()
+        result[Path(name).name] = digest
+    return result
+
+
+def normalize_version(version: str) -> str:
+    v = (version or "").strip()
+    if v.lower().startswith("v") and len(v) > 1 and v[1].isdigit():
+        return v[1:]
+    return v
+
+
+def browser_download_url(tag: str, asset_name: str) -> str:
+    tag = tag.strip()
+    name = asset_name.strip()
+    return f"https://github.com/{REPO}/releases/download/{tag}/{name}"
+
+
+def html_url(tag: str) -> str:
+    return f"https://github.com/{REPO}/releases/tag/{tag.strip()}"
+
+
+def collect_assets(assets_dir: Path, tag: str, hashes: dict[str, str]) -> list[dict]:
+    assets: list[dict] = []
+    for path in sorted(assets_dir.iterdir()):
+        if not path.is_file():
+            continue
+        name = path.name
+        if name in SKIP_NAMES:
+            continue
+        if name.startswith("."):
+            continue
+        item = {
+            "name": name,
+            "url": browser_download_url(tag, name),
+            "size": path.stat().st_size,
+        }
+        sha = hashes.get(name, "").strip().lower()
+        if sha:
+            item["sha256"] = sha
+        assets.append(item)
+    return assets
+
+
+def build_manifest(
+    *,
+    channel: str,
+    version: str,
+    tag: str,
+    assets_dir: Path,
+    name: str | None,
+    published_at: str | None,
+) -> dict:
+    hashes = parse_sha256sums(assets_dir / "SHA256SUMS")
+    tag = tag.strip() or f"v{normalize_version(version)}"
+    version = normalize_version(version) or normalize_version(tag)
+    assets = collect_assets(assets_dir, tag, hashes)
+    if not assets:
+        raise SystemExit(f"no release assets found under {assets_dir}")
+
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "channel": channel,
+        "tagName": tag,
+        "version": version,
+        "name": (name or tag).strip(),
+        "htmlUrl": html_url(tag),
+        "publishedAt": (published_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")),
+        "assets": assets,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Generate GoNavi latest.json update manifest")
+    parser.add_argument("--assets-dir", required=True, help="Directory containing release binaries + SHA256SUMS")
+    parser.add_argument("--version", required=True, help="Release version, e.g. 1.2.3 or dev-abc1234")
+    parser.add_argument("--tag", default="", help="Git tag, e.g. v1.2.3 (default: v{version})")
+    parser.add_argument(
+        "--channel",
+        choices=("latest", "dev"),
+        default="latest",
+        help="Update channel (default: latest)",
+    )
+    parser.add_argument("--name", default="", help="Release display name")
+    parser.add_argument("--published-at", default="", help="ISO8601 published time")
+    parser.add_argument(
+        "--output",
+        default="",
+        help="Output path (default: <assets-dir>/latest.json or latest-dev.json)",
+    )
+    args = parser.parse_args()
+
+    assets_dir = Path(args.assets_dir).resolve()
+    if not assets_dir.is_dir():
+        print(f"assets dir not found: {assets_dir}", file=sys.stderr)
+        return 2
+
+    tag = args.tag.strip()
+    if not tag:
+        if args.channel == "dev":
+            tag = "dev-latest"
+        else:
+            ver = normalize_version(args.version)
+            tag = f"v{ver}" if ver else ""
+
+    out_name = "latest-dev.json" if args.channel == "dev" else "latest.json"
+    output = Path(args.output).resolve() if args.output else assets_dir / out_name
+
+    manifest = build_manifest(
+        channel=args.channel,
+        version=args.version,
+        tag=tag,
+        assets_dir=assets_dir,
+        name=args.name or None,
+        published_at=args.published_at or None,
+    )
+    output.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"wrote {output} ({len(manifest['assets'])} assets, version={manifest['version']})")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

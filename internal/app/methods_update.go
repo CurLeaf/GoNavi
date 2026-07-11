@@ -17,13 +17,12 @@ import (
 	stdRuntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/logger"
 	"GoNavi-Wails/internal/uievents"
-
-	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const (
@@ -33,7 +32,19 @@ const (
 	updateChecksumAsset         = "SHA256SUMS"
 	updateDownloadProgressEvent = "update:download-progress"
 	updateNetworkRetryDelay     = 250 * time.Millisecond
+	updateQuitRequestDelay      = 300 * time.Millisecond
+	updateQuitForceExitDelay    = 35 * time.Second
+	updateReleaseCacheTTL       = 10 * time.Minute
+	updateGitHubAPIVersion      = "2022-11-28"
+	updateHTTPBodySnippetLimit  = 240
 )
+
+type cachedGitHubRelease struct {
+	release   *githubRelease
+	fetchedAt time.Time
+}
+
+var updateReleaseCache sync.Map // apiURL -> cachedGitHubRelease
 
 var (
 	updateFetchLatestRelease   = fetchLatestRelease
@@ -42,6 +53,8 @@ var (
 	updateLogCheckError        = func(err error) { logger.Error(err, "检查更新失败") }
 	updateResolveInstallTarget = resolveUpdateInstallTarget
 	updateLaunchInstallScript  = launchUpdateScript
+	updateQuitSleep            = time.Sleep
+	updateExitProcess          = os.Exit
 )
 
 type updateState struct {
@@ -60,6 +73,7 @@ type UpdateInfo struct {
 	ReleaseNotesURL    string `json:"releaseNotesUrl"`
 	AssetName          string `json:"assetName"`
 	AssetURL           string `json:"assetUrl"`
+	AssetAPIURL        string `json:"assetApiUrl,omitempty"`
 	AssetSize          int64  `json:"assetSize"`
 	SHA256             string `json:"sha256"`
 	Downloaded         bool   `json:"downloaded"`
@@ -146,17 +160,19 @@ func (a *App) localizedUpdateError(err error) string {
 }
 
 func (a *App) CheckForUpdates() connection.QueryResult {
-	return a.checkForUpdates(true)
+	// 用户手动检查：强制走网络（静态清单优先，API 回退）
+	return a.checkForUpdates(true, true)
 }
 
 func (a *App) CheckForUpdatesSilently() connection.QueryResult {
-	return a.checkForUpdates(false)
+	// 静默检查：允许节流，优先磁盘/短时缓存，避免启动刷爆网络
+	return a.checkForUpdates(false, false)
 }
 
-func (a *App) checkForUpdates(logFailure bool) connection.QueryResult {
+func (a *App) checkForUpdates(logFailure bool, forceNetwork bool) connection.QueryResult {
 	a.ensurePersistedGlobalProxyRuntime()
 	channel := a.currentUpdateChannel()
-	info, err := fetchLatestUpdateInfo(channel)
+	info, err := fetchLatestUpdateInfoWithOptions(channel, forceNetwork)
 	if err != nil {
 		if logFailure {
 			updateLogCheckError(err)
@@ -287,13 +303,7 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 		}
 	}
 
-	go func() {
-		time.Sleep(300 * time.Millisecond)
-		wailsRuntime.Quit(a.ctx)
-		// 兜底退出，避免某些平台/窗口状态下 Quit 未真正结束进程，导致更新脚本一直等待。
-		time.Sleep(2 * time.Second)
-		os.Exit(0)
-	}()
+	go a.quitForUpdate()
 
 	msg := a.appText("app.update.backend.message.install_started", nil)
 	if staged.InstallLogPath != "" {
@@ -306,6 +316,14 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 			"logPath": staged.InstallLogPath,
 		},
 	}
+}
+
+func (a *App) quitForUpdate() {
+	updateQuitSleep(updateQuitRequestDelay)
+	a.ForceQuitApplication()
+	// Leave enough time for shutdown transaction rollback before forcing the process down.
+	updateQuitSleep(updateQuitForceExitDelay)
+	updateExitProcess(0)
 }
 
 func (a *App) OpenDownloadedUpdateDirectory() connection.QueryResult {
@@ -389,13 +407,19 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 
 	// 安装包本体放在工作区根级，staging 目录只保留更新脚本和临时展开物。
 	assetPath := resolveUpdateAssetPath(workspaceDir, stagedDir, info.AssetName)
-	actualHash, err := downloadFileWithHash(info.AssetURL, assetPath, func(downloaded, total int64) {
+	progressCB := func(downloaded, total int64) {
 		reportTotal := total
 		if reportTotal <= 0 {
 			reportTotal = info.AssetSize
 		}
 		a.emitUpdateDownloadProgress("downloading", downloaded, reportTotal, "")
-	})
+	}
+	actualHash, err := downloadFileWithHash(info.AssetURL, assetPath, progressCB)
+	if err != nil && strings.TrimSpace(info.AssetAPIURL) != "" && !strings.EqualFold(strings.TrimSpace(info.AssetAPIURL), strings.TrimSpace(info.AssetURL)) {
+		logger.Warnf("更新包主下载地址失败，尝试 assets API 回退：err=%v", err)
+		_ = os.Remove(assetPath)
+		actualHash, err = downloadFileWithHash(info.AssetAPIURL, assetPath, progressCB)
+	}
 	if err != nil {
 		_ = os.Remove(assetPath)
 		_ = os.RemoveAll(stagedDir)
@@ -438,10 +462,15 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 }
 
 func fetchLatestUpdateInfo(channel updateChannel) (UpdateInfo, error) {
+	return fetchLatestUpdateInfoWithOptions(channel, true)
+}
+
+func fetchLatestUpdateInfoWithOptions(channel updateChannel, forceNetwork bool) (UpdateInfo, error) {
 	if channel != updateChannelDev {
 		channel = updateChannelLatest
 	}
-	release, err := fetchReleaseForChannel(channel)
+	// 优先静态 latest.json（不占 api.github.com 配额）→ GitHub API → 磁盘缓存
+	release, err := fetchReleaseForChannelPreferringStatic(channel, forceNetwork)
 	if err != nil {
 		return UpdateInfo{}, err
 	}
@@ -503,7 +532,8 @@ func fetchLatestUpdateInfo(channel updateChannel) (UpdateInfo, error) {
 		ReleasePublishedAt: strings.TrimSpace(release.PublishedAt),
 		ReleaseNotesURL:    release.HTMLURL,
 		AssetName:          asset.Name,
-		AssetURL:           asset.BrowserDownloadURL,
+		AssetURL:           firstNonEmptyString(asset.BrowserDownloadURL, asset.URL),
+		AssetAPIURL:        strings.TrimSpace(asset.URL),
 		AssetSize:          asset.Size,
 		SHA256:             sha256Value,
 	}, nil
@@ -568,32 +598,188 @@ func fetchDevRelease() (*githubRelease, error) {
 }
 
 func fetchReleaseByURL(apiURL string) (*githubRelease, error) {
+	apiURL = strings.TrimSpace(apiURL)
+	if apiURL == "" {
+		return nil, localizedUpdateError{key: "app.update.backend.error.latest_version_unparseable"}
+	}
+
 	client := newHTTPClientWithGlobalProxy(15 * time.Second)
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "GoNavi-Updater")
-	req.Header.Set("Accept", "application/vnd.github+json")
+	applyGitHubAPIRequestHeaders(req)
 
 	resp, err := doUpdateRequest(client, req)
 	if err != nil {
+		if cached := loadCachedGitHubRelease(apiURL); cached != nil {
+			logger.Warnf("检查更新网络失败，回退缓存发布信息：url=%s err=%v", apiURL, err)
+			return cached, nil
+		}
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, localizedUpdateError{
-			key:    "app.update.backend.error.check_http_status",
-			params: map[string]any{"status": resp.StatusCode},
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if readErr != nil {
+		if cached := loadCachedGitHubRelease(apiURL); cached != nil {
+			logger.Warnf("检查更新读取响应失败，回退缓存发布信息：url=%s err=%v", apiURL, readErr)
+			return cached, nil
 		}
+		return nil, wrapUpdateNetworkError(readErr)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
+			if cached := loadCachedGitHubRelease(apiURL); cached != nil {
+				logger.Warnf("检查更新被限流/拒绝 (HTTP %d)，回退缓存发布信息：url=%s", resp.StatusCode, apiURL)
+				return cached, nil
+			}
+		}
+		return nil, classifyGitHubUpdateHTTPError(resp.StatusCode, body, resp.Header, true)
 	}
 
 	var release githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+	if err := json.Unmarshal(body, &release); err != nil {
 		return nil, wrapUpdateNetworkError(err)
 	}
+	storeCachedGitHubRelease(apiURL, &release)
 	return &release, nil
+}
+
+func applyGitHubAPIRequestHeaders(req *http.Request) {
+	if req == nil {
+		return
+	}
+	req.Header.Set("User-Agent", "GoNavi-Updater/"+strings.TrimSpace(getCurrentVersion()))
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", updateGitHubAPIVersion)
+	if token := resolveGitHubAPIToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+}
+
+func applyGitHubDownloadRequestHeaders(req *http.Request, assetAPIURL bool) {
+	if req == nil {
+		return
+	}
+	req.Header.Set("User-Agent", "GoNavi-Updater/"+strings.TrimSpace(getCurrentVersion()))
+	if assetAPIURL {
+		req.Header.Set("Accept", "application/octet-stream")
+		req.Header.Set("X-GitHub-Api-Version", updateGitHubAPIVersion)
+		if token := resolveGitHubAPIToken(); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		return
+	}
+	// browser_download_url 通常走 objects/release-assets CDN，不强制 github+json
+	req.Header.Set("Accept", "*/*")
+}
+
+func resolveGitHubAPIToken() string {
+	for _, key := range []string{"GONAVI_GITHUB_TOKEN", "GITHUB_TOKEN"} {
+		if token := strings.TrimSpace(os.Getenv(key)); token != "" {
+			return token
+		}
+	}
+	return ""
+}
+
+func loadCachedGitHubRelease(apiURL string) *githubRelease {
+	value, ok := updateReleaseCache.Load(strings.TrimSpace(apiURL))
+	if !ok {
+		return nil
+	}
+	entry, ok := value.(cachedGitHubRelease)
+	if !ok || entry.release == nil {
+		return nil
+	}
+	if time.Since(entry.fetchedAt) > updateReleaseCacheTTL {
+		return nil
+	}
+	// 浅拷贝，避免调用方意外改写缓存
+	cloned := *entry.release
+	if entry.release.Assets != nil {
+		cloned.Assets = append([]githubAsset(nil), entry.release.Assets...)
+	}
+	return &cloned
+}
+
+func storeCachedGitHubRelease(apiURL string, release *githubRelease) {
+	if strings.TrimSpace(apiURL) == "" || release == nil {
+		return
+	}
+	cloned := *release
+	if release.Assets != nil {
+		cloned.Assets = append([]githubAsset(nil), release.Assets...)
+	}
+	updateReleaseCache.Store(strings.TrimSpace(apiURL), cachedGitHubRelease{
+		release:   &cloned,
+		fetchedAt: time.Now(),
+	})
+}
+
+func classifyGitHubUpdateHTTPError(status int, body []byte, headers http.Header, isCheck bool) error {
+	snippet := strings.TrimSpace(string(body))
+	if len(snippet) > updateHTTPBodySnippetLimit {
+		snippet = snippet[:updateHTTPBodySnippetLimit] + "…"
+	}
+	lower := strings.ToLower(snippet)
+	remaining := strings.TrimSpace(headers.Get("X-RateLimit-Remaining"))
+	reset := strings.TrimSpace(headers.Get("X-RateLimit-Reset"))
+	detailParts := make([]string, 0, 3)
+	if snippet != "" {
+		// 尽量抽出 GitHub JSON message 字段
+		var payload struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(body, &payload) == nil && strings.TrimSpace(payload.Message) != "" {
+			detailParts = append(detailParts, strings.TrimSpace(payload.Message))
+		} else {
+			detailParts = append(detailParts, snippet)
+		}
+	}
+	if remaining != "" {
+		detailParts = append(detailParts, "X-RateLimit-Remaining="+remaining)
+	}
+	if reset != "" {
+		detailParts = append(detailParts, "X-RateLimit-Reset="+reset)
+	}
+	detail := strings.Join(detailParts, " | ")
+
+	rateLimited := status == http.StatusTooManyRequests ||
+		strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "secondary rate limit") ||
+		(status == http.StatusForbidden && remaining == "0")
+
+	if rateLimited {
+		return localizedUpdateError{
+			key:    "app.update.backend.error.check_http_rate_limited",
+			params: map[string]any{"detail": detail},
+		}
+	}
+	if status == http.StatusForbidden {
+		if isCheck {
+			return localizedUpdateError{
+				key:    "app.update.backend.error.check_http_forbidden",
+				params: map[string]any{"detail": detail},
+			}
+		}
+		return localizedUpdateError{
+			key:    "app.update.backend.error.package_download_forbidden",
+			params: map[string]any{"detail": detail},
+		}
+	}
+	if isCheck {
+		return localizedUpdateError{
+			key:    "app.update.backend.error.check_http_status",
+			params: map[string]any{"status": status},
+		}
+	}
+	return localizedUpdateError{
+		key:    "app.update.backend.error.package_download_http_failed",
+		params: map[string]any{"status": status},
+	}
 }
 
 func expectedAssetName(goos, goarch, version string) (string, error) {
@@ -687,42 +873,70 @@ func normalizeGitHubAssetSHA256(digest string) string {
 }
 
 func fetchReleaseSHA256(assets []githubAsset) (map[string]string, error) {
-	var checksumURL string
+	var candidates []string
+	seen := map[string]struct{}{}
+	addCandidate := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return
+		}
+		if _, ok := seen[raw]; ok {
+			return
+		}
+		seen[raw] = struct{}{}
+		candidates = append(candidates, raw)
+	}
 	for _, asset := range assets {
 		if strings.EqualFold(asset.Name, updateChecksumAsset) || strings.Contains(strings.ToLower(asset.Name), "sha256sums") {
-			checksumURL = asset.BrowserDownloadURL
+			addCandidate(asset.BrowserDownloadURL)
+			addCandidate(asset.URL)
 			break
 		}
 	}
-	if checksumURL == "" {
+	if len(candidates) == 0 {
 		return nil, localizedUpdateError{key: "app.update.backend.error.sha256sums_missing"}
 	}
 
 	client := newHTTPClientWithGlobalProxy(15 * time.Second)
-	req, err := http.NewRequest(http.MethodGet, checksumURL, nil)
-	if err != nil {
-		return nil, err
+	var lastStatus int
+	for _, candidate := range candidates {
+		resp, err := doGitHubDownload(client, candidate)
+		if err != nil {
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			continue
+		}
+		if resp.StatusCode == http.StatusOK {
+			return parseSHA256Sums(string(body)), nil
+		}
+		lastStatus = resp.StatusCode
 	}
-	req.Header.Set("User-Agent", "GoNavi-Updater")
-	resp, err := doUpdateRequest(client, req)
-	if err != nil {
-		return nil, err
+	if lastStatus == 0 {
+		lastStatus = http.StatusForbidden
 	}
-	defer resp.Body.Close()
+	return nil, localizedUpdateError{
+		key:    "app.update.backend.error.sha256sums_download_failed",
+		params: map[string]any{"status": lastStatus},
+	}
+}
 
-	if resp.StatusCode != http.StatusOK {
+func doGitHubDownload(client *http.Client, rawURL string) (*http.Response, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
 		return nil, localizedUpdateError{
-			key:    "app.update.backend.error.sha256sums_download_failed",
-			params: map[string]any{"status": resp.StatusCode},
+			key:    "app.update.backend.error.package_download_http_failed",
+			params: map[string]any{"status": 0},
 		}
 	}
-
-	body, err := io.ReadAll(resp.Body)
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, wrapUpdateNetworkError(err)
+		return nil, err
 	}
-
-	return parseSHA256Sums(string(body)), nil
+	applyGitHubDownloadRequestHeaders(req, isGitHubReleaseAssetAPIURL(rawURL))
+	return doUpdateRequest(client, req)
 }
 
 func parseSHA256Sums(content string) map[string]string {
@@ -780,26 +994,15 @@ func downloadFileWithHashWithTimeout(url, filePath string, onProgress func(downl
 		timeout = 10 * time.Minute
 	}
 	client := newHTTPClientWithGlobalProxy(timeout)
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", "GoNavi-Updater")
-	if isGitHubReleaseAssetAPIURL(url) {
-		req.Header.Set("Accept", "application/octet-stream")
-	}
-
-	resp, err := doUpdateRequest(client, req)
+	resp, err := doGitHubDownload(client, url)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", localizedUpdateError{
-			key:    "app.update.backend.error.package_download_http_failed",
-			params: map[string]any{"status": resp.StatusCode},
-		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		return "", classifyGitHubUpdateHTTPError(resp.StatusCode, body, resp.Header, false)
 	}
 
 	// Windows 上旧文件可能被杀毒软件/索引服务占用，先尝试删除并重试
@@ -1378,31 +1581,7 @@ func launchUpdateScript(staged *stagedUpdate) error {
 }
 
 func launchWindowsUpdate(staged *stagedUpdate, targetExe string, pid int) error {
-	if err := os.MkdirAll(staged.StagedDir, 0o755); err != nil {
-		return err
-	}
-	scriptPath := filepath.Join(staged.StagedDir, "update.cmd")
-	logPath := strings.TrimSpace(staged.InstallLogPath)
-	if logPath == "" {
-		logPath = buildUpdateInstallLogPath(filepath.Dir(staged.FilePath))
-		staged.InstallLogPath = logPath
-	}
-	content := buildWindowsScript(staged.FilePath, targetExe, staged.StagedDir, logPath, pid)
-	if err := os.WriteFile(scriptPath, []byte(content), 0o644); err != nil {
-		return err
-	}
-
-	logger.Infof("启动 Windows 更新脚本：target=%s script=%s log=%s", targetExe, scriptPath, logPath)
-	cmd := buildWindowsLaunchCommand(scriptPath)
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	if cmd.Process != nil {
-		if err := cmd.Process.Release(); err != nil {
-			logger.Warnf("释放 Windows 更新脚本进程句柄失败：%v", err)
-		}
-	}
-	return nil
+	return launchWindowsUpdateWithCleanup(staged, targetExe, pid)
 }
 
 func launchMacUpdate(staged *stagedUpdate, targetExe string, pid int) error {
@@ -1423,9 +1602,19 @@ func launchMacUpdate(staged *stagedUpdate, targetExe string, pid int) error {
 		return err
 	}
 
+	// 用 bash 执行脚本；Setsid 脱离主进程会话，避免 Quit 后脚本被 SIGHUP
 	cmd := exec.Command("/bin/bash", scriptPath)
-	logger.Infof("启动 macOS 更新脚本：target=%s script=%s log=%s", targetApp, scriptPath, logPath)
-	return cmd.Start()
+	configureDetachedUpdateCommand(cmd)
+	logger.Infof("启动 macOS 更新脚本：target=%s script=%s log=%s package=%s", targetApp, scriptPath, logPath, staged.FilePath)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if cmd.Process != nil {
+		if err := cmd.Process.Release(); err != nil {
+			logger.Warnf("释放 macOS 更新脚本进程句柄失败：%v", err)
+		}
+	}
+	return nil
 }
 
 func launchLinuxUpdate(staged *stagedUpdate, targetExe string, pid int) error {
@@ -1436,168 +1625,134 @@ func launchLinuxUpdate(staged *stagedUpdate, targetExe string, pid int) error {
 	}
 
 	cmd := exec.Command("/bin/sh", scriptPath)
-	return cmd.Start()
+	configureDetachedUpdateCommand(cmd)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if cmd.Process != nil {
+		_ = cmd.Process.Release()
+	}
+	return nil
 }
 
-func buildWindowsScript(source, target, stagedDir, logPath string, pid int) string {
-	script := `@echo off
-setlocal EnableExtensions EnableDelayedExpansion
-set "SOURCE=__GONAVI_UPDATE_SOURCE__"
-set "TARGET=__GONAVI_UPDATE_TARGET__"
-set "TARGET_OLD=%TARGET%.old"
-set "STAGED=__GONAVI_UPDATE_STAGED__"
-set "LOG_FILE=__GONAVI_UPDATE_LOG__"
-set PID=__GONAVI_UPDATE_PID__
-set /a WAIT_PID_SECONDS=0
-
-call :log updater started
-if not exist "%SOURCE%" (
-  call :log source file not found: %SOURCE%
-  exit /b 1
-)
-
-for %%I in ("%TARGET%") do set "TARGET_NAME=%%~nxI"
-for %%I in ("%TARGET%") do set "TARGET_DIR=%%~dpI"
-for %%I in ("%SOURCE%") do set "SOURCE_EXT=%%~xI"
-set "SOURCE_EXE="
-
-if /I "%SOURCE_EXT%"==".zip" (
-  set "EXTRACT_DIR=%STAGED%\_extract"
-  if exist "%EXTRACT_DIR%" (
-    rmdir /S /Q "%EXTRACT_DIR%" >> "%LOG_FILE%" 2>&1
-  )
-  mkdir "%EXTRACT_DIR%" >> "%LOG_FILE%" 2>&1
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "$src=$env:SOURCE; $dst=$env:EXTRACT_DIR; Expand-Archive -LiteralPath $src -DestinationPath $dst -Force" >> "%LOG_FILE%" 2>&1
-  if !ERRORLEVEL! NEQ 0 (
-    call :log expand zip failed: %SOURCE%
-    exit /b 1
-  )
-  if exist "%EXTRACT_DIR%\%TARGET_NAME%" (
-    set "SOURCE_EXE=%EXTRACT_DIR%\%TARGET_NAME%"
-  ) else (
-    for /R "%EXTRACT_DIR%" %%F in (*.exe) do (
-      if not defined SOURCE_EXE (
-        set "SOURCE_EXE=%%~fF"
-      )
-    )
-  )
-  if not defined SOURCE_EXE (
-    call :log no executable found in portable zip: %SOURCE%
-    exit /b 1
-  )
-) else (
-  set "SOURCE_EXE=%SOURCE%"
-)
-for %%I in ("%SOURCE_EXE%") do set "SOURCE_DIR=%%~dpI"
-
-:waitloop
-tasklist /FI "PID eq %PID%" | find "%PID%" >nul
-if %ERRORLEVEL%==0 (
-  if !WAIT_PID_SECONDS! GEQ 90 (
-    call :log host process still running after !WAIT_PID_SECONDS! seconds, aborting update
-    exit /b 1
-  )
-  timeout /t 1 /nobreak >nul
-  set /a WAIT_PID_SECONDS+=1
-  goto waitloop
-)
-call :log host process exited
-
-rem -- Win10 needs extra time for kernel to release exe file handles --
-timeout /t 3 /nobreak >nul
-call :log cooldown finished, starting file replace
-
-:replace_binary
-if /I "%SOURCE_EXE%"=="%TARGET%" (
-  call :log downloaded executable already at target path, skip replace
-  goto move_done
-)
-set /a RETRY=0
-:move_retry
-call :log attempt !RETRY!: trying rename-then-copy strategy
-move /Y "%TARGET%" "%TARGET_OLD%" >> "%LOG_FILE%" 2>&1
-if !ERRORLEVEL!==0 (
-  copy /Y "%SOURCE_EXE%" "%TARGET%" >> "%LOG_FILE%" 2>&1
-  if !ERRORLEVEL!==0 (
-    del /F /Q "%TARGET_OLD%" >> "%LOG_FILE%" 2>&1
-    goto move_done
-  )
-  call :log copy after rename failed, restoring old file
-  move /Y "%TARGET_OLD%" "%TARGET%" >> "%LOG_FILE%" 2>&1
-)
-
-call :log rename strategy failed, trying direct move
-move /Y "%SOURCE_EXE%" "%TARGET%" >> "%LOG_FILE%" 2>&1
-if %ERRORLEVEL%==0 goto move_done
-
-copy /Y "%SOURCE_EXE%" "%TARGET%" >> "%LOG_FILE%" 2>&1
-if %ERRORLEVEL%==0 goto move_done
-
-set /a RETRY+=1
-if !RETRY! LSS 15 (
-  set /a WAIT=1
-  if !RETRY! GEQ 3 set /a WAIT=2
-  if !RETRY! GEQ 6 set /a WAIT=3
-  if !RETRY! GEQ 9 set /a WAIT=5
-  call :log waiting !WAIT! seconds before retry
-  timeout /t !WAIT! /nobreak >nul
-  goto move_retry
-)
-
-call :log replace failed after retries (portable mode, no elevation): check directory write permission or file lock
-exit /b 1
-
-:move_done
-del /F /Q "%TARGET_OLD%" >> "%LOG_FILE%" 2>&1
-if exist "%SOURCE%" del /F /Q "%SOURCE%" >> "%LOG_FILE%" 2>&1
-start "" /D "%TARGET_DIR%" "%TARGET%" >> "%LOG_FILE%" 2>&1
-if %ERRORLEVEL% NEQ 0 (
-  call :log cmd start failed, trying powershell Start-Process
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%TARGET%' -WorkingDirectory '%TARGET_DIR%'" >> "%LOG_FILE%" 2>&1
-  if !ERRORLEVEL! NEQ 0 (
-    call :log relaunch failed
-    exit /b 1
-  )
-)
-rmdir /S /Q "%STAGED%" >> "%LOG_FILE%" 2>&1
-call :log update finished
-exit /b 0
-
-:log
-echo [%date% %time%] %*>>"%LOG_FILE%"
-exit /b 0
-`
-	return strings.NewReplacer(
-		"__GONAVI_UPDATE_SOURCE__", source,
-		"__GONAVI_UPDATE_TARGET__", target,
-		"__GONAVI_UPDATE_STAGED__", stagedDir,
-		"__GONAVI_UPDATE_LOG__", logPath,
-		"__GONAVI_UPDATE_PID__", strconv.Itoa(pid),
-	).Replace(strings.ReplaceAll(script, "\n", "\r\n"))
-}
-
-func buildWindowsLaunchCommand(scriptPath string) *exec.Cmd {
-	cmd := exec.Command("cmd.exe", "/D", "/C", "call", scriptPath)
+func buildWindowsLaunchCommand(scriptPath string, context windowsUpdateLaunchContext) *exec.Cmd {
+	cmd := exec.Command(
+		"powershell.exe",
+		"-NoProfile",
+		"-NonInteractive",
+		"-ExecutionPolicy",
+		"Bypass",
+		"-File",
+		scriptPath,
+	)
+	cmd.Dir = context.StagedDir
+	cmd.Env = append(cmd.Environ(),
+		"GONAVI_UPDATE_SOURCE="+context.SourcePath,
+		"GONAVI_UPDATE_TARGET="+context.TargetPath,
+		"GONAVI_UPDATE_CURRENT_TARGET="+context.CurrentTargetPath,
+		"GONAVI_UPDATE_STAGED_DIR="+context.StagedDir,
+		"GONAVI_UPDATE_LOG_PATH="+context.LogPath,
+		"GONAVI_UPDATE_PID="+strconv.Itoa(context.PID),
+	)
 	configureWindowsUpdateCommand(cmd)
 	return cmd
 }
 
-func buildMacScript(dmgPath, targetApp, stagedDir, mountDir, logPath string, pid int) string {
+func buildMacScript(packagePath, targetApp, stagedDir, mountDir, logPath string, pid int) string {
 	return fmt.Sprintf(`#!/bin/bash
-set -euo pipefail
+set -uo pipefail
 PID=%d
-DMG="%s"
+PACKAGE="%s"
 TARGET_APP="%s"
 STAGED="%s"
 MOUNT_DIR="%s"
 LOG_FILE="%s"
 TMP_APP="${TARGET_APP}.new"
 BACKUP_APP="${TARGET_APP}.backup"
-APP_BIN_NAME=$(basename "$TARGET_APP" .app)
-APP_BIN_REL="Contents/MacOS/$APP_BIN_NAME"
+EXTRACT_DIR="${STAGED}/_extract"
+WAIT_PID_SECONDS=0
+MAX_WAIT_PID_SECONDS=120
+APP_SRC=""
+APP_BIN_REL=""
+DETACH_NEEDED=0
 
 log() {
-  echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] $*" >> "$LOG_FILE"
+  echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] $*" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+cleanup_mount() {
+  if [ "$DETACH_NEEDED" = "1" ]; then
+    /usr/bin/hdiutil detach "$MOUNT_DIR" -quiet >>"$LOG_FILE" 2>&1 || \
+      /usr/bin/hdiutil detach "$MOUNT_DIR" -force -quiet >>"$LOG_FILE" 2>&1 || true
+    DETACH_NEEDED=0
+  fi
+}
+
+resolve_app_binary_rel() {
+  local app_root="$1"
+  local preferred
+  preferred=$(basename "$TARGET_APP" .app)
+  if [ -n "$preferred" ] && [ -x "$app_root/Contents/MacOS/$preferred" ]; then
+    APP_BIN_REL="Contents/MacOS/$preferred"
+    return 0
+  fi
+  local found
+  found=$(/usr/bin/find "$app_root/Contents/MacOS" -maxdepth 1 -type f -perm -111 2>/dev/null | /usr/bin/head -n 1 || true)
+  if [ -n "$found" ]; then
+    APP_BIN_REL="Contents/MacOS/$(basename "$found")"
+    return 0
+  fi
+  return 1
+}
+
+prepare_app_source_from_package() {
+  local ext
+  ext=$(printf '%%s' "${PACKAGE##*.}" | tr '[:upper:]' '[:lower:]')
+  case "$ext" in
+    dmg)
+      log "attaching dmg: $PACKAGE"
+      /bin/mkdir -p "$MOUNT_DIR" >>"$LOG_FILE" 2>&1 || true
+      if ! /usr/bin/hdiutil attach "$PACKAGE" -nobrowse -quiet -mountpoint "$MOUNT_DIR" >>"$LOG_FILE" 2>&1; then
+        log "hdiutil attach failed, retry without quiet"
+        if ! /usr/bin/hdiutil attach "$PACKAGE" -nobrowse -mountpoint "$MOUNT_DIR" >>"$LOG_FILE" 2>&1; then
+          log "hdiutil attach failed for $PACKAGE"
+          return 1
+        fi
+      fi
+      DETACH_NEEDED=1
+      APP_SRC=$(/usr/bin/find "$MOUNT_DIR" -maxdepth 2 -name "*.app" -type d 2>/dev/null | /usr/bin/head -n 1 || true)
+      if [ -z "$APP_SRC" ]; then
+        log "no .app found inside dmg mount: $MOUNT_DIR"
+        return 1
+      fi
+      ;;
+    zip)
+      log "extracting zip package: $PACKAGE"
+      /bin/rm -rf "$EXTRACT_DIR" >>"$LOG_FILE" 2>&1 || true
+      /bin/mkdir -p "$EXTRACT_DIR" >>"$LOG_FILE" 2>&1 || true
+      if ! /usr/bin/ditto -x -k "$PACKAGE" "$EXTRACT_DIR" >>"$LOG_FILE" 2>&1; then
+        if ! /usr/bin/unzip -qo "$PACKAGE" -d "$EXTRACT_DIR" >>"$LOG_FILE" 2>&1; then
+          log "extract zip failed: $PACKAGE"
+          return 1
+        fi
+      fi
+      APP_SRC=$(/usr/bin/find "$EXTRACT_DIR" -maxdepth 3 -name "*.app" -type d 2>/dev/null | /usr/bin/head -n 1 || true)
+      if [ -z "$APP_SRC" ]; then
+        log "no .app found inside zip: $PACKAGE"
+        return 1
+      fi
+      ;;
+    *)
+      log "unsupported mac package type: $PACKAGE"
+      return 1
+      ;;
+  esac
+  if ! resolve_app_binary_rel "$APP_SRC"; then
+    log "no executable found in package app: $APP_SRC"
+    return 1
+  fi
+  log "package app source: $APP_SRC binary=$APP_BIN_REL"
+  return 0
 }
 
 run_admin_replace() {
@@ -1624,68 +1779,109 @@ APPLESCRIPT
 }
 
 replace_app_direct() {
-  rm -rf "$TMP_APP" "$BACKUP_APP" >>"$LOG_FILE" 2>&1 || true
+  /bin/rm -rf "$TMP_APP" "$BACKUP_APP" >>"$LOG_FILE" 2>&1 || true
   /usr/bin/ditto "$APP_SRC" "$TMP_APP" >>"$LOG_FILE" 2>&1
   if [ ! -x "$TMP_APP/$APP_BIN_REL" ]; then
     log "tmp app binary missing: $TMP_APP/$APP_BIN_REL"
     return 1
   fi
-  xattr -rd com.apple.quarantine "$TMP_APP" >>"$LOG_FILE" 2>&1 || true
+  /usr/bin/xattr -rd com.apple.quarantine "$TMP_APP" >>"$LOG_FILE" 2>&1 || true
   if [ -d "$TARGET_APP" ]; then
-    mv "$TARGET_APP" "$BACKUP_APP" >>"$LOG_FILE" 2>&1
+    /bin/mv "$TARGET_APP" "$BACKUP_APP" >>"$LOG_FILE" 2>&1
   fi
-  if ! mv "$TMP_APP" "$TARGET_APP" >>"$LOG_FILE" 2>&1; then
+  if ! /bin/mv "$TMP_APP" "$TARGET_APP" >>"$LOG_FILE" 2>&1; then
     log "move new app failed, trying rollback"
-    rm -rf "$TARGET_APP" >>"$LOG_FILE" 2>&1 || true
+    /bin/rm -rf "$TARGET_APP" >>"$LOG_FILE" 2>&1 || true
     if [ -d "$BACKUP_APP" ]; then
-      mv "$BACKUP_APP" "$TARGET_APP" >>"$LOG_FILE" 2>&1 || true
+      /bin/mv "$BACKUP_APP" "$TARGET_APP" >>"$LOG_FILE" 2>&1 || true
     fi
     return 1
   fi
-  rm -rf "$BACKUP_APP" >>"$LOG_FILE" 2>&1 || true
-  xattr -rd com.apple.quarantine "$TARGET_APP" >>"$LOG_FILE" 2>&1 || true
+  /bin/rm -rf "$BACKUP_APP" >>"$LOG_FILE" 2>&1 || true
+  /usr/bin/xattr -rd com.apple.quarantine "$TARGET_APP" >>"$LOG_FILE" 2>&1 || true
   return 0
 }
 
 relaunch_app() {
+  # open -a 需要应用名，不能传完整路径；路径必须用 open -n "xxx.app"
   if /usr/bin/open -n "$TARGET_APP" >>"$LOG_FILE" 2>&1; then
+    log "relaunch via open -n path ok"
     return 0
   fi
-  log "open -n failed, trying binary launch"
-  "$TARGET_APP/$APP_BIN_REL" >>"$LOG_FILE" 2>&1 &
-  return 0
+  local app_name
+  app_name=$(basename "$TARGET_APP" .app)
+  if [ -n "$app_name" ] && /usr/bin/open -n -a "$app_name" >>"$LOG_FILE" 2>&1; then
+    log "relaunch via open -n -a name ok: $app_name"
+    return 0
+  fi
+  log "open failed, trying binary launch: $TARGET_APP/$APP_BIN_REL"
+  if [ -x "$TARGET_APP/$APP_BIN_REL" ]; then
+    nohup "$TARGET_APP/$APP_BIN_REL" >>"$LOG_FILE" 2>&1 &
+    log "relaunch via binary pid=$!"
+    return 0
+  fi
+  log "relaunch failed: no launch method succeeded"
+  return 1
 }
 
-log "updater started"
-while kill -0 $PID 2>/dev/null; do
-  sleep 1
+log "updater started package=$PACKAGE target=$TARGET_APP pid=$PID"
+while /bin/kill -0 "$PID" 2>/dev/null; do
+  if [ "$WAIT_PID_SECONDS" -ge "$MAX_WAIT_PID_SECONDS" ]; then
+    log "host process still running after ${WAIT_PID_SECONDS}s, aborting update"
+    exit 1
+  fi
+  /bin/sleep 1
+  WAIT_PID_SECONDS=$((WAIT_PID_SECONDS + 1))
 done
-log "host process exited"
-hdiutil attach "$DMG" -nobrowse -quiet -mountpoint "$MOUNT_DIR" >>"$LOG_FILE" 2>&1
-APP_SRC=$(ls "$MOUNT_DIR"/*.app 2>/dev/null | head -n 1 || true)
-if [ -z "$APP_SRC" ]; then
-  log "no .app found inside dmg"
-  hdiutil detach "$MOUNT_DIR" -quiet >>"$LOG_FILE" 2>&1 || true
+log "host process exited after ${WAIT_PID_SECONDS}s"
+/bin/sleep 1
+
+if [ ! -f "$PACKAGE" ]; then
+  log "package file missing: $PACKAGE"
+  exit 1
+fi
+
+if ! prepare_app_source_from_package; then
+  cleanup_mount
   exit 1
 fi
 
 log "install target: $TARGET_APP"
 if ! replace_app_direct; then
   log "direct replace failed, trying admin replace"
-  run_admin_replace >>"$LOG_FILE" 2>&1
+  if ! run_admin_replace >>"$LOG_FILE" 2>&1; then
+    log "admin replace failed — package kept at: $PACKAGE"
+    cleanup_mount
+    exit 1
+  fi
 fi
 
+if ! resolve_app_binary_rel "$TARGET_APP"; then
+  log "target app binary missing after replace: $TARGET_APP — package kept at: $PACKAGE"
+  cleanup_mount
+  exit 1
+fi
 if [ ! -x "$TARGET_APP/$APP_BIN_REL" ]; then
-  log "target app binary missing after replace: $TARGET_APP/$APP_BIN_REL"
-  hdiutil detach "$MOUNT_DIR" -quiet >>"$LOG_FILE" 2>&1 || true
+  log "target app binary not executable: $TARGET_APP/$APP_BIN_REL — package kept at: $PACKAGE"
+  cleanup_mount
   exit 1
 fi
 
-hdiutil detach "$MOUNT_DIR" -quiet >>"$LOG_FILE" 2>&1 || true
-rm -rf "$MOUNT_DIR" "$DMG" "$STAGED" >>"$LOG_FILE" 2>&1 || true
-relaunch_app
-log "relaunch requested"
-	`, pid, dmgPath, targetApp, stagedDir, mountDir, logPath)
+cleanup_mount
+# 仅清理临时解压目录；安装包在 relaunch 成功后再删，失败则保留便于手动安装
+/bin/rm -rf "$EXTRACT_DIR" >>"$LOG_FILE" 2>&1 || true
+
+if ! relaunch_app; then
+  log "update files replaced but relaunch failed — package kept for manual install: $PACKAGE"
+  log "please open: $TARGET_APP"
+  exit 1
+fi
+
+# relaunch 已发出：再删安装包（用户已不需要 dmg/zip）
+/bin/rm -f "$PACKAGE" >>"$LOG_FILE" 2>&1 || true
+log "relaunch requested; package cleaned if possible"
+exit 0
+	`, pid, packagePath, targetApp, stagedDir, mountDir, logPath)
 }
 
 func buildLinuxScript(tarPath, targetExe, stagedDir string, pid int) string {
@@ -1736,14 +1932,24 @@ func detectMacAppPath(exePath string) string {
 func resolveMacUpdateTarget(exePath string) string {
 	targetApp := detectMacAppPath(exePath)
 	if targetApp == "" {
+		logger.Warnf("无法从可执行路径解析 .app，回退 /Applications/GoNavi.app：exe=%s", exePath)
 		return "/Applications/GoNavi.app"
 	}
 	targetApp = filepath.Clean(targetApp)
-	// Gatekeeper App Translocation 路径不可用于稳定覆盖更新，统一回退到 /Applications。
+	// Gatekeeper App Translocation 路径不可用于稳定覆盖更新。
+	// 优先使用 /Applications 中已有的正式安装；否则仍回退到标准路径（避免写进临时隔离目录）。
 	if strings.Contains(targetApp, string(filepath.Separator)+"AppTranslocation"+string(filepath.Separator)) {
-		logger.Warnf("检测到 AppTranslocation 运行路径，更新目标回退至 /Applications/GoNavi.app：%s", targetApp)
-		return "/Applications/GoNavi.app"
+		applicationsTarget := "/Applications/GoNavi.app"
+		if st, err := os.Stat(applicationsTarget); err == nil && st.IsDir() {
+			logger.Warnf("检测到 AppTranslocation，更新目标使用已有 Applications 安装：%s（来自 %s）", applicationsTarget, targetApp)
+			return applicationsTarget
+		}
+		logger.Warnf("检测到 AppTranslocation 且 Applications 无安装，仍将更新到 %s（来自 %s）", applicationsTarget, targetApp)
+		return applicationsTarget
 	}
+	// 正在运行的是桌面/便携 .app（含 dev 包）：必须覆盖「当前这份」而不是误写到 /Applications，
+	// 否则会出现：latest 包被删、用户仍打开旧的 Desktop dev 包。
+	logger.Infof("macOS 更新目标使用当前运行的应用包：%s", targetApp)
 	return targetApp
 }
 

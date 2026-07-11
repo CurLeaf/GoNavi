@@ -760,6 +760,8 @@ export const useSidebarObjectActions = ({
       dbName,
       query: template,
       queryMode: 'object-edit',
+      viewName,
+      objectType: 'view',
     });
   };
 

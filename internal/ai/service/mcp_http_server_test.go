@@ -94,11 +94,11 @@ func TestMCPHTTPServerLifecycleFromAIService(t *testing.T) {
 	if started.Path != "/mcp" {
 		t.Fatalf("expected normalized path /mcp, got %q", started.Path)
 	}
-	if !started.SchemaOnly {
-		t.Fatal("expected in-app MCP HTTP server to default to schema-only mode")
+	if started.SchemaOnly {
+		t.Fatal("expected in-app MCP HTTP server to default to execute_sql-enabled mode for limited data queries")
 	}
-	if !capturedOptions.SchemaOnly || capturedOptions.Token != started.Token {
-		t.Fatalf("expected process to receive schema-only and generated token, got %#v", capturedOptions)
+	if capturedOptions.SchemaOnly || capturedOptions.Token != started.Token {
+		t.Fatalf("expected process to receive schemaOnly=false and generated token, got %#v", capturedOptions)
 	}
 	if !strings.HasPrefix(started.Token, "gnv_") || started.AuthorizationHeader != "Bearer "+started.Token {
 		t.Fatalf("expected generated bearer token in status, got token=%q header=%q", started.Token, started.AuthorizationHeader)
@@ -160,8 +160,23 @@ func TestMCPHTTPServerStartUsesCustomAddrAndToken(t *testing.T) {
 	if started.Token != "gnv_custom_token" || started.AuthorizationHeader != "Bearer gnv_custom_token" {
 		t.Fatalf("expected custom bearer token in status, got token=%q header=%q", started.Token, started.AuthorizationHeader)
 	}
-	if !started.SchemaOnly || !capturedOptions.SchemaOnly {
-		t.Fatal("expected custom in-app MCP HTTP server to remain schema-only")
+	if started.SchemaOnly || capturedOptions.SchemaOnly {
+		t.Fatal("expected custom in-app MCP HTTP server to keep default execute_sql-enabled mode")
+	}
+
+	// 显式 schemaOnly=true 仍可关闭 execute_sql
+	service.Shutdown()
+	_, err = service.AIStartMCPHTTPServer(ai.MCPHTTPServerOptions{
+		Addr:       "127.0.0.1:9124",
+		Path:       "mcp",
+		Token:      "gnv_schema_only",
+		SchemaOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("AIStartMCPHTTPServer schema-only returned error: %v", err)
+	}
+	if !capturedOptions.SchemaOnly {
+		t.Fatalf("expected process to receive schemaOnly=true, got %#v", capturedOptions)
 	}
 }
 

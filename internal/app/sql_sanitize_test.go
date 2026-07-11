@@ -111,6 +111,35 @@ func TestIsReadOnlySQLQuery_TreatsMongoDeleteAsWrite(t *testing.T) {
 	}
 }
 
+func TestIsReadOnlySQLQuery_TreatsMilvusJSONQueriesAsReadOnly(t *testing.T) {
+	for _, query := range []string{
+		`{"list_collections":true}`,
+		`{"query":"products","filter":"id >= 1","limit":10}`,
+		`{"search":"products","vector":[0.1,0.2,0.3],"limit":5}`,
+		`{"collection":"products","filter":"id >= 1"}`,
+	} {
+		if !isReadOnlySQLQuery("milvus", query) {
+			t.Fatalf("Milvus query should be read-only: %s", query)
+		}
+	}
+	if !isReadOnlySQLQuery("milvus-db", `{"count":"products"}`) {
+		t.Fatal("Milvus aliases should preserve JSON read classification")
+	}
+}
+
+func TestIsReadOnlySQLQuery_TreatsMilvusJSONWritesAsWrites(t *testing.T) {
+	for _, query := range []string{
+		`{"create_collection":"products","dimension":3}`,
+		`{"insert":"products","data":[{"id":1}]}`,
+		`{"delete":"products","filter":"id in [1]"}`,
+		`{"drop_index":"products","index_name":"embedding_idx"}`,
+	} {
+		if isReadOnlySQLQuery("milvus", query) {
+			t.Fatalf("Milvus write should not be read-only: %s", query)
+		}
+	}
+}
+
 func TestIsBatchableWriteSQLStatement_OnlyMatchesRealWriteStatements(t *testing.T) {
 	if !isBatchableWriteSQLStatement("mysql", "INSERT INTO demo(id) VALUES (1)") {
 		t.Fatal("expected INSERT to be treated as batchable write")

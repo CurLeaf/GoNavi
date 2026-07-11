@@ -27,6 +27,7 @@ const LogPanel: React.FC<LogPanelProps> = ({
     const theme = useStore(state => state.theme);
     const appearance = useStore(state => state.appearance);
     const darkMode = theme === 'dark';
+    const isV2Ui = appearance.uiVersion === 'v2';
     const resolvedAppearance = resolveAppearanceValues(appearance);
     const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
 
@@ -42,17 +43,27 @@ const LogPanel: React.FC<LogPanelProps> = ({
     const bgMain = getBg('#1d1d1d');
     const shellOpacity = darkMode ? Math.max(0.18, opacity * 0.82) : Math.max(0.28, opacity * 0.92);
     const shellOpacityStrong = darkMode ? Math.max(0.22, opacity * 0.9) : Math.max(0.34, opacity * 0.96);
-    const panelDividerColor = darkMode
+    const panelDividerColor = isV2Ui ? 'var(--gn-br-2)' : (darkMode
         ? `rgba(255,255,255,${Math.max(0.04, opacity * 0.10)})`
-        : `rgba(0,0,0,${Math.max(0.04, opacity * 0.08)})`;
-    const panelMutedTextColor = darkMode ? 'rgba(255,255,255,0.62)' : 'rgba(0,0,0,0.58)';
-    const panelShellBg = darkMode
+        : `rgba(0,0,0,${Math.max(0.04, opacity * 0.08)})`);
+    const panelMutedTextColor = isV2Ui
+        ? 'var(--gn-fg-4)'
+        : (darkMode ? 'rgba(255,255,255,0.62)' : 'rgba(0,0,0,0.58)');
+    const panelPrimaryTextColor = isV2Ui
+        ? 'var(--gn-fg-1)'
+        : (darkMode ? '#f5f7ff' : '#162033');
+    const panelShellBg = isV2Ui ? 'var(--gn-bg-panel)' : (darkMode
         ? `linear-gradient(180deg, rgba(15,20,30,${shellOpacity}) 0%, rgba(9,13,22,${shellOpacityStrong}) 100%)`
-        : `linear-gradient(180deg, rgba(255,255,255,${shellOpacityStrong}) 0%, rgba(246,248,252,${shellOpacity}) 100%)`;
-    const panelAccentColor = darkMode ? '#ffd666' : '#1677ff';
-    const panelShadow = darkMode
+        : `linear-gradient(180deg, rgba(255,255,255,${shellOpacityStrong}) 0%, rgba(246,248,252,${shellOpacity}) 100%)`);
+    const panelAccentColor = isV2Ui ? 'var(--gn-accent)' : (darkMode ? '#ffd666' : '#1677ff');
+    const panelAccentSoftBg = isV2Ui
+        ? 'var(--gn-accent-soft)'
+        : (darkMode
+            ? `rgba(255,214,102,${Math.max(0.10, Math.min(0.18, opacity * 0.18))})`
+            : `rgba(24,144,255,${Math.max(0.08, Math.min(0.16, opacity * 0.16))})`);
+    const panelShadow = isV2Ui ? 'var(--gn-shadow-md)' : (darkMode
         ? `0 12px 28px rgba(0,0,0,${Math.max(0.05, opacity * 0.18)})`
-        : `0 12px 24px rgba(15,23,42,${Math.max(0.02, opacity * 0.08)})`;
+        : `0 12px 24px rgba(15,23,42,${Math.max(0.02, opacity * 0.08)})`);
     const logScrollbarThumb = darkMode
         ? `rgba(255, 255, 255, ${Math.max(0.18, opacity * 0.34)})`
         : `rgba(0, 0, 0, ${Math.max(0.12, opacity * 0.26)})`;
@@ -89,7 +100,7 @@ const LogPanel: React.FC<LogPanelProps> = ({
             title: t('log_panel.column.sql_message'),
             dataIndex: 'sql',
             render: (text: string, record: any) => (
-                <div style={{ fontFamily: 'var(--gn-font-mono)', wordBreak: 'break-all', fontSize: '12px', lineHeight: '1.45' }}>
+                <div style={{ fontFamily: 'var(--gn-font-mono)', wordBreak: 'break-all', whiteSpace: 'pre-wrap', fontSize: '12px', lineHeight: '1.45' }}>
                     <div style={{ color: darkMode ? '#a6e22e' : '#005cc5' }}>{text}</div>
                     {record.message && <div style={{ color: '#ff4d4f', marginTop: 2 }}>{record.message}</div>}
                     {record.affectedRows !== undefined && <div style={{ color: panelMutedTextColor, marginTop: 1 }}>{t('log_panel.affected_rows', { count: record.affectedRows })}</div>}
@@ -201,9 +212,7 @@ const LogPanel: React.FC<LogPanelProps> = ({
                                 borderRadius: 8,
                                 display: 'grid',
                                 placeItems: 'center',
-                                background: darkMode
-                                    ? `rgba(255,214,102,${Math.max(0.08, Math.min(0.14, opacity * 0.14))})`
-                                    : `rgba(24,144,255,${Math.max(0.06, Math.min(0.12, opacity * 0.12))})`,
+                                background: panelAccentSoftBg,
                                 color: panelAccentColor,
                                 flexShrink: 0,
                             }}
@@ -211,7 +220,7 @@ const LogPanel: React.FC<LogPanelProps> = ({
                             <BugOutlined />
                         </div>
                         <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: darkMode ? '#f5f7ff' : '#162033' }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: panelPrimaryTextColor }}>
                                 {t('log_panel.description')}
                             </div>
                             <div style={{ fontSize: 11, color: panelMutedTextColor }}>
@@ -324,11 +333,11 @@ const LogPanel: React.FC<LogPanelProps> = ({
                 minHeight: 48
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                    <div style={{ width: 30, height: 30, borderRadius: 10, display: 'grid', placeItems: 'center', background: darkMode ? `rgba(255,214,102,${Math.max(0.10, Math.min(0.18, opacity * 0.18))})` : `rgba(24,144,255,${Math.max(0.08, Math.min(0.16, opacity * 0.16))})`, color: panelAccentColor, flexShrink: 0 }}>
+                    <div style={{ width: 30, height: 30, borderRadius: 10, display: 'grid', placeItems: 'center', background: panelAccentSoftBg, color: panelAccentColor, flexShrink: 0 }}>
                         <BugOutlined />
                     </div>
                     <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 13, color: darkMode ? '#f5f7ff' : '#162033' }}>{t('log_panel.title')}</div>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: panelPrimaryTextColor }}>{t('log_panel.title')}</div>
                         <div style={{ fontSize: 12, color: panelMutedTextColor }}>{t('log_panel.description')}</div>
                     </div>
                 </div>

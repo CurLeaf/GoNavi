@@ -37,4 +37,44 @@ describe('SQL analysis workbench wiring', () => {
     expect(source).toContain('gn-explain-report-switcher')
     expect(source).not.toContain('<Tabs')
   })
+
+  it('keeps the editor draft separate from the SQL submitted for diagnosis', () => {
+    const source = readFileSync(new URL('./explain/SqlAnalysisWorkbench.tsx', import.meta.url), 'utf8')
+
+    expect(source).toContain('submittedSql')
+    expect(source).toContain('setSubmittedSql')
+    expect(source).toContain('sql={submittedSql}')
+    expect(source).toContain("event.key === 'Enter'")
+    expect(source).toContain('event.ctrlKey || event.metaKey')
+  })
+
+  it('loads a slow query into the editor without immediately diagnosing it', () => {
+    const source = readFileSync(new URL('./explain/SqlAnalysisWorkbench.tsx', import.meta.url), 'utf8')
+    const handler = source.slice(source.indexOf('const handlePickSlowQuery'), source.indexOf('const slowQueryLoadKey'))
+
+    expect(handler).toContain('setSqlDraft(nextSql)')
+    expect(handler).toContain("setActiveView('diagnose')")
+    expect(handler).toContain("setSubmittedSql('')")
+    expect(handler).toContain('setDiagnoseRunKey(0)')
+    expect(handler).not.toContain('setDiagnoseRunKey((previous)')
+  })
+
+  it('guards diagnose and slow-query responses against stale requests', () => {
+    const explainSource = readFileSync(new URL('./explain/ExplainWorkbench.tsx', import.meta.url), 'utf8')
+    const slowQuerySource = readFileSync(new URL('./explain/SlowQueryPanel.tsx', import.meta.url), 'utf8')
+
+    expect(explainSource).toContain('requestSequenceRef')
+    expect(slowQuerySource).toContain('requestSequenceRef')
+  })
+
+  it('disables execution-plan diagnosis for unsupported datasource types', () => {
+    const capabilitiesSource = readFileSync(new URL('../utils/dataSourceCapabilities.ts', import.meta.url), 'utf8')
+    const workbenchSource = readFileSync(new URL('./explain/SqlAnalysisWorkbench.tsx', import.meta.url), 'utf8')
+    const queryEditorSource = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8')
+
+    expect(capabilitiesSource).toContain('supportsExplainDiagnosis')
+    expect(workbenchSource).toContain('disabled: !supportsDiagnosis')
+    expect(workbenchSource).toContain("t('sql_analysis.slow_query.unsupported_diagnosis')")
+    expect(queryEditorSource).toContain('!currentConnectionCapabilities.supportsExplainDiagnosis')
+  })
 })

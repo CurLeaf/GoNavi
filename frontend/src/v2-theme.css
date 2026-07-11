@@ -287,6 +287,26 @@ body[data-ui-version="v2"] .ant-btn-primary:hover {
   border-color: var(--gn-accent-2) !important;
 }
 
+/* 查询工具栏「保存」：与「运行」同款实心饱满，色值用蓝色 */
+body[data-ui-version="v2"] .gn-v2-query-toolbar-save-action.ant-btn-primary {
+  background: #2563eb !important;
+  border-color: #1d4ed8 !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+  box-shadow: var(--gn-shadow-sm), inset 0 0.5px 0 rgba(255, 255, 255, 0.18) !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-toolbar-save-action.ant-btn-primary:hover {
+  background: #1d4ed8 !important;
+  border-color: #1e40af !important;
+  color: #fff !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-toolbar-save-action.ant-btn-primary:active {
+  background: #1e40af !important;
+  border-color: #1e3a8a !important;
+}
+
 body[data-ui-version="v2"] .ant-btn-primary:disabled {
   background: var(--gn-bg-active) !important;
   border-color: var(--gn-br-2) !important;
@@ -434,8 +454,24 @@ body[data-ui-version="v2"] .ant-table-tbody > tr:hover > td {
   background: var(--gn-bg-hover) !important;
 }
 
-body[data-ui-version="v2"] .ant-table-tbody > tr.ant-table-row-selected > td {
+body[data-ui-version="v2"] .ant-table-tbody > tr.ant-table-row-selected > td,
+body[data-ui-version="v2"] .ant-table-tbody .ant-table-row.ant-table-row-selected > .ant-table-cell,
+body[data-ui-version="v2"] .ant-table-tbody-virtual .ant-table-row.ant-table-row-selected > .ant-table-cell,
+body[data-ui-version="v2"] .ant-table-tbody-virtual-holder .ant-table-row.ant-table-row-selected > .ant-table-cell,
+body[data-ui-version="v2"] .gn-v2-data-grid .ant-table-row.ant-table-row-selected > .ant-table-cell {
   background: var(--gn-bg-selected) !important;
+  background-color: var(--gn-bg-selected) !important;
+  background-image: none !important;
+}
+
+body[data-ui-version="v2"] .ant-table-tbody > tr.ant-table-row-selected:hover > td,
+body[data-ui-version="v2"] .ant-table-tbody .ant-table-row.ant-table-row-selected:hover > .ant-table-cell,
+body[data-ui-version="v2"] .ant-table-tbody-virtual .ant-table-row.ant-table-row-selected:hover > .ant-table-cell,
+body[data-ui-version="v2"] .ant-table-tbody-virtual-holder .ant-table-row.ant-table-row-selected:hover > .ant-table-cell,
+body[data-ui-version="v2"] .gn-v2-data-grid .ant-table-row.ant-table-row-selected:hover > .ant-table-cell {
+  background: var(--gn-bg-selected) !important;
+  background-color: var(--gn-bg-selected) !important;
+  background-image: none !important;
 }
 
 /* ─── Tags / Badges ────────────────────────────────────── */
@@ -1718,7 +1754,7 @@ body[data-ui-version="v2"] .gonavi-v2-brand-chip {
   width: 24px; height: 24px;
   border-radius: 7px;
   background: linear-gradient(135deg, var(--gn-accent) 0%, var(--gn-accent-2) 100%);
-  color: #fff;
+  color: var(--gn-on-accent, #fff);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1880,7 +1916,7 @@ body[data-ui-version="v2"] .gn-v2-rail-group-count {
   padding: 0 calc(4px * var(--gn-v2-rail-scale));
   border: 2px solid var(--gn-bg-panel-2);
   background: var(--gn-accent);
-  color: #fff;
+  color: var(--gn-on-accent, #fff);
   font-family: var(--gn-font-mono);
   font-size: calc(9px * var(--gn-v2-rail-scale));
   font-weight: 800;
@@ -2037,7 +2073,7 @@ body[data-ui-version="v2"] .gn-v2-rail-status {
 }
 
 body[data-ui-version="v2"] .gn-v2-rail-status.is-live {
-  background: #22c55e;
+  background: var(--gn-accent);
 }
 
 body[data-ui-version="v2"] .gn-v2-rail-status.is-error {
@@ -3011,7 +3047,7 @@ body[data-ui-version="v2"] .gn-v2-table-pin-action:hover {
 }
 
 body[data-ui-version="v2"] .gn-v2-table-pin-action.is-pinned {
-  color: #f59e0b;
+  color: var(--gn-warn);
   opacity: 1;
 }
 
@@ -3317,7 +3353,7 @@ body[data-ui-version="v2"] .gn-v2-titlebar-brand {
   height: 18px;
   border-radius: 5px;
   background: linear-gradient(135deg, var(--gn-accent) 0%, var(--gn-accent-2) 100%);
-  color: #fff;
+  color: var(--gn-on-accent, #fff);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3954,7 +3990,8 @@ body[data-ui-version="v2"] .gn-v2-data-grid .is-single-line-title .sortable-head
 body[data-ui-version="v2"] .gn-v2-data-grid .ant-table-thead > tr > th:first-child,
 body[data-ui-version="v2"] .gn-v2-data-grid .ant-table-selection-column {
   width: 56px !important;
-  background: var(--gn-bg-panel-2) !important;
+  /* 与固定列（行号/钉住列）统一用 panel，勿用 panel-2 造成色差 */
+  background: var(--gn-bg-panel) !important;
   border-right: 0.5px solid var(--gn-br-1) !important;
 }
 

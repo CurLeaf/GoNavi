@@ -1,0 +1,62 @@
+# syntax=docker/dockerfile:1.7
+#
+# GoNavi Web Server（浏览器访问版）镜像。
+# 复用主程序 web-server 模式 + 嵌入 frontend/dist，不依赖桌面 WebView/CGO。
+
+FROM --platform=$BUILDPLATFORM node:20-bookworm AS frontend
+
+# 使用 monorepo 布局：frontend 源码通过相对路径 ../../../shared/i18n 引用仓库 shared/
+# （见 frontend/src/i18n/catalog.ts、shared/i18n/messages.ts、shared/i18n/translate.ts）。
+# 仅 COPY frontend/ 会导致 tsc 报 Cannot find module '../../../shared/i18n/*'。
+WORKDIR /src/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend/ ./
+COPY shared/ /src/shared/
+# wailsjs 绑定已入库；容器内只构建静态前端
+RUN npm run build
+
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
+
+WORKDIR /src
+
+COPY go.mod go.sum ./
+COPY third_party/highgo-pq/go.mod ./third_party/highgo-pq/go.mod
+COPY third_party/go-irisnative/go.mod third_party/go-irisnative/go.sum ./third_party/go-irisnative/
+RUN go mod download
+
+COPY . .
+RUN ./tools/generate-driver-agent-revisions.sh --platform "${TARGETOS}/${TARGETARCH}"
+COPY --from=frontend /src/frontend/dist ./frontend/dist
+
+# 纯 Go 构建主程序（web-server 模式不需要 Wails WebView / CGO）
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /out/gonavi .
+
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --create-home --home-dir /var/lib/gonavi --uid 10001 gonavi \
+    && mkdir -p /data /var/lib/gonavi/logs \
+    && chown -R gonavi:gonavi /data /var/lib/gonavi
+
+COPY --from=builder /out/gonavi /usr/local/bin/gonavi
+
+ENV HOME=/var/lib/gonavi \
+    GONAVI_DATA_ROOT=/data \
+    GONAVI_LOG_DIR=/var/lib/gonavi/logs \
+    GONAVI_WEB_ADDR=0.0.0.0:34116
+
+VOLUME ["/data"]
+EXPOSE 34116
+
+USER gonavi
+
+# 未通过环境变量配置密码时，首次访问 /setup 初始化；认证状态落在数据目录 web_auth.json
+ENTRYPOINT ["/usr/local/bin/gonavi"]
+CMD ["web-server"]

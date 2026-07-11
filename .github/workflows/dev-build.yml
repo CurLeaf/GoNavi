@@ -516,6 +516,11 @@ jobs:
           & "$env:CC" --version
           & "$env:CXX" --version
 
+      - name: Test Windows Online Updater (Windows AMD64)
+        if: ${{ matrix.platform == 'windows/amd64' }}
+        shell: pwsh
+        run: go test ./internal/app -run '^TestWindowsPowerShellUpdater' -count=1 -timeout=3m
+
       # ---- 生成 dev 版本号 ----
       - name: Generate Dev Version
         id: version
@@ -1071,6 +1076,9 @@ jobs:
           FILES=()
           while IFS= read -r file; do
             if [ -n "$file" ]; then
+              case "$file" in
+                SHA256SUMS|latest.json|latest-dev.json) continue ;;
+              esac
               FILES+=("$file")
             fi
           done < <(find . -maxdepth 1 -type f ! -name SHA256SUMS -exec basename {} \; | sort)
@@ -1104,6 +1112,24 @@ jobs:
           SHORT_SHA="${GITHUB_SHA:0:7}"
           DEV_VERSION="dev-${SHORT_SHA}"
           echo "version=${DEV_VERSION}" >> "$GITHUB_OUTPUT"
+
+      # 静态更新清单：dev 通道读
+      # https://github.com/Syngnat/GoNavi/releases/download/dev-latest/latest-dev.json
+      - name: Generate static update manifest (latest-dev.json)
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEV_VERSION="${{ steps.version.outputs.version }}"
+          python3 tools/generate-update-latest-manifest.py \
+            --assets-dir release-assets \
+            --version "$DEV_VERSION" \
+            --tag dev-latest \
+            --channel dev \
+            --name "Dev Build (${DEV_VERSION})" \
+            --output release-assets/latest-dev.json
+          test -s release-assets/latest-dev.json
+          echo "📄 latest-dev.json ready:"
+          head -n 40 release-assets/latest-dev.json
 
       - name: Format Build Time
         id: build_time

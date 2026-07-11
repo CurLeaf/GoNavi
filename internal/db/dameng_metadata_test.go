@@ -127,16 +127,22 @@ func TestBuildDamengColumnsQuery_IncludesColumnCommentsJoin(t *testing.T) {
 	if !strings.Contains(userQuery, "user_col_comments") {
 		t.Fatalf("expected user query to join user_col_comments, got: %s", userQuery)
 	}
-	if !strings.Contains(userQuery, "cc.comments AS comment") {
-		t.Fatalf("expected user query to select column comments, got: %s", userQuery)
+	if !strings.Contains(userQuery, "cc.comments AS col_comment") {
+		t.Fatalf("expected user query to select column comments as col_comment, got: %s", userQuery)
+	}
+	if strings.Contains(strings.ToLower(userQuery), " as comment") {
+		t.Fatalf("dameng forbids AS comment alias (reserved word), got: %s", userQuery)
 	}
 
 	allQuery := buildDamengColumnsQuery("app", "orders")
 	if !strings.Contains(allQuery, "all_col_comments") {
 		t.Fatalf("expected schema query to join all_col_comments, got: %s", allQuery)
 	}
-	if !strings.Contains(allQuery, "cc.comments AS comment") {
-		t.Fatalf("expected schema query to select column comments, got: %s", allQuery)
+	if !strings.Contains(allQuery, "cc.comments AS col_comment") {
+		t.Fatalf("expected schema query to select column comments as col_comment, got: %s", allQuery)
+	}
+	if strings.Contains(strings.ToLower(allQuery), " as comment") {
+		t.Fatalf("dameng forbids AS comment alias (reserved word), got: %s", allQuery)
 	}
 }
 
@@ -145,11 +151,11 @@ func TestBuildDamengColumnDefinitions_MapsComment(t *testing.T) {
 
 	columns := buildDamengColumnDefinitions([]map[string]interface{}{
 		{
-			"COLUMN_NAME": "ID",
-			"DATA_TYPE":   "NUMBER",
-			"NULLABLE":    "N",
-			"COLUMN_KEY":  "PRI",
-			"COMMENT":     "主键",
+			"COLUMN_NAME":  "ID",
+			"DATA_TYPE":    "NUMBER",
+			"NULLABLE":     "N",
+			"COLUMN_KEY":   "PRI",
+			"COL_COMMENT":  "主键",
 		},
 	})
 

@@ -1116,6 +1116,16 @@ func (r *RedisClientImpl) ListSet(key string, index int64, value string) error {
 	return r.client.LSet(ctx, r.toPhysicalKey(key), index, value).Err()
 }
 
+// ListRemove removes one matching value from a list.
+func (r *RedisClientImpl) ListRemove(key, value string) error {
+	if r.client == nil {
+		return fmt.Errorf("Redis 客户端未连接")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return r.client.LRem(ctx, r.toPhysicalKey(key), 1, value).Err()
+}
+
 // GetSet gets all members of a set
 func (r *RedisClientImpl) GetSet(key string) ([]string, error) {
 	if r.client == nil {

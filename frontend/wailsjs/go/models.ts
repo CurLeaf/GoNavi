@@ -4,6 +4,7 @@ export namespace ai {
 	    model?: string;
 	    temperature?: number;
 	    maxTokens?: number;
+	    thinkingIntensity?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ChatSendOptions(source);
@@ -14,6 +15,7 @@ export namespace ai {
 	        this.model = source["model"];
 	        this.temperature = source["temperature"];
 	        this.maxTokens = source["maxTokens"];
+	        this.thinkingIntensity = source["thinkingIntensity"];
 	    }
 	}
 	export class MCPClientInstallResult {
@@ -297,6 +299,7 @@ export namespace ai {
 	    headers?: Record<string, string>;
 	    maxTokens: number;
 	    temperature: number;
+	    thinkingIntensity?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProviderConfig(source);
@@ -318,6 +321,7 @@ export namespace ai {
 	        this.headers = source["headers"];
 	        this.maxTokens = source["maxTokens"];
 	        this.temperature = source["temperature"];
+	        this.thinkingIntensity = source["thinkingIntensity"];
 	    }
 	}
 	export class SafetyResult {
@@ -439,6 +443,7 @@ export namespace app {
 	export class ConnectionExportOptions {
 	    includeSecrets: boolean;
 	    filePassword?: string;
+	    redisDbAliases?: Record<string, any>;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnectionExportOptions(source);
@@ -448,7 +453,40 @@ export namespace app {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.includeSecrets = source["includeSecrets"];
 	        this.filePassword = source["filePassword"];
+	        this.redisDbAliases = source["redisDbAliases"];
 	    }
+	}
+	export class ConnectionPackageImportResult {
+	    connections: connection.SavedConnectionView[];
+	    redisDbAliases?: Record<string, any>;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConnectionPackageImportResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.connections = this.convertValues(source["connections"], connection.SavedConnectionView);
+	        this.redisDbAliases = source["redisDbAliases"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ExportFileOptions {
 	    format: string;
@@ -534,6 +572,56 @@ export namespace app {
 	        this.sourceType = source["sourceType"];
 	        this.rawPayload = source["rawPayload"];
 	        this.options = this.convertValues(source["options"], SecurityUpdateOptions);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ResultDiffStartRequest {
+	    jobId?: string;
+	    config: connection.ConnectionConfig;
+	    database: string;
+	    left: resultdiff.DatasetSpec;
+	    right: resultdiff.DatasetSpec;
+	    keyColumns: string[];
+	    compareColumns?: string[];
+	    ignoreColumns?: string[];
+	    options: resultdiff.CompareOptions;
+	    maxRowsPerSide?: number;
+	    includeSameRows?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ResultDiffStartRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.jobId = source["jobId"];
+	        this.config = this.convertValues(source["config"], connection.ConnectionConfig);
+	        this.database = source["database"];
+	        this.left = this.convertValues(source["left"], resultdiff.DatasetSpec);
+	        this.right = this.convertValues(source["right"], resultdiff.DatasetSpec);
+	        this.keyColumns = source["keyColumns"];
+	        this.compareColumns = source["compareColumns"];
+	        this.ignoreColumns = source["ignoreColumns"];
+	        this.options = this.convertValues(source["options"], resultdiff.CompareOptions);
+	        this.maxRowsPerSide = source["maxRowsPerSide"];
+	        this.includeSameRows = source["includeSameRows"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1366,18 +1454,18 @@ export namespace connection {
 	    proxy: SaveGlobalProxyInput;
 	    url: string;
 	    timeoutSeconds?: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new TestGlobalProxyInput(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.proxy = this.convertValues(source["proxy"], SaveGlobalProxyInput);
 	        this.url = source["url"];
 	        this.timeoutSeconds = source["timeoutSeconds"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1478,6 +1566,87 @@ export namespace redis {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.member = source["member"];
 	        this.score = source["score"];
+	    }
+	}
+
+}
+
+export namespace resultdiff {
+	
+	export class CompareOptions {
+	    trimStrings: boolean;
+	    ignoreCase: boolean;
+	    nullEqualsEmpty: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CompareOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.trimStrings = source["trimStrings"];
+	        this.ignoreCase = source["ignoreCase"];
+	        this.nullEqualsEmpty = source["nullEqualsEmpty"];
+	    }
+	}
+	export class DatasetSpec {
+	    mode: string;
+	    sql?: string;
+	    columns?: string[];
+	    rows?: any[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DatasetSpec(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.sql = source["sql"];
+	        this.columns = source["columns"];
+	        this.rows = source["rows"];
+	    }
+	}
+	export class PageRequest {
+	    jobId: string;
+	    kinds?: string[];
+	    changedColumn?: string;
+	    offset: number;
+	    limit: number;
+	    includeSameRows?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PageRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.jobId = source["jobId"];
+	        this.kinds = source["kinds"];
+	        this.changedColumn = source["changedColumn"];
+	        this.offset = source["offset"];
+	        this.limit = source["limit"];
+	        this.includeSameRows = source["includeSameRows"];
+	    }
+	}
+	export class UploadChunkRequest {
+	    jobId: string;
+	    side: string;
+	    columns?: string[];
+	    rows: any[];
+	    done: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new UploadChunkRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.jobId = source["jobId"];
+	        this.side = source["side"];
+	        this.columns = source["columns"];
+	        this.rows = source["rows"];
+	        this.done = source["done"];
 	    }
 	}
 
@@ -1591,3 +1760,4 @@ export namespace sync {
 	}
 
 }
+

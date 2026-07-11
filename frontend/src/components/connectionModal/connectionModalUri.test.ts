@@ -48,3 +48,32 @@ describe('connectionModalUri trino support', () => {
     expect(getConnectionParamsPlaceholder('trino', 'mysql')).toBe('session_properties=query_max_execution_time:30m&query_timeout=30s');
   });
 });
+
+describe('connectionModalUri Milvus support', () => {
+  it('parses the REST v2 URI, database path, token, and TLS state', () => {
+    expect(parseUriToValues('https://127.0.0.1:19530/default?token=secret&skip_verify=true', 'milvus'))
+      .toMatchObject({
+        host: '127.0.0.1',
+        port: 19530,
+        database: 'default',
+        useSSL: true,
+        sslMode: 'skip-verify',
+        connectionParams: 'token=secret&skip_verify=true',
+      });
+  });
+
+  it('builds an HTTP URI using the database path and token connection parameter', () => {
+    expect(buildUriFromValues({
+      type: 'milvus',
+      host: '127.0.0.1',
+      port: 19530,
+      database: 'default',
+      connectionParams: 'token=secret',
+    })).toBe('http://127.0.0.1:19530/default?token=secret');
+  });
+
+  it('keeps Milvus URI and connection parameter placeholders aligned with REST v2', () => {
+    expect(getUriPlaceholder('milvus')).toBe('http://127.0.0.1:19530/default');
+    expect(getConnectionParamsPlaceholder('milvus', 'mysql')).toBe('token=...');
+  });
+});

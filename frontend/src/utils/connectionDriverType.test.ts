@@ -17,6 +17,8 @@ describe("connectionDriverType", () => {
     expect(normalizeDriverType("chroma-db")).toBe("chroma");
     expect(normalizeDriverType("qdrantdb")).toBe("qdrant");
     expect(normalizeDriverType("qdrant-db")).toBe("qdrant");
+    expect(normalizeDriverType("milvusdb")).toBe("milvus");
+    expect(normalizeDriverType("milvus-db")).toBe("milvus");
     expect(normalizeDriverType("apache-iotdb")).toBe("iotdb");
     expect(normalizeDriverType("apache_iotdb")).toBe("iotdb");
     expect(normalizeDriverType("apache-kafka")).toBe("kafka");

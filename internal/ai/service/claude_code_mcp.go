@@ -149,6 +149,114 @@ func (s *Service) AIInstallCodexMCP() (ai.MCPClientInstallResult, error) {
 	}, nil
 }
 
+// RepairInstalledLocalMCPClientConfigs refreshes stale GoNavi-owned client
+// entries after an update or application move. Missing entries and custom
+// entries that happen to use the gonavi key are left untouched.
+func RepairInstalledLocalMCPClientConfigs(s *Service) error {
+	if s == nil {
+		return nil
+	}
+	return s.repairInstalledLocalMCPClientConfigs()
+}
+
+func (s *Service) repairInstalledLocalMCPClientConfigs() error {
+	command, args, err := resolveCurrentLocalMCPCommand(s.serviceText)
+	if err != nil {
+		return err
+	}
+
+	var repairErrors []error
+	if err := repairClaudeCodeMCPClientConfig(command, args, s.serviceText); err != nil {
+		repairErrors = append(repairErrors, fmt.Errorf("Claude Code: %w", err))
+	}
+	if err := repairCodexMCPClientConfig(command, args, s.serviceText); err != nil {
+		repairErrors = append(repairErrors, fmt.Errorf("Codex: %w", err))
+	}
+	return errors.Join(repairErrors...)
+}
+
+func repairClaudeCodeMCPClientConfig(expectedCommand string, expectedArgs []string, text mcpClientInstallTextFunc) error {
+	configPath, err := claudeCodeConfigPathFunc()
+	if err != nil {
+		return err
+	}
+	serverConfig, found, err := readClaudeCodeMCPServerConfig(configPath, gonaviMCPServerID, text)
+	if err != nil || !found || sameMCPCommand(serverConfig.Command, serverConfig.Args, expectedCommand, expectedArgs) {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(serverConfig.Type), "stdio") ||
+		!shouldRepairInstalledLocalMCPCommand(serverConfig.Command, serverConfig.Args, expectedCommand) {
+		return nil
+	}
+	return upsertClaudeCodeMCPServerConfig(configPath, gonaviMCPServerID, claudeCodeMCPServerConfig{
+		Type:    "stdio",
+		Command: expectedCommand,
+		Args:    append([]string(nil), expectedArgs...),
+		Env:     map[string]string{},
+	}, text)
+}
+
+func repairCodexMCPClientConfig(expectedCommand string, expectedArgs []string, text mcpClientInstallTextFunc) error {
+	configPath, err := codexConfigPathFunc()
+	if err != nil {
+		return err
+	}
+	serverConfig, found, err := readCodexMCPServerConfig(configPath, gonaviMCPServerID, text)
+	if err != nil || !found || sameMCPCommand(serverConfig.Command, serverConfig.Args, expectedCommand, expectedArgs) {
+		return err
+	}
+	if !shouldRepairInstalledLocalMCPCommand(serverConfig.Command, serverConfig.Args, expectedCommand) {
+		return nil
+	}
+	return upsertCodexMCPServerConfig(configPath, gonaviMCPServerID, codexMCPServerConfig{
+		Command:           expectedCommand,
+		Args:              append([]string(nil), expectedArgs...),
+		StartupTimeoutSec: defaultCodexMCPStartupTimeoutSecond,
+	}, text)
+}
+
+func shouldRepairInstalledLocalMCPCommand(command string, args []string, expectedCommand string) bool {
+	command = strings.TrimSpace(command)
+	if command == "" || !isManagedLocalMCPCommand(command, args) {
+		return false
+	}
+	_, err := os.Stat(command)
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	return isSameDirectoryVersionedWindowsGoNaviCommand(command, expectedCommand)
+}
+
+func isSameDirectoryVersionedWindowsGoNaviCommand(command string, expectedCommand string) bool {
+	if !isVersionedWindowsGoNaviExecutable(command) || !isVersionedWindowsGoNaviExecutable(expectedCommand) {
+		return false
+	}
+	return strings.EqualFold(portablePathDir(command), portablePathDir(expectedCommand))
+}
+
+func isVersionedWindowsGoNaviExecutable(command string) bool {
+	baseName := strings.ToLower(portablePathBase(command))
+	return strings.HasPrefix(baseName, "gonavi-") &&
+		strings.Contains(baseName, "-windows-") &&
+		strings.HasSuffix(baseName, ".exe")
+}
+
+func isManagedLocalMCPCommand(command string, args []string) bool {
+	normalizedArgs := normalizeStringSlice(args)
+	if len(normalizedArgs) == 1 && strings.EqualFold(normalizedArgs[0], "mcp-server") {
+		baseName := strings.ToLower(portablePathBase(command))
+		return baseName == "gonavi" || baseName == "gonavi.exe" ||
+			strings.HasPrefix(baseName, "gonavi-build-") ||
+			isVersionedWindowsGoNaviExecutable(command) ||
+			(strings.HasPrefix(baseName, "gonavi-") && strings.HasSuffix(baseName, ".appimage"))
+	}
+	if len(normalizedArgs) != 0 {
+		return false
+	}
+	baseName := strings.ToLower(portablePathBase(command))
+	return baseName == "gonavi-mcp-server" || baseName == "gonavi-mcp-server.exe"
+}
+
 func resolveCurrentLocalMCPCommand(textFuncs ...mcpClientInstallTextFunc) (string, []string, error) {
 	text := firstMCPClientInstallText(textFuncs)
 	executablePath, err := localMCPExecutablePathFunc()
@@ -170,13 +278,30 @@ func resolveLocalMCPCommand(executablePath string, textFuncs ...mcpClientInstall
 	}
 
 	cleaned := filepath.Clean(executablePath)
-	baseName := strings.ToLower(strings.TrimSpace(filepath.Base(cleaned)))
+	baseName := strings.ToLower(portablePathBase(cleaned))
 	switch baseName {
 	case "gonavi-mcp-server", "gonavi-mcp-server.exe":
 		return cleaned, []string{}, nil
 	default:
 		return cleaned, []string{"mcp-server"}, nil
 	}
+}
+
+func portablePathBase(path string) string {
+	normalized := strings.ReplaceAll(strings.TrimSpace(path), "\\", "/")
+	return strings.TrimSpace(filepath.Base(normalized))
+}
+
+func portablePathDir(path string) string {
+	normalized := strings.TrimRight(strings.ReplaceAll(strings.TrimSpace(path), "\\", "/"), "/")
+	separator := strings.LastIndex(normalized, "/")
+	if separator < 0 {
+		return "."
+	}
+	if separator == 0 {
+		return "/"
+	}
+	return normalized[:separator]
 }
 
 func detectLocalCLICommand(commandName string) (bool, string) {

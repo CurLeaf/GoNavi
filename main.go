@@ -41,13 +41,9 @@ func main() {
 	application := app.NewApp()
 	aiService := aiservice.NewService()
 	lowMemoryMode := isLowMemoryMode()
+	backgroundColour, windowsOptions := resolveWindowVisualOptions(runtime.GOOS, lowMemoryMode)
+	windowsOptions.WebviewUserDataPath = resolveWindowsWebviewUserDataPath()
 	var runtimeCtx context.Context
-	backgroundColour := &options.RGBA{R: 0, G: 0, B: 0, A: 0}
-	windowsBackdrop := windows.Acrylic
-	if lowMemoryMode {
-		backgroundColour = &options.RGBA{R: 255, G: 255, B: 255, A: 255}
-		windowsBackdrop = windows.None
-	}
 	var appMenu *menu.Menu
 	if strings.EqualFold(strings.TrimSpace(runtime.GOOS), "darwin") {
 		appMenu = buildMacApplicationMenu(func() {
@@ -58,14 +54,23 @@ func main() {
 		}, true)
 	}
 
+	// Windows 冷启动：原生先最大化，避免 main 默认小窗先闪一帧；
+	// 前端 hydration 后再按用户记忆（最大化 / 普通尺寸）精细恢复。
+	// 其它平台仍用 Normal，由前端恢复逻辑接管。
+	windowStartState := options.Normal
+	if strings.EqualFold(strings.TrimSpace(runtime.GOOS), "windows") {
+		windowStartState = options.Maximised
+	}
+
 	// Create application with options
 	err := wails.Run(&options.App{
-		Title:     "GoNavi",
-		Width:     1024,
-		Height:    768,
-		MinWidth:  900,
-		MinHeight: 600,
-		Frameless: true,
+		Title:            "GoNavi",
+		Width:            1440,
+		Height:           900,
+		MinWidth:         900,
+		MinHeight:        600,
+		WindowStartState: windowStartState,
+		Frameless:        true,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
@@ -75,6 +80,9 @@ func main() {
 			runtimeCtx = ctx
 			app.InitializeLifecycle(application, ctx)
 			aiservice.InitializeLifecycle(aiService, ctx)
+			if err := aiservice.RepairInstalledLocalMCPClientConfigs(aiService); err != nil {
+				logger.Warnf("自动修复本地 MCP 客户端配置失败：%v", err)
+			}
 		},
 		OnShutdown: func(ctx context.Context) {
 			aiService.Shutdown()
@@ -85,14 +93,7 @@ func main() {
 			application,
 			aiService,
 		},
-		Windows: &windows.Options{
-			WebviewIsTransparent:              !lowMemoryMode,
-			WindowIsTranslucent:               !lowMemoryMode,
-			BackdropType:                      windowsBackdrop,
-			DisableWindowIcon:                 false,
-			DisableFramelessWindowDecorations: false,
-			WebviewUserDataPath:               resolveWindowsWebviewUserDataPath(),
-		},
+		Windows: windowsOptions,
 		Mac: &mac.Options{
 			WebviewIsTransparent: true,
 			WindowIsTranslucent:  true,
@@ -172,5 +173,28 @@ func isLowMemoryMode() bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func resolveWindowVisualOptions(goos string, lowMemoryMode bool) (*options.RGBA, *windows.Options) {
+	// A visible Acrylic surface keeps DWM composing after GoNavi loses focus.
+	// Windows therefore uses an opaque surface by default; macOS keeps its separate native effect path.
+	disableTransparency := lowMemoryMode || strings.EqualFold(strings.TrimSpace(goos), "windows")
+	if disableTransparency {
+		return &options.RGBA{R: 255, G: 255, B: 255, A: 255}, &windows.Options{
+			WebviewIsTransparent:              false,
+			WindowIsTranslucent:               false,
+			BackdropType:                      windows.None,
+			DisableWindowIcon:                 false,
+			DisableFramelessWindowDecorations: false,
+		}
+	}
+
+	return &options.RGBA{R: 0, G: 0, B: 0, A: 0}, &windows.Options{
+		WebviewIsTransparent:              true,
+		WindowIsTranslucent:               true,
+		BackdropType:                      windows.Acrylic,
+		DisableWindowIcon:                 false,
+		DisableFramelessWindowDecorations: false,
 	}
 }

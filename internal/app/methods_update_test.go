@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	stdRuntime "runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
@@ -27,6 +28,11 @@ func TestFetchLatestUpdateInfoSkipsChecksumWhenCurrentVersionIsAlreadyLatest(t *
 	}()
 
 	releaseCalled := false
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		// 单测走 API 路径，模拟尚无 latest.json 的历史 Release
+		return nil, errors.New("static manifest unavailable in test")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
 		releaseCalled = true
 		return &githubRelease{
@@ -83,6 +89,10 @@ func TestFetchLatestUpdateInfoUsesAssetDigestWhenUpdateIsAvailable(t *testing.T)
 		AppVersion = originalVersion
 	}()
 
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		return nil, errors.New("static manifest unavailable in test")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
 		return &githubRelease{
 			TagName:     "v0.6.5",
@@ -138,6 +148,10 @@ func TestFetchLatestUpdateInfoFallsBackToChecksumFileWhenAssetDigestMissing(t *t
 		AppVersion = originalVersion
 	}()
 
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		return nil, errors.New("static manifest unavailable in test")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
 		return &githubRelease{
 			TagName: "v0.6.5",
@@ -180,7 +194,12 @@ func TestFetchLatestUpdateInfoFallsBackToChecksumFileWhenAssetDigestMissing(t *t
 
 func TestCheckForUpdatesLogsFailuresForManualChecks(t *testing.T) {
 	app := &App{configDir: t.TempDir()}
+	t.Setenv("GONAVI_DATA_ROOT", t.TempDir())
 
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		return nil, errors.New("static unavailable")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
 		return nil, errors.New("request timed out")
 	})
@@ -203,7 +222,12 @@ func TestCheckForUpdatesLogsFailuresForManualChecks(t *testing.T) {
 
 func TestCheckForUpdatesSilentlySkipsFailureLogs(t *testing.T) {
 	app := &App{configDir: t.TempDir()}
+	t.Setenv("GONAVI_DATA_ROOT", t.TempDir())
 
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		return nil, errors.New("static unavailable")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchLatestRelease(func() (*githubRelease, error) {
 		return nil, errors.New("request timed out")
 	})
@@ -272,6 +296,10 @@ func TestCheckForUpdatesRestoresPersistedGlobalProxyRuntime(t *testing.T) {
 		AppVersion = originalVersion
 	}()
 
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		return nil, errors.New("static unavailable; exercise API proxy path")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchDevRelease(func() (*githubRelease, error) {
 		return fetchReleaseByURL("http://api.github.invalid/repos/Syngnat/GoNavi/releases/tags/dev-latest")
 	})
@@ -303,6 +331,10 @@ func TestFetchLatestUpdateInfoForDevChannelUsesReleaseBuildVersion(t *testing.T)
 		AppVersion = originalVersion
 	}()
 
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		return nil, errors.New("static unavailable in test")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchDevRelease(func() (*githubRelease, error) {
 		return &githubRelease{
 			TagName: "dev-latest",
@@ -361,6 +393,10 @@ func TestFetchLatestUpdateInfoForDevChannelSkipsChecksumWhenBuildMatches(t *test
 		AppVersion = originalVersion
 	}()
 
+	restoreStatic := swapUpdateFetchStaticManifest(func(channel updateChannel) (*githubRelease, error) {
+		return nil, errors.New("static unavailable in test")
+	})
+	defer restoreStatic()
 	restoreRelease := swapUpdateFetchDevRelease(func() (*githubRelease, error) {
 		return &githubRelease{
 			TagName: "dev-latest",
@@ -692,29 +728,26 @@ func TestShouldWindowsUpdateLaunchDownloadedAssetDirectly(t *testing.T) {
 	}
 }
 
-func TestBuildWindowsScriptReplacesTargetWithDownloadedExe(t *testing.T) {
-	script := buildWindowsScript(
-		`C:\GoNavi\GoNavi-dev-93dc696-Windows-Amd64.exe`,
-		`C:\GoNavi\GoNavi-dev-00d70d2-Windows-Amd64.exe`,
-		`C:\Users\tester\AppData\Local\Temp\gonavi-updates\.gonavi-update-windows-dev-dev-93dc696`,
-		`C:\Users\tester\AppData\Local\Temp\gonavi-updates\gonavi-update-windows.log`,
-		12345,
-	)
+func TestBuildWindowsPowerShellScriptReplacesTargetWithDownloadedExe(t *testing.T) {
+	script := buildWindowsPowerShellScript()
 
 	mustContain := []string{
-		`:replace_binary`,
-		`move /Y "%TARGET%" "%TARGET_OLD%"`,
-		`copy /Y "%SOURCE_EXE%" "%TARGET%"`,
-		`if exist "%SOURCE%" del /F /Q "%SOURCE%"`,
-		`start "" /D "%TARGET_DIR%" "%TARGET%"`,
+		`Move-Item -LiteralPath $Target -Destination $TargetOld -Force`,
+		`Copy-Item -LiteralPath $SourceExe -Destination $Target -Force`,
+		`Start-Process -FilePath $Target -WorkingDirectory $TargetDir`,
+		`package kept for manual install`,
+		`Remove-UpdateArtifact $Source`,
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(script, want) {
 			t.Fatalf("windows update script missing required token: %s\nscript:\n%s", want, script)
 		}
 	}
-	if strings.Contains(script, "launch_downloaded_exe") {
-		t.Fatalf("windows update script should not launch downloaded exe side-by-side\nscript:\n%s", script)
+	// relaunch 必须在删除安装包之前
+	startIdx := strings.Index(script, `Start-Process -FilePath $Target -WorkingDirectory $TargetDir`)
+	delIdx := strings.LastIndex(script, `Remove-UpdateArtifact $Source`)
+	if startIdx < 0 || delIdx < 0 || delIdx < startIdx {
+		t.Fatalf("source package must be deleted only after relaunch attempt (start=%d del=%d)", startIdx, delIdx)
 	}
 }
 
@@ -770,5 +803,65 @@ func TestBuildLinuxScriptPrefersTargetExecutableBasename(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Fatalf("linux update script missing required token: %s\nscript:\n%s", want, script)
 		}
+	}
+}
+
+func TestApplyGitHubAPIRequestHeadersUsesTokenAndVersion(t *testing.T) {
+	t.Setenv("GONAVI_GITHUB_TOKEN", "ghp_test_token")
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/Syngnat/GoNavi/releases/latest", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	applyGitHubAPIRequestHeaders(req)
+	if got := req.Header.Get("Authorization"); got != "Bearer ghp_test_token" {
+		t.Fatalf("Authorization = %q", got)
+	}
+	if got := req.Header.Get("X-GitHub-Api-Version"); got != updateGitHubAPIVersion {
+		t.Fatalf("X-GitHub-Api-Version = %q", got)
+	}
+	if !strings.HasPrefix(req.Header.Get("User-Agent"), "GoNavi-Updater/") {
+		t.Fatalf("User-Agent = %q", req.Header.Get("User-Agent"))
+	}
+}
+
+func TestClassifyGitHubUpdateHTTPErrorRateLimit(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("X-RateLimit-Remaining", "0")
+	headers.Set("X-RateLimit-Reset", "1783562945")
+	body := []byte(`{"message":"API rate limit exceeded for 1.2.3.4."}`)
+	err := classifyGitHubUpdateHTTPError(http.StatusForbidden, body, headers, true)
+	var localized localizedUpdateError
+	if !errors.As(err, &localized) {
+		t.Fatalf("expected localizedUpdateError, got %T %v", err, err)
+	}
+	if localized.key != "app.update.backend.error.check_http_rate_limited" {
+		t.Fatalf("unexpected key: %s", localized.key)
+	}
+	if detail, _ := localized.params["detail"].(string); !strings.Contains(detail, "rate limit") {
+		t.Fatalf("detail should include rate limit message: %q", detail)
+	}
+}
+
+func TestFetchReleaseByURLFallsBackToCacheOn403(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"API rate limit exceeded"}`))
+	}))
+	defer server.Close()
+
+	updateReleaseCache = sync.Map{}
+	storeCachedGitHubRelease(server.URL, &githubRelease{
+		TagName: "v9.9.9",
+		Name:    "cached",
+		HTMLURL: "https://example.com",
+	})
+
+	release, err := fetchReleaseByURL(server.URL)
+	if err != nil {
+		t.Fatalf("expected cache fallback, got err=%v", err)
+	}
+	if release.TagName != "v9.9.9" {
+		t.Fatalf("unexpected release: %#v", release)
 	}
 }

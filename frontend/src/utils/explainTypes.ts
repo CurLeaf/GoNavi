@@ -149,24 +149,33 @@ export function severityColor(severity: string): string {
   }
 }
 
-// formatNumber 容错格式化大数字（千分位）。
-export function formatNumber(n?: number): string {
+// formatNumber 按当前 UI 语言容错格式化数字。
+export function formatNumber(n?: number, locale?: string | string[]): string {
   if (n === undefined || n === null || isNaN(n)) return '-'
-  if (Math.abs(n) >= 10000) {
-    return new Intl.NumberFormat('en-US').format(n)
-  }
-  return String(n)
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 20 }).format(n)
 }
 
 // formatPercent 把 0-1 的小数格式化为百分比字符串。
-export function formatPercent(ratio?: number): string {
+export function formatPercent(ratio?: number, locale?: string | string[]): string {
   if (ratio === undefined || ratio === null || isNaN(ratio)) return '-'
-  return `${(ratio * 100).toFixed(1)}%`
+  return new Intl.NumberFormat(locale, {
+    style: 'percent',
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(ratio)
 }
 
 // formatMs 把毫秒格式化为人类可读（>1s 显示秒）。
-export function formatMs(ms?: number): string {
+export function formatMs(ms?: number, locale?: string | string[]): string {
   if (ms === undefined || ms === null || isNaN(ms)) return '-'
-  if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`
-  return `${ms.toFixed(1)}ms`
+  if (ms >= 1000) {
+    return `${new Intl.NumberFormat(locale, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(ms / 1000)}s`
+  }
+  return `${new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(ms)}ms`
 }

@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	defaultMaxRowsPerResult = 200
-	maxRowsPerResultLimit   = 1000
+	// 默认/上限刻意压低：MCP 只用于「少量样例数据」探查，避免把大结果集灌进 Agent 上下文。
+	defaultMaxRowsPerResult = 50
+	maxRowsPerResultLimit   = 200
 	redactedOpaqueTarget    = "opaque-connection-string-configured"
 )
 
@@ -56,7 +57,7 @@ type executeSQLArgs struct {
 	DBName           string `json:"dbName,omitempty" jsonschema:"可选数据库/Schema 名称。为空时优先使用保存连接里的默认数据库"`
 	SQL              string `json:"sql" jsonschema:"待执行的 SQL 文本，可以包含多条语句"`
 	AllowMutating    bool   `json:"allowMutating,omitempty" jsonschema:"当 SQL 包含当前 AI 安全控制允许范围内的 DDL/DML 等非只读语句时，必须显式设为 true"`
-	MaxRowsPerResult int    `json:"maxRowsPerResult,omitempty" jsonschema:"每个结果集最多返回多少行。默认 200，最大 1000"`
+	MaxRowsPerResult int    `json:"maxRowsPerResult,omitempty" jsonschema:"每个结果集最多返回多少行。默认 50，最大 200（少量数据探查）"`
 }
 
 type connectionDescriptor struct {

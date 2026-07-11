@@ -251,6 +251,8 @@ func defaultPortByType(driverType string) int {
 		return 8000
 	case "qdrant":
 		return 6333
+	case "milvus":
+		return 19530
 	case "kafka":
 		return 9092
 	default:

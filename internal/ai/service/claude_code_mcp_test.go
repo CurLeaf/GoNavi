@@ -3,6 +3,7 @@ package aiservice
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -36,6 +37,132 @@ func TestResolveLocalMCPCommandKeepsDedicatedServerBinary(t *testing.T) {
 	}
 	if len(args) != 0 {
 		t.Fatalf("expected dedicated server args to be empty, got %#v", args)
+	}
+}
+
+func TestRepairInstalledLocalMCPClientConfigsUpdatesMissingManagedCommands(t *testing.T) {
+	originalClaudeConfigPathFunc := claudeCodeConfigPathFunc
+	originalCodexConfigPathFunc := codexConfigPathFunc
+	originalExecutablePathFunc := localMCPExecutablePathFunc
+	t.Cleanup(func() {
+		claudeCodeConfigPathFunc = originalClaudeConfigPathFunc
+		codexConfigPathFunc = originalCodexConfigPathFunc
+		localMCPExecutablePathFunc = originalExecutablePathFunc
+	})
+
+	tempDir := t.TempDir()
+	claudeConfigPath := filepath.Join(tempDir, ".claude.json")
+	codexConfigPath := filepath.Join(tempDir, ".codex", "config.toml")
+	currentExecutable := filepath.Join(tempDir, "current", "GoNavi.exe")
+	if err := os.MkdirAll(filepath.Dir(currentExecutable), 0o755); err != nil {
+		t.Fatalf("MkdirAll current executable dir returned error: %v", err)
+	}
+	if err := os.WriteFile(currentExecutable, []byte("current"), 0o755); err != nil {
+		t.Fatalf("WriteFile current executable returned error: %v", err)
+	}
+	missingOldExecutable := filepath.Join(tempDir, "old", "GoNavi-0.8.0-Windows-Amd64.exe")
+
+	claudeConfig := map[string]any{
+		"theme": "dark",
+		"mcpServers": map[string]any{
+			"memory": map[string]any{"type": "stdio", "command": "memory-server"},
+			gonaviMCPServerID: map[string]any{
+				"type":    "stdio",
+				"command": missingOldExecutable,
+				"args":    []string{"mcp-server"},
+			},
+		},
+	}
+	claudeData, err := json.MarshalIndent(claudeConfig, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent Claude config returned error: %v", err)
+	}
+	if err := os.WriteFile(claudeConfigPath, append(claudeData, '\n'), 0o644); err != nil {
+		t.Fatalf("WriteFile Claude config returned error: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(codexConfigPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll Codex config dir returned error: %v", err)
+	}
+	codexConfig := strings.Join([]string{
+		`model = "gpt-5.4"`,
+		``,
+		`[mcp_servers.memory]`,
+		`command = "memory-server"`,
+		``,
+		`[mcp_servers.gonavi]`,
+		fmt.Sprintf("command = %s", tomlString(missingOldExecutable)),
+		`args = ['mcp-server']`,
+		`startup_timeout_sec = 60`,
+		``,
+	}, "\n")
+	if err := os.WriteFile(codexConfigPath, []byte(codexConfig), 0o644); err != nil {
+		t.Fatalf("WriteFile Codex config returned error: %v", err)
+	}
+
+	claudeCodeConfigPathFunc = func() (string, error) { return claudeConfigPath, nil }
+	codexConfigPathFunc = func() (string, error) { return codexConfigPath, nil }
+	localMCPExecutablePathFunc = func() (string, error) { return currentExecutable, nil }
+
+	service := NewService()
+	if err := service.repairInstalledLocalMCPClientConfigs(); err != nil {
+		t.Fatalf("repairInstalledLocalMCPClientConfigs returned error: %v", err)
+	}
+
+	statuses := service.AIGetMCPClientInstallStatuses()
+	if len(statuses) < 2 || !statuses[0].MatchesCurrent || !statuses[1].MatchesCurrent {
+		t.Fatalf("expected Claude Code and Codex configs to match current executable, got %#v", statuses)
+	}
+
+	updatedClaudeData, err := os.ReadFile(claudeConfigPath)
+	if err != nil {
+		t.Fatalf("ReadFile updated Claude config returned error: %v", err)
+	}
+	if !strings.Contains(string(updatedClaudeData), `"memory"`) || !strings.Contains(string(updatedClaudeData), `"theme": "dark"`) {
+		t.Fatalf("expected unrelated Claude config to remain, got %s", string(updatedClaudeData))
+	}
+	updatedCodexData, err := os.ReadFile(codexConfigPath)
+	if err != nil {
+		t.Fatalf("ReadFile updated Codex config returned error: %v", err)
+	}
+	if !strings.Contains(string(updatedCodexData), `[mcp_servers.memory]`) || !strings.Contains(string(updatedCodexData), `model = "gpt-5.4"`) {
+		t.Fatalf("expected unrelated Codex config to remain, got %s", string(updatedCodexData))
+	}
+}
+
+func TestRepairInstalledLocalMCPClientConfigsLeavesExistingOrCustomCommandsUntouched(t *testing.T) {
+	existingManagedCommand := filepath.Join(t.TempDir(), "GoNavi.exe")
+	if err := os.WriteFile(existingManagedCommand, []byte("old but available"), 0o755); err != nil {
+		t.Fatalf("WriteFile existing managed command returned error: %v", err)
+	}
+
+	if shouldRepairInstalledLocalMCPCommand(existingManagedCommand, []string{"mcp-server"}, filepath.Join(t.TempDir(), "GoNavi.exe")) {
+		t.Fatal("expected an existing managed command to remain untouched")
+	}
+	if shouldRepairInstalledLocalMCPCommand("missing-custom-proxy", []string{"--serve"}, "GoNavi.exe") {
+		t.Fatal("expected a custom command to remain untouched")
+	}
+	if shouldRepairInstalledLocalMCPCommand("missing-custom-proxy", []string{"mcp-server"}, "GoNavi.exe") {
+		t.Fatal("expected a missing non-GoNavi command to remain untouched")
+	}
+	if !shouldRepairInstalledLocalMCPCommand(filepath.Join(t.TempDir(), "missing", "GoNavi.exe"), []string{"mcp-server"}, "GoNavi.exe") {
+		t.Fatal("expected a missing managed GoNavi command to be repaired")
+	}
+}
+
+func TestShouldRepairInstalledLocalMCPCommandUpdatesExistingVersionedWindowsTarget(t *testing.T) {
+	dir := t.TempDir()
+	oldCommand := filepath.Join(dir, "GoNavi-0.8.4-Windows-Amd64.exe")
+	newCommand := filepath.Join(dir, "GoNavi-0.8.5-Windows-Amd64.exe")
+	if err := os.WriteFile(oldCommand, []byte("still locked by an MCP process"), 0o755); err != nil {
+		t.Fatalf("WriteFile old command returned error: %v", err)
+	}
+
+	if !shouldRepairInstalledLocalMCPCommand(oldCommand, []string{"mcp-server"}, newCommand) {
+		t.Fatal("expected a same-directory versioned Windows update to refresh the MCP command")
+	}
+	if shouldRepairInstalledLocalMCPCommand(oldCommand, []string{"mcp-server"}, filepath.Join(t.TempDir(), filepath.Base(newCommand))) {
+		t.Fatal("expected a versioned command in another directory to remain untouched")
 	}
 }
 

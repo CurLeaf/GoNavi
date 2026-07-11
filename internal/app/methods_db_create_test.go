@@ -9,8 +9,12 @@ import (
 )
 
 type fakeCreateDatabaseDB struct {
-	connectConfig connection.ConnectionConfig
-	execQueries   []string
+	connectConfig  connection.ConnectionConfig
+	execQueries    []string
+	applyChanges   connection.ChangeSet
+	previewDeletes []string
+	previewUpdates []string
+	previewInserts []string
 }
 
 func (f *fakeCreateDatabaseDB) Connect(config connection.ConnectionConfig) error {
@@ -48,8 +52,17 @@ func (f *fakeCreateDatabaseDB) GetForeignKeys(dbName, tableName string) ([]conne
 func (f *fakeCreateDatabaseDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDefinition, error) {
 	return nil, nil
 }
+func (f *fakeCreateDatabaseDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
+	f.applyChanges = changes
+	return nil
+}
+func (f *fakeCreateDatabaseDB) PreviewChanges(tableName string, changes connection.ChangeSet) (deletes, updates, inserts []string) {
+	return f.previewDeletes, f.previewUpdates, f.previewInserts
+}
 
 var _ db.Database = (*fakeCreateDatabaseDB)(nil)
+var _ db.BatchApplier = (*fakeCreateDatabaseDB)(nil)
+var _ db.ChangePreviewer = (*fakeCreateDatabaseDB)(nil)
 
 func TestResolveDDLDBType_SQLServerAliases(t *testing.T) {
 	tests := []connection.ConnectionConfig{
