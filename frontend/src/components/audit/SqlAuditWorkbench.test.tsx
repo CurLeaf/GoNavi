@@ -54,6 +54,17 @@ describe('SqlAuditWorkbench', () => {
     expect(styleSource).toMatch(/\.gn-sql-audit-table-panel\s*\{[\s\S]*?min-height:\s*280px;/);
   });
 
+  it('keeps the fixed action column opaque while rows are hovered', () => {
+    const styleSource = readFileSync(new URL('./SqlAuditWorkbench.css', import.meta.url), 'utf8');
+
+    expect(styleSource).toMatch(
+      /\.gn-sql-audit-table-panel\s+\.ant-table-cell-fix-right[\s\S]*?background:\s*var\(--sql-audit-panel\)/,
+    );
+    expect(styleSource).toMatch(
+      /\.gn-sql-audit-workbench\s+\.gn-sql-audit-table-panel[\s\S]*?tr:hover\s*>\s*td[\s\S]*?background:\s*color-mix\(in srgb, var\(--sql-audit-text\) 4\.5%, var\(--sql-audit-panel\)\)\s*!important/,
+    );
+  });
+
   it('debounces only free-text search before querying SQLite', () => {
     const source = readFileSync(new URL('./SqlAuditWorkbench.tsx', import.meta.url), 'utf8');
 

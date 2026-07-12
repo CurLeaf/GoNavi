@@ -170,6 +170,14 @@
   padding-block: 9px;
 }
 
+.gn-sql-audit-table-panel .ant-table-cell-fix-right {
+  background: var(--sql-audit-panel);
+}
+
+.gn-sql-audit-workbench .gn-sql-audit-table-panel .ant-table-tbody > tr:hover > td {
+  background: color-mix(in srgb, var(--sql-audit-text) 4.5%, var(--sql-audit-panel)) !important;
+}
+
 .gn-sql-audit-table-row td {
   height: 44px;
   font-variant-numeric: tabular-nums;
