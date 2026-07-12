@@ -1443,6 +1443,21 @@ func normalizeNativeResultStatementIndexes(dbType string, statements []string, r
 		for idx := range results {
 			results[idx].StatementIndex = idx + 1
 		}
+	case len(results) == len(statements)*2:
+		// go-mssqldb 会在每个 SELECT 数据结果后再发送一条 MsgRowsAffected。
+		// 仅在整个批次严格呈现 [数据结果, affectedRows] 成对结构时补索引，
+		// 避免把存储过程返回的多个真实结果集错误归并到不同语句。
+		for statementIdx := range statements {
+			resultIdx := statementIdx * 2
+			if isAffectedRowsResultSet(results[resultIdx]) || !isAffectedRowsResultSet(results[resultIdx+1]) {
+				return
+			}
+		}
+		for statementIdx := range statements {
+			resultIdx := statementIdx * 2
+			results[resultIdx].StatementIndex = statementIdx + 1
+			results[resultIdx+1].StatementIndex = statementIdx + 1
+		}
 	}
 }
 

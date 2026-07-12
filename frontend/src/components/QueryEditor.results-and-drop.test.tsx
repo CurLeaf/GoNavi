@@ -1085,6 +1085,53 @@ describe('QueryEditor external SQL save', () => {
     expect(messageApi.success).toHaveBeenCalledWith('已执行完成，生成 1 个结果集。');
   });
 
+  it('hides redundant sqlserver affected-row status results for every statement in a batch', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    storeState.connections[0].config.type = 'sqlserver';
+    storeState.connections[0].config.database = 'master';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { statementIndex: 1, columns: ['value'], rows: [{ value: 1 }] },
+        { statementIndex: 1, columns: ['affectedRows'], rows: [{ affectedRows: 1 }] },
+        { statementIndex: 2, columns: ['value'], rows: [{ value: 2 }] },
+        { statementIndex: 2, columns: ['affectedRows'], rows: [{ affectedRows: 1 }] },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'master', query: 'SELECT 1;\nSELECT 2;' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const rendered = textContent(renderer!.toJSON());
+    expect(rendered).toContain('结果 1');
+    expect(rendered).toContain('结果 2');
+    expect(rendered).not.toContain('结果 3');
+    expect(rendered).not.toContain('结果 4');
+    expect(rendered).not.toContain('影响行数：1');
+    expect(messageApi.success).toHaveBeenCalledWith('已执行完成，生成 2 个结果集。');
+
+    const resultTabButtons = renderer!.root.findAll((node) =>
+      node.type === 'button' && String(node.props['data-tab-key'] || '').startsWith('result-'));
+    expect(resultTabButtons).toHaveLength(2);
+
+    await act(async () => {
+      resultTabButtons[1].props.onClick();
+    });
+
+    expect(dataGridState.latestProps?.columnNames).toEqual(['value']);
+    expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ value: 2 });
+  });
+
   it('prefers the first displayable sqlserver procedure result when empty result sets are returned', async () => {
     storeState.connections[0].config.type = 'sqlserver';
     storeState.connections[0].config.database = 'hydee';

@@ -2258,6 +2258,81 @@ func TestDBQueryMultiNormalizesSingleSQLServerSelectAffectedRowsStatementIndex(t
 	}
 }
 
+func TestDBQueryMultiNormalizesSQLServerSelectAffectedRowsPairsByStatement(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := "SELECT 1;\nSELECT 2;"
+	baseDB := &fakeBatchWriteDB{
+		multiResult: map[string][]connection.ResultSetData{
+			query: {
+				{
+					Rows:    []map[string]interface{}{{"value": int64(1)}},
+					Columns: []string{"value"},
+				},
+				{
+					Rows:    []map[string]interface{}{{"affectedRows": int64(1)}},
+					Columns: []string{"affectedRows"},
+				},
+				{
+					Rows:    []map[string]interface{}{{"value": int64(2)}},
+					Columns: []string{"value"},
+				},
+				{
+					Rows:    []map[string]interface{}{{"affectedRows": int64(1)}},
+					Columns: []string{"affectedRows"},
+				},
+			},
+		},
+		queryErr: map[string]error{},
+	}
+	fakeDB := &fakeNativeMultiResultDB{fakeBatchWriteDB: baseDB}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "sqlserver", Host: "127.0.0.1", Port: 1433, User: "sa"}
+
+	result := app.DBQueryMulti(config, "master", query, "sqlserver-select-pairs-index-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 4 {
+		t.Fatalf("expected four raw SQL Server result sets, got %#v", resultSets)
+	}
+	wantStatementIndexes := []int{1, 1, 2, 2}
+	for idx, want := range wantStatementIndexes {
+		if got := resultSets[idx].StatementIndex; got != want {
+			t.Fatalf("result set %d statementIndex = %d, want %d; all results: %#v", idx, got, want, resultSets)
+		}
+	}
+}
+
+func TestNormalizeNativeResultStatementIndexesKeepsAmbiguousSQLServerResultsUnassigned(t *testing.T) {
+	statements := []string{"SELECT 1", "SELECT 2"}
+	results := []connection.ResultSetData{
+		{Rows: []map[string]interface{}{{"first": int64(1)}}, Columns: []string{"first"}},
+		{Rows: []map[string]interface{}{{"second": int64(2)}}, Columns: []string{"second"}},
+		{Rows: []map[string]interface{}{{"affectedRows": int64(1)}}, Columns: []string{"affectedRows"}},
+		{Rows: []map[string]interface{}{{"affectedRows": int64(1)}}, Columns: []string{"affectedRows"}},
+	}
+
+	normalizeNativeResultStatementIndexes("sqlserver", statements, results)
+
+	for idx, result := range results {
+		if result.StatementIndex != 0 {
+			t.Fatalf("ambiguous result set %d received guessed statementIndex=%d: %#v", idx, result.StatementIndex, results)
+		}
+	}
+}
+
 func TestDBQueryMultiTreatsBareSQLServerProcedureCallAsQueryFirst(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {
