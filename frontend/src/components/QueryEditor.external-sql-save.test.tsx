@@ -849,6 +849,7 @@ describe('QueryEditor external SQL save', () => {
     backendApp.GenerateQueryID.mockResolvedValue('query-1');
     storeState.connections = createDefaultConnections();
     storeState.sqlLogs = [];
+    storeState.addSqlLog.mockReset();
     storeState.sqlSnippets = [];
     storeState.clearSqlLogs.mockReset();
     storeState.connections[0].config.type = 'mysql';
@@ -7469,6 +7470,13 @@ describe('QueryEditor external SQL save', () => {
     expect(textContent(renderer!.root)).not.toContain('未提交');
     expect(textContent(renderer!.root)).toContain('提交');
     expect(textContent(renderer!.root)).toContain('影响行数：2');
+    expect(storeState.sqlEditorPendingTransactions['tab-1']).toMatchObject({
+      id: 'tx-1',
+      dbType: 'mysql',
+      dbName: 'main',
+      statements: ["UPDATE users SET name = 'new' WHERE id = 1"],
+      executionDurationMs: expect.any(Number),
+    });
 
     await act(async () => {
       await findButton(renderer!, '提交').props.onClick();
@@ -7479,6 +7487,11 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-1');
+    expect(storeState.addSqlLog).toHaveBeenCalledWith(expect.objectContaining({
+      sql: "START TRANSACTION;\nUPDATE users SET name = 'new' WHERE id = 1;\nCOMMIT;",
+      status: 'success',
+      dbName: 'main',
+    }));
     expect(textContent(renderer!.root)).not.toContain('未提交');
   });
 
@@ -7571,6 +7584,26 @@ describe('QueryEditor external SQL save', () => {
     expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ name: 'new' });
     expect(textContent(renderer!.root)).toContain('提交');
     expect(textContent(renderer!.root)).toContain('回滚');
+    expect(storeState.sqlEditorPendingTransactions['tab-1']).toMatchObject({
+      statements: [
+        "UPDATE users SET name = 'new' WHERE id = 1",
+        'SELECT name FROM users WHERE id = 1',
+      ],
+      statementCount: 2,
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '提交').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(storeState.addSqlLog).toHaveBeenCalledWith(expect.objectContaining({
+      sql: "START TRANSACTION;\nUPDATE users SET name = 'new' WHERE id = 1;\nSELECT name FROM users WHERE id = 1;\nCOMMIT;",
+      status: 'success',
+    }));
   });
 
   it('runs SQL editor WITH DML through a pending managed transaction', async () => {

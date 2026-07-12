@@ -3155,7 +3155,18 @@ body[data-ui-version="v2"] .gn-v2-sidebar-slow-query-button {
   border-radius: 8px;
 }
 
+body[data-ui-version="v2"] .gn-v2-sidebar-sql-audit-button {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 8px;
+}
+
 body[data-ui-version="v2"] .gn-v2-sidebar-slow-query-button:hover {
+  background: var(--gn-bg-hover) !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-sidebar-sql-audit-button:hover {
   background: var(--gn-bg-hover) !important;
 }
 

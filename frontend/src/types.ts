@@ -447,6 +447,7 @@ export interface TabData {
     | "design"
     | "sql-file-execution"
     | "sql-analysis"
+    | "sql-audit"
     | "redis-keys"
     | "redis-command"
     | "redis-monitor"
@@ -501,6 +502,8 @@ export interface TabData {
   sqlFileExecutionFileSizeMB?: string;
   sqlAnalysisView?: "diagnose" | "slow-query";
   sqlAnalysisRequestKey?: string;
+  sqlAuditTransactionId?: string;
+  sqlAuditRequestKey?: string;
   formatRestoreSnapshot?: {
     query: string;
     createdAt: number;

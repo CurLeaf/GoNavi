@@ -304,7 +304,7 @@ vi.mock('@monaco-editor/react', () => ({
       onMount?.(editorState.editor, {
         editor: { setTheme: vi.fn() },
         KeyMod: { CtrlCmd: 2048, WinCtrl: 256, Alt: 512, Shift: 1024 },
-        KeyCode: { KeyF: 70, KeyM: 77, KeyQ: 81, KeyS: 83 },
+        KeyCode: { KeyF: 70, KeyM: 77, KeyQ: 81, KeyR: 82, KeyS: 83 },
         languages: {
           CompletionItemKind: { Keyword: 1, Function: 2, Field: 3 },
           CompletionItemInsertTextRule: { InsertAsSnippet: 1 },
@@ -1774,6 +1774,66 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(expect.anything(), 'main', expect.stringContaining('select 2 as two'), 'query-1');
+    expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 1');
+    expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 3');
+  });
+
+  it('registers Windows Ctrl+R with Monaco CtrlCmd and runs the selected SQL', async () => {
+    storeState.shortcutOptions.runQuery.windows = { enabled: true, combo: 'Ctrl+R' };
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn((event: Event) => {
+        windowListeners[event.type]?.forEach((listener) => listener(event));
+        return true;
+      }),
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['total'], rows: [{ total: 1 }] }],
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        dbName: 'main',
+        query: 'select 1;\nselect count(*) as total from messages;\nselect 3;',
+      })} />);
+    });
+
+    editorState.selection = {
+      startLineNumber: 2,
+      startColumn: 1,
+      endLineNumber: 2,
+      endColumn: 'select count(*) as total from messages'.length + 1,
+    };
+    const runAction = findEditorAction('gonavi.runQuery');
+    expect(runAction).toMatchObject({
+      keybindings: [2048 | 82],
+      keybindingContext: 'editorTextFocus',
+    });
+
+    await act(async () => {
+      await runAction.run();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(
+      expect.anything(),
+      'main',
+      expect.stringContaining('select count(*) as total from messages'),
+      'query-1',
+    );
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 1');
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 3');
   });

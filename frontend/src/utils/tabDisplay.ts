@@ -479,6 +479,7 @@ export const getTabDisplayKindLabel = (tab: TabData): string => {
   if (tab.type === 'table-overview') return 'DB';
   if (tab.type === 'table-export') return 'EXPORT';
   if (tab.type === 'sql-analysis') return 'ANALYZE';
+  if (tab.type === 'sql-audit') return 'AUDIT';
   if (tab.type.startsWith('redis')) return 'REDIS';
   if (tab.type.startsWith('jvm')) return 'JVM';
   if (tab.type === 'trigger') return 'TRG';
@@ -502,6 +503,7 @@ const getTabRawObjectLabel = (tab: TabData, translate: TabDisplayTranslate = def
   if (tab.resourcePath) return tab.resourcePath;
   if (tab.filePath) return getFileNameFromPath(tab.filePath);
   if (tab.type.startsWith('redis')) return `db${tab.redisDB ?? 0}`;
+  if (tab.type === 'sql-audit') return tab.title;
   return tab.title;
 };
 

@@ -2146,7 +2146,7 @@ describe("i18n catalog", () => {
       sliceBetween(
         source,
         "      const binding = runQueryShortcutBinding;",
-        "  }, [languagePreference, runQueryShortcutBinding]);",
+        "  }, [activeShortcutPlatform, languagePreference, runQueryShortcutBinding]);",
       ),
       sliceBetween(
         source,
@@ -2156,12 +2156,12 @@ describe("i18n catalog", () => {
       sliceBetween(
         source,
         "      const binding = duplicateCurrentLineShortcutBinding;",
-        "  }, [duplicateCurrentLineShortcutBinding, handleDuplicateCurrentLine, languagePreference]);",
+        "  }, [activeShortcutPlatform, duplicateCurrentLineShortcutBinding, handleDuplicateCurrentLine, languagePreference]);",
       ),
       sliceBetween(
         source,
         "      const binding = saveQueryShortcutBinding;",
-        "  }, [languagePreference, saveQueryShortcutBinding]);",
+        "  }, [activeShortcutPlatform, languagePreference, saveQueryShortcutBinding]);",
       ),
     ].join("\n");
 

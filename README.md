@@ -126,6 +126,10 @@ GoNavi is designed for developers and DBAs who need a unified desktop experience
 
 ### Observability and Update
 - SQL execution logs with timing information.
+- SQL audit center for persisted SQL-editor operations, transaction boundaries, data edits/imports, SQL-file jobs, data sync, object DDL, table design, message publishing, and built-in AI/MCP database actions, with filters, transaction timelines, JSON/CSV export, retention controls, and writer health.
+- Audit content is redacted by default: Redis values and message payloads are hidden, while non-SQL operations that cannot be parsed safely retain metadata only. The audit database lives at `audit/sql_audit.db` under the active data root.
+- SQL-file, import, and sync entries are privacy-safe task summaries (content hash, target/count metadata), not raw per-row evidence. Source values identify the called GoNavi entry point rather than an unforgeable user identity.
+- The local SHA-256 hash chain is a consistency check, not a keyed signature or tamper-proof guarantee. Known persistence gaps are marked with `audit_gap` after recovery.
 - Startup/scheduled/manual update checks.
 
 ### UI/UX

@@ -318,8 +318,38 @@ func isReadOnlyMongoCommand(query string) bool {
 	if _, blocked := mongoWriteCommands[commandKey]; blocked {
 		return false
 	}
+	if commandKey == "aggregate" && mongoAggregateHasWriteStage(doc) {
+		return false
+	}
 	_, allowed := mongoReadOnlyCommands[commandKey]
 	return allowed
+}
+
+func mongoAggregateHasWriteStage(doc map[string]interface{}) bool {
+	var pipeline interface{}
+	for key, value := range doc {
+		if strings.EqualFold(strings.TrimSpace(key), "pipeline") {
+			pipeline = value
+			break
+		}
+	}
+	stages, ok := pipeline.([]interface{})
+	if !ok {
+		return false
+	}
+	for _, rawStage := range stages {
+		stage, ok := rawStage.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for key := range stage {
+			switch strings.ToLower(strings.TrimSpace(key)) {
+			case "$out", "$merge":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isReadOnlyMilvusCommand(query string) bool {

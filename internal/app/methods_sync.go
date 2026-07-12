@@ -81,7 +81,34 @@ func (a *App) resolveDataSyncEndpointConfig(raw connection.ConnectionConfig, sel
 }
 
 // DataSync executes a data synchronization task
-func (a *App) DataSync(config sync.SyncConfig) sync.SyncResult {
+func (a *App) DataSync(config sync.SyncConfig) (result sync.SyncResult) {
+	auditStartedAt := time.Now()
+	defer func() {
+		runConfig := normalizeRunConfig(config.TargetConfig, config.TargetDatabase)
+		auditMessage := ""
+		if !result.Success {
+			auditMessage = "data synchronization task failed"
+		}
+		auditResult := connection.QueryResult{
+			Success: result.Success,
+			Message: auditMessage,
+			Data: map[string]int64{
+				"affectedRows": int64(result.RowsInserted + result.RowsUpdated + result.RowsDeleted),
+			},
+		}
+		a.recordSQLAuditQuery(sqlAuditQueryInput{
+			Config:         runConfig,
+			Database:       config.TargetDatabase,
+			DBType:         resolveDDLDBType(runConfig),
+			QueryID:        generateQueryID(),
+			SQL:            fmt.Sprintf("SYNC DATA TABLES_%d", len(config.Tables)),
+			Source:         "sync",
+			CommitMode:     "auto",
+			Duration:       time.Since(auditStartedAt),
+			StatementCount: len(config.Tables),
+			Result:         auditResult,
+		})
+	}()
 	if err := ensureDataSyncTargetProtection(config); err != nil {
 		return sync.SyncResult{
 			Success: false,

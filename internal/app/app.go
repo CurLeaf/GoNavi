@@ -24,6 +24,7 @@ import (
 	redisbackend "GoNavi-Wails/internal/redis"
 	"GoNavi-Wails/internal/resultdiff"
 	"GoNavi-Wails/internal/secretstore"
+	"GoNavi-Wails/internal/sqlaudit"
 	syncbackend "GoNavi-Wails/internal/sync"
 	"GoNavi-Wails/shared/i18n"
 	"github.com/google/uuid"
@@ -68,20 +69,24 @@ type queryContext struct {
 }
 
 type managedSQLTransaction struct {
-	id          string
-	execer      db.StatementExecer
-	transactor  db.TransactionExecer
-	cancel      context.CancelFunc
-	config      connection.ConnectionConfig
-	dbType      string
-	commitSQL   string
-	rollbackSQL string
-	createdAt   time.Time
+	mu           sync.Mutex
+	id           string
+	execer       db.StatementExecer
+	transactor   db.TransactionExecer
+	cancel       context.CancelFunc
+	config       connection.ConnectionConfig
+	dbType       string
+	boundaryMode string
+	commitSQL    string
+	rollbackSQL  string
+	createdAt    time.Time
+	finished     bool
 }
 
 // App struct
 type App struct {
 	ctx                           context.Context
+	webRuntime                    bool
 	startedAt                     time.Time
 	dbCache                       map[string]cachedDatabase // Cache for DB connections
 	connectFailures               map[string]cachedConnectFailure
@@ -94,11 +99,26 @@ type App struct {
 	allowApplicationQuit          bool
 	applicationQuitPromptInFlight bool
 	queryMu                       sync.RWMutex
+	dataRootApplyMu               sync.Mutex
 	configDir                     string
 	secretStore                   secretstore.SecretStore
 	runningQueries                map[string]queryContext // queryID -> cancelFunc and start time
 	sqlTransactionMu              sync.Mutex
 	sqlTransactions               map[string]*managedSQLTransaction
+	sqlAuditMu                    sync.RWMutex
+	sqlAuditStore                 *sqlaudit.Store
+	sqlAuditStorePath             string
+	sqlAuditRuntimeActive         bool
+	sqlAuditSuspended             bool
+	sqlAuditAppendMu              sync.Mutex
+	sqlAuditHealthMu              sync.RWMutex
+	sqlAuditHealth                sqlAuditHealthState
+	sqlAuditHealthPath            string
+	sqlAuditHealthRevision        uint64
+	sqlAuditSuspensionDropped     int64
+	sqlAuditSuspensionFirstAt     int64
+	sqlAuditSuspensionLastAt      int64
+	sqlAuditSuspensionLastError   string
 	jvmPreviewTokenMu             sync.Mutex
 	jvmPreviewTokens              map[string]jvmPreviewConfirmationToken
 	jvmPreviewTokenTTL            time.Duration
@@ -110,6 +130,15 @@ type App struct {
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return NewAppWithSecretStore(secretstore.NewKeyringStore())
+}
+
+// NewWebApp creates the backend used by the authenticated browser server.
+// The immutable runtime marker keeps desktop-only Wails APIs from being
+// reached through the reflective Web RPC bridge.
+func NewWebApp() *App {
+	app := NewApp()
+	app.webRuntime = true
+	return app
 }
 
 func NewAppWithSecretStore(store secretstore.SecretStore) *App {
@@ -244,6 +273,7 @@ func (a *App) startup(ctx context.Context) {
 	if err := migrateLegacyWebKitStorageIfNeeded(a); err != nil {
 		logger.Warnf("迁移旧 WebKit 连接存储失败：%v", err)
 	}
+	a.activateSQLAudit()
 	if shouldInstallMacNativeWindowDiagnostics() {
 		installMacNativeWindowDiagnostics(logger.Path())
 	}
@@ -299,6 +329,7 @@ func (a *App) Shutdown() {
 	logger.Infof("应用开始关闭，准备释放资源")
 	a.stopConnectionKeepAliveLoop()
 	a.rollbackPendingSQLTransactionsOnShutdown()
+	a.closeSQLAuditStore()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, dbInst := range a.dbCache {

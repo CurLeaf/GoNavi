@@ -257,7 +257,7 @@ const buildQueryEditorInlineMemoryEntries = ({
     });
 
     sqlLogs.forEach((log) => {
-        if (log.status !== 'success') {
+        if (log.status !== 'success' || log.category === 'transaction') {
             return;
         }
         if (!matchesQueryEditorInlineMemoryDb(currentDb, log.dbName)) {
@@ -1553,7 +1553,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
       const binding = triggerSqlAiCompletionShortcutBinding;
       const keyBinding = binding?.enabled && binding.combo
-          ? comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode)
+          ? comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode, activeShortcutPlatform)
           : null;
       triggerSqlAiCompletionActionRef.current = editor.addAction({
           id: 'gonavi.triggerSqlAiCompletion',
@@ -1565,7 +1565,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               triggerAiInlineCompletionRef.current?.();
           },
       });
-  }, [triggerSqlAiCompletionShortcutBinding]);
+  }, [activeShortcutPlatform, triggerSqlAiCompletionShortcutBinding]);
   useEffect(() => {
       // Prefer remount session cache (detach/attach); otherwise follow tab draft flag.
       if (restoredResultSessionRef.current && restoredResultSessionRef.current.isResultPanelVisible !== undefined) {
@@ -1621,6 +1621,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       : 0;
   const {
       activatePendingSqlTransaction,
+      appendPendingSqlTransactionExecution,
       autoCommitRemainingSeconds: sqlEditorAutoCommitRemainingSeconds,
       finishPendingSqlTransaction,
       pendingSqlTransaction,
@@ -1629,6 +1630,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       tabId: tab.id,
       translate: (key, params) => translate(key, params),
   });
+  const handleFinishPendingSqlTransaction = useCallback(async (action: 'commit' | 'rollback') => {
+      await finishPendingSqlTransaction(action, 'manual');
+      handleShowSqlExecutionLog('open');
+  }, [finishPendingSqlTransaction, handleShowSqlExecutionLog]);
   const autoFetchVisible = useAutoFetchVisibility();
 
   useEffect(() => {
@@ -4496,7 +4501,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const runBinding = runQueryShortcutBinding;
       if (runBinding?.enabled && runBinding.combo) {
           const keyBinding = comboToMonacoKeyBinding(
-              runBinding.combo, monaco.KeyMod, monaco.KeyCode
+              runBinding.combo, monaco.KeyMod, monaco.KeyCode, activeShortcutPlatform,
           );
           if (keyBinding) {
               runQueryActionRef.current = editor.addAction({
@@ -4516,7 +4521,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const selectStatementBinding = selectCurrentStatementShortcutBinding;
       if (selectStatementBinding?.enabled && selectStatementBinding.combo) {
           const keyBinding = comboToMonacoKeyBinding(
-              selectStatementBinding.combo, monaco.KeyMod, monaco.KeyCode
+              selectStatementBinding.combo, monaco.KeyMod, monaco.KeyCode, activeShortcutPlatform,
           );
           if (keyBinding) {
               selectCurrentStatementActionRef.current = editor.addAction({
@@ -4531,6 +4536,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const macFindWithSelectionGuardKeyBinding = activeShortcutPlatform === 'mac'
           ? comboToMonacoKeyBinding(
               QUERY_EDITOR_MAC_FIND_WITH_SELECTION_COMBO, monaco.KeyMod, monaco.KeyCode,
+              activeShortcutPlatform,
           )
           : null;
       if (macFindWithSelectionGuardKeyBinding) {
@@ -4556,6 +4562,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       if (duplicateLineBinding?.enabled && duplicateLineBinding.combo) {
           const keyBinding = comboToMonacoKeyBinding(
               duplicateLineBinding.combo, monaco.KeyMod, monaco.KeyCode,
+              activeShortcutPlatform,
           );
           if (keyBinding) {
               duplicateCurrentLineActionRef.current = editor.addAction({
@@ -4570,7 +4577,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const saveBinding = saveQueryShortcutBinding;
       if (saveBinding?.enabled && saveBinding.combo) {
           const keyBinding = comboToMonacoKeyBinding(
-              saveBinding.combo, monaco.KeyMod, monaco.KeyCode
+              saveBinding.combo, monaco.KeyMod, monaco.KeyCode, activeShortcutPlatform,
           );
           if (keyBinding) {
               saveQueryActionRef.current = editor.addAction({
@@ -4585,7 +4592,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }
 
       const findInEditorKeyBinding = comboToMonacoKeyBinding(
-          findInEditorShortcutCombo, monaco.KeyMod, monaco.KeyCode
+          findInEditorShortcutCombo, monaco.KeyMod, monaco.KeyCode, activeShortcutPlatform,
       );
       if (findInEditorKeyBinding) {
           findInEditorActionRef.current = editor.addAction({
@@ -4601,7 +4608,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const formatBinding = formatSqlShortcutBinding;
       if (formatBinding?.enabled && formatBinding.combo) {
           const keyBinding = comboToMonacoKeyBinding(
-              formatBinding.combo, monaco.KeyMod, monaco.KeyCode
+              formatBinding.combo, monaco.KeyMod, monaco.KeyCode, activeShortcutPlatform,
           );
           if (keyBinding) {
               formatSqlActionRef.current = editor.addAction({
@@ -4620,7 +4627,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const toggleResultsBinding = toggleQueryResultsPanelShortcutBinding;
       if (toggleResultsBinding?.enabled && toggleResultsBinding.combo) {
           const keyBinding = comboToMonacoKeyBinding(
-              toggleResultsBinding.combo, monaco.KeyMod, monaco.KeyCode
+              toggleResultsBinding.combo, monaco.KeyMod, monaco.KeyCode, activeShortcutPlatform,
           );
           if (keyBinding) {
               toggleQueryResultsPanelActionRef.current = editor.addAction({
@@ -6486,14 +6493,27 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 return;
             }
 
-            if (useManagedTransaction && res.transactionPending && res.transactionId) {
-                activatePendingSqlTransaction({
-                    id: String(res.transactionId),
-                    commitMode: sqlEditorCommitMode,
-                    autoCommitDelayMs: sqlEditorAutoCommitDelayMs,
-                    createdAt: Date.now(),
-                    statementCount: managedTransactionStatementCount,
-                });
+            if (res.transactionPending && res.transactionId) {
+                const transactionId = String(res.transactionId);
+                if (useManagedTransaction) {
+                    activatePendingSqlTransaction({
+                        id: transactionId,
+                        commitMode: sqlEditorCommitMode,
+                        autoCommitDelayMs: sqlEditorAutoCommitDelayMs,
+                        createdAt: Date.now(),
+                        statementCount: managedTransactionStatementCount,
+                        dbType: normalizedDbType,
+                        dbName: currentDb,
+                        statements: sourceStatements,
+                        executionDurationMs: duration,
+                    });
+                } else {
+                    appendPendingSqlTransactionExecution({
+                        transactionId,
+                        statements: sourceStatements,
+                        durationMs: duration,
+                    });
+                }
             }
 
             // res.data 是 ResultSetData[] 数组
@@ -6897,7 +6917,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const binding = runQueryShortcutBinding;
       if (!binding?.enabled || !binding.combo) return;
 
-      const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+      const keyBinding = comboToMonacoKeyBinding(
+          binding.combo, monaco.KeyMod, monaco.KeyCode, activeShortcutPlatform,
+      );
       if (keyBinding) {
           runQueryActionRef.current = editor.addAction({
               id: 'gonavi.runQuery',
@@ -6918,7 +6940,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               runQueryActionRef.current = null;
           }
       };
-  }, [languagePreference, runQueryShortcutBinding]);
+  }, [activeShortcutPlatform, languagePreference, runQueryShortcutBinding]);
 
   useEffect(() => {
       if (selectCurrentStatementActionRef.current) {
@@ -6936,7 +6958,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
       const binding = selectCurrentStatementShortcutBinding;
       if (binding?.enabled && binding.combo) {
-          const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+          const keyBinding = comboToMonacoKeyBinding(
+              binding.combo, monaco.KeyMod, monaco.KeyCode, activeShortcutPlatform,
+          );
           if (keyBinding) {
               selectCurrentStatementActionRef.current = editor.addAction({
                   id: 'gonavi.selectCurrentStatement',
@@ -6952,6 +6976,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               QUERY_EDITOR_MAC_FIND_WITH_SELECTION_COMBO,
               monaco.KeyMod,
               monaco.KeyCode,
+              activeShortcutPlatform,
           )
           : null;
       if (macFindWithSelectionGuardKeyBinding) {
@@ -6998,7 +7023,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const binding = duplicateCurrentLineShortcutBinding;
       if (!binding?.enabled || !binding.combo) return;
 
-      const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+      const keyBinding = comboToMonacoKeyBinding(
+          binding.combo, monaco.KeyMod, monaco.KeyCode, activeShortcutPlatform,
+      );
       if (keyBinding) {
           duplicateCurrentLineActionRef.current = editor.addAction({
               id: 'gonavi.duplicateCurrentLine',
@@ -7014,7 +7041,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               duplicateCurrentLineActionRef.current = null;
           }
       };
-  }, [duplicateCurrentLineShortcutBinding, handleDuplicateCurrentLine, languagePreference]);
+  }, [activeShortcutPlatform, duplicateCurrentLineShortcutBinding, handleDuplicateCurrentLine, languagePreference]);
 
   useEffect(() => {
       if (saveQueryActionRef.current) {
@@ -7029,7 +7056,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const binding = saveQueryShortcutBinding;
       if (!binding?.enabled || !binding.combo) return;
 
-      const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+      const keyBinding = comboToMonacoKeyBinding(
+          binding.combo, monaco.KeyMod, monaco.KeyCode, activeShortcutPlatform,
+      );
       if (keyBinding) {
           saveQueryActionRef.current = editor.addAction({
               id: 'gonavi.saveQuery',
@@ -7047,7 +7076,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               saveQueryActionRef.current = null;
           }
       };
-  }, [languagePreference, saveQueryShortcutBinding]);
+  }, [activeShortcutPlatform, languagePreference, saveQueryShortcutBinding]);
 
   useEffect(() => {
       if (findInEditorActionRef.current) {
@@ -7063,6 +7092,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           findInEditorShortcutCombo,
           monaco.KeyMod,
           monaco.KeyCode,
+          activeShortcutPlatform,
       );
       if (keyBinding) {
           findInEditorActionRef.current = editor.addAction({
@@ -7081,7 +7111,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               findInEditorActionRef.current = null;
           }
       };
-  }, [findInEditorShortcutCombo, languagePreference]);
+  }, [activeShortcutPlatform, findInEditorShortcutCombo, languagePreference]);
 
   useEffect(() => {
       if (formatSqlActionRef.current) {
@@ -7096,7 +7126,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const binding = formatSqlShortcutBinding;
       if (!binding?.enabled || !binding.combo) return;
 
-      const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+      const keyBinding = comboToMonacoKeyBinding(
+          binding.combo, monaco.KeyMod, monaco.KeyCode, activeShortcutPlatform,
+      );
       if (keyBinding) {
           formatSqlActionRef.current = editor.addAction({
               id: 'gonavi.formatSql',
@@ -7114,7 +7146,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               formatSqlActionRef.current = null;
           }
       };
-  }, [languagePreference, formatSqlShortcutBinding]);
+  }, [activeShortcutPlatform, languagePreference, formatSqlShortcutBinding]);
 
   useEffect(() => {
       const editor = editorRef.current;
@@ -7144,7 +7176,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const binding = toggleQueryResultsPanelShortcutBinding;
       if (!binding?.enabled || !binding.combo) return;
 
-      const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+      const keyBinding = comboToMonacoKeyBinding(
+          binding.combo, monaco.KeyMod, monaco.KeyCode, activeShortcutPlatform,
+      );
       if (keyBinding) {
           toggleQueryResultsPanelActionRef.current = editor.addAction({
               id: 'gonavi.toggleQueryResultsPanel',
@@ -7160,7 +7194,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               toggleQueryResultsPanelActionRef.current = null;
           }
       };
-  }, [languagePreference, toggleQueryResultsPanelShortcutBinding, toggleResultPanelVisibility]);
+  }, [activeShortcutPlatform, languagePreference, toggleQueryResultsPanelShortcutBinding, toggleResultPanelVisibility]);
 
   useEffect(() => {
       const handleRunActiveQuery = (event: Event) => {
@@ -7937,7 +7971,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           darkMode={darkMode}
           transaction={pendingSqlTransaction}
           autoCommitRemainingSeconds={sqlEditorAutoCommitRemainingSeconds}
-          onFinish={(action) => void finishPendingSqlTransaction(action, 'manual')}
+          onFinish={(action) => void handleFinishPendingSqlTransaction(action)}
       />
   );
   const queryEditorStageStyle: React.CSSProperties = isResultPanelVisible

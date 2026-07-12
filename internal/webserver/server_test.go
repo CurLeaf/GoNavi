@@ -79,3 +79,33 @@ func TestMethodInvokerInvokeSupportsStructuredReturnValues(t *testing.T) {
 		t.Fatalf("expected echoed value hello, got %#v", payload["value"])
 	}
 }
+
+func TestMethodInvokerRejectsDesktopOnlyAppMethodsBeforeReflection(t *testing.T) {
+	invoker := &methodInvoker{
+		targets: map[string]reflect.Value{
+			"app.app": reflect.ValueOf(webserverTestReceiver{}),
+		},
+	}
+
+	for _, method := range []string{
+		"Shutdown", "ExportSQLAuditFile", "OpenSQLFile", "ExecuteSQLFile", "ReadSQLFile",
+		"PreviewImportFile", "ImportDataWithProgress", "GetDataRootDirectoryInfo",
+		"ApplyDataRootDirectory", "OpenDataRootDirectory",
+	} {
+		_, err := invoker.Invoke(invokeRequest{Namespace: "app", Receiver: "app", Method: method})
+		if err == nil || !strings.Contains(err.Error(), "unavailable in web runtime") {
+			t.Fatalf("desktop-only method %s error = %v, want web runtime rejection", method, err)
+		}
+	}
+}
+
+func TestSQLAuditHeavyInvokeIncludesExportAndIntegrityVerification(t *testing.T) {
+	for _, method := range []string{"BuildSQLAuditExport", "VerifySQLAuditIntegrity"} {
+		if !isSQLAuditHeavyInvoke(invokeRequest{Namespace: "app", Receiver: "app", Method: method}) {
+			t.Fatalf("%s must share the SQL audit heavy-operation semaphore", method)
+		}
+	}
+	if isSQLAuditHeavyInvoke(invokeRequest{Namespace: "app", Receiver: "app", Method: "GetSQLAuditEvents"}) {
+		t.Fatal("ordinary paged audit reads must not use the heavy-operation semaphore")
+	}
+}

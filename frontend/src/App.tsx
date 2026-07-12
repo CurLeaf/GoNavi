@@ -1,7 +1,7 @@
 ﻿import Modal from './components/common/ResizableDraggableModal';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip, Alert } from 'antd';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined, PoweroffOutlined, TagOutlined, UserOutlined, UpCircleOutlined, MessageOutlined, FileTextOutlined, SyncOutlined, SendOutlined } from '@ant-design/icons';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined, PoweroffOutlined, TagOutlined, UserOutlined, UpCircleOutlined, MessageOutlined, FileTextOutlined, SyncOutlined, SendOutlined, AuditOutlined } from '@ant-design/icons';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -72,6 +72,7 @@ import {
   normalizeConnectionPackagePassword,
 } from './utils/connectionExport';
 import { downloadBrowserTextFile } from './utils/browserFileTransfer';
+import { buildSqlAuditWorkbenchTab } from './utils/sqlAuditTab';
 import {
   extractCustomThemeAntTokens,
 } from './utils/customTheme';
@@ -7086,6 +7087,18 @@ function App() {
                     description: t('app.tools.entry.shortcuts.description'),
                     onClick: () => {
                       handleOpenToolCenterPane('workspace', 'shortcut-settings');
+                    },
+                  },
+                  {
+                    key: 'sql-audit',
+                    icon: <AuditOutlined />,
+                    title: t('app.tools.entry.sql_audit.title'),
+                    description: t('app.tools.entry.sql_audit.description'),
+                    onClick: () => {
+                      setIsToolsModalOpen(false);
+                      setActiveToolCenterPane(null);
+                      setToolCenterBackGroupKey(null);
+                      addTab(buildSqlAuditWorkbenchTab());
                     },
                   },
                 ],

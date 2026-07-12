@@ -1304,6 +1304,9 @@ export interface SqlLog {
   message?: string;
   dbName?: string;
   affectedRows?: number;
+  category?: "query" | "transaction";
+  transactionId?: string;
+  transactionAction?: "commit" | "rollback";
 }
 
 export interface QueryOptions {
@@ -1335,6 +1338,10 @@ export interface SqlEditorPendingTransactionState {
   createdAt: number;
   autoCommitDueAt?: number | null;
   statementCount?: number;
+  dbType?: string;
+  dbName?: string;
+  statements?: string[];
+  executionDurationMs?: number;
 }
 
 interface AppState {
@@ -2009,6 +2016,17 @@ const sanitizeSqlLogEntry = (
     duration: Number.isFinite(duration) && duration >= 0 ? duration : 0,
     dbName: toTrimmedString(raw.dbName) || undefined,
   };
+
+  if (raw.category === "query" || raw.category === "transaction") {
+    log.category = raw.category;
+  }
+  const transactionId = toTrimmedString(raw.transactionId);
+  if (transactionId) {
+    log.transactionId = transactionId;
+  }
+  if (raw.transactionAction === "commit" || raw.transactionAction === "rollback") {
+    log.transactionAction = raw.transactionAction;
+  }
 
   if (message) {
     log.message = message;

@@ -1019,6 +1019,7 @@ export const comboToMonacoKeyBinding = (
   combo: string,
   keyModEnum: Record<string, number>,
   keyCodeEnum: Record<string, number>,
+  platform: ShortcutPlatform,
 ): MonacoKeyBinding | null => {
   const normalized = normalizeShortcutCombo(combo);
   if (!normalized) return null;
@@ -1026,12 +1027,20 @@ export const comboToMonacoKeyBinding = (
   const pieces = normalized.split('+');
   let keyMod = 0;
   let keyCode: number | null = null;
+  // Monaco 的 CtrlCmd / WinCtrl 是平台抽象：Windows/Linux 下分别表示
+  // Ctrl / Meta，macOS 下则分别表示 Command / Control。
+  const ctrlKeyMod = platform === 'mac'
+    ? (keyModEnum.WinCtrl ?? 0)
+    : (keyModEnum.CtrlCmd ?? 0);
+  const metaKeyMod = platform === 'mac'
+    ? (keyModEnum.CtrlCmd ?? 0)
+    : (keyModEnum.WinCtrl ?? 0);
 
   for (const piece of pieces) {
     if (piece === 'Ctrl') {
-      keyMod |= keyModEnum.WinCtrl ?? 0;
+      keyMod |= ctrlKeyMod;
     } else if (piece === 'Meta') {
-      keyMod |= keyModEnum.CtrlCmd ?? 0;
+      keyMod |= metaKeyMod;
     } else if (piece === 'Alt') {
       keyMod |= keyModEnum.Alt ?? 0;
     } else if (piece === 'Shift') {

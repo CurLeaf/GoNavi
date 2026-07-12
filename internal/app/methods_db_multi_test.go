@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
@@ -27,6 +28,9 @@ type fakeBatchWriteDB struct {
 	queryErr     map[string]error
 	execErr      map[string]error
 	execAffected map[string]int64
+	execDelay    map[string]time.Duration
+	execStarted  chan<- string
+	execRelease  <-chan struct{}
 	session      *fakeBatchWriteSession
 }
 
@@ -173,6 +177,29 @@ func (f *fakeBatchWriteDB) ExecContext(ctx context.Context, query string) (int64
 	f.lastCtx = ctx
 	f.execCalls++
 	f.execQueries = append(f.execQueries, query)
+	if f.execStarted != nil {
+		select {
+		case f.execStarted <- query:
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
+	if f.execRelease != nil {
+		select {
+		case <-f.execRelease:
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
+	if delay := f.execDelay[query]; delay > 0 {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
 	if err := f.execErr[query]; err != nil {
 		return 0, err
 	}
@@ -354,6 +381,126 @@ func cloneResultSets(input []connection.ResultSetData) []connection.ResultSetDat
 		})
 	}
 	return cloned
+}
+
+func TestDBQueryMultiInTransactionSerializesCommitWithInFlightStatement(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() { newDatabaseFunc = originalNewDatabaseFunc })
+
+	initialStatement := "UPDATE users SET active = 1 WHERE id = 1"
+	followUpStatement := "UPDATE users SET active = 0 WHERE id = 2"
+	fakeDB := &fakeTransactionalDB{fakeBatchWriteDB: fakeBatchWriteDB{
+		execAffected: map[string]int64{initialStatement: 1, followUpStatement: 1},
+	}}
+	newDatabaseFunc = func(string) (db.Database, error) { return fakeDB, nil }
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306, Database: "main"}
+
+	started := app.DBQueryMultiTransactional(config, "main", initialStatement, "tx-serialize-start")
+	if !started.Success || started.TransactionID == "" {
+		t.Fatalf("start managed transaction: %#v", started)
+	}
+
+	execStarted := make(chan string, 1)
+	execRelease := make(chan struct{})
+	fakeDB.execStarted = execStarted
+	fakeDB.execRelease = execRelease
+	queryDone := make(chan connection.QueryResult, 1)
+	go func() {
+		queryDone <- app.DBQueryMultiInTransaction(started.TransactionID, followUpStatement, "tx-serialize-follow-up")
+	}()
+
+	select {
+	case statement := <-execStarted:
+		if statement != followUpStatement {
+			close(execRelease)
+			t.Fatalf("blocked statement = %q, want %q", statement, followUpStatement)
+		}
+	case <-time.After(2 * time.Second):
+		close(execRelease)
+		t.Fatal("follow-up statement did not start")
+	}
+
+	commitDone := make(chan connection.QueryResult, 1)
+	go func() {
+		commitDone <- app.DBCommitTransaction(started.TransactionID)
+	}()
+	select {
+	case result := <-commitDone:
+		close(execRelease)
+		t.Fatalf("commit completed while statement was still in flight: %#v", result)
+	case <-time.After(75 * time.Millisecond):
+	}
+
+	close(execRelease)
+	if result := <-queryDone; !result.Success {
+		t.Fatalf("follow-up statement failed: %#v", result)
+	}
+	if result := <-commitDone; !result.Success {
+		t.Fatalf("commit after follow-up failed: %#v", result)
+	}
+	if fakeDB.txSession.commitCalls != 1 || !fakeDB.txSession.closed {
+		t.Fatalf("transaction was not committed exactly once after execution: commitCalls=%d closed=%v", fakeDB.txSession.commitCalls, fakeDB.txSession.closed)
+	}
+}
+
+func TestRollbackPendingSQLTransactionsWaitsForInFlightStatement(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() { newDatabaseFunc = originalNewDatabaseFunc })
+
+	initialStatement := "UPDATE users SET active = 1 WHERE id = 1"
+	followUpStatement := "UPDATE users SET active = 0 WHERE id = 2"
+	fakeDB := &fakeTransactionalDB{fakeBatchWriteDB: fakeBatchWriteDB{
+		execAffected: map[string]int64{initialStatement: 1, followUpStatement: 1},
+	}}
+	newDatabaseFunc = func(string) (db.Database, error) { return fakeDB, nil }
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306, Database: "main"}
+
+	started := app.DBQueryMultiTransactional(config, "main", initialStatement, "tx-shutdown-start")
+	if !started.Success || started.TransactionID == "" {
+		t.Fatalf("start managed transaction: %#v", started)
+	}
+
+	execStarted := make(chan string, 1)
+	execRelease := make(chan struct{})
+	fakeDB.execStarted = execStarted
+	fakeDB.execRelease = execRelease
+	queryDone := make(chan connection.QueryResult, 1)
+	go func() {
+		queryDone <- app.DBQueryMultiInTransaction(started.TransactionID, followUpStatement, "tx-shutdown-follow-up")
+	}()
+	select {
+	case <-execStarted:
+	case <-time.After(2 * time.Second):
+		close(execRelease)
+		t.Fatal("follow-up statement did not start")
+	}
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		app.rollbackPendingSQLTransactionsOnShutdown()
+		close(shutdownDone)
+	}()
+	select {
+	case <-shutdownDone:
+		close(execRelease)
+		t.Fatal("shutdown rollback completed while statement was still in flight")
+	case <-time.After(75 * time.Millisecond):
+	}
+
+	close(execRelease)
+	if result := <-queryDone; !result.Success {
+		t.Fatalf("follow-up statement failed: %#v", result)
+	}
+	select {
+	case <-shutdownDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown rollback did not finish after statement completed")
+	}
+	if fakeDB.txSession.rollbackCalls != 1 || !fakeDB.txSession.closed {
+		t.Fatalf("transaction was not rolled back exactly once after execution: rollbackCalls=%d closed=%v", fakeDB.txSession.rollbackCalls, fakeDB.txSession.closed)
+	}
 }
 
 func TestDBQueryMultiKeepsOracleAnonymousBlockAsSingleStatement(t *testing.T) {

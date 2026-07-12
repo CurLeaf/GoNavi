@@ -3,7 +3,9 @@ package app
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1548,7 +1550,14 @@ func executeSQLFileStream(ctx context.Context, dbInst db.Database, reader io.Rea
 
 // ExecuteSQLFile 在后端流式读取并执行大 SQL 文件，通过事件推送进度。
 // 前端通过 EventsOn("sqlfile:progress", ...) 监听进度。
-func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, filePath string, jobID string) connection.QueryResult {
+func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, filePath string, jobID string) (result connection.QueryResult) {
+	auditSQL := "EXECUTE SQL FILE"
+	auditStatementCount := 0
+	auditSafeError := "SQL file task failed before an execution summary was available"
+	defer a.beginSQLAuditUserActionWithOptions(config, dbName, "sql_file", &auditSQL, &result, sqlAuditUserActionOptions{
+		StatementCount: &auditStatementCount,
+		SafeError:      &auditSafeError,
+	})()
 	if strings.TrimSpace(filePath) == "" {
 		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.file_path_empty", nil)}
 	}
@@ -1574,8 +1583,12 @@ func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, 
 	defer f.Close()
 
 	// 获取文件大小用于计算进度
-	fi, _ := f.Stat()
-	totalSize := fi.Size()
+	var totalSize int64
+	totalSizeKnown := false
+	if fi, statErr := f.Stat(); statErr == nil {
+		totalSize = fi.Size()
+		totalSizeKnown = true
+	}
 
 	// 设置取消上下文
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1619,7 +1632,8 @@ func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, 
 	emitProgress("running", 0, 0, 0, 0, "", "")
 
 	// 使用 countingReader 追踪已读取字节数
-	cr := &countingReader{r: f}
+	fileDigest := sha256.New()
+	cr := &countingReader{r: io.TeeReader(f, fileDigest)}
 
 	startTime := time.Now()
 	execResult, streamErr := executeSQLFileStream(ctx, dbInst, cr, sqlFileExecutionOptions{
@@ -1644,6 +1658,12 @@ func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, 
 	executedCount := execResult.Executed
 	failedCount := execResult.Failed
 	errorLogs := execResult.Errors
+	auditStatementCount = executedCount + failedCount
+	auditSQL = fmt.Sprintf("EXECUTE SQL FILE EXECUTED_%d FAILED_%d", executedCount, failedCount)
+	auditSafeError = fmt.Sprintf("SQL file task failed after executing %d statement(s); %d statement(s) failed", executedCount, failedCount)
+	if totalSizeKnown && cr.n == totalSize {
+		auditSQL += " SHA256_" + hex.EncodeToString(fileDigest.Sum(nil))
+	}
 
 	if streamErr != nil && streamErr.Error() == "已取消" {
 		emitProgress("cancelled", executedCount, failedCount, executedCount+failedCount, cr.n, "", a.appText("file.backend.message.user_cancelled", nil))
@@ -2364,7 +2384,21 @@ func formatImportSQLValue(dbType, columnType string, value interface{}) string {
 }
 
 // ImportDataWithProgress 执行导入并发送进度事件
-func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName, tableName, filePath string) connection.QueryResult {
+func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName, tableName, filePath string) (result connection.QueryResult) {
+	dbType := resolveDDLDBType(config)
+	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
+	auditTarget := strings.TrimSpace(tableName)
+	if pureTableName != "" {
+		auditTarget = quoteTableIdentByType(dbType, schemaName, pureTableName)
+	}
+	if auditTarget == "" {
+		auditTarget = "TARGET_TABLE"
+	}
+	auditSQL := "IMPORT DATA INTO " + auditTarget
+	auditSafeError := "data import task failed"
+	defer a.beginSQLAuditUserActionWithOptions(config, dbName, "data_import", &auditSQL, &result, sqlAuditUserActionOptions{
+		SafeError: &auditSafeError,
+	})()
 	if err := ensureConnectionAllowsDataImport(config, "connection.backend.action.import_data"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -2374,8 +2408,6 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	dbType := resolveDDLDBType(config)
-	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
 	columnTypeMap := map[string]string{}
 	if defs, colErr := dbInst.GetColumns(schemaName, pureTableName); colErr == nil {
 		columnTypeMap = buildImportColumnTypeMap(defs)
@@ -2406,19 +2438,22 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 		"imported": resultData.Success,
 		"failed":   resultData.Failed,
 	})
-	result := map[string]interface{}{
+	resultPayload := map[string]interface{}{
 		"success":      resultData.Success,
 		"failed":       resultData.Failed,
 		"total":        resultData.Total,
+		"affectedRows": int64(resultData.Success),
 		"errorLogs":    resultData.ErrorLogs,
 		"errorSummary": summary,
 	}
 
 	maybeReleaseFileTransferMemory("import-finished", int64(resultData.Total), filePath)
-	return connection.QueryResult{Success: true, Data: result, Message: summary}
+	return connection.QueryResult{Success: true, Data: resultPayload, Message: summary}
 }
 
-func (a *App) ApplyChanges(config connection.ConnectionConfig, dbName, tableName string, changes connection.ChangeSet) connection.QueryResult {
+func (a *App) ApplyChanges(config connection.ConnectionConfig, dbName, tableName string, changes connection.ChangeSet) (result connection.QueryResult) {
+	auditSQL := fmt.Sprintf("APPLY CHANGES TO %s", strings.TrimSpace(tableName))
+	defer a.beginSQLAuditUserAction(config, dbName, "data_editor", &auditSQL, &result)()
 	if err := ensureConnectionAllowsDataEdit(config, "connection.backend.action.apply_result_changes"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -2983,7 +3018,13 @@ func tableDataClearMessageKeys(mode tableDataClearMode, partial bool) (failureKe
 	}
 }
 
-func (a *App) runTableDataClear(config connection.ConnectionConfig, dbName string, tableNames []string, mode tableDataClearMode) connection.QueryResult {
+func (a *App) runTableDataClear(config connection.ConnectionConfig, dbName string, tableNames []string, mode tableDataClearMode) (result connection.QueryResult) {
+	auditAction := "DELETE TABLE DATA"
+	if mode == tableDataClearModeTruncate {
+		auditAction = "TRUNCATE TABLE DATA"
+	}
+	auditSQL := auditAction + " " + strings.Join(tableNames, ", ")
+	defer a.beginSQLAuditUserAction(config, dbName, "object_editor", &auditSQL, &result)()
 	actionLabel, progressLabel := tableDataClearActionLabels(mode)
 	if err := ensureConnectionAllowsDataEdit(config, actionLabel); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}

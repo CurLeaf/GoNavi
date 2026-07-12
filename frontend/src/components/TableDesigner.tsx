@@ -8,7 +8,7 @@ import { CSS } from '@dnd-kit/utilities';
 import Editor from './MonacoEditor';
 import { TabData, ColumnDefinition, IndexDefinition, ForeignKeyDefinition, TriggerDefinition } from '../types';
 import { useStore } from '../store';
-import { DBGetColumns, DBGetIndexes, DBQuery, DBGetForeignKeys, DBGetTriggers, DBShowCreateTable } from '../../wailsjs/go/app/App';
+import { DBGetColumns, DBGetIndexes, DBQueryAudited, DBGetForeignKeys, DBGetTriggers, DBShowCreateTable } from '../../wailsjs/go/app/App';
 import { hasIndexFormChanged, normalizeIndexFormFromRow, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot } from './tableDesignerIndexUtils';
 import { buildIndexCreateSqlPreview } from './tableDesignerIndexSql';
 import { buildAlterTablePreviewSql, buildCreateTablePreviewSql, hasAlterTableDraftChanges, type StarRocksCreateTableOptions, type StarRocksDistributionType, type StarRocksKeyModel, type StarRocksTableKind } from './tableDesignerSchemaSql';
@@ -1209,7 +1209,7 @@ ${selectedTrigger.statement}`;
         const dropSql = buildDropTriggerSql(selectedTrigger.name);
 
         try {
-          const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', dropSql);
+          const res = await DBQueryAudited(buildRpcConnectionConfig(config) as any, tab.dbName || '', dropSql, 'table_designer');
           if (res.success) {
             message.success(t('table_designer.message.trigger_deleted', undefined, i18nLanguage));
             setSelectedTrigger(null);
@@ -1246,7 +1246,7 @@ ${selectedTrigger.statement}`;
       // 如果是编辑模式，先删除旧触发器
       if (triggerEditMode === 'edit' && selectedTrigger) {
         const dropSql = buildDropTriggerSql(selectedTrigger.name);
-        const dropRes = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', dropSql);
+        const dropRes = await DBQueryAudited(buildRpcConnectionConfig(config) as any, tab.dbName || '', dropSql, 'table_designer');
         if (!dropRes.success) {
           message.error(t('table_designer.message.drop_old_trigger_failed', { detail: dropRes.message }, i18nLanguage));
           setTriggerExecuting(false);
@@ -1255,7 +1255,7 @@ ${selectedTrigger.statement}`;
       }
 
       // 执行创建语句
-      const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', triggerEditSql);
+      const res = await DBQueryAudited(buildRpcConnectionConfig(config) as any, tab.dbName || '', triggerEditSql, 'table_designer');
       if (res.success) {
         message.success(triggerEditMode === 'create'
             ? t('table_designer.message.trigger_created', undefined, i18nLanguage)
@@ -1761,7 +1761,7 @@ ${selectedTrigger.statement}`;
       const sql = buildCreateTableSql(copyTableName.trim(), selectedColumns, copyCharset, copyCollation);
       setCopyExecuting(true);
       try {
-          const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', sql);
+          const res = await DBQueryAudited(buildRpcConnectionConfig(config) as any, tab.dbName || '', sql, 'table_designer');
           if (res.success) {
               message.success(t('table_designer.message.columns_copied_to_new_table', { count: selectedColumns.length, table: copyTableName.trim() }, i18nLanguage));
               setIsCopyColumnsModalOpen(false);
@@ -1790,7 +1790,7 @@ ${selectedTrigger.statement}`;
       const statements = splitSchemaExecutionStatements(sqlText);
       for (let i = 0; i < statements.length; i++) {
           const stmt = normalizeSchemaStatementForExecution(statements[i], dbType);
-          const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', stmt);
+          const res = await DBQueryAudited(buildRpcConnectionConfig(config) as any, tab.dbName || '', stmt, 'table_designer');
           if (!res.success) {
               const prefix = statements.length > 1
                   ? t('table_designer.message.statement_execution_failed_prefix', { current: i + 1, total: statements.length }, i18nLanguage)

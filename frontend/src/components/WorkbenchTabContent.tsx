@@ -17,6 +17,7 @@ import JVMAuditViewer from './JVMAuditViewer';
 import JVMDiagnosticConsole from './JVMDiagnosticConsole';
 import JVMMonitoringDashboard from './JVMMonitoringDashboard';
 import SqlAnalysisWorkbench from './explain/SqlAnalysisWorkbench';
+import SqlAuditWorkbench from './audit/SqlAuditWorkbench';
 
 export const WorkbenchTabContent: React.FC<{ tab: TabData; isActive: boolean }> = React.memo(({ tab, isActive }) => {
   if (tab.type === 'query') {
@@ -54,6 +55,9 @@ export const WorkbenchTabContent: React.FC<{ tab: TabData; isActive: boolean }> 
   }
   if (tab.type === 'sql-analysis') {
     return <SqlAnalysisWorkbench tab={tab} />;
+  }
+  if (tab.type === 'sql-audit') {
+    return <SqlAuditWorkbench tab={tab} isActive={isActive} />;
   }
   if (tab.type === 'jvm-overview') {
     return <JVMOverview tab={tab} />;

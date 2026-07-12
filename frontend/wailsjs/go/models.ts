@@ -1652,6 +1652,63 @@ export namespace resultdiff {
 
 }
 
+export namespace sqlaudit {
+
+	export class Filter {
+	    search: string;
+	    connectionId: string;
+	    database: string;
+	    dbType: string;
+	    eventType: string;
+	    status: string;
+	    transactionId: string;
+	    source: string;
+	    fromTimestamp: number;
+	    toTimestamp: number;
+	    page: number;
+	    pageSize: number;
+
+	    static createFrom(source: any = {}) {
+	        return new Filter(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.search = source["search"];
+	        this.connectionId = source["connectionId"];
+	        this.database = source["database"];
+	        this.dbType = source["dbType"];
+	        this.eventType = source["eventType"];
+	        this.status = source["status"];
+	        this.transactionId = source["transactionId"];
+	        this.source = source["source"];
+	        this.fromTimestamp = source["fromTimestamp"];
+	        this.toTimestamp = source["toTimestamp"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	    }
+	}
+	export class Settings {
+	    enabled: boolean;
+	    captureMode: string;
+	    retentionDays: number;
+	    maxRecords: number;
+
+	    static createFrom(source: any = {}) {
+	        return new Settings(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.captureMode = source["captureMode"];
+	        this.retentionDays = source["retentionDays"];
+	        this.maxRecords = source["maxRecords"];
+	    }
+	}
+
+}
+
 export namespace sync {
 	
 	export class TableOptions {
@@ -1760,4 +1817,3 @@ export namespace sync {
 	}
 
 }
-

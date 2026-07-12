@@ -29,6 +29,56 @@ const (
 
 var errorType = reflect.TypeOf((*error)(nil)).Elem()
 
+var desktopOnlyAppMethods = map[string]struct{}{
+	"Shutdown":                      {},
+	"SetWindowTranslucency":         {},
+	"SetMacNativeWindowControls":    {},
+	"ResetWebViewZoom":              {},
+	"SelectDataRootDirectory":       {},
+	"GetDataRootDirectoryInfo":      {},
+	"ApplyDataRootDirectory":        {},
+	"OpenDataRootDirectory":         {},
+	"SelectDriverDownloadDirectory": {},
+	"SelectDriverPackageFile":       {},
+	"SelectDriverPackageDirectory":  {},
+	"OpenSQLFile":                   {},
+	"SelectSQLFileForExecution":     {},
+	"SelectSQLDirectory":            {},
+	"ListSQLDirectory":              {},
+	"ReadSQLFile":                   {},
+	"WriteSQLFile":                  {},
+	"CreateSQLFile":                 {},
+	"CreateSQLDirectory":            {},
+	"DeleteSQLFile":                 {},
+	"DeleteSQLDirectory":            {},
+	"RenameSQLFile":                 {},
+	"RenameSQLDirectory":            {},
+	"ExecuteSQLFile":                {},
+	"ExportSQLFile":                 {},
+	"ImportConfigFile":              {},
+	"ExportConnectionsPackage":      {},
+	"SelectSSHKeyFile":              {},
+	"SelectCertificateFile":         {},
+	"SelectDatabaseFile":            {},
+	"ImportData":                    {},
+	"PreviewImportFile":             {},
+	"ImportDataWithProgress":        {},
+	"ExportTable":                   {},
+	"ExportTableWithOptions":        {},
+	"ExportTablesSQL":               {},
+	"ExportTablesDataSQL":           {},
+	"ExportTablesSQLWithOptions":    {},
+	"ExportDatabaseSQL":             {},
+	"ExportDatabasesSQLWithOptions": {},
+	"ExportSchemaSQL":               {},
+	"ExportData":                    {},
+	"ExportDataWithOptions":         {},
+	"ExportQuery":                   {},
+	"ExportQueryWithOptions":        {},
+	"RedisExportKeys":               {},
+	"ExportSQLAuditFile":            {},
+}
+
 type Options struct {
 	Addr string
 }
@@ -128,6 +178,9 @@ func (i *methodInvoker) Invoke(req invokeRequest) (any, error) {
 	if !ok {
 		return nil, fmt.Errorf("unsupported invoke target: %s.%s", namespace, receiver)
 	}
+	if (key == "app" || key == "app.app") && isDesktopOnlyAppMethod(methodName) {
+		return nil, fmt.Errorf("method %s is unavailable in web runtime", methodName)
+	}
 
 	method := target.MethodByName(methodName)
 	if !method.IsValid() {
@@ -153,6 +206,11 @@ func (i *methodInvoker) Invoke(req invokeRequest) (any, error) {
 
 	results := method.Call(callArgs)
 	return unpackResults(results)
+}
+
+func isDesktopOnlyAppMethod(methodName string) bool {
+	_, denied := desktopOnlyAppMethods[strings.TrimSpace(methodName)]
+	return denied
 }
 
 func decodeArgument(raw json.RawMessage, targetType reflect.Type) (reflect.Value, error) {
@@ -194,13 +252,14 @@ func unpackResults(results []reflect.Value) (any, error) {
 }
 
 type Server struct {
-	options Options
-	assets  fs.FS
-	app     *appcore.App
-	ai      *aiservice.Service
-	auth    *webAuthManager
-	events  *eventHub
-	invoker *methodInvoker
+	options       Options
+	assets        fs.FS
+	app           *appcore.App
+	ai            *aiservice.Service
+	auth          *webAuthManager
+	events        *eventHub
+	invoker       *methodInvoker
+	auditHeavySem chan struct{}
 }
 
 func ParseOptions(args []string) (Options, error) {
@@ -246,7 +305,7 @@ func New(ctx context.Context, assetFS fs.FS, options Options) (*Server, error) {
 	events := newEventHub()
 	lifecycleCtx := uievents.WithEmitter(ctx, events)
 
-	app := appcore.NewApp()
+	app := appcore.NewWebApp()
 	appcore.InitializeLifecycle(app, lifecycleCtx)
 	ai := aiservice.NewService()
 	aiservice.InitializeLifecycle(ai, lifecycleCtx)
@@ -256,13 +315,14 @@ func New(ctx context.Context, assetFS fs.FS, options Options) (*Server, error) {
 	}
 
 	return &Server{
-		options: options,
-		assets:  frontendFS,
-		app:     app,
-		ai:      ai,
-		auth:    auth,
-		events:  events,
-		invoker: newMethodInvoker(app, ai),
+		options:       options,
+		assets:        frontendFS,
+		app:           app,
+		ai:            ai,
+		auth:          auth,
+		events:        events,
+		invoker:       newMethodInvoker(app, ai),
+		auditHeavySem: make(chan struct{}, 1),
 	}, nil
 }
 
@@ -412,12 +472,35 @@ func (s *Server) handleInvoke(w http.ResponseWriter, r *http.Request) {
 		s.writeInvokeResponse(w, http.StatusBadRequest, invokeResponse{Error: err.Error()})
 		return
 	}
+	if isSQLAuditHeavyInvoke(request) && s.auditHeavySem != nil {
+		select {
+		case s.auditHeavySem <- struct{}{}:
+			defer func() { <-s.auditHeavySem }()
+		default:
+			s.writeInvokeResponse(w, http.StatusTooManyRequests, invokeResponse{Error: "another SQL audit export or integrity verification is already in progress"})
+			return
+		}
+	}
 	result, err := s.invoker.Invoke(request)
 	if err != nil {
 		s.writeInvokeResponse(w, http.StatusBadRequest, invokeResponse{Error: err.Error()})
 		return
 	}
 	s.writeInvokeResponse(w, http.StatusOK, invokeResponse{Result: result})
+}
+
+func isSQLAuditHeavyInvoke(request invokeRequest) bool {
+	namespace := strings.ToLower(strings.TrimSpace(request.Namespace))
+	receiver := strings.ToLower(strings.TrimSpace(request.Receiver))
+	if namespace != "app" || (receiver != "" && receiver != "app") {
+		return false
+	}
+	switch strings.TrimSpace(request.Method) {
+	case "BuildSQLAuditExport", "VerifySQLAuditIntegrity":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) writeInvokeResponse(w http.ResponseWriter, status int, response invokeResponse) {

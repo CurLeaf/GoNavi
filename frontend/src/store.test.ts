@@ -2014,6 +2014,36 @@ describe('store appearance persistence', () => {
     expect(reloaded.useStore.getState().sqlLogs[0]?.sql.length).toBe(12 * 1024);
   });
 
+  it('preserves SQL transaction log metadata across persistence', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addSqlLog({
+      id: 'transaction-tx-1',
+      timestamp: 100,
+      sql: 'START TRANSACTION;\nUPDATE users SET active = 1 WHERE id = 1;\nCOMMIT;',
+      status: 'success',
+      duration: 32,
+      dbName: 'main',
+      category: 'transaction',
+      transactionId: 'tx-1',
+      transactionAction: 'commit',
+    });
+
+    expect(useStore.getState().sqlLogs[0]).toMatchObject({
+      category: 'transaction',
+      transactionId: 'tx-1',
+      transactionAction: 'commit',
+    });
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().sqlLogs[0]).toMatchObject({
+      category: 'transaction',
+      transactionId: 'tx-1',
+      transactionAction: 'commit',
+    });
+  });
+
   it('shrinks oversized SQL logs from older persisted snapshots during hydration', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {

@@ -24,6 +24,7 @@ const getTabKindLabel = (type: string): string => {
   if (type === 'table-export') return t('tab_manager.kind_badge.table_export');
   if (type === 'sql-file-execution') return t('sidebar.sql_file_exec.title');
   if (type === 'sql-analysis') return t('tab_manager.kind_badge.sql_analysis');
+  if (type === 'sql-audit') return t('tab_manager.kind_badge.sql_audit');
   if (type.startsWith('redis')) return t('tab_manager.kind_badge.redis');
   if (type.startsWith('jvm')) return t('tab_manager.kind_badge.jvm');
   if (type === 'trigger') return t('tab_manager.kind_badge.trigger');

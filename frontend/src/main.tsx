@@ -333,7 +333,47 @@ if (
                     ),
                 }),
                 DBQuery: async () => ({ success: true, data: [], columns: [] }),
+                DBQueryAudited: async () => ({ success: true, data: { affectedRows: 1 }, queryId: `query-${Date.now()}` }),
                 ExecuteQuery: async () => ({ columns: [], rows: [], time: 0 }),
+                GetSQLAuditEvents: async (filter: any) => ({
+                    success: true,
+                    data: {
+                        items: [],
+                        total: 0,
+                        page: Number(filter?.page) || 1,
+                        pageSize: Number(filter?.pageSize) || 50,
+                        summary: { totalEvents: 0, successCount: 0, errorCount: 0, transactionCount: 0 },
+                    },
+                }),
+                GetSQLAuditHealth: async () => ({
+                    success: true,
+                    data: {
+                        status: 'healthy',
+                        captureEnabled: true,
+                        captureMode: 'redacted',
+                        droppedEvents: 0,
+                        firstFailureAt: 0,
+                        lastFailureAt: 0,
+                        lastSuccessAt: 0,
+                        lastError: '',
+                    },
+                }),
+                GetSQLAuditSettings: async () => ({ success: true, data: { enabled: true, captureMode: 'redacted', retentionDays: 30, maxRecords: 100000 } }),
+                UpdateSQLAuditSettings: async () => ({ success: true }),
+                VerifySQLAuditIntegrity: async () => ({
+                    success: true,
+                    data: { valid: true, weakValidation: true, partialChain: false, truncatedPrefix: false, checkedRecords: 0 },
+                }),
+                BuildSQLAuditExport: async (_filter: any, format: string) => ({
+                    success: true,
+                    data: {
+                        fileName: `gonavi-sql-audit.${format === 'csv' ? 'csv' : 'json'}`,
+                        mimeType: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json',
+                        content: format === 'csv' ? '' : '[]',
+                    },
+                }),
+                ExportSQLAuditFile: async (_filter: any, format: string) => ({ success: true, data: { filePath: `gonavi-sql-audit.${format}` } }),
+                ClearSQLAuditEvents: async () => ({ success: true }),
                 GetSavedQueries: async () => cloneBrowserMockValue(mockSavedQueries),
                 SaveQuery: async (input: any) => saveMockQuery(input),
                 ImportSavedQueries: async (payload: any) => {

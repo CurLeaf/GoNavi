@@ -9,10 +9,47 @@ import (
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
 	"GoNavi-Wails/internal/logger"
+	"GoNavi-Wails/internal/sqlaudit"
 	"github.com/google/uuid"
 )
 
 const sqlEditorTransactionFinishTimeout = 30 * time.Second
+
+type managedSQLStatementObservation struct {
+	Statement      string
+	StatementIndex int
+	StatementCount int
+	StartedAt      time.Time
+	CompletedAt    time.Time
+	Duration       time.Duration
+	RowsAffected   int64
+	RowsReturned   int64
+	Err            error
+}
+
+type managedSQLStatementObserver func(managedSQLStatementObservation)
+
+func withManagedSQLStatementAuditTimestamp(
+	observer managedSQLStatementObserver,
+	events *[]sqlaudit.Event,
+) managedSQLStatementObserver {
+	if observer == nil {
+		return nil
+	}
+	return func(observation managedSQLStatementObservation) {
+		before := 0
+		if events != nil {
+			before = len(*events)
+		}
+		observer(observation)
+		if events == nil || observation.CompletedAt.IsZero() {
+			return
+		}
+		for index := before; index < len(*events); index++ {
+			(*events)[index].Timestamp = observation.CompletedAt.UnixMilli()
+		}
+	}
+}
 
 // DBQueryMultiTransactional executes SQL editor DML in a managed transaction.
 // The transaction stays open until DBCommitTransaction or DBRollbackTransaction
@@ -45,11 +82,34 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 	}
 
 	query = sanitizeSQLForPgLike(transactionDBType, query)
-	if err := ensureConnectionAllowsQuery(config, query); err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
-	}
 	if !shouldUseManagedSQLTransaction(transactionDBType, query) {
 		return a.DBQueryMulti(config, dbName, query, queryID)
+	}
+	transactionID := "sql-editor-" + uuid.NewString()
+	transactionAuditOpened := false
+	transactionBoundaryMode := "unknown"
+	defer func() {
+		if transactionAuditOpened {
+			return
+		}
+		a.recordSQLAuditTransactionEvent(sqlAuditTransactionEventInput{
+			Config:         transactionConfig,
+			Database:       dbName,
+			DBType:         transactionDBType,
+			QueryID:        queryID,
+			TransactionID:  transactionID,
+			EventType:      "transaction_begin",
+			Status:         sqlAuditStatusFromResult(result),
+			Source:         "query_editor",
+			CommitMode:     "pending",
+			BoundaryMode:   transactionBoundaryMode,
+			SQL:            query,
+			StatementCount: countSQLAuditStatements(query),
+			Err:            sqlAuditErrorFromResult(result),
+		})
+	}()
+	if err := ensureConnectionAllowsQuery(config, query); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 	}
 	var queryExecutionDuration time.Duration
 	defer func() {
@@ -97,6 +157,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		startTextTransaction bool
 	)
 	if provider, ok := dbInst.(db.TransactionExecerProvider); ok {
+		transactionBoundaryMode = "driver_api"
 		// database/sql rolls back a BeginTx transaction when its context is cancelled.
 		// SQL editor transactions must outlive the execution RPC and be ended only by
 		// explicit commit, rollback, or shutdown cleanup.
@@ -111,6 +172,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		sessionExecer = transactionExecer
 		transactor = transactionExecer
 	} else if implicitTextTransaction {
+		transactionBoundaryMode = "implicit"
 		provider, ok := dbInst.(db.SessionExecerProvider)
 		if !ok {
 			return connection.QueryResult{
@@ -125,6 +187,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 			return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 		}
 	} else {
+		transactionBoundaryMode = "text_sql"
 		if !hasTextTransaction {
 			return connection.QueryResult{
 				Success: false,
@@ -166,12 +229,49 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 			return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 		}
 	}
+	transactionAuditOpened = true
+	a.recordSQLAuditTransactionEvent(sqlAuditTransactionEventInput{
+		Config:        transactionConfig,
+		Database:      dbName,
+		DBType:        transactionDBType,
+		QueryID:       queryID,
+		TransactionID: transactionID,
+		EventType:     "transaction_begin",
+		Status:        "success",
+		Source:        "query_editor",
+		CommitMode:    "pending",
+		BoundaryMode:  transactionBoundaryMode,
+	})
 
 	statements := splitSQLStatements(query)
 	queryStartedAt := time.Now()
-	resultSets, err := executeManagedSQLTransactionStatements(ctx, sessionExecer, transactionConfig, statements, a.appText)
+	statementAuditEvents := make([]sqlaudit.Event, 0, len(statements))
+	resultSets, err := executeManagedSQLTransactionStatementsWithObserver(
+		ctx,
+		sessionExecer,
+		transactionConfig,
+		statements,
+		a.appText,
+		withManagedSQLStatementAuditTimestamp(
+			a.sqlAuditTransactionStatementObserver(transactionConfig, dbName, transactionDBType, queryID, transactionID, transactionBoundaryMode, &statementAuditEvents),
+			&statementAuditEvents,
+		),
+	)
 	queryExecutionDuration += time.Since(queryStartedAt)
+	a.appendSQLAuditEvents(statementAuditEvents)
 	if err != nil {
+		a.recordSQLAuditTransactionEvent(sqlAuditTransactionEventInput{
+			Config:        transactionConfig,
+			Database:      dbName,
+			DBType:        transactionDBType,
+			QueryID:       queryID,
+			TransactionID: transactionID,
+			EventType:     "transaction_rollback_requested",
+			Status:        "success",
+			Source:        "query_editor",
+			CommitMode:    "auto",
+			BoundaryMode:  transactionBoundaryMode,
+		})
 		var rollbackErr error
 		if transactor != nil {
 			rollbackErr = transactor.Rollback()
@@ -182,25 +282,38 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 			logger.Error(rollbackErr, "DBQueryMultiTransactional 执行失败后回滚失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 			err = appendRollbackFailureMessage(err, rollbackErr)
 		}
+		a.recordSQLAuditTransactionEvent(sqlAuditTransactionEventInput{
+			Config:        transactionConfig,
+			Database:      dbName,
+			DBType:        transactionDBType,
+			QueryID:       queryID,
+			TransactionID: transactionID,
+			EventType:     "transaction_auto_rollback",
+			Status:        sqlAuditStatusFromError(rollbackErr),
+			Source:        "query_editor",
+			CommitMode:    "auto",
+			BoundaryMode:  transactionBoundaryMode,
+			Err:           rollbackErr,
+		})
 		logger.Error(err, "DBQueryMultiTransactional 执行失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 	}
 
-	transactionID := "sql-editor-" + uuid.NewString()
 	a.sqlTransactionMu.Lock()
 	if a.sqlTransactions == nil {
 		a.sqlTransactions = make(map[string]*managedSQLTransaction)
 	}
 	a.sqlTransactions[transactionID] = &managedSQLTransaction{
-		id:          transactionID,
-		execer:      sessionExecer,
-		transactor:  transactor,
-		cancel:      transactionCancel,
-		config:      runConfig,
-		dbType:      transactionDBType,
-		commitSQL:   commitSQL,
-		rollbackSQL: rollbackSQL,
-		createdAt:   time.Now(),
+		id:           transactionID,
+		execer:       sessionExecer,
+		transactor:   transactor,
+		cancel:       transactionCancel,
+		config:       runConfig,
+		dbType:       transactionDBType,
+		boundaryMode: transactionBoundaryMode,
+		commitSQL:    commitSQL,
+		rollbackSQL:  rollbackSQL,
+		createdAt:    time.Now(),
 	}
 	a.sqlTransactionMu.Unlock()
 
@@ -229,6 +342,11 @@ func (a *App) DBQueryMultiInTransaction(transactionID string, query string, quer
 	tx, ok := a.sqlTransactions[transactionID]
 	a.sqlTransactionMu.Unlock()
 	if !ok || tx == nil || tx.execer == nil {
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.transaction_not_found", nil), QueryID: queryID}
+	}
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	if tx.finished || tx.execer == nil {
 		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.transaction_not_found", nil), QueryID: queryID}
 	}
 
@@ -263,8 +381,20 @@ func (a *App) DBQueryMultiInTransaction(transactionID string, query string, quer
 	}()
 
 	queryStartedAt := time.Now()
-	resultSets, err := executeManagedSQLTransactionStatements(ctx, tx.execer, runConfig, statements, a.appText)
+	statementAuditEvents := make([]sqlaudit.Event, 0, len(statements))
+	resultSets, err := executeManagedSQLTransactionStatementsWithObserver(
+		ctx,
+		tx.execer,
+		runConfig,
+		statements,
+		a.appText,
+		withManagedSQLStatementAuditTimestamp(
+			a.sqlAuditTransactionStatementObserver(runConfig, runConfig.Database, tx.dbType, queryID, transactionID, tx.boundaryMode, &statementAuditEvents),
+			&statementAuditEvents,
+		),
+	)
 	queryExecutionDuration += time.Since(queryStartedAt)
+	a.appendSQLAuditEvents(statementAuditEvents)
 	if err != nil {
 		logger.Error(err, "DBQueryMultiInTransaction 执行失败：id=%s dbType=%s SQL片段=%q", transactionID, tx.dbType, sqlSnippet(query))
 		return connection.QueryResult{
@@ -286,6 +416,17 @@ func (a *App) DBQueryMultiInTransaction(transactionID string, query string, quer
 }
 
 func executeManagedSQLTransactionStatements(ctx context.Context, session db.StatementExecer, runConfig connection.ConnectionConfig, statements []string, text func(string, map[string]any) string) ([]connection.ResultSetData, error) {
+	return executeManagedSQLTransactionStatementsWithObserver(ctx, session, runConfig, statements, text, nil)
+}
+
+func executeManagedSQLTransactionStatementsWithObserver(
+	ctx context.Context,
+	session db.StatementExecer,
+	runConfig connection.ConnectionConfig,
+	statements []string,
+	text func(string, map[string]any) string,
+	observer managedSQLStatementObserver,
+) ([]connection.ResultSetData, error) {
 	if text == nil {
 		text = defaultDBBackendText
 	}
@@ -306,10 +447,36 @@ func executeManagedSQLTransactionStatements(ctx context.Context, session db.Stat
 	sessionMultiQueryTarget, _ := session.(db.StatementMultiResultQueryExecer)
 	sessionMultiQueryMessageTarget, _ := session.(db.StatementMultiResultQueryMessageExecer)
 
-	for idx, stmt := range statements {
+	statementCount := 0
+	for _, statement := range statements {
+		if strings.TrimSpace(statement) != "" {
+			statementCount++
+		}
+	}
+	statementIndex := 0
+	for _, stmt := range statements {
 		stmt = strings.TrimSpace(stmt)
 		if stmt == "" {
 			continue
+		}
+		statementIndex++
+		statementStartedAt := time.Now()
+		emitObservation := func(rowsAffected, rowsReturned int64, err error) {
+			if observer == nil {
+				return
+			}
+			completedAt := time.Now()
+			observer(managedSQLStatementObservation{
+				Statement:      stmt,
+				StatementIndex: statementIndex,
+				StatementCount: statementCount,
+				StartedAt:      statementStartedAt,
+				CompletedAt:    completedAt,
+				Duration:       completedAt.Sub(statementStartedAt),
+				RowsAffected:   rowsAffected,
+				RowsReturned:   rowsReturned,
+				Err:            err,
+			})
 		}
 
 		isReadStmt := isReadOnlySQLQuery(runConfig.Type, stmt)
@@ -346,6 +513,7 @@ func executeManagedSQLTransactionStatements(ctx context.Context, session db.Stat
 			}
 			if err == nil {
 				if usedMultiResult {
+					var rowsAffected, rowsReturned int64
 					if len(statementResults) == 0 && len(messages) > 0 {
 						statementResults = []connection.ResultSetData{{
 							Rows:     []map[string]interface{}{},
@@ -360,9 +528,13 @@ func executeManagedSQLTransactionStatements(ctx context.Context, session db.Stat
 						if statementResult.Columns == nil {
 							statementResult.Columns = []string{}
 						}
-						statementResult.StatementIndex = idx + 1
+						statementResult.StatementIndex = statementIndex
+						affected, returned := summarizeManagedSQLResultSet(statementResult)
+						rowsAffected += affected
+						rowsReturned += returned
 						resultSets = append(resultSets, statementResult)
 					}
+					emitObservation(rowsAffected, rowsReturned, nil)
 					continue
 				}
 				if data == nil {
@@ -375,30 +547,76 @@ func executeManagedSQLTransactionStatements(ctx context.Context, session db.Stat
 					Rows:           data,
 					Columns:        columns,
 					Messages:       messages,
-					StatementIndex: idx + 1,
+					StatementIndex: statementIndex,
 				})
+				emitObservation(0, int64(len(data)), nil)
 				continue
 			}
 			if isReadStmt {
-				return nil, buildStatementExecutionFailedError(idx+1, err)
+				statementErr := buildStatementExecutionFailedError(statementIndex, err)
+				emitObservation(0, 0, statementErr)
+				return nil, statementErr
 			}
 		}
 
 		affected, err := session.ExecContext(ctx, stmt)
 		if err != nil {
-			return nil, buildStatementExecutionFailedError(idx+1, err)
+			statementErr := buildStatementExecutionFailedError(statementIndex, err)
+			emitObservation(0, 0, statementErr)
+			return nil, statementErr
 		}
 		resultSets = append(resultSets, connection.ResultSetData{
 			Rows:           []map[string]interface{}{{"affectedRows": affected}},
 			Columns:        []string{"affectedRows"},
-			StatementIndex: idx + 1,
+			StatementIndex: statementIndex,
 		})
+		emitObservation(affected, 0, nil)
 	}
 
 	if resultSets == nil {
 		resultSets = []connection.ResultSetData{}
 	}
 	return resultSets, nil
+}
+
+func summarizeManagedSQLResultSet(resultSet connection.ResultSetData) (rowsAffected, rowsReturned int64) {
+	if !isAffectedRowsResultSet(resultSet) {
+		return 0, int64(len(resultSet.Rows))
+	}
+	for _, row := range resultSet.Rows {
+		value, ok := row["affectedRows"]
+		if !ok {
+			for key, candidate := range row {
+				if strings.EqualFold(strings.TrimSpace(key), "affectedRows") {
+					value = candidate
+					ok = true
+					break
+				}
+			}
+		}
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case int:
+			rowsAffected += int64(typed)
+		case int32:
+			rowsAffected += int64(typed)
+		case int64:
+			rowsAffected += typed
+		case uint:
+			rowsAffected += int64(typed)
+		case uint32:
+			rowsAffected += int64(typed)
+		case uint64:
+			if typed <= uint64(^uint64(0)>>1) {
+				rowsAffected += int64(typed)
+			}
+		case float64:
+			rowsAffected += int64(typed)
+		}
+	}
+	return rowsAffected, 0
 }
 
 func shouldUseManagedSQLTransaction(dbType string, query string) bool {
@@ -500,15 +718,24 @@ func isOracleLikeAnonymousBlockManagedWrite(dbType string, stmt string) bool {
 }
 
 func (a *App) DBCommitTransaction(transactionID string) connection.QueryResult {
-	return a.finishManagedSQLTransaction(transactionID, true)
+	return a.finishManagedSQLTransaction(transactionID, true, "manual")
 }
 
 func (a *App) DBRollbackTransaction(transactionID string) connection.QueryResult {
-	return a.finishManagedSQLTransaction(transactionID, false)
+	return a.finishManagedSQLTransaction(transactionID, false, "manual")
 }
 
-func (a *App) finishManagedSQLTransaction(transactionID string, commit bool) connection.QueryResult {
+func (a *App) DBCommitTransactionWithTrigger(transactionID string, trigger string) connection.QueryResult {
+	return a.finishManagedSQLTransaction(transactionID, true, trigger)
+}
+
+func (a *App) DBRollbackTransactionWithTrigger(transactionID string, trigger string) connection.QueryResult {
+	return a.finishManagedSQLTransaction(transactionID, false, trigger)
+}
+
+func (a *App) finishManagedSQLTransaction(transactionID string, commit bool, trigger string) connection.QueryResult {
 	transactionID = strings.TrimSpace(transactionID)
+	trigger = normalizeSQLTransactionFinishTrigger(trigger)
 	if transactionID == "" {
 		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.transaction_id_required", nil)}
 	}
@@ -522,19 +749,53 @@ func (a *App) finishManagedSQLTransaction(transactionID string, commit bool) con
 	if !ok || tx == nil || tx.execer == nil {
 		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.transaction_not_found", nil)}
 	}
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	if tx.finished || tx.execer == nil {
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.transaction_not_found", nil)}
+	}
+	tx.finished = true
 	if tx.cancel != nil {
 		defer tx.cancel()
 	}
 
 	actionCode := "rollback"
 	sqlText := tx.rollbackSQL
+	eventType := "transaction_rollback"
 	if commit {
 		actionCode = "commit"
 		sqlText = tx.commitSQL
+		eventType = "transaction_commit"
+	} else if trigger == "tab_close" || trigger == "auto" {
+		eventType = "transaction_auto_rollback"
+	}
+	auditSource := "query_editor"
+	if trigger == "tab_close" {
+		auditSource = "tab_close"
+	}
+	commitMode := "manual"
+	if trigger == "auto" {
+		commitMode = "auto"
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), sqlEditorTransactionFinishTimeout)
 	defer cancel()
+	requestedEventType := "transaction_rollback_requested"
+	if commit {
+		requestedEventType = "transaction_commit_requested"
+	}
+	a.recordSQLAuditTransactionEvent(sqlAuditTransactionEventInput{
+		Config:        tx.config,
+		Database:      tx.config.Database,
+		DBType:        tx.dbType,
+		TransactionID: transactionID,
+		EventType:     requestedEventType,
+		Status:        "success",
+		Source:        auditSource,
+		CommitMode:    commitMode,
+		BoundaryMode:  tx.boundaryMode,
+	})
+	startedAt := time.Now()
 
 	var execErr error
 	if tx.transactor != nil {
@@ -548,6 +809,19 @@ func (a *App) finishManagedSQLTransaction(transactionID string, commit bool) con
 	}
 	closeErr := tx.execer.Close()
 	if execErr != nil {
+		a.recordSQLAuditTransactionEvent(sqlAuditTransactionEventInput{
+			Config:        tx.config,
+			Database:      tx.config.Database,
+			DBType:        tx.dbType,
+			TransactionID: transactionID,
+			EventType:     eventType,
+			Status:        "error",
+			Source:        auditSource,
+			CommitMode:    commitMode,
+			BoundaryMode:  tx.boundaryMode,
+			Duration:      time.Since(startedAt),
+			Err:           execErr,
+		})
 		logger.Error(execErr, "SQL 编辑器事务%s失败：id=%s dbType=%s", actionCode, transactionID, tx.dbType)
 		key := "db.backend.error.transaction_rollback_failed"
 		if commit {
@@ -556,6 +830,21 @@ func (a *App) finishManagedSQLTransaction(transactionID string, commit bool) con
 		return connection.QueryResult{Success: false, Message: a.appText(key, map[string]any{"detail": execErr.Error()})}
 	}
 	if closeErr != nil {
+		// Commit/Rollback has already succeeded at the database boundary. Record that
+		// outcome as success while retaining the local session cleanup error.
+		a.recordSQLAuditTransactionEvent(sqlAuditTransactionEventInput{
+			Config:        tx.config,
+			Database:      tx.config.Database,
+			DBType:        tx.dbType,
+			TransactionID: transactionID,
+			EventType:     eventType,
+			Status:        "success",
+			Source:        auditSource,
+			CommitMode:    commitMode,
+			BoundaryMode:  tx.boundaryMode,
+			Duration:      time.Since(startedAt),
+			Err:           closeErr,
+		})
 		logger.Error(closeErr, "SQL 编辑器事务%s后关闭会话失败：id=%s dbType=%s", actionCode, transactionID, tx.dbType)
 		key := "db.backend.error.transaction_rollback_close_failed"
 		if commit {
@@ -563,11 +852,32 @@ func (a *App) finishManagedSQLTransaction(transactionID string, commit bool) con
 		}
 		return connection.QueryResult{Success: false, Message: a.appText(key, map[string]any{"detail": closeErr.Error()})}
 	}
+	a.recordSQLAuditTransactionEvent(sqlAuditTransactionEventInput{
+		Config:        tx.config,
+		Database:      tx.config.Database,
+		DBType:        tx.dbType,
+		TransactionID: transactionID,
+		EventType:     eventType,
+		Status:        "success",
+		Source:        auditSource,
+		CommitMode:    commitMode,
+		BoundaryMode:  tx.boundaryMode,
+		Duration:      time.Since(startedAt),
+	})
 
 	if commit {
 		return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.transaction_committed", nil)}
 	}
 	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.transaction_rolled_back", nil)}
+}
+
+func normalizeSQLTransactionFinishTrigger(trigger string) string {
+	switch strings.ToLower(strings.TrimSpace(trigger)) {
+	case "auto", "tab_close":
+		return strings.ToLower(strings.TrimSpace(trigger))
+	default:
+		return "manual"
+	}
 }
 
 func (a *App) rollbackPendingSQLTransactionsOnShutdown() {
@@ -582,13 +892,34 @@ func (a *App) rollbackPendingSQLTransactionsOnShutdown() {
 	a.sqlTransactionMu.Unlock()
 
 	for _, tx := range pending {
+		tx.mu.Lock()
+		if tx.finished {
+			tx.mu.Unlock()
+			continue
+		}
+		tx.finished = true
 		ctx, cancel := context.WithTimeout(context.Background(), sqlEditorTransactionFinishTimeout)
+		a.recordSQLAuditTransactionEvent(sqlAuditTransactionEventInput{
+			Config:        tx.config,
+			Database:      tx.config.Database,
+			DBType:        tx.dbType,
+			TransactionID: tx.id,
+			EventType:     "transaction_rollback_requested",
+			Status:        "success",
+			Source:        "app_shutdown",
+			CommitMode:    "auto",
+			BoundaryMode:  tx.boundaryMode,
+		})
+		startedAt := time.Now()
+		var rollbackErr error
 		if tx.transactor != nil {
 			if err := tx.transactor.Rollback(); err != nil {
+				rollbackErr = err
 				logger.Warnf("关闭应用时回滚 SQL 编辑器事务失败：id=%s dbType=%s err=%v", tx.id, tx.dbType, err)
 			}
 		} else if strings.TrimSpace(tx.rollbackSQL) != "" && tx.execer != nil {
 			if _, err := tx.execer.ExecContext(ctx, tx.rollbackSQL); err != nil {
+				rollbackErr = err
 				logger.Warnf("关闭应用时回滚 SQL 编辑器事务失败：id=%s dbType=%s err=%v", tx.id, tx.dbType, err)
 			}
 		}
@@ -596,10 +927,32 @@ func (a *App) rollbackPendingSQLTransactionsOnShutdown() {
 		if tx.cancel != nil {
 			tx.cancel()
 		}
+		var closeErr error
 		if tx.execer != nil {
 			if err := tx.execer.Close(); err != nil {
+				closeErr = err
 				logger.Warnf("关闭应用时关闭 SQL 编辑器事务会话失败：id=%s dbType=%s err=%v", tx.id, tx.dbType, err)
 			}
 		}
+		auditErr := rollbackErr
+		status := sqlAuditStatusFromError(rollbackErr)
+		if auditErr == nil && closeErr != nil {
+			// The database rollback succeeded; retain only the cleanup warning.
+			auditErr = closeErr
+		}
+		a.recordSQLAuditTransactionEvent(sqlAuditTransactionEventInput{
+			Config:        tx.config,
+			Database:      tx.config.Database,
+			DBType:        tx.dbType,
+			TransactionID: tx.id,
+			EventType:     "transaction_auto_rollback",
+			Status:        status,
+			Source:        "app_shutdown",
+			CommitMode:    "auto",
+			BoundaryMode:  tx.boundaryMode,
+			Duration:      time.Since(startedAt),
+			Err:           auditErr,
+		})
+		tx.mu.Unlock()
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
 	"GoNavi-Wails/internal/logger"
+	"GoNavi-Wails/internal/sqlaudit"
 	"GoNavi-Wails/internal/utils"
 	"GoNavi-Wails/shared/i18n"
 )
@@ -191,7 +192,9 @@ func (a *App) MongoDiscoverMembers(config connection.ConnectionConfig) connectio
 	}
 }
 
-func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) connection.QueryResult {
+func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) (result connection.QueryResult) {
+	auditSQL := fmt.Sprintf("CREATE DATABASE %s", strings.TrimSpace(dbName))
+	defer a.beginSQLAuditUserAction(config, dbName, "object_editor", &auditSQL, &result)()
 	dbName = strings.TrimSpace(dbName)
 	if dbName == "" {
 		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.database_name_required", nil)}
@@ -368,7 +371,9 @@ func resolveSchemaDDLTargetDatabaseWithText(config connection.ConnectionConfig, 
 	return targetDbName, nil
 }
 
-func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
+func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, schemaName string) (result connection.QueryResult) {
+	auditSQL := fmt.Sprintf("CREATE SCHEMA %s", strings.TrimSpace(schemaName))
+	defer a.beginSQLAuditUserAction(config, dbName, "object_editor", &auditSQL, &result)()
 	if err := ensureConnectionAllowsStructureEdit(config, "connection.backend.action.create_schema"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -396,7 +401,9 @@ func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, sc
 	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.schema_created", nil)}
 }
 
-func (a *App) RenameSchema(config connection.ConnectionConfig, dbName string, oldSchemaName string, newSchemaName string) connection.QueryResult {
+func (a *App) RenameSchema(config connection.ConnectionConfig, dbName string, oldSchemaName string, newSchemaName string) (result connection.QueryResult) {
+	auditSQL := fmt.Sprintf("ALTER SCHEMA %s RENAME TO %s", strings.TrimSpace(oldSchemaName), strings.TrimSpace(newSchemaName))
+	defer a.beginSQLAuditUserAction(config, dbName, "object_editor", &auditSQL, &result)()
 	if err := ensureConnectionAllowsStructureEdit(config, "connection.backend.action.rename_schema"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -422,7 +429,9 @@ func (a *App) RenameSchema(config connection.ConnectionConfig, dbName string, ol
 	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.schema_renamed", nil)}
 }
 
-func (a *App) DropSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
+func (a *App) DropSchema(config connection.ConnectionConfig, dbName string, schemaName string) (result connection.QueryResult) {
+	auditSQL := fmt.Sprintf("DROP SCHEMA %s", strings.TrimSpace(schemaName))
+	defer a.beginSQLAuditUserAction(config, dbName, "object_editor", &auditSQL, &result)()
 	if err := ensureConnectionAllowsStructureEdit(config, "connection.backend.action.drop_schema"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -680,7 +689,9 @@ func buildRunConfigForDDL(config connection.ConnectionConfig, dbType string, dbN
 	return runConfig
 }
 
-func (a *App) RenameDatabase(config connection.ConnectionConfig, oldName string, newName string) connection.QueryResult {
+func (a *App) RenameDatabase(config connection.ConnectionConfig, oldName string, newName string) (result connection.QueryResult) {
+	auditSQL := fmt.Sprintf("ALTER DATABASE %s RENAME TO %s", strings.TrimSpace(oldName), strings.TrimSpace(newName))
+	defer a.beginSQLAuditUserAction(config, oldName, "object_editor", &auditSQL, &result)()
 	oldName = strings.TrimSpace(oldName)
 	newName = strings.TrimSpace(newName)
 	if oldName == "" || newName == "" {
@@ -727,7 +738,9 @@ func (a *App) RenameDatabase(config connection.ConnectionConfig, oldName string,
 	}
 }
 
-func (a *App) DropDatabase(config connection.ConnectionConfig, dbName string) connection.QueryResult {
+func (a *App) DropDatabase(config connection.ConnectionConfig, dbName string) (result connection.QueryResult) {
+	auditSQL := fmt.Sprintf("DROP DATABASE %s", strings.TrimSpace(dbName))
+	defer a.beginSQLAuditUserAction(config, dbName, "object_editor", &auditSQL, &result)()
 	dbName = strings.TrimSpace(dbName)
 	if dbName == "" {
 		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.database_name_required", nil)}
@@ -763,7 +776,9 @@ func (a *App) DropDatabase(config connection.ConnectionConfig, dbName string) co
 	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.database_dropped", nil)}
 }
 
-func (a *App) RenameTable(config connection.ConnectionConfig, dbName string, oldTableName string, newTableName string) connection.QueryResult {
+func (a *App) RenameTable(config connection.ConnectionConfig, dbName string, oldTableName string, newTableName string) (result connection.QueryResult) {
+	auditSQL := fmt.Sprintf("ALTER TABLE %s RENAME TO %s", strings.TrimSpace(oldTableName), strings.TrimSpace(newTableName))
+	defer a.beginSQLAuditUserAction(config, dbName, "object_editor", &auditSQL, &result)()
 	oldTableName = strings.TrimSpace(oldTableName)
 	newTableName = strings.TrimSpace(newTableName)
 	if oldTableName == "" || newTableName == "" {
@@ -819,7 +834,9 @@ func (a *App) RenameTable(config connection.ConnectionConfig, dbName string, old
 	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.table_renamed", nil)}
 }
 
-func (a *App) DropTable(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
+func (a *App) DropTable(config connection.ConnectionConfig, dbName string, tableName string) (result connection.QueryResult) {
+	auditSQL := fmt.Sprintf("DROP TABLE %s", strings.TrimSpace(tableName))
+	defer a.beginSQLAuditUserAction(config, dbName, "object_editor", &auditSQL, &result)()
 	tableName = strings.TrimSpace(tableName)
 	if tableName == "" {
 		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.table_name_required", nil)}
@@ -878,16 +895,86 @@ func (a *App) MySQLShowCreateTable(config connection.ConnectionConfig, dbName st
 	return a.DBShowCreateTable(config, dbName, tableName)
 }
 
-func (a *App) DBQuery(config connection.ConnectionConfig, dbName string, query string) connection.QueryResult {
-	return a.DBQueryWithCancel(config, dbName, query, "")
+type dbQueryAuditOptions struct {
+	trackHistory bool
+	auditAll     bool
+	auditWrites  bool
+	source       string
 }
 
-func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName string, query string, queryID string) (result connection.QueryResult) {
-	// DBQuery() 以及后台元数据读取会传空 queryID；只记录 SQL 编辑器显式传入 ID 的查询，
-	// 避免把表结构探测等内部查询混入用户慢 SQL 历史。
-	trackQueryHistory := strings.TrimSpace(queryID) != ""
+type dbQueryMultiAuditOptions struct {
+	auditAll    bool
+	auditWrites bool
+	source      string
+}
+
+func containsSQLAuditWrite(dbType string, query string) bool {
+	statements := splitSQLStatements(query)
+	if len(statements) == 0 {
+		return !isReadOnlySQLQuery(dbType, query)
+	}
+	for _, statement := range statements {
+		statement = strings.TrimSpace(statement)
+		if statement != "" && !isReadOnlySQLQuery(dbType, statement) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) DBQuery(config connection.ConnectionConfig, dbName string, query string) connection.QueryResult {
+	return a.dbQueryWithCancel(config, dbName, query, "", dbQueryAuditOptions{
+		auditAll:    a.webRuntime,
+		auditWrites: true,
+		source:      "application_api",
+	})
+}
+
+func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName string, query string, queryID string) connection.QueryResult {
+	explicitQuery := strings.TrimSpace(queryID) != ""
+	auditSource := "query_editor"
+	if !explicitQuery {
+		auditSource = "application_api"
+	}
+	return a.dbQueryWithCancel(config, dbName, query, queryID, dbQueryAuditOptions{
+		trackHistory: explicitQuery,
+		auditAll:     explicitQuery || a.webRuntime,
+		auditWrites:  true,
+		source:       auditSource,
+	})
+}
+
+func (a *App) dbQueryWithCancel(
+	config connection.ConnectionConfig,
+	dbName string,
+	query string,
+	queryID string,
+	auditOptions dbQueryAuditOptions,
+) (result connection.QueryResult) {
+	trackQueryHistory := auditOptions.trackHistory
+	auditStartedAt := time.Now()
 	var queryExecutionDuration time.Duration
 	runConfig := normalizeRunConfig(config, dbName)
+	if queryID == "" {
+		queryID = generateQueryID()
+	}
+	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
+	trackSQLAudit := auditOptions.auditAll || (auditOptions.auditWrites && containsSQLAuditWrite(resolveDDLDBType(runConfig), query))
+	if trackSQLAudit {
+		defer func() {
+			a.recordSQLAuditQuery(sqlAuditQueryInput{
+				Config:     runConfig,
+				Database:   dbName,
+				DBType:     resolveDDLDBType(runConfig),
+				QueryID:    queryID,
+				SQL:        query,
+				Source:     normalizeSQLAuditSource(auditOptions.source),
+				CommitMode: "auto",
+				Duration:   time.Since(auditStartedAt),
+				Result:     result,
+			})
+		}()
+	}
 	if trackQueryHistory {
 		defer func() {
 			if !result.Success {
@@ -898,12 +985,6 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 		}()
 	}
 
-	// Generate query ID if not provided
-	if queryID == "" {
-		queryID = generateQueryID()
-	}
-
-	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
 	if err := ensureConnectionAllowsQuery(config, query); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 	}
@@ -1010,9 +1091,50 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 // DBQueryMulti 执行可能包含多条 SQL 语句的查询，返回多个结果集。
 // 如果底层驱动支持 MultiResultQuerier，一次性执行所有语句；
 // 否则按分号拆分后逐条执行，模拟多结果集。
-func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, query string, queryID string) (result connection.QueryResult) {
+func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, query string, queryID string) connection.QueryResult {
+	explicitQuery := strings.TrimSpace(queryID) != ""
+	auditSource := "query_editor"
+	if !explicitQuery {
+		auditSource = "application_api"
+	}
+	return a.dbQueryMulti(config, dbName, query, queryID, dbQueryMultiAuditOptions{
+		auditAll:    explicitQuery || a.webRuntime,
+		auditWrites: true,
+		source:      auditSource,
+	})
+}
+
+func (a *App) dbQueryMulti(
+	config connection.ConnectionConfig,
+	dbName string,
+	query string,
+	queryID string,
+	auditOptions dbQueryMultiAuditOptions,
+) (result connection.QueryResult) {
 	runConfig := normalizeRunConfig(config, dbName)
 	resolvedDBType := resolveDDLDBType(runConfig)
+	trackSQLAudit := auditOptions.auditAll || (auditOptions.auditWrites && containsSQLAuditWrite(resolvedDBType, query))
+	auditSource := normalizeSQLAuditSource(auditOptions.source)
+	auditStartedAt := time.Now()
+	var statementAuditEvents []sqlaudit.Event
+	if trackSQLAudit {
+		defer func() {
+			a.recordSQLAuditQuery(sqlAuditQueryInput{
+				Config:     runConfig,
+				Database:   dbName,
+				DBType:     resolvedDBType,
+				QueryID:    queryID,
+				SQL:        query,
+				Source:     auditSource,
+				CommitMode: "auto",
+				Duration:   time.Since(auditStartedAt),
+				Result:     result,
+			})
+		}()
+		defer func() {
+			a.appendSQLAuditEvents(statementAuditEvents)
+		}()
+	}
 	// 慢 SQL 埋点：成功执行后记录（低于阈值 500ms 自动跳过）。
 	// 用 named return + defer 覆盖所有 return path，避免遗漏。
 	var queryExecutionDuration time.Duration
@@ -1083,6 +1205,46 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	// sql.Rows 不暴露 RowsAffected，导致影响行数丢失。
 	// 因此仅在全部语句皆为读操作时才使用原生路径。
 	statements := splitSQLStatements(query)
+	statementCount := 0
+	for _, statement := range statements {
+		if strings.TrimSpace(statement) != "" {
+			statementCount++
+		}
+	}
+	auditSequentialStatements := trackSQLAudit && statementCount > 1
+	appendStatementAudit := func(
+		statement string,
+		statementIndex int,
+		startedAt time.Time,
+		rowsAffected int64,
+		rowsReturned int64,
+		statementErr error,
+	) {
+		if !auditSequentialStatements {
+			return
+		}
+		completedAt := time.Now()
+		event := buildSQLAuditTransactionEvent(sqlAuditTransactionEventInput{
+			Config:         runConfig,
+			Database:       dbName,
+			DBType:         resolvedDBType,
+			QueryID:        queryID,
+			EventType:      "query_statement",
+			Status:         sqlAuditStatusFromError(statementErr),
+			Source:         auditSource,
+			CommitMode:     "auto",
+			BoundaryMode:   "unknown",
+			SQL:            statement,
+			StatementIndex: statementIndex,
+			StatementCount: statementCount,
+			Duration:       completedAt.Sub(startedAt),
+			RowsAffected:   rowsAffected,
+			RowsReturned:   rowsReturned,
+			Err:            statementErr,
+		})
+		event.Timestamp = completedAt.UnixMilli()
+		statementAuditEvents = append(statementAuditEvents, event)
+	}
 	allReadOnly := true
 	for _, stmt := range statements {
 		if strings.TrimSpace(stmt) != "" && !isReadOnlySQLQuery(runConfig.Type, stmt) {
@@ -1273,6 +1435,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		if stmt == "" {
 			continue
 		}
+		statementStartedAt := time.Now()
 
 		isReadStmt := isReadOnlySQLQuery(runConfig.Type, stmt)
 		tryQueryStmtFirst := shouldTryQueryResultFirst(runConfig.Type, stmt)
@@ -1344,6 +1507,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 			}
 			if err == nil {
 				if usedMultiResult {
+					var rowsAffected, rowsReturned int64
 					if len(statementResults) == 0 && len(messages) > 0 {
 						statementResults = []connection.ResultSetData{{
 							Rows:     []map[string]interface{}{},
@@ -1359,8 +1523,12 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 							statementResult.Columns = []string{}
 						}
 						statementResult.StatementIndex = idx + 1
+						affected, returned := summarizeManagedSQLResultSet(statementResult)
+						rowsAffected += affected
+						rowsReturned += returned
 						resultSets = append(resultSets, statementResult)
 					}
+					appendStatementAudit(stmt, idx+1, statementStartedAt, rowsAffected, rowsReturned, nil)
 					continue
 				}
 				if data == nil {
@@ -1375,11 +1543,13 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 					Messages:       messages,
 					StatementIndex: idx + 1,
 				})
+				appendStatementAudit(stmt, idx+1, statementStartedAt, 0, int64(len(data)), nil)
 				continue
 			}
 			if isReadStmt {
 				logger.Error(err, "DBQueryMulti 逐条查询失败（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
 				errMsg := buildStatementExecutionFailedMessage(idx+1, err, len(resultSets))
+				appendStatementAudit(stmt, idx+1, statementStartedAt, 0, 0, err)
 				return connection.QueryResult{Success: false, Message: errMsg, QueryID: queryID}
 			}
 		}
@@ -1399,6 +1569,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		if err != nil {
 			logger.Error(err, "DBQueryMulti 逐条执行失败（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
 			errMsg := buildStatementExecutionFailedMessage(idx+1, err, len(resultSets))
+			appendStatementAudit(stmt, idx+1, statementStartedAt, 0, 0, err)
 			return connection.QueryResult{Success: false, Message: errMsg, QueryID: queryID}
 		}
 		resultSets = append(resultSets, connection.ResultSetData{
@@ -1406,6 +1577,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 			Columns:        []string{"affectedRows"},
 			StatementIndex: idx + 1,
 		})
+		appendStatementAudit(stmt, idx+1, statementStartedAt, affected, 0, nil)
 	}
 
 	if resultSets == nil {
@@ -1518,6 +1690,8 @@ func shouldTryQueryResultFirst(dbType string, query string) bool {
 	}
 	keyword := leadingSQLKeyword(query)
 	switch keyword {
+	case "explain", "pragma":
+		return true
 	case "exec", "execute", "call":
 		return true
 	case "set", "print":
@@ -2653,7 +2827,9 @@ func (a *App) DBGetTriggers(config connection.ConnectionConfig, dbName string, t
 	return connection.QueryResult{Success: true, Data: ensureNonNilSlice(triggers)}
 }
 
-func (a *App) DropView(config connection.ConnectionConfig, dbName string, viewName string) connection.QueryResult {
+func (a *App) DropView(config connection.ConnectionConfig, dbName string, viewName string) (result connection.QueryResult) {
+	auditSQL := fmt.Sprintf("DROP VIEW %s", strings.TrimSpace(viewName))
+	defer a.beginSQLAuditUserAction(config, dbName, "object_editor", &auditSQL, &result)()
 	viewName = strings.TrimSpace(viewName)
 	if viewName == "" {
 		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.view_name_required", nil)}
@@ -2687,7 +2863,9 @@ func (a *App) DropView(config connection.ConnectionConfig, dbName string, viewNa
 	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.view_dropped", nil)}
 }
 
-func (a *App) DropFunction(config connection.ConnectionConfig, dbName string, routineName string, routineType string) connection.QueryResult {
+func (a *App) DropFunction(config connection.ConnectionConfig, dbName string, routineName string, routineType string) (result connection.QueryResult) {
+	auditSQL := fmt.Sprintf("DROP %s %s", strings.ToUpper(strings.TrimSpace(routineType)), strings.TrimSpace(routineName))
+	defer a.beginSQLAuditUserAction(config, dbName, "object_editor", &auditSQL, &result)()
 	routineName = strings.TrimSpace(routineName)
 	routineType = strings.TrimSpace(strings.ToUpper(routineType))
 	if routineName == "" {
@@ -2732,7 +2910,9 @@ func (a *App) DropFunction(config connection.ConnectionConfig, dbName string, ro
 	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.function_dropped", nil)}
 }
 
-func (a *App) RenameView(config connection.ConnectionConfig, dbName string, oldName string, newName string) connection.QueryResult {
+func (a *App) RenameView(config connection.ConnectionConfig, dbName string, oldName string, newName string) (result connection.QueryResult) {
+	auditSQL := fmt.Sprintf("ALTER VIEW %s RENAME TO %s", strings.TrimSpace(oldName), strings.TrimSpace(newName))
+	defer a.beginSQLAuditUserAction(config, dbName, "object_editor", &auditSQL, &result)()
 	oldName = strings.TrimSpace(oldName)
 	newName = strings.TrimSpace(newName)
 	if oldName == "" || newName == "" {

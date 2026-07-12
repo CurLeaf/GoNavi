@@ -166,7 +166,7 @@ export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReport
         <Empty description={t('sql_analysis.explain.empty')} style={{ padding: '48px 0' }} />
       )}
       {!error && report && (
-        <Spin spinning={loading} tip={t('sql_analysis.explain.loading')} className="gn-explain-report-spinner">
+        <Spin spinning={loading} tip={t('sql_analysis.explain.loading')} wrapperClassName="gn-explain-report-spinner">
           <div className="gn-explain-report-shell">
           <div className="gn-explain-report-switcher-row">
             <Segmented
@@ -297,6 +297,8 @@ const reportViewStyles = `
   .gn-explain-report-spinner > .ant-spin-container {
     height: 100%;
     min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
   .gn-explain-report-switcher-row {
     flex: 0 0 auto;

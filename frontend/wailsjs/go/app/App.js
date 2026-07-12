@@ -10,6 +10,10 @@ export function ApplyDataRootDirectory(arg1, arg2) {
   return window['go']['app']['App']['ApplyDataRootDirectory'](arg1, arg2);
 }
 
+export function BuildSQLAuditExport(arg1, arg2) {
+  return window['go']['app']['App']['BuildSQLAuditExport'](arg1, arg2);
+}
+
 export function CancelApplicationQuit() {
   return window['go']['app']['App']['CancelApplicationQuit']();
 }
@@ -32,6 +36,10 @@ export function CheckForUpdates() {
 
 export function CheckForUpdatesSilently() {
   return window['go']['app']['App']['CheckForUpdatesSilently']();
+}
+
+export function ClearSQLAuditEvents(arg1) {
+  return window['go']['app']['App']['ClearSQLAuditEvents'](arg1);
 }
 
 export function ClearSlowQueries(arg1, arg2) {
@@ -68,6 +76,10 @@ export function CreateSchema(arg1, arg2, arg3) {
 
 export function DBCommitTransaction(arg1) {
   return window['go']['app']['App']['DBCommitTransaction'](arg1);
+}
+
+export function DBCommitTransactionWithTrigger(arg1, arg2) {
+  return window['go']['app']['App']['DBCommitTransactionWithTrigger'](arg1, arg2);
 }
 
 export function DBConnect(arg1) {
@@ -114,6 +126,14 @@ export function DBQuery(arg1, arg2, arg3) {
   return window['go']['app']['App']['DBQuery'](arg1, arg2, arg3);
 }
 
+export function DBQueryAI(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DBQueryAI'](arg1, arg2, arg3);
+}
+
+export function DBQueryAudited(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['DBQueryAudited'](arg1, arg2, arg3, arg4);
+}
+
 export function DBQueryIsolated(arg1, arg2, arg3) {
   return window['go']['app']['App']['DBQueryIsolated'](arg1, arg2, arg3);
 }
@@ -140,6 +160,10 @@ export function DBReleaseConnection(arg1) {
 
 export function DBRollbackTransaction(arg1) {
   return window['go']['app']['App']['DBRollbackTransaction'](arg1);
+}
+
+export function DBRollbackTransactionWithTrigger(arg1, arg2) {
+  return window['go']['app']['App']['DBRollbackTransactionWithTrigger'](arg1, arg2);
 }
 
 export function DBShowCreateTable(arg1, arg2, arg3) {
@@ -250,6 +274,10 @@ export function ExportQueryWithOptions(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['ExportQueryWithOptions'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function ExportSQLAuditFile(arg1, arg2) {
+  return window['go']['app']['App']['ExportSQLAuditFile'](arg1, arg2);
+}
+
 export function ExportSQLFile(arg1, arg2) {
   return window['go']['app']['App']['ExportSQLFile'](arg1, arg2);
 }
@@ -312,6 +340,18 @@ export function GetEditableSavedConnection(arg1) {
 
 export function GetGlobalProxyConfig() {
   return window['go']['app']['App']['GetGlobalProxyConfig']();
+}
+
+export function GetSQLAuditEvents(arg1) {
+  return window['go']['app']['App']['GetSQLAuditEvents'](arg1);
+}
+
+export function GetSQLAuditHealth() {
+  return window['go']['app']['App']['GetSQLAuditHealth']();
+}
+
+export function GetSQLAuditSettings() {
+  return window['go']['app']['App']['GetSQLAuditSettings']();
 }
 
 export function GetSavedConnections() {
@@ -772,6 +812,14 @@ export function TestJVMConnection(arg1) {
 
 export function TruncateTables(arg1, arg2, arg3) {
   return window['go']['app']['App']['TruncateTables'](arg1, arg2, arg3);
+}
+
+export function UpdateSQLAuditSettings(arg1) {
+  return window['go']['app']['App']['UpdateSQLAuditSettings'](arg1);
+}
+
+export function VerifySQLAuditIntegrity() {
+  return window['go']['app']['App']['VerifySQLAuditIntegrity']();
 }
 
 export function WriteSQLFile(arg1, arg2) {

@@ -601,73 +601,87 @@ describe('comboToMonacoKeyBinding', () => {
     OemPlus: 89, OemPeriod: 90,
   };
 
-  it('maps Ctrl+Enter correctly', () => {
-    expect(comboToMonacoKeyBinding('Ctrl+Enter', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.WinCtrl,
+  it('maps Windows Ctrl+Enter to Monaco CtrlCmd', () => {
+    expect(comboToMonacoKeyBinding('Ctrl+Enter', mockKeyMod, mockKeyCode, 'windows')).toEqual({
+      keyMod: mockKeyMod.CtrlCmd,
       keyCode: mockKeyCode.Enter,
     });
   });
 
-  it('maps Ctrl+Shift+R correctly', () => {
-    expect(comboToMonacoKeyBinding('Ctrl+Shift+R', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.WinCtrl | mockKeyMod.Shift,
+  it('maps Windows Ctrl+Shift+R to Monaco CtrlCmd', () => {
+    expect(comboToMonacoKeyBinding('Ctrl+Shift+R', mockKeyMod, mockKeyCode, 'windows')).toEqual({
+      keyMod: mockKeyMod.CtrlCmd | mockKeyMod.Shift,
       keyCode: mockKeyCode.KeyR,
     });
   });
 
   it('maps Alt+Shift+F correctly', () => {
-    expect(comboToMonacoKeyBinding('Alt+Shift+F', mockKeyMod, mockKeyCode)).toEqual({
+    expect(comboToMonacoKeyBinding('Alt+Shift+F', mockKeyMod, mockKeyCode, 'windows')).toEqual({
       keyMod: mockKeyMod.Alt | mockKeyMod.Shift,
       keyCode: mockKeyCode.KeyF,
     });
   });
 
   it('maps Meta+Enter (macOS variant)', () => {
-    expect(comboToMonacoKeyBinding('Meta+Enter', mockKeyMod, mockKeyCode)).toEqual({
+    expect(comboToMonacoKeyBinding('Meta+Enter', mockKeyMod, mockKeyCode, 'mac')).toEqual({
       keyMod: mockKeyMod.CtrlCmd,
       keyCode: mockKeyCode.Enter,
     });
   });
 
+  it('maps macOS Ctrl+Enter to Monaco WinCtrl', () => {
+    expect(comboToMonacoKeyBinding('Ctrl+Enter', mockKeyMod, mockKeyCode, 'mac')).toEqual({
+      keyMod: mockKeyMod.WinCtrl,
+      keyCode: mockKeyCode.Enter,
+    });
+  });
+
+  it('maps Windows Meta+Enter to Monaco WinCtrl', () => {
+    expect(comboToMonacoKeyBinding('Meta+Enter', mockKeyMod, mockKeyCode, 'windows')).toEqual({
+      keyMod: mockKeyMod.WinCtrl,
+      keyCode: mockKeyCode.Enter,
+    });
+  });
+
   it('maps F2 key', () => {
-    expect(comboToMonacoKeyBinding('F2', mockKeyMod, mockKeyCode)).toEqual({
+    expect(comboToMonacoKeyBinding('F2', mockKeyMod, mockKeyCode, 'windows')).toEqual({
       keyMod: 0,
       keyCode: mockKeyCode.F2,
     });
   });
 
   it('maps Ctrl+, (comma)', () => {
-    expect(comboToMonacoKeyBinding('Ctrl+,', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.WinCtrl,
+    expect(comboToMonacoKeyBinding('Ctrl+,', mockKeyMod, mockKeyCode, 'windows')).toEqual({
+      keyMod: mockKeyMod.CtrlCmd,
       keyCode: mockKeyCode.OemComma,
     });
   });
 
   it('maps Alt+\\ (manual AI completion)', () => {
-    expect(comboToMonacoKeyBinding('Alt+\\', mockKeyMod, mockKeyCode)).toEqual({
+    expect(comboToMonacoKeyBinding('Alt+\\', mockKeyMod, mockKeyCode, 'windows')).toEqual({
       keyMod: mockKeyMod.Alt,
       keyCode: mockKeyCode.Oem5,
     });
   });
 
   it('returns null for empty combo', () => {
-    expect(comboToMonacoKeyBinding('', mockKeyMod, mockKeyCode)).toBeNull();
+    expect(comboToMonacoKeyBinding('', mockKeyMod, mockKeyCode, 'windows')).toBeNull();
   });
 
   it('returns null for combo with only modifiers', () => {
-    expect(comboToMonacoKeyBinding('Ctrl+Shift', mockKeyMod, mockKeyCode)).toBeNull();
+    expect(comboToMonacoKeyBinding('Ctrl+Shift', mockKeyMod, mockKeyCode, 'windows')).toBeNull();
   });
 
   it('maps Ctrl+Digit1', () => {
-    expect(comboToMonacoKeyBinding('Ctrl+1', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.WinCtrl,
+    expect(comboToMonacoKeyBinding('Ctrl+1', mockKeyMod, mockKeyCode, 'windows')).toEqual({
+      keyMod: mockKeyMod.CtrlCmd,
       keyCode: mockKeyCode.Digit1,
     });
   });
 
   it('maps Ctrl+Alt+Delete', () => {
-    expect(comboToMonacoKeyBinding('Ctrl+Alt+Delete', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.WinCtrl | mockKeyMod.Alt,
+    expect(comboToMonacoKeyBinding('Ctrl+Alt+Delete', mockKeyMod, mockKeyCode, 'windows')).toEqual({
+      keyMod: mockKeyMod.CtrlCmd | mockKeyMod.Alt,
       keyCode: mockKeyCode.Delete,
     });
   });
