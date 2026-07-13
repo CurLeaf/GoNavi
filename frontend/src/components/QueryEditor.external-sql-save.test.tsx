@@ -8423,6 +8423,37 @@ describe('QueryEditor external SQL save', () => {
     renderer?.unmount();
   });
 
+  it('keeps OceanBase Oracle sequence queries out of the ROWNUM auto-limit wrapper', async () => {
+    const sql = 'SELECT IMP_BASICINFO.SEQ_HIS_AZA7.nextval FROM dual';
+    storeState.connections[0].config.type = 'oceanbase';
+    (storeState.connections[0].config as any).oceanBaseProtocol = 'oracle';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['NEXTVAL'], rows: [{ NEXTVAL: 42 }] }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'IMP_BASICINFO', query: sql })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const executedSql = String(backendApp.DBQueryMulti.mock.calls[0][2]);
+    expect(executedSql).toContain('IMP_BASICINFO.SEQ_HIS_AZA7.nextval');
+    expect(executedSql).not.toContain('SELECT * FROM (');
+    expect(executedSql).not.toMatch(/\bROWNUM\b/i);
+    expect(backendApp.DBQueryMultiTransactional).not.toHaveBeenCalled();
+    renderer?.unmount();
+  });
+
   it('quotes exact-case OceanBase Oracle lowercase tables for execution while keeping sql logs unchanged', async () => {
     storeState.connections[0].config.type = 'oceanbase';
     (storeState.connections[0].config as any).oceanBaseProtocol = 'oracle';
