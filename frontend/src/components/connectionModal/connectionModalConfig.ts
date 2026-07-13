@@ -252,6 +252,7 @@ export const buildSavedConnectionInput = ({
     includeRedisDatabases: isRedisType
       ? values.includeRedisDatabases
       : undefined,
+    schemaVisibilityByDatabase: initialValues?.schemaVisibilityByDatabase,
     iconType: customIconType || "",
     iconColor: customIconColor || "",
     clearPrimaryPassword: primaryDraft.clearStoredSecret,

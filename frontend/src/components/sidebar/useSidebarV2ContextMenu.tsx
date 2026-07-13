@@ -17,7 +17,7 @@ import {
 import type { SavedConnection } from '../../types';
 import { t } from '../../i18n';
 import { DBQuery } from '../../../wailsjs/go/app/App';
-import { getCaseInsensitiveRawValue, getCaseInsensitiveValue, getMetadataDialect, splitQualifiedName, buildSidebarTableStatusSQL, escapeSQLLiteral } from './sidebarMetadataLoaders';
+import { getCaseInsensitiveRawValue, getCaseInsensitiveValue, getMetadataDialect, splitQualifiedName, buildSidebarTableStatusSQL, escapeSQLLiteral, shouldHideSchemaPrefix } from './sidebarMetadataLoaders';
 import { getDataSourceCapabilities } from '../../utils/dataSourceCapabilities';
 import { resolveConnectionHostSummary } from '../../utils/tabDisplay';
 import { resolveConnectionIconType } from '../../utils/connectionVisual';
@@ -64,6 +64,7 @@ type SidebarV2ContextMenuOptions = {
   handleExportSchemaSQL: (node: any, includeData: boolean) => Promise<void>;
   handleDeleteSchema: (node: any) => void;
   openRenameSchemaModal: (node: any) => void;
+  openSchemaVisibilitySettings: (node: any) => void;
   resolveMessagePublishTarget: (node: any) => unknown;
   addSqlLog: (log: any) => void;
   handleV2TableContextMenuAction: (node: any, action: V2TableContextMenuActionKey) => void;
@@ -91,6 +92,7 @@ export const useSidebarV2ContextMenu = ({
   handleExportSchemaSQL,
   handleDeleteSchema,
   openRenameSchemaModal,
+  openSchemaVisibilitySettings,
   resolveMessagePublishTarget,
   addSqlLog,
   handleV2TableContextMenuAction,
@@ -328,11 +330,16 @@ export const useSidebarV2ContextMenu = ({
               shortcutPlatform={activeShortcutPlatform}
               dialect={dialect}
               supportsSchemaActions={isPostgresSchemaDialect(dialect)}
+              supportsSchemaVisibility={shouldHideSchemaPrefix(node.dataRef as SavedConnection)}
               supportsStarRocksActions={dialect === 'starrocks'}
               supportsRenameDatabase={capabilities.supportsRenameDatabase}
               supportsDropDatabase={capabilities.supportsDropDatabase}
               onAction={(action) => {
                   setContextMenu(null);
+                  if (action === 'schema-visibility') {
+                      openSchemaVisibilitySettings(node);
+                      return;
+                  }
                   handleV2DatabaseContextMenuAction(node, action);
               }}
           />

@@ -106,7 +106,7 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().appearance.uiVersion).toBe('v2');
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
-    expect(persisted.version).toBe(14);
+    expect(persisted.version).toBe(15);
     expect(persisted.state.appearance.uiVersion).toBe('v2');
   });
 
@@ -1169,7 +1169,7 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().globalProxy.hasPassword).toBe(true);
   });
 
-  it('persists external SQL directories and restores valid items after reload', async () => {
+  it('persists external SQL directories and keeps distinct connection bindings after reload', async () => {
     const { useStore } = await importStore();
 
     useStore.getState().saveExternalSQLDirectory({
@@ -1216,7 +1216,125 @@ describe('store appearance persistence', () => {
         path: 'D:/sql/scripts',
         createdAt: 1,
       },
+      {
+        id: 'legacy-ext-1',
+        name: 'legacy duplicate',
+        path: 'D:\\sql\\scripts',
+        connectionId: 'conn-1',
+        dbName: 'demo',
+        createdAt: 2,
+      },
     ]);
+  });
+
+  it('records recent workbench targets and SQL files with their database binding', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'recent-query-1',
+      title: 'Orders',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'orders',
+      query: 'select * from orders;',
+    });
+    useStore.getState().addTab({
+      id: 'recent-file-1',
+      title: 'daily-report.sql',
+      type: 'query',
+      connectionId: 'conn-2',
+      dbName: 'reporting',
+      query: 'select 1;',
+      filePath: 'D:/sql/reports/daily-report.sql',
+    });
+
+    expect(useStore.getState().recentConnectionTargets).toEqual([
+      expect.objectContaining({ connectionId: 'conn-2', dbName: 'reporting' }),
+      expect.objectContaining({ connectionId: 'conn-1', dbName: 'orders' }),
+    ]);
+    expect(useStore.getState().recentSQLFiles).toEqual([
+      expect.objectContaining({
+        connectionId: 'conn-2',
+        dbName: 'reporting',
+        fileName: 'daily-report.sql',
+        filePath: 'D:/sql/reports/daily-report.sql',
+      }),
+    ]);
+
+    useStore.getState().updateQueryTabDraft('recent-file-1', {
+      connectionId: 'conn-3',
+      dbName: 'auditing',
+    });
+    expect(useStore.getState().recentConnectionTargets[0]).toEqual(
+      expect.objectContaining({ connectionId: 'conn-3', dbName: 'auditing' }),
+    );
+    expect(useStore.getState().recentSQLFiles[0]).toEqual(
+      expect.objectContaining({
+        connectionId: 'conn-3',
+        dbName: 'auditing',
+        fileName: 'daily-report.sql',
+        filePath: 'D:/sql/reports/daily-report.sql',
+      }),
+    );
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.recentConnectionTargets).toHaveLength(3);
+    expect(persisted.state.recentSQLFiles).toHaveLength(2);
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().recentConnectionTargets).toEqual([
+      expect.objectContaining({ connectionId: 'conn-3', dbName: 'auditing' }),
+      expect.objectContaining({ connectionId: 'conn-2', dbName: 'reporting' }),
+      expect.objectContaining({ connectionId: 'conn-1', dbName: 'orders' }),
+    ]);
+    expect(reloaded.useStore.getState().recentSQLFiles).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        connectionId: 'conn-3',
+        dbName: 'auditing',
+        fileName: 'daily-report.sql',
+      }),
+    ]));
+  });
+
+  it('keeps recent SQL shortcuts in sync when files or their directories move or are deleted', async () => {
+    const { useStore } = await importStore();
+    useStore.getState().addTab({
+      id: 'recent-file-a',
+      title: 'a.sql',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'orders',
+      query: 'select 1;',
+      filePath: 'D:/sql/reports/a.sql',
+    });
+    useStore.getState().addTab({
+      id: 'recent-file-b',
+      title: 'b.sql',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'orders',
+      query: 'select 2;',
+      filePath: 'D:/sql/reports/nested/b.sql',
+    });
+
+    useStore.getState().moveRecentSQLFilesByDirectory('D:/sql/reports', 'D:/sql/archive');
+    expect(useStore.getState().recentSQLFiles.map((file) => file.filePath).sort()).toEqual([
+      'D:/sql/archive/a.sql',
+      'D:/sql/archive/nested/b.sql',
+    ]);
+
+    useStore.getState().updateRecentSQLFilePath('D:/sql/archive/a.sql', 'D:/sql/archive/renamed.sql');
+    expect(useStore.getState().recentSQLFiles).toEqual(expect.arrayContaining([
+      expect.objectContaining({ filePath: 'D:/sql/archive/renamed.sql', fileName: 'renamed.sql' }),
+    ]));
+
+    useStore.getState().removeRecentSQLFilesByPath('D:/sql/archive/renamed.sql');
+    expect(useStore.getState().recentSQLFiles).toEqual([
+      expect.objectContaining({ filePath: 'D:/sql/archive/nested/b.sql' }),
+    ]);
+    useStore.getState().removeRecentSQLFilesByDirectory('D:/sql/archive');
+    expect(useStore.getState().recentSQLFiles).toEqual([]);
   });
 
   it('uses localized external SQL directory fallback names without overriding explicit names or path segments', async () => {

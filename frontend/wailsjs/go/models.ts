@@ -1268,12 +1268,27 @@ export namespace connection {
 	        this.clearPassword = source["clearPassword"];
 	    }
 	}
+	export class SchemaVisibilityRule {
+	    mode: string;
+	    schemas?: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new SchemaVisibilityRule(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.schemas = source["schemas"];
+	    }
+	}
 	export class SavedConnectionInput {
 	    id?: string;
 	    name: string;
 	    config: ConnectionConfig;
 	    includeDatabases?: string[];
 	    includeRedisDatabases?: number[];
+	    schemaVisibilityByDatabase?: Record<string, SchemaVisibilityRule>;
 	    iconType?: string;
 	    iconColor?: string;
 	    clearPrimaryPassword?: boolean;
@@ -1297,6 +1312,7 @@ export namespace connection {
 	        this.config = this.convertValues(source["config"], ConnectionConfig);
 	        this.includeDatabases = source["includeDatabases"];
 	        this.includeRedisDatabases = source["includeRedisDatabases"];
+	        this.schemaVisibilityByDatabase = this.convertValues(source["schemaVisibilityByDatabase"], SchemaVisibilityRule, true);
 	        this.iconType = source["iconType"];
 	        this.iconColor = source["iconColor"];
 	        this.clearPrimaryPassword = source["clearPrimaryPassword"];
@@ -1334,6 +1350,7 @@ export namespace connection {
 	    config: ConnectionConfig;
 	    includeDatabases?: string[];
 	    includeRedisDatabases?: number[];
+	    schemaVisibilityByDatabase?: Record<string, SchemaVisibilityRule>;
 	    iconType?: string;
 	    iconColor?: string;
 	    secretRef?: string;
@@ -1358,6 +1375,7 @@ export namespace connection {
 	        this.config = this.convertValues(source["config"], ConnectionConfig);
 	        this.includeDatabases = source["includeDatabases"];
 	        this.includeRedisDatabases = source["includeRedisDatabases"];
+	        this.schemaVisibilityByDatabase = this.convertValues(source["schemaVisibilityByDatabase"], SchemaVisibilityRule, true);
 	        this.iconType = source["iconType"];
 	        this.iconColor = source["iconColor"];
 	        this.secretRef = source["secretRef"];
@@ -1452,6 +1470,7 @@ export namespace connection {
 		    return a;
 		}
 	}
+
 	export class TestGlobalProxyInput {
 	    proxy: SaveGlobalProxyInput;
 	    url: string;
@@ -1710,7 +1729,6 @@ export namespace sqlaudit {
 	}
 
 }
-
 export namespace sync {
 	
 	export class TableOptions {

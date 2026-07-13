@@ -1,10 +1,12 @@
 ﻿import SidebarConnectionRail from './sidebar/SidebarConnectionRail';
+import Modal from './common/ResizableDraggableModal';
 import SidebarSearchPanel, { type SidebarSearchPanelProps } from './sidebar/SidebarSearchPanel';
 import SlowQueryRailButton from './sidebar/SlowQueryRailButton';
 import SqlAuditRailButton from './sidebar/SqlAuditRailButton';
 import { buildSidebarLegacyNodeMenuItems } from './sidebar/sidebarLegacyNodeMenu';
 import {
   getMetadataDialect,
+  loadSchemas,
   shouldHideSchemaPrefix,
   splitQualifiedName,
 } from './sidebar/sidebarMetadataLoaders';
@@ -67,7 +69,7 @@ export {
 } from './sidebar/sidebarHelpers';
 import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
-import { Tree, message, Dropdown, MenuProps, Input, Button, Form, Popover, Tooltip } from 'antd';
+import { Tree, message, Dropdown, MenuProps, Input, Button, Form, Popover, Radio, Select, Tooltip } from 'antd';
 	import {
 	  CaretDownFilled,
 	  DatabaseOutlined,
@@ -110,7 +112,7 @@ import {
     useStore,
 } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-		import { SavedConnection, SavedQuery, ExternalSQLDirectory, ExternalSQLTreeEntry } from '../types';
+		import { SavedConnection, SavedQuery, ExternalSQLDirectory, ExternalSQLTreeEntry, SchemaVisibilityRule } from '../types';
 import { getDbIcon } from './DatabaseIcons';
 		import { ListSQLDirectory } from '../../wailsjs/go/app/App';
 import { supportsTableTruncateAction } from './tableDataDangerActions';
@@ -134,6 +136,11 @@ import {
     type SidebarLocateTreeNodeLike,
 } from '../utils/sidebarLocate';
 import { resolveConnectionAccentColor, resolveConnectionIconType } from '../utils/connectionVisual';
+import {
+  getSchemaVisibilityRule,
+  moveSchemaVisibilityRule,
+  updateSchemaVisibilityRule,
+} from '../utils/schemaVisibility';
 import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors } from '../utils/jvmSidebarActions';
 import {
@@ -296,6 +303,7 @@ const buildConnectionReloadSignature = (conn?: SavedConnection | null): string =
     config: conn.config || {},
     includeDatabases: conn.includeDatabases || [],
     includeRedisDatabases: conn.includeRedisDatabases || [],
+    schemaVisibilityByDatabase: conn.schemaVisibilityByDatabase || {},
   });
 };
 
@@ -443,7 +451,12 @@ const Sidebar: React.FC<{
   const deleteQuery = useStore(state => state.deleteQuery);
   const saveExternalSQLDirectory = useStore(state => state.saveExternalSQLDirectory);
   const deleteExternalSQLDirectory = useStore(state => state.deleteExternalSQLDirectory);
+  const updateRecentSQLFilePath = useStore(state => state.updateRecentSQLFilePath);
+  const removeRecentSQLFilesByPath = useStore(state => state.removeRecentSQLFilesByPath);
+  const moveRecentSQLFilesByDirectory = useStore(state => state.moveRecentSQLFilesByDirectory);
+  const removeRecentSQLFilesByDirectory = useStore(state => state.removeRecentSQLFilesByDirectory);
   const addConnection = useStore(state => state.addConnection);
+  const updateConnection = useStore(state => state.updateConnection);
   const addTab = useStore(state => state.addTab);
   const updateQueryTabDraft = useStore(state => state.updateQueryTabDraft);
   const tabs = useStore(state => state.tabs);
@@ -787,6 +800,17 @@ const Sidebar: React.FC<{
   const [isRenameSchemaModalOpen, setIsRenameSchemaModalOpen] = useState(false);
   const [renameSchemaForm] = Form.useForm();
   const [renameSchemaTarget, setRenameSchemaTarget] = useState<any>(null);
+  const [schemaVisibilityForm] = Form.useForm<{
+      mode: SchemaVisibilityRule['mode'];
+      schemas: string[];
+  }>();
+  const [schemaVisibilityTarget, setSchemaVisibilityTarget] = useState<{
+      connection: SavedConnection;
+      dbName: string;
+      databaseNodeKey: React.Key;
+      availableSchemas: string[];
+  } | null>(null);
+  const [isSavingSchemaVisibility, setIsSavingSchemaVisibility] = useState(false);
   const [isRenameDbModalOpen, setIsRenameDbModalOpen] = useState(false);
   const [renameDbForm] = Form.useForm();
   const [renameDbTarget, setRenameDbTarget] = useState<any>(null);
@@ -1028,13 +1052,25 @@ const Sidebar: React.FC<{
       message.error(error?.message || t('connection.sidebar.duplicate.failureFallback'));
     }
   };
-  const updateTreeData = (list: TreeNode[], key: React.Key, children: TreeNode[] | undefined): TreeNode[] => {
+  const updateTreeData = (
+    list: TreeNode[],
+    key: React.Key,
+    children: TreeNode[] | undefined,
+    dataRef?: unknown,
+  ): TreeNode[] => {
     return list.map(node => {
       if (node.key === key) {
-        return { ...node, children };
+        return {
+          ...node,
+          children,
+          ...(dataRef === undefined ? {} : { dataRef }),
+        };
       }
       if (node.children) {
-        return { ...node, children: updateTreeData(node.children, key, children) };
+        return {
+          ...node,
+          children: updateTreeData(node.children, key, children, dataRef),
+        };
       }
       return node;
     });
@@ -1057,8 +1093,12 @@ const Sidebar: React.FC<{
 
   findTreeNodeByKeyRef.current = findTreeNodeByKey;
 
-  const replaceTreeNodeChildren = (key: React.Key, children: TreeNode[] | undefined): TreeNode[] => {
-      const nextTreeData = updateTreeData(treeDataRef.current, key, children);
+  const replaceTreeNodeChildren = (
+    key: React.Key,
+    children: TreeNode[] | undefined,
+    dataRef?: unknown,
+  ): TreeNode[] => {
+      const nextTreeData = updateTreeData(treeDataRef.current, key, children, dataRef);
       treeDataRef.current = nextTreeData;
       setTreeData(nextTreeData);
       return nextTreeData;
@@ -1230,6 +1270,10 @@ const Sidebar: React.FC<{
       addTab,
       saveExternalSQLDirectory,
       deleteExternalSQLDirectory,
+      updateRecentSQLFilePath,
+      removeRecentSQLFilesByPath,
+      moveRecentSQLFilesByDirectory,
+      removeRecentSQLFilesByDirectory,
       refreshGlobalExternalSQLRootNode,
       setExpandedKeys,
       setAutoExpandParent,
@@ -1967,6 +2011,171 @@ const Sidebar: React.FC<{
       },
   });
 
+  const openSchemaVisibilitySettings = useCallback((node: any) => {
+      const dbName = String(node?.dataRef?.dbName || node?.title || '').trim();
+      const connectionId = String(node?.dataRef?.id || '').trim();
+      const connection = connections.find((item) => item.id === connectionId) || node?.dataRef;
+      if (!connection || !dbName || !shouldHideSchemaPrefix(connection as SavedConnection)) {
+          return;
+      }
+
+      const databaseNode = node?.type === 'database'
+          ? node
+          : getDatabaseNodeRef(connection, dbName);
+      const currentRule = getSchemaVisibilityRule(connection as SavedConnection, dbName);
+      const availableSchemas = Array.from(new Set([
+          ...(Array.isArray(databaseNode?.children)
+              ? databaseNode.children
+                  .filter((item: any) => item?.dataRef?.groupKey === 'schema')
+                  .map((item: any) => String(item?.dataRef?.schemaName || item?.title || '').trim())
+              : []),
+          ...(currentRule?.schemas || []),
+      ].filter(Boolean))).sort((a, b) => a.localeCompare(b));
+
+      schemaVisibilityForm.setFieldsValue({
+          mode: currentRule?.mode || 'include',
+          schemas: currentRule?.schemas || [],
+      });
+      setSchemaVisibilityTarget({
+          connection: connection as SavedConnection,
+          dbName,
+          databaseNodeKey: databaseNode?.key || `${connectionId}-${dbName}`,
+          availableSchemas,
+      });
+      void loadSchemas(connection as SavedConnection, dbName).then((result) => {
+          const loadedSchemas = Array.isArray(result?.schemas)
+              ? result.schemas.map((schema) => String(schema || '').trim()).filter(Boolean)
+              : [];
+          if (loadedSchemas.length === 0) return;
+          setSchemaVisibilityTarget((current) => {
+              if (!current || current.connection.id !== connectionId || current.dbName !== dbName) {
+                  return current;
+              }
+              return {
+                  ...current,
+                  availableSchemas: Array.from(new Set([
+                      ...current.availableSchemas,
+                      ...loadedSchemas,
+                  ])).sort((left, right) => left.localeCompare(right)),
+              };
+          });
+      }).catch(() => undefined);
+  }, [connections, getDatabaseNodeRef, schemaVisibilityForm]);
+
+  const handleSaveSchemaVisibility = useCallback(async () => {
+      if (!schemaVisibilityTarget) return;
+      setIsSavingSchemaVisibility(true);
+      try {
+          const values = await schemaVisibilityForm.validateFields();
+          const mode = values.mode === 'exclude' ? 'exclude' : 'include';
+          const seenSchemas = new Set<string>();
+          const schemas = (Array.isArray(values.schemas) ? values.schemas : [])
+              .map((schema) => String(schema || '').trim())
+              .filter((schema) => {
+                  const normalized = schema.toLocaleLowerCase();
+                  if (!normalized || seenSchemas.has(normalized)) return false;
+                  seenSchemas.add(normalized);
+                  return true;
+              });
+          const nextRule: SchemaVisibilityRule | undefined = schemas.length > 0
+              ? { mode, schemas }
+              : undefined;
+          const nextConnection = updateSchemaVisibilityRule(
+              schemaVisibilityTarget.connection,
+              schemaVisibilityTarget.dbName,
+              nextRule,
+          );
+          const backendApp = (window as any).go?.app?.App;
+          if (typeof backendApp?.SaveConnection !== 'function') {
+              throw new Error(t('connection_modal.message.save_failed'));
+          }
+          const saved = await backendApp.SaveConnection({
+              id: nextConnection.id,
+              name: nextConnection.name,
+              config: nextConnection.config,
+              includeDatabases: nextConnection.includeDatabases,
+              includeRedisDatabases: nextConnection.includeRedisDatabases,
+              schemaVisibilityByDatabase: nextConnection.schemaVisibilityByDatabase,
+              iconType: nextConnection.iconType,
+              iconColor: nextConnection.iconColor,
+          });
+          const persistedConnection: SavedConnection = {
+              ...nextConnection,
+              ...(saved || {}),
+              schemaVisibilityByDatabase: nextConnection.schemaVisibilityByDatabase,
+          };
+          connectionReloadSignaturesRef.current[persistedConnection.id] =
+              buildConnectionReloadSignature(persistedConnection);
+          updateConnection(persistedConnection);
+          await loadTables({
+              key: schemaVisibilityTarget.databaseNodeKey,
+              type: 'database',
+              dataRef: {
+                  ...persistedConnection,
+                  dbName: schemaVisibilityTarget.dbName,
+              },
+          });
+          setExpandedKeys((previous) => previous.includes(schemaVisibilityTarget.databaseNodeKey)
+              ? previous
+              : [...previous, schemaVisibilityTarget.databaseNodeKey]);
+          setSchemaVisibilityTarget(null);
+          message.success(t('sidebar.schema_visibility.message.saved'));
+      } catch (error: any) {
+          message.error(t('sidebar.schema_visibility.message.save_failed', {
+              error: error?.message || String(error),
+          }));
+      } finally {
+          setIsSavingSchemaVisibility(false);
+      }
+  }, [loadTables, schemaVisibilityForm, schemaVisibilityTarget, updateConnection]);
+
+  const migrateSchemaVisibilityForRenamedDatabase = useCallback(async (
+      connection: SavedConnection,
+      oldDbName: string,
+      newDbName: string,
+  ): Promise<SavedConnection> => {
+      const currentConnection = connections.find((item) => item.id === connection.id) || connection;
+      const nextConnection = moveSchemaVisibilityRule(currentConnection, oldDbName, newDbName);
+      if (nextConnection === currentConnection) {
+          return currentConnection;
+      }
+
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.SaveConnection !== 'function') {
+          message.warning(t('sidebar.schema_visibility.message.save_failed', {
+              error: t('connection_modal.message.save_failed'),
+          }));
+          return currentConnection;
+      }
+
+      try {
+          const saved = await backendApp.SaveConnection({
+              id: nextConnection.id,
+              name: nextConnection.name,
+              config: nextConnection.config,
+              includeDatabases: nextConnection.includeDatabases,
+              includeRedisDatabases: nextConnection.includeRedisDatabases,
+              schemaVisibilityByDatabase: nextConnection.schemaVisibilityByDatabase,
+              iconType: nextConnection.iconType,
+              iconColor: nextConnection.iconColor,
+          });
+          const persistedConnection: SavedConnection = {
+              ...nextConnection,
+              ...(saved || {}),
+              schemaVisibilityByDatabase: nextConnection.schemaVisibilityByDatabase,
+          };
+          connectionReloadSignaturesRef.current[persistedConnection.id] =
+              buildConnectionReloadSignature(persistedConnection);
+          updateConnection(persistedConnection);
+          return persistedConnection;
+      } catch (error: any) {
+          message.warning(t('sidebar.schema_visibility.message.save_failed', {
+              error: error?.message || String(error),
+          }));
+          return currentConnection;
+      }
+  }, [connections, updateConnection]);
+
   const {
       handleCopyStructure,
       handleCopyTableName,
@@ -2064,6 +2273,7 @@ const Sidebar: React.FC<{
       runExportWithProgress,
       setAIPanelVisible,
       addAIContext,
+      migrateSchemaVisibilityForRenamedDatabase,
   });
 
 
@@ -2248,6 +2458,7 @@ const Sidebar: React.FC<{
       handleExportSchemaSQL,
       handleDeleteSchema,
       openRenameSchemaModal,
+      openSchemaVisibilitySettings,
       resolveMessagePublishTarget,
       addSqlLog,
       handleV2TableContextMenuAction,
@@ -2315,6 +2526,8 @@ const Sidebar: React.FC<{
   const getNodeMenuItems = (node: any): MenuProps['items'] => buildSidebarLegacyNodeMenuItems(node, {
     addTab,
     getMetadataDialect,
+    shouldHideSchemaPrefix,
+    openSchemaVisibilitySettings,
     handleV2DatabaseContextMenuAction,
     isPostgresSchemaDialect,
     handleExportSchemaSQL,
@@ -3143,6 +3356,78 @@ const Sidebar: React.FC<{
             setRenameSavedQueryTarget={setRenameSavedQueryTarget}
             handleRenameSavedQuery={handleRenameSavedQuery}
         />
+
+        <Modal
+            title={renderSidebarModalTitle(
+                <FolderOpenOutlined />,
+                t('sidebar.schema_visibility.title', { database: schemaVisibilityTarget?.dbName || '' }),
+                t('sidebar.schema_visibility.description'),
+            )}
+            open={Boolean(schemaVisibilityTarget)}
+            centered
+            width={560}
+            okText={t('common.save')}
+            confirmLoading={isSavingSchemaVisibility}
+            styles={{
+                content: modalPanelStyle,
+                header: { background: 'transparent', borderBottom: 'none', paddingBottom: 10 },
+                body: { paddingTop: 8 },
+                footer: { background: 'transparent', borderTop: 'none', paddingTop: 12 },
+            }}
+            onOk={() => void handleSaveSchemaVisibility()}
+            onCancel={() => {
+                setSchemaVisibilityTarget(null);
+                schemaVisibilityForm.resetFields();
+            }}
+        >
+            <Form form={schemaVisibilityForm} layout="vertical">
+                <div style={modalSectionStyle}>
+                    <Form.Item
+                        name="mode"
+                        label={t('sidebar.schema_visibility.field.mode')}
+                        style={{ marginBottom: 14 }}
+                    >
+                        <Radio.Group optionType="button" buttonStyle="solid">
+                            <Radio.Button value="include">
+                                {t('sidebar.schema_visibility.mode.include')}
+                            </Radio.Button>
+                            <Radio.Button value="exclude">
+                                {t('sidebar.schema_visibility.mode.exclude')}
+                            </Radio.Button>
+                        </Radio.Group>
+                    </Form.Item>
+                    <Form.Item
+                        name="schemas"
+                        label={t('sidebar.schema_visibility.field.schemas')}
+                        help={t('sidebar.schema_visibility.field.schemas_help')}
+                        style={{ marginBottom: 12 }}
+                    >
+                        <Select
+                            mode="tags"
+                            allowClear
+                            tokenSeparators={[',', ';', '，', '；']}
+                            placeholder={t('sidebar.schema_visibility.field.schemas_placeholder')}
+                            options={(schemaVisibilityTarget?.availableSchemas || []).map((schema) => ({
+                                label: schema,
+                                value: schema,
+                            }))}
+                        />
+                    </Form.Item>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                        <span style={modalHintTextStyle}>
+                            {t('sidebar.schema_visibility.notice')}
+                        </span>
+                        <Button
+                            type="link"
+                            size="small"
+                            onClick={() => schemaVisibilityForm.setFieldsValue({ schemas: [] })}
+                        >
+                            {t('sidebar.schema_visibility.action.show_all')}
+                        </Button>
+                    </div>
+                </div>
+            </Form>
+        </Modal>
 
         <ExternalSQLFileModal {...externalSQLFileModalProps} />
 

@@ -138,6 +138,7 @@ if (
 
     const saveMockConnection = (input: any) => {
         const existing = mockConnections.find((item) => item.id === input?.id);
+        const hasSchemaVisibilityByDatabase = Object.prototype.hasOwnProperty.call(input || {}, 'schemaVisibilityByDatabase');
         const existingSecrets = mockConnectionSecrets.get(existing?.id || input?.id || '') || {};
         const config = (input?.config && typeof input.config === 'object') ? input.config : {};
         const ssh = (config.ssh && typeof config.ssh === 'object') ? config.ssh : {};
@@ -183,6 +184,11 @@ if (
             },
             includeDatabases: Array.isArray(input?.includeDatabases) ? [...input.includeDatabases] : existing?.includeDatabases,
             includeRedisDatabases: Array.isArray(input?.includeRedisDatabases) ? [...input.includeRedisDatabases] : existing?.includeRedisDatabases,
+            schemaVisibilityByDatabase: hasSchemaVisibilityByDatabase
+                ? (input?.schemaVisibilityByDatabase && typeof input.schemaVisibilityByDatabase === 'object'
+                    ? cloneBrowserMockValue(input.schemaVisibilityByDatabase)
+                    : undefined)
+                : existing?.schemaVisibilityByDatabase,
             iconType: typeof input?.iconType === 'string' ? input.iconType : (existing?.iconType || ''),
             iconColor: typeof input?.iconColor === 'string' ? input.iconColor : (existing?.iconColor || ''),
             hasPrimaryPassword: resolveBrowserMockSecretFlag(config.password, !!input?.clearPrimaryPassword, existing?.hasPrimaryPassword),

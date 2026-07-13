@@ -103,6 +103,11 @@ type UseSidebarObjectActionsArgs = {
   runExportWithProgress: RunExportWithProgress;
   setAIPanelVisible: (visible: boolean) => void;
   addAIContext: (connectionId: string, context: { dbName: string; tableName: string; ddl: string }) => void;
+  migrateSchemaVisibilityForRenamedDatabase: (
+    connection: SavedConnection,
+    oldDbName: string,
+    newDbName: string,
+  ) => Promise<SavedConnection>;
 };
 
 const resolveCopyObjectNameLabel = (node: any): string => {
@@ -200,6 +205,7 @@ export const useSidebarObjectActions = ({
   runExportWithProgress,
   setAIPanelVisible,
   addAIContext,
+  migrateSchemaVisibilityForRenamedDatabase,
 }: UseSidebarObjectActionsArgs) => {
   const handleCopyStructure = async (node: any) => {
     const { config, dbName, tableName } = node.dataRef;
@@ -499,10 +505,15 @@ export const useSidebarObjectActions = ({
       const config = buildRuntimeConfig(conn, conn.dbName);
       const res = await RenameDatabase(buildRpcConnectionConfig(config) as any, oldDbName, newDbName);
       if (res.success) {
+        const migratedConnection = await migrateSchemaVisibilityForRenamedDatabase(
+          conn as SavedConnection,
+          oldDbName,
+          newDbName,
+        );
         message.success(t('sidebar.message.database_renamed'));
         setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${oldDbName}`)));
         setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${oldDbName}`)));
-        await loadDatabases(getConnectionNodeRef(conn));
+        await loadDatabases({ key: migratedConnection.id, dataRef: migratedConnection });
         setIsRenameDbModalOpen(false);
         setRenameDbTarget(null);
         renameDbForm.resetFields();

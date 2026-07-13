@@ -1,14 +1,14 @@
 import Modal from './common/ResizableDraggableModal';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Button, Dropdown, message, Tabs, Tooltip } from 'antd';
-import { AppstoreOutlined, CloseOutlined, ConsoleSqlOutlined, DatabaseOutlined, PlusOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, CloseOutlined, ConsoleSqlOutlined, DatabaseOutlined, FileTextOutlined, HistoryOutlined, PlusOutlined, RightOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons';
 import type { MenuProps, TabsProps } from 'antd';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core';
 import { SortableContext, useSortable, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useStore } from '../store';
-import type { TabData } from '../types';
+import { useStore, type RecentConnectionTarget, type RecentSQLFile } from '../store';
+import type { SavedConnection, SavedQuery, TabData } from '../types';
 import { t } from '../i18n';
 import {
   buildTabDisplayModel,
@@ -26,6 +26,9 @@ import {
   normalizeSQLFileReadContent,
 } from '../utils/sqlFileTabDirty';
 import { clearSQLFileTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
+import { buildExternalSQLTabId } from '../utils/externalSqlTree';
+import { buildSQLFileExecutionWorkbenchTab } from '../utils/sqlFileExecutionTab';
+import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import WorkbenchTabContent from './WorkbenchTabContent';
 import DetachDragPreview, {
   buildDetachDragPreviewState,
@@ -61,6 +64,51 @@ const getTabKindLabel = (tab: TabData): string => {
 };
 
 export const TAB_WORKBENCH_CLASS_NAME = 'tab-workbench';
+
+type RecentConnectionShortcut = {
+  connection: SavedConnection;
+  dbName?: string;
+};
+
+const RECENT_WORKBENCH_ITEM_LIMIT = 6;
+
+export const buildRecentConnectionShortcuts = (
+  connections: SavedConnection[],
+  recentTargets: RecentConnectionTarget[],
+): RecentConnectionShortcut[] => {
+  const queryCapableConnections = connections.filter((connection) =>
+    getDataSourceCapabilities(connection.config).supportsQueryEditor,
+  );
+  const connectionById = new Map(queryCapableConnections.map((connection) => [connection.id, connection]));
+  const seen = new Set<string>();
+  const seenConnectionIds = new Set<string>();
+  const result: RecentConnectionShortcut[] = [];
+
+  const append = (connection: SavedConnection, preferredDbName?: string) => {
+    const dbName = String(preferredDbName || connection.config.database || '').trim() || undefined;
+    const key = `${connection.id}::${dbName || ''}`;
+    if (seen.has(key) || result.length >= RECENT_WORKBENCH_ITEM_LIMIT) return;
+    seen.add(key);
+    seenConnectionIds.add(connection.id);
+    result.push({ connection, ...(dbName ? { dbName } : {}) });
+  };
+
+  recentTargets.forEach((target) => {
+    const connection = connectionById.get(target.connectionId);
+    if (connection) {
+      append(connection, target.dbName);
+    }
+  });
+  queryCapableConnections.forEach((connection) => {
+    if (!seenConnectionIds.has(connection.id)) {
+      append(connection);
+    }
+  });
+  return result;
+};
+
+const buildWorkbenchQueryTabId = (): string =>
+  `query-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const getTabKindTooltipLabel = (tab: TabData): string => {
   if (tab.type === 'query') return t('tab_manager.hover.kind.query');
@@ -404,6 +452,9 @@ const TabManager: React.FC = React.memo(() => {
   const tabs = useStore(state => state.tabs);
   const detachedWorkbenchWindows = useStore(state => state.detachedWorkbenchWindows);
   const connections = useStore(state => state.connections);
+  const savedQueries = useStore(state => state.savedQueries);
+  const recentConnectionTargets = useStore(state => state.recentConnectionTargets);
+  const recentSQLFiles = useStore(state => state.recentSQLFiles);
   const theme = useStore(state => state.theme);
   const appearance = useStore(state => state.appearance);
   const languagePreference = useStore(state => state.languagePreference);
@@ -429,6 +480,7 @@ const TabManager: React.FC = React.memo(() => {
   const tabsNavBorderColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.09)' : 'rgba(0, 0, 0, 0.08)';
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
   const [detachDragPreview, setDetachDragPreview] = useState<DetachDragPreviewState | null>(null);
+  const [openingRecentSQLFileKey, setOpeningRecentSQLFileKey] = useState<string | null>(null);
   const detachDragSessionRef = useRef<{
     tabId: string;
     title: string;
@@ -804,6 +856,33 @@ const TabManager: React.FC = React.memo(() => {
     };
   }), [dockedTabs, dockedActiveTabId, tabs, connections, appearance.tabDisplay, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs, closeTab, closeTabsWithSQLFilePrompt, detachWorkbenchTab, isV2Ui, languagePreference]);
 
+  const queryCapableConnections = useMemo(
+    () => connections.filter((connection) => getDataSourceCapabilities(connection.config).supportsQueryEditor),
+    [connections],
+  );
+  const connectionById = useMemo(
+    () => new Map(queryCapableConnections.map((connection) => [connection.id, connection])),
+    [queryCapableConnections],
+  );
+  const recentConnectionShortcuts = useMemo(
+    () => buildRecentConnectionShortcuts(connections, recentConnectionTargets),
+    [connections, recentConnectionTargets],
+  );
+  const recentSavedQueries = useMemo(
+    () => [...savedQueries]
+      .filter((query) => connectionById.has(query.connectionId))
+      .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0))
+      .slice(0, RECENT_WORKBENCH_ITEM_LIMIT),
+    [connectionById, savedQueries],
+  );
+  const recentSQLFileShortcuts = useMemo(
+    () => [...recentSQLFiles]
+      .filter((file) => connectionById.has(file.connectionId))
+      .sort((left, right) => right.openedAt - left.openedAt)
+      .slice(0, RECENT_WORKBENCH_ITEM_LIMIT),
+    [connectionById, recentSQLFiles],
+  );
+
   const handleOpenConnectionModal = () => {
     const target = document.querySelector<HTMLButtonElement>('[data-gonavi-create-connection-action="true"]');
     target?.click();
@@ -812,6 +891,86 @@ const TabManager: React.FC = React.memo(() => {
   const handleOpenAI = () => {
     setAIPanelVisible(true);
   };
+
+  const handleOpenRecentConnection = useCallback((shortcut: RecentConnectionShortcut) => {
+    addTab({
+      id: buildWorkbenchQueryTabId(),
+      title: t('query.new'),
+      type: 'query',
+      connectionId: shortcut.connection.id,
+      dbName: shortcut.dbName,
+      query: '',
+    });
+  }, [addTab]);
+
+  const handleOpenSavedQuery = useCallback((query: SavedQuery) => {
+    if (!connectionById.has(query.connectionId)) {
+      message.error(t('sidebar.message.connection_config_not_found'));
+      return;
+    }
+    addTab({
+      id: query.id,
+      title: query.name || t('sidebar.tree.untitled_query'),
+      type: 'query',
+      connectionId: query.connectionId,
+      dbName: query.dbName,
+      query: query.sql,
+      savedQueryId: query.id,
+    });
+  }, [addTab, connectionById]);
+
+  const handleOpenRecentSQLFile = useCallback(async (file: RecentSQLFile) => {
+    const connectionId = String(file.connectionId || '').trim();
+    const dbName = String(file.dbName || '').trim();
+    const filePath = String(file.filePath || '').trim();
+    if (!connectionId || !connectionById.has(connectionId)) {
+      message.error(t('sidebar.message.connection_config_not_found'));
+      return;
+    }
+    if (!filePath) {
+      message.error(t('sidebar.message.sql_file_path_incomplete'));
+      return;
+    }
+
+    const openKey = `${connectionId}::${dbName}::${filePath}`;
+    setOpeningRecentSQLFileKey(openKey);
+    try {
+      const res = await ReadSQLFile(filePath);
+      if (!res.success) {
+        message.error(t('sidebar.message.read_sql_file_failed', { error: res.message }));
+        return;
+      }
+
+      const data = res.data;
+      if (data && typeof data === 'object' && (data as Record<string, unknown>).isLargeFile === true) {
+        const payload = data as Record<string, unknown>;
+        addTab(buildSQLFileExecutionWorkbenchTab({
+          connectionId,
+          dbName: dbName || undefined,
+          filePath: String(payload.filePath || '').trim() || filePath,
+          fileName: file.fileName,
+          fileSizeMB: String(payload.fileSizeMB || '').trim() || undefined,
+        }));
+        return;
+      }
+
+      addTab({
+        id: buildExternalSQLTabId(connectionId, dbName, filePath),
+        title: file.fileName,
+        type: 'query',
+        connectionId,
+        dbName: dbName || undefined,
+        query: normalizeSQLFileReadContent(data),
+        filePath,
+      });
+    } catch (error) {
+      message.error(t('sidebar.message.read_sql_file_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      setOpeningRecentSQLFileKey((current) => current === openKey ? null : current);
+    }
+  }, [addTab, connectionById]);
 
   const EmptyWorkbench = (
     <div className="gn-v2-empty-workbench">
@@ -832,6 +991,99 @@ const TabManager: React.FC = React.memo(() => {
           <Button icon={<RobotOutlined />} onClick={handleOpenAI}>
             {t('tab_manager.empty.action.open_ai')}
           </Button>
+        </div>
+        <div className="gn-v2-empty-recent" aria-label={t('tab_manager.empty.recent.aria')}>
+          <section className="gn-v2-empty-recent-card">
+            <div className="gn-v2-empty-recent-heading">
+              <span><HistoryOutlined />{t('tab_manager.empty.recent.connection.heading')}</span>
+              <em>{recentConnectionShortcuts.length}</em>
+            </div>
+            {recentConnectionShortcuts.length > 0 ? (
+              <div className="gn-v2-empty-recent-list">
+                {recentConnectionShortcuts.map((shortcut) => (
+                  <button
+                    key={`${shortcut.connection.id}::${shortcut.dbName || ''}`}
+                    type="button"
+                    className="gn-v2-empty-recent-item"
+                    onClick={() => handleOpenRecentConnection(shortcut)}
+                  >
+                    <DatabaseOutlined />
+                    <span>
+                      <strong title={shortcut.connection.name}>{shortcut.connection.name}</strong>
+                      <small>{shortcut.dbName || t('tab_manager.empty.recent.connection.default_database')}</small>
+                    </span>
+                    <RightOutlined className="gn-v2-empty-recent-arrow" />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="gn-v2-empty-recent-empty">{t('tab_manager.empty.recent.connection.empty')}</p>
+            )}
+          </section>
+          <section className="gn-v2-empty-recent-card">
+            <div className="gn-v2-empty-recent-heading">
+              <span><FileTextOutlined />{t('tab_manager.empty.recent.saved_query.heading')}</span>
+              <em>{recentSavedQueries.length}</em>
+            </div>
+            {recentSavedQueries.length > 0 ? (
+              <div className="gn-v2-empty-recent-list">
+                {recentSavedQueries.map((query) => {
+                  const connection = connectionById.get(query.connectionId);
+                  return (
+                    <button
+                      key={query.id}
+                      type="button"
+                      className="gn-v2-empty-recent-item"
+                      onClick={() => handleOpenSavedQuery(query)}
+                    >
+                      <FileTextOutlined />
+                      <span>
+                        <strong title={query.name || t('sidebar.tree.untitled_query')}>
+                          {query.name || t('sidebar.tree.untitled_query')}
+                        </strong>
+                        <small>{`${connection?.name || query.connectionId} · ${query.dbName || t('tab_manager.empty.recent.connection.default_database')}`}</small>
+                      </span>
+                      <RightOutlined className="gn-v2-empty-recent-arrow" />
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="gn-v2-empty-recent-empty">{t('tab_manager.empty.recent.saved_query.empty')}</p>
+            )}
+          </section>
+          <section className="gn-v2-empty-recent-card">
+            <div className="gn-v2-empty-recent-heading">
+              <span><ConsoleSqlOutlined />{t('tab_manager.empty.recent.sql_file.heading')}</span>
+              <em>{recentSQLFileShortcuts.length}</em>
+            </div>
+            {recentSQLFileShortcuts.length > 0 ? (
+              <div className="gn-v2-empty-recent-list">
+                {recentSQLFileShortcuts.map((file) => {
+                  const connection = connectionById.get(file.connectionId);
+                  const openKey = `${file.connectionId}::${file.dbName || ''}::${file.filePath}`;
+                  return (
+                    <button
+                      key={openKey}
+                      type="button"
+                      className="gn-v2-empty-recent-item"
+                      disabled={openingRecentSQLFileKey === openKey}
+                      onClick={() => void handleOpenRecentSQLFile(file)}
+                    >
+                      <FileTextOutlined />
+                      <span>
+                        <strong title={file.fileName}>{file.fileName}</strong>
+                        <small>{`${connection?.name || file.connectionId} · ${file.dbName || t('tab_manager.empty.recent.connection.default_database')}`}</small>
+                      </span>
+                      <RightOutlined className="gn-v2-empty-recent-arrow" />
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="gn-v2-empty-recent-empty">{t('tab_manager.empty.recent.sql_file.empty')}</p>
+            )}
+          </section>
         </div>
       </section>
       <section className="gn-v2-empty-panel" aria-label={t('tab_manager.empty.quick.aria')}>

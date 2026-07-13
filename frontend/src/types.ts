@@ -354,8 +354,14 @@ export interface SavedConnection {
   hasOpaqueDSN?: boolean;
   includeDatabases?: string[];
   includeRedisDatabases?: number[]; // Redis databases to show
+  schemaVisibilityByDatabase?: Record<string, SchemaVisibilityRule>;
   iconType?: string; // 自定义图标类型（如 'mysql','postgres'），不填则取 config.type
   iconColor?: string; // 自定义图标颜色（十六进制），不填则取类型默认色
+}
+
+export interface SchemaVisibilityRule {
+  mode: 'include' | 'exclude';
+  schemas: string[];
 }
 
 export interface GlobalProxyConfig extends ProxyConfig {

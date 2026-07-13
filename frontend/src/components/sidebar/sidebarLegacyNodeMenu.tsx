@@ -126,6 +126,8 @@ export const buildSidebarLegacyNodeMenuItems = (
   const {
     addTab,
     getMetadataDialect,
+    shouldHideSchemaPrefix,
+    openSchemaVisibilitySettings,
     handleV2DatabaseContextMenuAction,
     isPostgresSchemaDialect,
     handleExportSchemaSQL,
@@ -619,6 +621,8 @@ export const buildSidebarLegacyNodeMenuItems = (
        const capabilities = getDataSourceCapabilities(databaseConn?.config);
        const isStarRocks = dialect === 'starrocks';
        const supportsSchemaActions = isPostgresSchemaDialect(dialect);
+       const supportsSchemaVisibility = typeof shouldHideSchemaPrefix === 'function'
+           && shouldHideSchemaPrefix(databaseConn);
        const canCreateTable = !isStructureOnlyDbType(String(databaseConn?.id || ''));
        return [
            ...(canCreateTable ? [{
@@ -633,6 +637,14 @@ export const buildSidebarLegacyNodeMenuItems = (
                     label: t('sidebar.v2_database_menu.new_schema'),
                     icon: <FolderAddOutlined />,
                     onClick: () => handleV2DatabaseContextMenuAction(node, 'new-schema')
+                },
+            ] : []),
+            ...(supportsSchemaVisibility ? [
+                {
+                    key: 'schema-visibility',
+                    label: t('sidebar.schema_visibility.menu.manage'),
+                    icon: <FolderOpenOutlined />,
+                    onClick: () => openSchemaVisibilitySettings(node),
                 },
             ] : []),
             ...(isStarRocks ? [

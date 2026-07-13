@@ -9,6 +9,7 @@ import {
   ConnectionConfig,
   ProxyConfig,
   SavedConnection,
+  SchemaVisibilityRule,
   TabData,
   SavedQuery,
   ConnectionTag,
@@ -217,7 +218,7 @@ const MIN_KEEPALIVE_INTERVAL_MINUTES = 1;
 const MAX_KEEPALIVE_INTERVAL_MINUTES = 1440;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
-const PERSIST_VERSION = 14;
+const PERSIST_VERSION = 15;
 const UI_VERSION_V2_MIGRATION_VERSION = 14;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
 const PERSIST_WRITE_DEBOUNCE_MS = 160;
@@ -231,6 +232,10 @@ const MAX_PERSISTED_SQL_LOG_LENGTH = 24 * 1024;
 const MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH = 2 * 1024;
 const MAX_TABLE_EXPORT_HISTORY_PER_TARGET = 20;
 const MAX_TABLE_EXPORT_HISTORY_TARGETS = 200;
+const MAX_RECENT_WORKBENCH_TARGETS = 8;
+const MAX_RECENT_SQL_FILES = 8;
+const MAX_RECENT_TARGET_DATABASE_LENGTH = 256;
+const MAX_RECENT_SQL_FILE_NAME_LENGTH = 256;
 const DEFAULT_CONNECTION_TYPE = "mysql";
 const DEFAULT_JVM_PORT = 9010;
 const DEFAULT_LANGUAGE_PREFERENCE: LanguagePreference = "system";
@@ -590,6 +595,50 @@ const sanitizeStringArray = (value: unknown, maxLength = 256): string[] => {
     result.push(normalized);
   });
   return result;
+};
+
+const sanitizeSchemaVisibilityByDatabase = (
+  value: unknown,
+): Record<string, SchemaVisibilityRule> | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const result: Record<string, SchemaVisibilityRule> = {};
+  const seenDatabases = new Set<string>();
+  Object.entries(value as Record<string, unknown>).some(([rawDatabase, rawRule]) => {
+    if (Object.keys(result).length >= 128) return true;
+    const database = toTrimmedString(rawDatabase);
+    const databaseKey = database.toLocaleLowerCase();
+    if (!database || database.length > 256 || seenDatabases.has(databaseKey)) {
+      return false;
+    }
+    if (!rawRule || typeof rawRule !== "object" || Array.isArray(rawRule)) {
+      return false;
+    }
+    const rule = rawRule as Record<string, unknown>;
+    const mode = rule.mode === "include" || rule.mode === "exclude"
+      ? rule.mode
+      : undefined;
+    if (!mode) return false;
+
+    const seenSchemas = new Set<string>();
+    const schemas = sanitizeStringArray(rule.schemas, 256)
+      .filter((schema) => {
+        const schemaKey = schema.toLocaleLowerCase();
+        if (seenSchemas.has(schemaKey)) return false;
+        seenSchemas.add(schemaKey);
+        return true;
+      })
+      .slice(0, 256);
+    if (schemas.length === 0) return false;
+
+    seenDatabases.add(databaseKey);
+    result[database] = { mode, schemas };
+    return false;
+  });
+
+  return Object.keys(result).length > 0 ? result : undefined;
 };
 
 const sanitizeNumberArray = (
@@ -1035,6 +1084,9 @@ const sanitizeSavedConnection = (
     0,
     MAX_REDIS_DATABASE_INDEX,
   );
+  const schemaVisibilityByDatabase = sanitizeSchemaVisibilityByDatabase(
+    raw.schemaVisibilityByDatabase,
+  );
 
   return {
     id,
@@ -1054,6 +1106,7 @@ const sanitizeSavedConnection = (
       includeDatabases.length > 0 ? includeDatabases : undefined,
     includeRedisDatabases:
       includeRedisDatabases.length > 0 ? includeRedisDatabases : undefined,
+    schemaVisibilityByDatabase,
     iconType: sanitizeConnectionIconType(raw.iconType),
     iconColor: sanitizeConnectionIconColor(raw.iconColor),
   };
@@ -1309,6 +1362,22 @@ export interface SqlLog {
   transactionAction?: "commit" | "rollback";
 }
 
+/** 首页一键重新打开的最近连接 / 数据库目标。 */
+export interface RecentConnectionTarget {
+  connectionId: string;
+  dbName?: string;
+  openedAt: number;
+}
+
+/** 首页一键重新打开的 SQL 文件，始终保留其运行时连接上下文。 */
+export interface RecentSQLFile {
+  filePath: string;
+  fileName: string;
+  connectionId: string;
+  dbName?: string;
+  openedAt: number;
+}
+
 export interface QueryOptions {
   maxRows: number;
   showColumnComment: boolean;
@@ -1361,6 +1430,8 @@ interface AppState {
   activeContext: { connectionId: string; dbName: string } | null;
   savedQueries: SavedQuery[];
   externalSQLDirectories: ExternalSQLDirectory[];
+  recentConnectionTargets: RecentConnectionTarget[];
+  recentSQLFiles: RecentSQLFile[];
   theme: ThemeMode;
   themePreference: ThemePreference;
   languagePreference: LanguagePreference;
@@ -1503,6 +1574,10 @@ interface AppState {
   deleteQuery: (id: string) => Promise<void>;
   saveExternalSQLDirectory: (directory: ExternalSQLDirectory) => void;
   deleteExternalSQLDirectory: (id: string) => void;
+  updateRecentSQLFilePath: (previousPath: string, nextPath: string) => void;
+  removeRecentSQLFilesByPath: (filePath: string) => void;
+  moveRecentSQLFilesByDirectory: (previousDirectoryPath: string, nextDirectoryPath: string) => void;
+  removeRecentSQLFilesByDirectory: (directoryPath: string) => void;
 
   setTheme: (theme: ThemeMode) => void;
   setThemePreference: (themePreference: ThemePreference) => void;
@@ -1701,23 +1776,23 @@ const sanitizeExternalSQLDirectories = (
 ): ExternalSQLDirectory[] => {
   if (!Array.isArray(value)) return [];
   const result: ExternalSQLDirectory[] = [];
-  const seenPaths = new Set<string>();
+  const seenDirectoryIds = new Set<string>();
   value.forEach((entry) => {
     if (!entry || typeof entry !== "object") return;
     const raw = entry as Record<string, unknown>;
     const path = toTrimmedString(raw.path);
     if (!path) return;
-    const normalizedPath = path.replace(/\\/g, "/").toLowerCase();
-    if (seenPaths.has(normalizedPath)) return;
-    seenPaths.add(normalizedPath);
     const connectionId = toTrimmedString(raw.connectionId);
     const dbName = toTrimmedString(raw.dbName);
+    const id =
+      toTrimmedString(
+        raw.id,
+        buildExternalSQLDirectoryId(connectionId, dbName, path),
+      ) || buildExternalSQLDirectoryId(connectionId, dbName, path);
+    if (seenDirectoryIds.has(id)) return;
+    seenDirectoryIds.add(id);
     result.push({
-      id:
-        toTrimmedString(
-          raw.id,
-          buildExternalSQLDirectoryId(connectionId, dbName, path),
-        ) || buildExternalSQLDirectoryId(connectionId, dbName, path),
+      id,
       name: resolveExternalSQLDirectoryName(raw.name, path),
       path,
       ...(connectionId ? { connectionId } : {}),
@@ -1729,6 +1804,171 @@ const sanitizeExternalSQLDirectories = (
   });
   return result;
 };
+
+const normalizeRecentTargetTimestamp = (value: unknown): number => {
+  const timestamp = Number(value);
+  return Number.isFinite(timestamp) && timestamp > 0
+    ? Math.trunc(timestamp)
+    : 0;
+};
+
+const buildRecentConnectionTargetKey = (
+  connectionId: string,
+  dbName?: string,
+): string => `${connectionId}::${String(dbName || '')}`;
+
+const buildRecentSQLFileKey = (
+  connectionId: string,
+  dbName: string | undefined,
+  filePath: string,
+): string => [
+  connectionId,
+  String(dbName || ''),
+  filePath.replace(/\\/g, '/'),
+].join('::');
+
+const sanitizeRecentConnectionTargets = (
+  value: unknown,
+): RecentConnectionTarget[] => {
+  if (!Array.isArray(value)) return [];
+
+  const candidates = value.flatMap((entry): RecentConnectionTarget[] => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const raw = entry as Record<string, unknown>;
+    const connectionId = toTrimmedString(raw.connectionId);
+    if (!connectionId || connectionId.length > 256) return [];
+    const dbName = toTrimmedString(raw.dbName).slice(0, MAX_RECENT_TARGET_DATABASE_LENGTH);
+    return [{
+      connectionId,
+      ...(dbName ? { dbName } : {}),
+      openedAt: normalizeRecentTargetTimestamp(raw.openedAt),
+    }];
+  }).sort((left, right) => right.openedAt - left.openedAt);
+
+  const seen = new Set<string>();
+  return candidates.filter((target) => {
+    const key = buildRecentConnectionTargetKey(target.connectionId, target.dbName);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, MAX_RECENT_WORKBENCH_TARGETS);
+};
+
+const resolveRecentSQLFileName = (filePath: string, title: unknown): string => {
+  const fallbackName = filePath.split(/[\\/]/).filter(Boolean).pop() || filePath;
+  return (toTrimmedString(title) || fallbackName).slice(0, MAX_RECENT_SQL_FILE_NAME_LENGTH);
+};
+
+const normalizeRecentSQLPath = (value: unknown): string => {
+  const normalized = toTrimmedString(value).replace(/\\/g, '/');
+  return normalized === '/' ? normalized : normalized.replace(/\/+$/, '');
+};
+
+const isRecentSQLPathInDirectory = (filePath: string, directoryPath: string): boolean => {
+  const normalizedFilePath = normalizeRecentSQLPath(filePath);
+  const normalizedDirectoryPath = normalizeRecentSQLPath(directoryPath);
+  if (!normalizedDirectoryPath) return false;
+  if (normalizedDirectoryPath === '/') return normalizedFilePath.startsWith('/');
+  return normalizedFilePath === normalizedDirectoryPath
+    || normalizedFilePath.startsWith(`${normalizedDirectoryPath}/`);
+};
+
+const relocateRecentSQLFilePath = (
+  filePath: string,
+  previousDirectoryPath: string,
+  nextDirectoryPath: string,
+): string => {
+  const normalizedPreviousDirectoryPath = normalizeRecentSQLPath(previousDirectoryPath);
+  const normalizedFilePath = normalizeRecentSQLPath(filePath);
+  const normalizedNextDirectoryPath = normalizeRecentSQLPath(nextDirectoryPath);
+  if (!normalizedPreviousDirectoryPath || !normalizedNextDirectoryPath) return filePath;
+  const suffix = normalizedFilePath.slice(normalizedPreviousDirectoryPath.length);
+  const rawNextDirectoryPath = toTrimmedString(nextDirectoryPath).replace(/[\\/]+$/, '');
+  const separator = rawNextDirectoryPath.includes('\\') ? '\\' : '/';
+  return `${rawNextDirectoryPath}${suffix.replace(/\//g, separator)}`;
+};
+
+const sanitizeRecentSQLFiles = (value: unknown): RecentSQLFile[] => {
+  if (!Array.isArray(value)) return [];
+
+  const candidates = value.flatMap((entry): RecentSQLFile[] => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const raw = entry as Record<string, unknown>;
+    const connectionId = toTrimmedString(raw.connectionId);
+    const filePath = toTrimmedString(raw.filePath).slice(0, MAX_URI_LENGTH);
+    if (!connectionId || connectionId.length > 256 || !filePath) return [];
+    const dbName = toTrimmedString(raw.dbName).slice(0, MAX_RECENT_TARGET_DATABASE_LENGTH);
+    const fileName = resolveRecentSQLFileName(filePath, raw.fileName);
+    if (!fileName) return [];
+    return [{
+      filePath,
+      fileName,
+      connectionId,
+      ...(dbName ? { dbName } : {}),
+      openedAt: normalizeRecentTargetTimestamp(raw.openedAt),
+    }];
+  }).sort((left, right) => right.openedAt - left.openedAt);
+
+  const seen = new Set<string>();
+  return candidates.filter((file) => {
+    const key = buildRecentSQLFileKey(file.connectionId, file.dbName, file.filePath);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, MAX_RECENT_SQL_FILES);
+};
+
+const prependRecentConnectionTarget = (
+  existing: RecentConnectionTarget[],
+  tab: Pick<TabData, 'connectionId' | 'dbName'>,
+): RecentConnectionTarget[] => {
+  const connectionId = toTrimmedString(tab.connectionId);
+  if (!connectionId) return existing;
+  const dbName = toTrimmedString(tab.dbName).slice(0, MAX_RECENT_TARGET_DATABASE_LENGTH);
+  const target: RecentConnectionTarget = {
+    connectionId,
+    ...(dbName ? { dbName } : {}),
+    openedAt: Date.now(),
+  };
+  const key = buildRecentConnectionTargetKey(target.connectionId, target.dbName);
+  return [
+    target,
+    ...existing.filter((item) => buildRecentConnectionTargetKey(item.connectionId, item.dbName) !== key),
+  ].slice(0, MAX_RECENT_WORKBENCH_TARGETS);
+};
+
+const prependRecentSQLFile = (
+  existing: RecentSQLFile[],
+  tab: Pick<TabData, 'connectionId' | 'dbName' | 'filePath' | 'title'>,
+): RecentSQLFile[] => {
+  const connectionId = toTrimmedString(tab.connectionId);
+  const filePath = toTrimmedString(tab.filePath).slice(0, MAX_URI_LENGTH);
+  if (!connectionId || !filePath) return existing;
+  const dbName = toTrimmedString(tab.dbName).slice(0, MAX_RECENT_TARGET_DATABASE_LENGTH);
+  const file: RecentSQLFile = {
+    filePath,
+    fileName: resolveRecentSQLFileName(filePath, tab.title),
+    connectionId,
+    ...(dbName ? { dbName } : {}),
+    openedAt: Date.now(),
+  };
+  const key = buildRecentSQLFileKey(file.connectionId, file.dbName, file.filePath);
+  return [
+    file,
+    ...existing.filter((item) => buildRecentSQLFileKey(item.connectionId, item.dbName, item.filePath) !== key),
+  ].slice(0, MAX_RECENT_SQL_FILES);
+};
+
+const resolveRecentWorkbenchEntries = (
+  state: Pick<AppState, 'recentConnectionTargets' | 'recentSQLFiles'>,
+  tab: TabData,
+): Pick<AppState, 'recentConnectionTargets' | 'recentSQLFiles'> => ({
+  recentConnectionTargets: prependRecentConnectionTarget(
+    state.recentConnectionTargets,
+    tab,
+  ),
+  recentSQLFiles: prependRecentSQLFile(state.recentSQLFiles, tab),
+});
 
 const sanitizeTableExportHistoryEntry = (
   value: unknown,
@@ -2655,6 +2895,8 @@ export const useStore = create<AppState>()(
       activeContext: null,
       savedQueries: [],
       externalSQLDirectories: [],
+      recentConnectionTargets: [],
+      recentSQLFiles: [],
       theme: "light",
       themePreference: "light",
       languagePreference: DEFAULT_LANGUAGE_PREFERENCE,
@@ -2745,6 +2987,12 @@ export const useStore = create<AppState>()(
           return {
             connections: nextConnections,
             connectionTags: nextTags,
+            recentConnectionTargets: state.recentConnectionTargets.filter(
+              (target) => target.connectionId !== id,
+            ),
+            recentSQLFiles: state.recentSQLFiles.filter(
+              (file) => file.connectionId !== id,
+            ),
             sidebarRootOrder: resolveSidebarRootOrderTokens(
               state.sidebarRootOrder.filter(
                 (token) => token !== buildSidebarRootConnectionToken(id),
@@ -3020,6 +3268,10 @@ export const useStore = create<AppState>()(
                   resultPanelVisible: state.queryOptions.showQueryResultsPanel,
                 }
               : tab;
+          const recentWorkbenchEntries = resolveRecentWorkbenchEntries(
+            state,
+            incomingTab,
+          );
           const index = state.tabs.findIndex((t) => t.id === incomingTab.id);
           if (index !== -1) {
             // Update existing tab with new data (e.g. switch initialTab)
@@ -3027,6 +3279,7 @@ export const useStore = create<AppState>()(
             newTabs[index] = { ...newTabs[index], ...incomingTab };
             return {
               tabs: newTabs,
+              ...recentWorkbenchEntries,
               activeTabId: incomingTab.id,
               activeContext: resolveActiveContextForTabId(
                 newTabs,
@@ -3063,6 +3316,7 @@ export const useStore = create<AppState>()(
               };
               return {
                 tabs: newTabs,
+                ...recentWorkbenchEntries,
                 activeTabId: existingTab.id,
                 activeContext: resolveActiveContextForTabId(
                   newTabs,
@@ -3090,6 +3344,7 @@ export const useStore = create<AppState>()(
               };
               return {
                 tabs: newTabs,
+                ...recentWorkbenchEntries,
                 activeTabId: existingTab.id,
                 activeContext: resolveActiveContextForTabId(
                   newTabs,
@@ -3102,6 +3357,7 @@ export const useStore = create<AppState>()(
           const nextTabs = [...state.tabs, incomingTab];
           return {
             tabs: nextTabs,
+            ...recentWorkbenchEntries,
             activeTabId: incomingTab.id,
             activeContext: resolveActiveContextForTabId(
               nextTabs,
@@ -3117,9 +3373,11 @@ export const useStore = create<AppState>()(
           if (!tabId) return state;
 
           let changed = false;
+          let contextChangedTab: TabData | null = null;
           const nextTabs = state.tabs.map((tab) => {
             if (tab.id !== tabId || tab.type !== "query") return tab;
             const nextTab: TabData = { ...tab };
+            let connectionContextChanged = false;
 
             if (draft.query !== undefined) {
               const nextQuery = typeof draft.query === "string" ? draft.query.slice(0, MAX_PERSISTED_QUERY_LENGTH) : "";
@@ -3133,6 +3391,7 @@ export const useStore = create<AppState>()(
               if (nextTab.connectionId !== nextConnectionId) {
                 nextTab.connectionId = nextConnectionId;
                 changed = true;
+                connectionContextChanged = true;
               }
             }
             if (draft.dbName !== undefined) {
@@ -3140,6 +3399,7 @@ export const useStore = create<AppState>()(
               if ((nextTab.dbName || "") !== nextDbName) {
                 nextTab.dbName = nextDbName;
                 changed = true;
+                connectionContextChanged = true;
               }
             }
             if (draft.title !== undefined) {
@@ -3181,10 +3441,19 @@ export const useStore = create<AppState>()(
               }
             }
 
+            if (connectionContextChanged) {
+              contextChangedTab = nextTab;
+            }
             return nextTab;
           });
 
-          return changed ? { tabs: nextTabs } : state;
+          if (!changed) return state;
+          return {
+            tabs: nextTabs,
+            ...(contextChangedTab
+              ? resolveRecentWorkbenchEntries(state, contextChangedTab)
+              : {}),
+          };
         }),
 
       closeTab: (id) =>
@@ -3792,11 +4061,8 @@ export const useStore = create<AppState>()(
               ? Number(directory.createdAt)
               : Date.now(),
           };
-          const nextPathKey = path.replace(/\\/g, "/").toLowerCase();
           const existingIndex = state.externalSQLDirectories.findIndex(
-            (item) =>
-              item.id === nextDirectory.id ||
-              item.path.replace(/\\/g, "/").toLowerCase() === nextPathKey,
+            (item) => item.id === nextDirectory.id,
           );
           if (existingIndex === -1) {
             return {
@@ -3817,6 +4083,64 @@ export const useStore = create<AppState>()(
         set((state) => ({
           externalSQLDirectories: state.externalSQLDirectories.filter(
             (item) => item.id !== id,
+          ),
+        })),
+
+      updateRecentSQLFilePath: (previousPath, nextPath) =>
+        set((state) => {
+          const previousKey = normalizeRecentSQLPath(previousPath);
+          const normalizedNextPath = toTrimmedString(nextPath);
+          if (!previousKey || !normalizedNextPath) return state;
+          return {
+            recentSQLFiles: sanitizeRecentSQLFiles(state.recentSQLFiles.map((file) => (
+              normalizeRecentSQLPath(file.filePath) === previousKey
+                ? {
+                    ...file,
+                    filePath: normalizedNextPath,
+                    fileName: resolveRecentSQLFileName(normalizedNextPath, undefined),
+                  }
+                : file
+            ))),
+          };
+        }),
+
+      removeRecentSQLFilesByPath: (filePath) =>
+        set((state) => {
+          const pathKey = normalizeRecentSQLPath(filePath);
+          if (!pathKey) return state;
+          return {
+            recentSQLFiles: state.recentSQLFiles.filter(
+              (file) => normalizeRecentSQLPath(file.filePath) !== pathKey,
+            ),
+          };
+        }),
+
+      moveRecentSQLFilesByDirectory: (previousDirectoryPath, nextDirectoryPath) =>
+        set((state) => {
+          const previousPath = normalizeRecentSQLPath(previousDirectoryPath);
+          const nextPath = normalizeRecentSQLPath(nextDirectoryPath);
+          if (!previousPath || !nextPath) return state;
+          return {
+            recentSQLFiles: sanitizeRecentSQLFiles(state.recentSQLFiles.map((file) => {
+              if (!isRecentSQLPathInDirectory(file.filePath, previousPath)) return file;
+              const filePath = relocateRecentSQLFilePath(
+                file.filePath,
+                previousDirectoryPath,
+                nextDirectoryPath,
+              );
+              return {
+                ...file,
+                filePath,
+                fileName: resolveRecentSQLFileName(filePath, undefined),
+              };
+            })),
+          };
+        }),
+
+      removeRecentSQLFilesByDirectory: (directoryPath) =>
+        set((state) => ({
+          recentSQLFiles: state.recentSQLFiles.filter(
+            (file) => !isRecentSQLPathInDirectory(file.filePath, directoryPath),
           ),
         })),
 
@@ -4551,6 +4875,10 @@ export const useStore = create<AppState>()(
         nextState.externalSQLDirectories = sanitizeExternalSQLDirectories(
           state.externalSQLDirectories,
         );
+        nextState.recentConnectionTargets = sanitizeRecentConnectionTargets(
+          state.recentConnectionTargets,
+        );
+        nextState.recentSQLFiles = sanitizeRecentSQLFiles(state.recentSQLFiles);
         nextState.theme = sanitizeTheme(state.theme);
         nextState.themePreference = sanitizeThemePreference(
           state.themePreference,
@@ -4675,6 +5003,10 @@ export const useStore = create<AppState>()(
           externalSQLDirectories: sanitizeExternalSQLDirectories(
             state.externalSQLDirectories,
           ),
+          recentConnectionTargets: sanitizeRecentConnectionTargets(
+            state.recentConnectionTargets,
+          ),
+          recentSQLFiles: sanitizeRecentSQLFiles(state.recentSQLFiles),
           theme: sanitizeTheme(state.theme),
           themePreference: sanitizeThemePreference(
             state.themePreference,
@@ -4737,6 +5069,10 @@ export const useStore = create<AppState>()(
           connectionTags: state.connectionTags,
           sidebarRootOrder: state.sidebarRootOrder,
           externalSQLDirectories: state.externalSQLDirectories,
+          recentConnectionTargets: sanitizeRecentConnectionTargets(
+            state.recentConnectionTargets,
+          ),
+          recentSQLFiles: sanitizeRecentSQLFiles(state.recentSQLFiles),
           theme: state.theme,
           themePreference: state.themePreference,
           languagePreference: state.languagePreference,

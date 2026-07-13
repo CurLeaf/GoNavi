@@ -331,6 +331,7 @@ export type V2DatabaseContextMenuActionKey =
   | 'disconnect-db'
   | 'new-query'
   | 'run-sql'
+  | 'schema-visibility'
   | 'drop-db';
 
 export type V2SchemaContextMenuActionKey =
@@ -345,6 +346,7 @@ export const V2DatabaseContextMenuView: React.FC<{
   shortcutPlatform?: ShortcutPlatform;
   dialect?: string;
   supportsSchemaActions?: boolean;
+  supportsSchemaVisibility?: boolean;
   supportsStarRocksActions?: boolean;
   supportsRenameDatabase?: boolean;
   supportsDropDatabase?: boolean;
@@ -354,6 +356,7 @@ export const V2DatabaseContextMenuView: React.FC<{
   shortcutPlatform = DEFAULT_V2_CONTEXT_MENU_SHORTCUT_PLATFORM,
   dialect,
   supportsSchemaActions = false,
+  supportsSchemaVisibility = false,
   supportsStarRocksActions = false,
   supportsRenameDatabase = true,
   supportsDropDatabase = true,
@@ -377,6 +380,7 @@ export const V2DatabaseContextMenuView: React.FC<{
         {renderItems([
           { action: 'new-table', icon: <TableOutlined />, title: t('sidebar.menu.create_table'), kbd: primaryShortcut('N', shortcutPlatform), featured: true },
           ...(supportsSchemaActions ? [{ action: 'new-schema', icon: <FolderAddOutlined />, title: t('sidebar.v2_database_menu.new_schema') }] : []),
+          ...(supportsSchemaVisibility ? [{ action: 'schema-visibility', icon: <FolderOpenOutlined />, title: t('sidebar.schema_visibility.menu.manage') }] : []),
           { action: 'new-query', icon: <ConsoleSqlOutlined />, title: t('sidebar.menu.new_query') },
           { action: 'run-sql', icon: <FileAddOutlined />, title: t('sidebar.sql_file_exec.title') },
         ])}
