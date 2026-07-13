@@ -2465,8 +2465,9 @@ func (a *App) ApplyChanges(config connection.ConnectionConfig, dbName, tableName
 	}
 
 	if applier, ok := dbInst.(db.BatchApplier); ok {
-		preview := buildChangePreview(dbInst, config, tableName, changes)
-		err := applier.ApplyChanges(tableName, changes)
+		targetTableName := resolveChangeTargetTableName(config, dbName, tableName)
+		preview := buildChangePreview(dbInst, config, targetTableName, changes)
+		err := applier.ApplyChanges(targetTableName, changes)
 		if err != nil {
 			return connection.QueryResult{Success: false, Message: err.Error(), Data: preview}
 		}
@@ -2483,6 +2484,19 @@ type ChangePreview struct {
 	Inserts []string `json:"inserts"`
 }
 
+func resolveChangeTargetTableName(config connection.ConnectionConfig, dbName, tableName string) string {
+	targetTableName := strings.TrimSpace(tableName)
+	if resolveDDLDBType(config) != "oracle" {
+		return targetTableName
+	}
+
+	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, targetTableName)
+	if strings.TrimSpace(schemaName) == "" || strings.TrimSpace(pureTableName) == "" {
+		return targetTableName
+	}
+	return strings.TrimSpace(schemaName) + "." + strings.TrimSpace(pureTableName)
+}
+
 func buildChangePreview(dbInst db.Database, config connection.ConnectionConfig, tableName string, changes connection.ChangeSet) ChangePreview {
 	if previewer, ok := dbInst.(db.ChangePreviewer); ok {
 		deletes, updates, inserts := previewer.PreviewChanges(tableName, changes)
@@ -2491,7 +2505,8 @@ func buildChangePreview(dbInst db.Database, config connection.ConnectionConfig, 
 
 	dbType := resolveDDLDBType(config)
 	quoter := func(s string) string { return quoteIdentByType(dbType, s) }
-	deletes, updates, inserts := db.GenerateChangePreview(tableName, changes, quoter)
+	tableQuoter := func(s string) string { return quoteQualifiedIdentByType(dbType, s) }
+	deletes, updates, inserts := db.GenerateChangePreviewWithTableQuoter(tableName, changes, quoter, tableQuoter)
 	return ChangePreview{Deletes: deletes, Updates: updates, Inserts: inserts}
 }
 
@@ -2506,7 +2521,8 @@ func (a *App) PreviewChanges(config connection.ConnectionConfig, dbName, tableNa
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Data: buildChangePreview(dbInst, config, tableName, changes)}
+	targetTableName := resolveChangeTargetTableName(config, dbName, tableName)
+	return connection.QueryResult{Success: true, Data: buildChangePreview(dbInst, config, targetTableName, changes)}
 }
 
 func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tableName string, format string) connection.QueryResult {
