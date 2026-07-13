@@ -312,14 +312,23 @@ export const useAppUpdateManager = ({
       setInstallMode(normalizeUpdateInstallMode(downloadedInfo.installMode));
       setUpdateDownloadProgress((prev) => {
         const total = prev.total > 0 ? prev.total : (info.assetSize || 0);
-        return { ...prev, key: downloadedKey, status: 'done', percent: 100, downloaded: total, total, message: '', open: false };
+        return {
+          ...prev,
+          key: downloadedKey,
+          status: 'done',
+          percent: 100,
+          downloaded: total,
+          total,
+          message: '',
+          open: prev.open || !updateUserDismissedRef.current,
+        };
       });
       setLastUpdateInfo(downloadedInfo);
       const installAction = resolveUpdateInstallAction(downloadedInfo);
       // 下载到 100% 后停留在就绪态，由用户确认当前安装方式对应的更新动作。
       setUpdateDownloadProgress((prev) => ({
         ...prev,
-        open: true,
+        open: prev.open || !updateUserDismissedRef.current,
         status: 'done',
         percent: 100,
         downloaded: prev.total > 0 ? prev.total : (info.assetSize || prev.downloaded),
@@ -720,7 +729,7 @@ export const useAppUpdateManager = ({
             }
           }
           return {
-            open: prev.open || nextStatus === 'start' || nextStatus === 'downloading' || nextStatus === 'done' || nextStatus === 'error',
+            open: prev.open || !updateUserDismissedRef.current,
             version: prev.version,
             key: prev.key,
             status: nextStatus,

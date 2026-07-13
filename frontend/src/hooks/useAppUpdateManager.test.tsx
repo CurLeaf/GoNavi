@@ -581,4 +581,66 @@ describe('useAppUpdateManager', () => {
     expect(backendApp.OpenDownloadedUpdateDirectory).toHaveBeenCalledTimes(1);
     expect(messageApi.success).toHaveBeenCalledWith('opened-install-directory');
   });
+
+  it('keeps an in-progress download hidden after later progress events', async () => {
+    let resolveDownload: ((result: Record<string, unknown>) => void) | undefined;
+    const downloadPromise = new Promise<Record<string, unknown>>((resolve) => {
+      resolveDownload = resolve;
+    });
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        downloaded: false,
+        assetSize: 1024,
+      },
+    });
+    backendApp.DownloadUpdate.mockReturnValue(downloadPromise);
+
+    renderHook();
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+
+    let pendingDownload: Promise<void> | undefined;
+    act(() => {
+      pendingDownload = hook?.downloadUpdate(hook.lastUpdateInfo!, false);
+    });
+    expect(hook?.updateDownloadProgress.open).toBe(true);
+
+    act(() => {
+      hook?.markUpdateProgressDismissed();
+      hook?.hideUpdateDownloadProgress();
+    });
+    expect(hook?.updateDownloadProgress.open).toBe(false);
+
+    const progressListener = (runtimeApi.EventsOn.mock.calls as unknown as Array<[string, unknown]>)
+      .filter(([eventName]) => eventName === 'update:download-progress')
+      .slice(-1)[0]?.[1] as ((event: Record<string, unknown>) => void) | undefined;
+    expect(progressListener).toBeTypeOf('function');
+    act(() => {
+      progressListener?.({
+        status: 'downloading',
+        downloaded: 768,
+        total: 1024,
+        percent: 75,
+      });
+    });
+
+    expect(hook?.updateDownloadProgress.open).toBe(false);
+    expect(hook?.updateDownloadProgress.percent).toBe(75);
+
+    await act(async () => {
+      resolveDownload?.({
+        success: true,
+        data: { downloadPath: 'D:/GoNavi/GoNavi-0.8.2.exe' },
+      });
+      await pendingDownload;
+    });
+
+    expect(hook?.updateDownloadProgress.status).toBe('done');
+    expect(hook?.updateDownloadProgress.open).toBe(false);
+  });
 });
