@@ -2113,6 +2113,20 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const decorations: any[] = [];
       const seen = new Set<string>();
       const candidates = collectQueryEditorObjectDecorationCandidates(text);
+      const objectMetadataCount = tablesRef.current.length
+          + viewsRef.current.length
+          + materializedViewsRef.current.length
+          + triggersRef.current.length
+          + routinesRef.current.length
+          + sequencesRef.current.length
+          + packagesRef.current.length;
+      if (objectMetadataCount > 5_000) {
+          objectDecorationIdsRef.current = editor.deltaDecorations(objectDecorationIdsRef.current, []);
+          return;
+      }
+      const decorationColumns = allColumnsRef.current.length <= 2_000
+          ? allColumnsRef.current
+          : [];
 
       for (const candidate of candidates) {
           const hoverTarget = resolveQueryEditorHoverTarget(
@@ -2122,7 +2136,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               currentDbRef.current,
               visibleDbsRef.current,
               tablesRef.current,
-              allColumnsRef.current,
+              decorationColumns,
               viewsRef.current,
               materializedViewsRef.current,
               triggersRef.current,
@@ -3958,6 +3972,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const applyNavigationHoverState = (event: any) => {
           const targetPosition = normalizeEditorPosition(event?.target?.position);
           lastHoverTargetPositionRef.current = targetPosition;
+          if (!ctrlMetaPressedRef.current) {
+              return;
+          }
           applyNavigationHoverStateAtPosition(targetPosition);
       };
 
@@ -4298,8 +4315,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   ...referencedDbs.map((dbName) => String(dbName || '').toLowerCase()).sort(),
               ].join('\u0000');
               if (nextKey === lastSqlReferencedMetadataKeyRef.current) {
-                  // 库集合未变：仍刷新装饰（可能表列表已异步到位）
-                  refreshObjectDecorations(QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH);
                   return;
               }
               lastSqlReferencedMetadataKeyRef.current = nextKey;

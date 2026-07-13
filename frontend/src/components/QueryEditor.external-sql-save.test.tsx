@@ -6017,6 +6017,27 @@ describe('QueryEditor external SQL save', () => {
     expect(editorState.editor.deltaDecorations).not.toHaveBeenCalled();
   });
 
+  it('does not churn decorations while selecting text without a navigation modifier', async () => {
+    editorState.value = 'select users.id from users';
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value })} />);
+    });
+
+    editorState.editor.updateOptions.mockClear();
+    editorState.editor.deltaDecorations.mockClear();
+
+    await act(async () => {
+      editorState.mouseMoveListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 10 } },
+        event: { ctrlKey: false, metaKey: false },
+      });
+    });
+
+    expect(editorState.editor.updateOptions).not.toHaveBeenCalled();
+    expect(editorState.editor.deltaDecorations).not.toHaveBeenCalled();
+  });
+
   it('ignores candidate number keys while a composition session is active', async () => {
     const windowListeners: Record<string, ((event?: any) => void)[]> = {};
     vi.stubGlobal('window', {
@@ -6652,6 +6673,35 @@ describe('QueryEditor external SQL save', () => {
     expect(editorState.editor.deltaDecorations).not.toHaveBeenCalled();
     expect(editorState.editor.getModel().getValueLength).not.toHaveBeenCalled();
     expect(editorState.editor.getModel().getValue).not.toHaveBeenCalled();
+  });
+
+  it('does not rescan object decorations after repeated edits in the same database context', async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: 'select 1;' })} />);
+      });
+
+      const emitChange = async (value: string) => {
+        editorState.value = value;
+        editorState.latestOnChange?.(value);
+        editorState.modelContentListeners.forEach((listener) => listener({
+          changes: [{ text: value }],
+        }));
+        await act(async () => {
+          vi.advanceTimersByTime(450);
+          await Promise.resolve();
+        });
+      };
+
+      await emitChange('select users.id from users;');
+      editorState.editor.deltaDecorations.mockClear();
+      await emitChange('select users.id, users.name from users;');
+
+      expect(editorState.editor.deltaDecorations).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('ignores focused local tab query echoes so IME candidate commits are not overwritten', async () => {

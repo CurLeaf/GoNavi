@@ -20,6 +20,32 @@ const isTestRuntime = (): boolean => {
   return env.MODE === 'test' || env.VITEST === true || env.VITEST === 'true';
 };
 
+type MonacoWorkerFactory = () => Worker;
+
+interface MonacoWorkerFactories {
+  editor: MonacoWorkerFactory;
+  json: MonacoWorkerFactory;
+  css: MonacoWorkerFactory;
+  html: MonacoWorkerFactory;
+  typescript: MonacoWorkerFactory;
+}
+
+export const installMonacoWorkerEnvironment = (
+  scope: Record<string, any>,
+  workers: MonacoWorkerFactories,
+) => {
+  scope.MonacoEnvironment = {
+    ...(scope.MonacoEnvironment || {}),
+    getWorker(_moduleId: string, label: string) {
+      if (label === 'json') return workers.json();
+      if (label === 'css' || label === 'scss' || label === 'less') return workers.css();
+      if (label === 'html' || label === 'handlebars' || label === 'razor') return workers.html();
+      if (label === 'typescript' || label === 'javascript') return workers.typescript();
+      return workers.editor();
+    },
+  };
+};
+
 const sameEditorPosition = (left: any, right: any): boolean => (
   Number(left?.lineNumber) === Number(right?.lineNumber)
   && Number(left?.column) === Number(right?.column)
@@ -539,8 +565,22 @@ const ensureMonacoConfigured = (): Promise<void> => {
 
   if (!monacoConfiguredPromise) {
     monacoConfiguredPromise = import('monaco-editor/esm/nls.messages.zh-cn')
-      .then(() => import('monaco-editor'))
-      .then((monaco) => {
+      .then(() => Promise.all([
+        import('monaco-editor'),
+        import('monaco-editor/esm/vs/editor/editor.worker?worker'),
+        import('monaco-editor/esm/vs/language/json/json.worker?worker'),
+        import('monaco-editor/esm/vs/language/css/css.worker?worker'),
+        import('monaco-editor/esm/vs/language/html/html.worker?worker'),
+        import('monaco-editor/esm/vs/language/typescript/ts.worker?worker'),
+      ]))
+      .then(([monaco, editorWorker, jsonWorker, cssWorker, htmlWorker, typescriptWorker]) => {
+        installMonacoWorkerEnvironment(globalThis as unknown as Record<string, any>, {
+          editor: () => new editorWorker.default(),
+          json: () => new jsonWorker.default(),
+          css: () => new cssWorker.default(),
+          html: () => new htmlWorker.default(),
+          typescript: () => new typescriptWorker.default(),
+        });
         loader.config({ monaco });
       });
   }
