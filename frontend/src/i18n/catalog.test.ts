@@ -450,6 +450,8 @@ describe("i18n catalog", () => {
       "data_grid.pagination.result_set",
       "data_grid.pagination.page_size_aria",
       "data_grid.pagination.page_size_option",
+      "data_grid.pagination.first_page",
+      "data_grid.pagination.last_page",
       "data_grid.pagination.jump_label",
       "data_grid.pagination.jump_aria",
       "data_grid.pagination.jump_action",

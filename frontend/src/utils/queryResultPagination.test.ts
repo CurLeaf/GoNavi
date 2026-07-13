@@ -26,7 +26,7 @@ describe('queryResultPagination', () => {
     });
   });
 
-  it('treats query-editor injected LIMIT as a capped page rather than an uncounted total', () => {
+  it('keeps query-editor injected LIMIT pageable instead of treating the cap as the total', () => {
     const page = createInitialQueryResultPagination({
       executedSql: 'SELECT id, name FROM users LIMIT 500',
       exportSql: 'SELECT id, name FROM users',
@@ -38,14 +38,14 @@ describe('queryResultPagination', () => {
     expect(page).toMatchObject({
       current: 1,
       pageSize: 500,
-      total: 500,
-      totalKnown: true,
+      total: 1000,
+      totalKnown: false,
       baseSql: 'SELECT id, name FROM users',
       exportAllSql: 'SELECT id, name FROM users',
     });
   });
 
-  it('treats query-editor injected Oracle ROWNUM wrapper as a capped page', () => {
+  it('keeps query-editor injected Oracle ROWNUM wrapper pageable', () => {
     const page = createInitialQueryResultPagination({
       executedSql: 'SELECT * FROM (SELECT id, name FROM users ORDER BY created_at DESC) WHERE ROWNUM <= 500',
       exportSql: 'SELECT id, name FROM users ORDER BY created_at DESC',
@@ -57,8 +57,8 @@ describe('queryResultPagination', () => {
     expect(page).toMatchObject({
       current: 1,
       pageSize: 500,
-      total: 500,
-      totalKnown: true,
+      total: 1000,
+      totalKnown: false,
       baseSql: 'SELECT id, name FROM users ORDER BY created_at DESC',
       exportAllSql: 'SELECT id, name FROM users ORDER BY created_at DESC',
     });

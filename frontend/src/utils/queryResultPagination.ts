@@ -188,13 +188,11 @@ export const createInitialQueryResultPagination = (params: {
     : explicitLimit?.baseSql || mainSql;
   if (!baseSql) return undefined;
 
-  const totalState = autoLimitCap
-    ? { total: returnedRowCount, totalKnown: true }
-    : resolveQueryResultPaginationTotal({
-      current,
-      pageSize,
-      rowCount: returnedRowCount,
-    });
+  const totalState = resolveQueryResultPaginationTotal({
+    current,
+    pageSize,
+    rowCount: returnedRowCount,
+  });
 
   return {
     current,

@@ -189,8 +189,10 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('gn-v2-data-grid-status-right');
     expect(markup).toContain('data-grid-v2-pagination="true"');
     expect(markup).toContain('data-grid-v2-page-chip="true"');
+    expect(markup).toContain('data-grid-v2-pagination-first="true"');
     expect(markup).toContain('data-grid-v2-pagination-prev="true"');
     expect(markup).toContain('data-grid-v2-pagination-next="true"');
+    expect(markup).toContain('data-grid-v2-pagination-last="true"');
     expect(markup).toContain('data-grid-pagination-jump="true"');
     expect(markup).toContain('跳页');
     expect(markup).toContain('跳转页码');
@@ -1157,6 +1159,8 @@ describe('DataGrid layout', () => {
     expect(detachedChromeSource).toContain("translate('data_grid.pagination.result_set')");
     expect(detachedChromeSource).toContain("translate('data_grid.pagination.page_size_aria')");
     expect(detachedChromeSource).toContain("translate('data_grid.pagination.page_size_option'");
+    expect(detachedChromeSource).toContain("translate('data_grid.pagination.first_page')");
+    expect(detachedChromeSource).toContain("translate('data_grid.pagination.last_page')");
     expect(detachedChromeSource).toContain("translate('data_grid.pagination.jump_label')");
     expect(detachedChromeSource).toContain("translate('data_grid.pagination.jump_aria')");
     expect(detachedChromeSource).toContain("translate('data_grid.pagination.jump_action')");
@@ -1721,6 +1725,8 @@ describe('DataGrid layout', () => {
         'data_grid.pagination.result_set': 'Result set label',
         'data_grid.pagination.page_size_aria': 'Rows per page label',
         'data_grid.pagination.page_size_option': `${params?.count} rows per page`,
+        'data_grid.pagination.first_page': 'First page label',
+        'data_grid.pagination.last_page': 'Last page label',
         'data_grid.pagination.jump_label': 'Jump label',
         'data_grid.pagination.jump_aria': 'Jump page aria',
         'data_grid.pagination.jump_action': 'Go action',
@@ -1813,6 +1819,8 @@ describe('DataGrid layout', () => {
       />,
     );
     expect(paginationMarkup).toContain('Result set label');
+    expect(paginationMarkup).toContain('First page label');
+    expect(paginationMarkup).toContain('Last page label');
     expect(paginationMarkup).toContain('Jump label');
     expect(paginationMarkup).toContain('Jump page aria');
     expect(paginationMarkup).toContain('Go action');
