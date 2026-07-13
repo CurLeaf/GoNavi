@@ -95,8 +95,11 @@ func TestInstallUpdateAndRestartAllowsGuardedCloseBeforeFallbackExit(t *testing.
 	app.ctx = context.Background()
 	stagedDir := t.TempDir()
 	app.updateState.staged = &stagedUpdate{
-		FilePath:  stagedDir + "/GoNavi-update.exe",
-		StagedDir: stagedDir,
+		FilePath:     stagedDir + "/GoNavi-update.exe",
+		StagedDir:    stagedDir,
+		InstallMode:  updateInstallModePortable,
+		PackageType:  updatePackageTypePortable,
+		AutoRelaunch: true,
 	}
 
 	events := make(chan string, 3)

@@ -14,6 +14,7 @@ func TestShouldRemoveWindowsUpdateArtifact(t *testing.T) {
 		want  bool
 	}{
 		{name: "GoNavi-dev-abc-Windows-Amd64.exe", want: true},
+		{name: "GoNavi-dev-abc-Windows-Amd64-Installer.msi", want: true},
 		{name: "GoNavi-0.8.4-Windows-Amd64.zip", want: true},
 		{name: "gonavi-update-windows-123.log", want: true},
 		{name: ".gonavi-update-windows-dev-dev-abc", isDir: true, want: true},
@@ -26,6 +27,37 @@ func TestShouldRemoveWindowsUpdateArtifact(t *testing.T) {
 		if got := shouldRemoveWindowsUpdateArtifact(tc.name, tc.isDir); got != tc.want {
 			t.Fatalf("shouldRemoveWindowsUpdateArtifact(%q, %v) = %v, want %v", tc.name, tc.isDir, got, tc.want)
 		}
+	}
+}
+
+func TestResolveReusableStagedUpdateDoesNotReuseDifferentWindowsPackageType(t *testing.T) {
+	tempDir := t.TempDir()
+	assetPath := filepath.Join(tempDir, "GoNavi-0.8.5-Windows-Amd64-Installer.msi")
+	if err := os.WriteFile(assetPath, []byte("12345678"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	info := UpdateInfo{
+		Channel:       string(updateChannelLatest),
+		LatestVersion: "0.8.5",
+		AssetName:     filepath.Base(assetPath),
+		AssetSize:     8,
+		InstallMode:   string(updateInstallModeMSI),
+		PackageType:   string(updatePackageTypeMSI),
+		AutoRelaunch:  true,
+	}
+	current := &stagedUpdate{
+		Channel:      updateChannelLatest,
+		Version:      info.LatestVersion,
+		AssetName:    info.AssetName,
+		FilePath:     assetPath,
+		InstallMode:  updateInstallModePortable,
+		PackageType:  updatePackageTypePortable,
+		AutoRelaunch: true,
+	}
+
+	reused := resolveReusableStagedUpdateForPlatform("windows", "", "", info, current)
+	if reused != nil {
+		t.Fatalf("expected package type mismatch not to reuse current staged update, got %#v", reused)
 	}
 }
 

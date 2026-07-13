@@ -1,0 +1,50 @@
+package app
+
+import (
+	_ "embed"
+	"os/exec"
+	"strconv"
+	"strings"
+)
+
+//go:embed windows_msi_update.ps1
+var windowsMSIUpdatePowerShellScript string
+
+type windowsMSIUpdateLaunchContext struct {
+	SourcePath  string
+	TargetPath  string
+	StagedDir   string
+	LogPath     string
+	MSILogPath  string
+	MSIExecPath string
+	PID         int
+}
+
+func buildWindowsMSIUpdatePowerShellScript() string {
+	normalized := strings.ReplaceAll(windowsMSIUpdatePowerShellScript, "\r\n", "\n")
+	return strings.ReplaceAll(normalized, "\n", "\r\n")
+}
+
+func buildWindowsMSILaunchCommand(scriptPath string, context windowsMSIUpdateLaunchContext) *exec.Cmd {
+	cmd := exec.Command(
+		"powershell.exe",
+		"-NoProfile",
+		"-NonInteractive",
+		"-ExecutionPolicy",
+		"Bypass",
+		"-File",
+		scriptPath,
+	)
+	cmd.Dir = context.StagedDir
+	cmd.Env = append(cmd.Environ(),
+		"GONAVI_UPDATE_SOURCE="+context.SourcePath,
+		"GONAVI_UPDATE_TARGET="+context.TargetPath,
+		"GONAVI_UPDATE_STAGED_DIR="+context.StagedDir,
+		"GONAVI_UPDATE_LOG_PATH="+context.LogPath,
+		"GONAVI_UPDATE_MSI_LOG_PATH="+context.MSILogPath,
+		"GONAVI_UPDATE_MSIEXEC_PATH="+context.MSIExecPath,
+		"GONAVI_UPDATE_PID="+strconv.Itoa(context.PID),
+	)
+	configureWindowsUpdateCommand(cmd)
+	return cmd
+}
