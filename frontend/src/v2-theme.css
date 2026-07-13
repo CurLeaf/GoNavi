@@ -3626,7 +3626,8 @@ body[data-ui-version="v2"] .gn-v2-tab-label-part-object {
 }
 
 body[data-ui-version="v2"] .gn-v2-tab-label-part-connection {
-  flex: 0 1 92px;
+  flex: 0 1 auto;
+  max-width: 92px;
   color: var(--gn-fg-2);
   font-family: var(--gn-font-mono);
   font-weight: 700;

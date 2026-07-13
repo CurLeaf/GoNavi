@@ -310,6 +310,13 @@ describe('TabManager hover info', () => {
     expect(source).not.toContain('gn-v2-main-tabs-rich');
   });
 
+  it('keeps short secondary connection labels content-sized', () => {
+    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+
+    expect(css).toMatch(/\.gn-v2-tab-label-part-connection \{[^}]*flex: 0 1 auto;[^}]*max-width: 92px;/s);
+    expect(css).not.toMatch(/\.gn-v2-tab-label-part-connection \{[^}]*flex: 0 1 92px;/s);
+  });
+
   it('wires hover card tab-switch and drag-blocking handlers with selectable text styles', () => {
     const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
 
