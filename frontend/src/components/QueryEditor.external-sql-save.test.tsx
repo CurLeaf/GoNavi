@@ -7495,6 +7495,45 @@ describe('QueryEditor external SQL save', () => {
     expect(textContent(renderer!.root)).not.toContain('未提交');
   });
 
+  it('keeps DML with a trailing line comment in a pending managed transaction', async () => {
+    backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({
+      success: true,
+      transactionId: 'tx-comment',
+      transactionPending: true,
+      data: [
+        { columns: ['affectedRows'], rows: [{ affectedRows: 1 }], statementIndex: 1 },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({
+        query: 'DELETE FROM users WHERE id = 1; -- keep this operation pending',
+      })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMultiTransactional).toHaveBeenCalledWith(
+      expect.anything(),
+      'main',
+      'DELETE FROM users WHERE id = 1',
+      'query-1',
+    );
+    expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
+    expect(storeState.sqlEditorPendingTransactions['tab-1']).toMatchObject({
+      id: 'tx-comment',
+      dbType: 'mysql',
+      statements: ['DELETE FROM users WHERE id = 1'],
+    });
+  });
+
   it('keeps TDengine insert on the regular query path because it has no managed transaction support', async () => {
     storeState.connections[0].config.type = 'tdengine';
     backendApp.DBQueryMulti.mockResolvedValueOnce({

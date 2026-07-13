@@ -909,7 +909,7 @@ type dbQueryMultiAuditOptions struct {
 }
 
 func containsSQLAuditWrite(dbType string, query string) bool {
-	statements := splitSQLStatements(query)
+	statements := splitSQLStatementsForDialect(dbType, query)
 	if len(statements) == 0 {
 		return !isReadOnlySQLQuery(dbType, query)
 	}
@@ -1204,7 +1204,7 @@ func (a *App) dbQueryMulti(
 	// 注意：原生 conn.Query() 执行写操作（UPDATE/INSERT/DELETE）时，
 	// sql.Rows 不暴露 RowsAffected，导致影响行数丢失。
 	// 因此仅在全部语句皆为读操作时才使用原生路径。
-	statements := splitSQLStatements(query)
+	statements := splitSQLStatementsForDialect(resolvedDBType, query)
 	statementCount := 0
 	for _, statement := range statements {
 		if strings.TrimSpace(statement) != "" {

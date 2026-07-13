@@ -2,7 +2,11 @@ import type { SqlLog } from '../../store';
 import type { I18nParams } from '../../i18n';
 import type { SavedConnection, TabData } from '../../types';
 import { findSqlStatementRanges } from '../../utils/sqlStatementSelection';
-import { shouldUseSqlEditorManagedTransaction } from '../../utils/sqlEditorTransaction';
+import {
+  shouldUseSqlEditorManagedTransaction,
+  shouldUseSqlEditorManagedTransactionForType,
+} from '../../utils/sqlEditorTransaction';
+import { resolveSqlDialect } from '../../utils/sqlDialect';
 import type {
   AISqlEditorPendingTransactionRuntimeState,
   AISqlEditorTransactionRuntimeState,
@@ -33,8 +37,8 @@ const normalizeDelayMs = (value: unknown): number => {
   return Number.isFinite(delayMs) && delayMs > 0 ? delayMs : DEFAULT_AUTO_COMMIT_DELAY_MS;
 };
 
-const splitStatements = (sql: string): string[] =>
-  findSqlStatementRanges(String(sql || ''))
+const splitStatements = (sql: string, dbType = ''): string[] =>
+  findSqlStatementRanges(String(sql || ''), dbType)
     .map((range) => String(range.text || '').trim())
     .filter(Boolean);
 
@@ -88,9 +92,15 @@ const buildActiveSqlTabSnapshot = (params: {
   }
 
   const sql = String(activeTab.query || '').trim();
-  const statements = splitStatements(sql);
+  const connection = connections.find((item) => item.id === activeTab.connectionId);
+  const dbType = resolveSqlDialect(
+    String(connection?.config?.type || ''),
+    String(connection?.config?.driver || ''),
+    { oceanBaseProtocol: connection?.config?.oceanBaseProtocol },
+  );
+  const statements = splitStatements(sql, dbType);
   const hasExplicitTransactionControl = statements.some(hasTransactionControlStatement);
-  const usesManagedTransaction = shouldUseSqlEditorManagedTransaction(statements);
+  const usesManagedTransaction = shouldUseSqlEditorManagedTransactionForType(dbType, statements);
 
   return {
     hasActiveTab: true,

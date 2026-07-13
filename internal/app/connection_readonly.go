@@ -266,8 +266,9 @@ func ensureConnectionAllowsQueryWithText(config connection.ConnectionConfig, que
 	if !isConnectionScriptExecutionRestricted(config) {
 		return nil
 	}
-	for _, statement := range splitSQLStatements(query) {
-		if trimmed := strings.TrimSpace(statement); trimmed != "" && !isReadOnlySQLQuery(resolveDDLDBType(config), trimmed) {
+	dbType := resolveDDLDBType(config)
+	for _, statement := range splitSQLStatementsForDialect(dbType, query) {
+		if trimmed := strings.TrimSpace(statement); trimmed != "" && !isReadOnlySQLQuery(dbType, trimmed) {
 			return errors.New(readOnlyConnectionQueryBlockedMessageWithText(text))
 		}
 	}

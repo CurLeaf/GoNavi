@@ -4935,7 +4935,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   lineNumber: Number(position?.lineNumber || 1),
                   column: Number(position?.column || 1),
               });
-              const currentStatementRange = resolveCurrentSqlStatementRange(fullText, cursorOffset);
+              const currentStatementRange = resolveCurrentSqlStatementRange(fullText, cursorOffset, activeDialect);
 
               // 获取当前行光标前的内容
               const linePrefix = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
@@ -5649,8 +5649,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       },
   ];
 
-  const splitSQLStatements = (sql: string): string[] => {
-    return findSqlStatementRanges(sql).map((range) => range.text);
+  const splitSQLStatements = (sql: string, dbType = ''): string[] => {
+    return findSqlStatementRanges(sql, dbType).map((range) => range.text);
   };
 
   const containsOraclePlsqlDefinition = (statements: string[]): boolean => (
@@ -5776,19 +5776,19 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           || '';
   };
 
-  const resolveExecutableSQLAtEditorPosition = (model: any, sqlText: string, position: any): string => {
+  const resolveExecutableSQLAtEditorPosition = (model: any, sqlText: string, position: any, dbType = ''): string => {
       const normalizedPosition = normalizeEditorPosition(position);
       if (!normalizedPosition) return '';
       const cursorOffset = getNormalizedOffsetAtPosition(sqlText, normalizedPosition);
-      const resolved = resolveExecutableSql(sqlText, cursorOffset, '');
+      const resolved = resolveExecutableSql(sqlText, cursorOffset, '', dbType);
       return resolved?.sql || '';
   };
 
-  const getExecutableSQLAtCurrentCursor = (model: any, sqlText: string): string => {
+  const getExecutableSQLAtCurrentCursor = (model: any, sqlText: string, dbType = ''): string => {
       const editor = editorRef.current;
       const liveSelection = normalizeEditorPosition(editor?.getSelection?.());
       if (liveSelection) {
-          return resolveExecutableSQLAtEditorPosition(model, sqlText, liveSelection);
+          return resolveExecutableSQLAtEditorPosition(model, sqlText, liveSelection, dbType);
       }
 
       const livePosition = normalizeEditorPosition(editor?.getPosition?.());
@@ -5802,12 +5802,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const key = `${position.lineNumber}:${position.column}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          const sql = resolveExecutableSQLAtEditorPosition(model, sqlText, position);
+          const sql = resolveExecutableSQLAtEditorPosition(model, sqlText, position, dbType);
           if (sql.trim()) return sql;
       }
 
       const fallbackPosition = cachedPosition || livePosition;
-      return resolveExecutableSQLAtEditorPosition(model, sqlText, fallbackPosition);
+      return resolveExecutableSQLAtEditorPosition(model, sqlText, fallbackPosition, dbType);
   };
 
   const getExecutableSQL = (): string => {
@@ -5829,7 +5829,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       if (selected) {
           return selectedSQL;
       }
-      return getExecutableSQLAtCurrentCursor(model, String(model.getValue?.() ?? currentQuery));
+      const activeConnection = connections.find((connection) => connection.id === currentConnectionId);
+      const activeDialect = resolveSqlDialect(
+          String(activeConnection?.config?.type || ''),
+          String(activeConnection?.config?.driver || ''),
+          { oceanBaseProtocol: activeConnection?.config?.oceanBaseProtocol },
+      );
+      return getExecutableSQLAtCurrentCursor(model, String(model.getValue?.() ?? currentQuery), activeDialect);
   };
 
   const captureEditorCursorPosition = (event?: React.MouseEvent<HTMLElement>) => {
@@ -5847,9 +5853,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       sql: string,
       queryId: string,
       sourceStatements: string[],
+      dbType = String(config.type || ''),
   ) => {
       const pendingTransaction = pendingSqlTransactionRef.current;
-      if (pendingTransaction && canReusePendingSqlEditorTransactionForType(String(config.type || ''), sourceStatements)) {
+      if (pendingTransaction && canReusePendingSqlEditorTransactionForType(dbType, sourceStatements)) {
           return DBQueryMultiInTransaction(pendingTransaction.id, sql, queryId);
       }
       return DBQueryMulti(buildRpcConnectionConfig(config) as any, dbName, sql, queryId);
@@ -5871,6 +5878,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           useSSH: conn.config.useSSH || false,
           ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
       };
+      const normalizedDbType = String(resolveSqlDialect(
+          String(config.type || ''),
+          String((config as any).driver || ''),
+          { oceanBaseProtocol: String((config as any).oceanBaseProtocol || '') },
+      )).trim().toLowerCase();
 
       try {
           setLoading(true);
@@ -5886,7 +5898,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               currentDb,
               sql,
               queryId,
-              splitSQLStatements(sql),
+              splitSQLStatements(sql, normalizedDbType),
+              normalizedDbType,
           );
           if (!res?.success) {
               message.error(translate('query_editor.message.refresh_failed', {
@@ -5989,7 +6002,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               currentDb,
               pageSql,
               queryId,
-              splitSQLStatements(pageSql),
+              splitSQLStatements(pageSql, normalizedDbType),
+              normalizedDbType,
           );
           if (!res?.success) {
               message.error(translate('query_editor.message.page_query_failed', {
@@ -6128,13 +6142,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             const splitInput = normalizedRawSQL
                 .replace(/^\s*\/\/.*$/gm, '')
                 .replace(/^\s*#.*$/gm, '');
-            const statements = splitSQLStatements(splitInput);
+            const statements = splitSQLStatements(splitInput, normalizedDbType);
             const didExecuteAppendedSql = resultSets.length > 0
                 && lastExecutedEditorQueryRef.current
                 && currentQuery.startsWith(lastExecutedEditorQueryRef.current)
                 && normalizedRawSQL.trim() === currentQuery.slice(lastExecutedEditorQueryRef.current.length).replace(/；/g, ';').trim();
             const didExecuteWholeEditor = areSqlStatementListsEqual(
-                splitSQLStatements(currentQuery.replace(/；/g, ';')),
+                splitSQLStatements(currentQuery.replace(/；/g, ';'), normalizedDbType),
                 statements,
             );
             if (statements.length === 0) {
@@ -6289,13 +6303,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
         } else {
             // 非 MongoDB：使用 DBQueryMulti 一次性执行多条 SQL，后端返回多结果集
-            const sourceStatements = splitSQLStatements(normalizedRawSQL);
+            const sourceStatements = splitSQLStatements(normalizedRawSQL, normalizedDbType);
             const didExecuteAppendedSql = resultSets.length > 0
                 && lastExecutedEditorQueryRef.current
                 && currentQuery.startsWith(lastExecutedEditorQueryRef.current)
                 && normalizedRawSQL.trim() === currentQuery.slice(lastExecutedEditorQueryRef.current.length).replace(/；/g, ';').trim();
             const didExecuteWholeEditor = areSqlStatementListsEqual(
-                splitSQLStatements(currentQuery.replace(/；/g, ';')),
+                splitSQLStatements(currentQuery.replace(/；/g, ';'), normalizedDbType),
                 sourceStatements,
             );
             if (sourceStatements.length === 0) {
@@ -6451,6 +6465,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                     fullSQL,
                     queryId,
                     executableStatements,
+                    normalizedDbType,
                 );
             const duration = Date.now() - startTime;
 

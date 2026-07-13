@@ -1075,6 +1075,53 @@ func TestDBQueryMultiTransactionalKeepsDMLTransactionOpenUntilCommit(t *testing.
 	}
 }
 
+func TestDBQueryMultiTransactionalKeepsTrailingCommentInsideManagedTransaction(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	statement := "DELETE FROM users WHERE id = 1"
+	fakeDB := &fakeBatchWriteDB{
+		execAffected: map[string]int64{statement: 1},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306, User: "root"}
+	result := app.DBQueryMultiTransactional(
+		config,
+		"main",
+		statement+"; -- keep this operation pending",
+		"tx-trailing-comment",
+	)
+
+	if !result.Success {
+		t.Fatalf("expected transactional query success, got failure: %s", result.Message)
+	}
+	if result.TransactionID == "" || !result.TransactionPending {
+		t.Fatalf("expected trailing comment to preserve pending transaction, got id=%q pending=%v", result.TransactionID, result.TransactionPending)
+	}
+	if strings.Contains(result.Message, "逐条执行") {
+		t.Fatalf("expected trailing comment to avoid sequential fallback message, got %q", result.Message)
+	}
+	wantExecs := []string{"START TRANSACTION", statement}
+	if !reflect.DeepEqual(fakeDB.execQueries, wantExecs) {
+		t.Fatalf("expected exec queries %#v, got %#v", wantExecs, fakeDB.execQueries)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok || len(resultSets) != 1 {
+		t.Fatalf("expected one DML result set, got %T %#v", result.Data, result.Data)
+	}
+
+	rollbackResult := app.DBRollbackTransaction(result.TransactionID)
+	if !rollbackResult.Success {
+		t.Fatalf("expected rollback success, got failure: %s", rollbackResult.Message)
+	}
+}
+
 func TestDBQueryMultiInTransactionReusesPendingManagedSessionForReadQueries(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {

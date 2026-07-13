@@ -134,20 +134,45 @@ const MONGO_META_KEYS = new Set([
   "writeconcern",
 ]);
 
-const stripLeadingSqlComments = (statement: string): string => {
+const MYSQL_COMMENT_DIALECTS = new Set([
+  "mysql",
+  "goldendb",
+  "mariadb",
+  "oceanbase",
+  "diros",
+  "starrocks",
+  "sphinx",
+  "tidb",
+]);
+
+const isDashLineCommentStart = (text: string, dbType: string): boolean => {
+  if (!MYSQL_COMMENT_DIALECTS.has(dbType)) return true;
+  const next = text[2] || "";
+  return !next || /\s/.test(next);
+};
+
+const supportsHashLineComment = (dbType: string): boolean =>
+  !dbType || dbType === "clickhouse" || MYSQL_COMMENT_DIALECTS.has(dbType);
+
+const isExecutableBlockComment = (text: string, dbType: string): boolean => {
+  if (text.slice(0, 4).toLowerCase() === "/*m!") return dbType === "mariadb";
+  return text.startsWith("/*!") && MYSQL_COMMENT_DIALECTS.has(dbType);
+};
+
+const stripLeadingSqlComments = (statement: string, dbType = ""): string => {
   let text = String(statement || "").trim();
   while (text) {
-    if (text.startsWith("--")) {
+    if (text.startsWith("--") && isDashLineCommentStart(text, dbType)) {
       const next = text.indexOf("\n");
       text = next >= 0 ? text.slice(next + 1).trimStart() : "";
       continue;
     }
-    if (text.startsWith("#")) {
+    if (text.startsWith("#") && supportsHashLineComment(dbType)) {
       const next = text.indexOf("\n");
       text = next >= 0 ? text.slice(next + 1).trimStart() : "";
       continue;
     }
-    if (text.startsWith("/*")) {
+    if (text.startsWith("/*") && !isExecutableBlockComment(text, dbType)) {
       const next = text.indexOf("*/");
       text = next >= 0 ? text.slice(next + 2).trimStart() : "";
       continue;
@@ -157,8 +182,8 @@ const stripLeadingSqlComments = (statement: string): string => {
   return text;
 };
 
-const extractLeadingSqlKeyword = (statement: string): string => {
-  const text = stripLeadingSqlComments(statement);
+const extractLeadingSqlKeyword = (statement: string, dbType = ""): string => {
+  const text = stripLeadingSqlComments(statement, dbType);
   const match = text.match(/^[A-Za-z_][A-Za-z0-9_]*/);
   return match ? match[0].toLowerCase() : "";
 };
@@ -176,10 +201,10 @@ const resolveConnectionReadOnlyType = (
     .toLowerCase();
 };
 
-const isReadOnlySqlStatement = (statement: string): boolean => {
-  const text = stripLeadingSqlComments(statement);
+const isReadOnlySqlStatement = (statement: string, dbType: string): boolean => {
+  const text = stripLeadingSqlComments(statement, dbType);
   if (!text) return true;
-  const keyword = extractLeadingSqlKeyword(text);
+  const keyword = extractLeadingSqlKeyword(text, dbType);
   if (!keyword || !SQL_READ_ONLY_KEYWORDS.has(keyword)) {
     return false;
   }
@@ -252,7 +277,7 @@ const isConnectionReadOnlyStatement = (
   if (dialect === "mongodb") {
     return isReadOnlyMongoStatement(statement);
   }
-  return isReadOnlySqlStatement(statement);
+  return isReadOnlySqlStatement(statement, dialect);
 };
 
 export const supportsConnectionReadOnlyMode = (
@@ -366,7 +391,7 @@ export const findConnectionMutatingStatements = (
   if (!isConnectionScriptExecutionRestricted(config)) {
     return [];
   }
-  return findSqlStatementRanges(String(sql || ""))
+  return findSqlStatementRanges(String(sql || ""), resolveConnectionReadOnlyType(config))
     .map((range) => range.text.trim())
     .filter((statement) => statement.length > 0)
     .filter((statement) => !isConnectionReadOnlyStatement(config, statement));

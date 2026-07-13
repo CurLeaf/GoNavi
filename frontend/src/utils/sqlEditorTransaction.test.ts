@@ -6,12 +6,32 @@ import {
   shouldUseSqlEditorManagedTransaction,
   shouldUseSqlEditorManagedTransactionForType,
 } from './sqlEditorTransaction';
+import { findSqlStatementRanges } from './sqlStatementSelection';
 
 describe('sqlEditorTransaction', () => {
   it('keeps regular DML in a managed transaction', () => {
     expect(shouldUseSqlEditorManagedTransaction(['UPDATE users SET name = "n" WHERE id = 1'])).toBe(true);
     expect(shouldUseSqlEditorManagedTransaction(['INSERT INTO users(id) VALUES (1)'])).toBe(true);
     expect(shouldUseSqlEditorManagedTransaction(['DELETE FROM users WHERE id = 1'])).toBe(true);
+  });
+
+  it('keeps DML with a trailing line comment in a managed transaction', () => {
+    const sql = 'DELETE FROM users WHERE id = 1; -- keep this operation pending';
+    const statements = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(statements).toEqual(['DELETE FROM users WHERE id = 1']);
+    expect(shouldUseSqlEditorManagedTransactionForType('mysql', statements)).toBe(true);
+  });
+
+  it('uses dialect-specific rules for compact line comments', () => {
+    const sql = 'DELETE FROM users WHERE id = 1;--comment';
+    const postgresStatements = findSqlStatementRanges(sql, 'postgres').map((range) => range.text);
+    const mysqlStatements = findSqlStatementRanges(sql, 'mysql').map((range) => range.text);
+
+    expect(postgresStatements).toEqual(['DELETE FROM users WHERE id = 1']);
+    expect(shouldUseSqlEditorManagedTransactionForType('postgres', postgresStatements)).toBe(true);
+    expect(mysqlStatements).toEqual(['DELETE FROM users WHERE id = 1', '--comment']);
+    expect(shouldUseSqlEditorManagedTransactionForType('mysql', mysqlStatements)).toBe(false);
   });
 
   it('classifies WITH statements by their top-level operation', () => {

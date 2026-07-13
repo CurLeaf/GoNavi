@@ -361,7 +361,7 @@ func (a *App) recordSQLAuditQuery(input sqlAuditQueryInput) {
 	status := sqlAuditStatusFromResult(input.Result)
 	statementCount := input.StatementCount
 	if statementCount <= 0 {
-		statementCount = countSQLAuditStatements(input.SQL)
+		statementCount = countSQLAuditStatements(input.DBType, input.SQL)
 	}
 	event := sqlaudit.Event{
 		EventType:             "query",
@@ -787,9 +787,9 @@ func durationMilliseconds(duration time.Duration) int64 {
 	return milliseconds
 }
 
-func countSQLAuditStatements(sql string) int {
+func countSQLAuditStatements(dbType string, sql string) int {
 	count := 0
-	for _, statement := range splitSQLStatements(sql) {
+	for _, statement := range splitSQLStatementsForDialect(dbType, sql) {
 		if strings.TrimSpace(statement) != "" {
 			count++
 		}

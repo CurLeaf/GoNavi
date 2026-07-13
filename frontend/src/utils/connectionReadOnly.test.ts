@@ -54,4 +54,20 @@ describe('connectionReadOnly', () => {
       },
     }, "UPDATE users SET name = 'next';")).toEqual([]);
   });
+
+  it('uses the connection dialect when filtering comment-only statements', () => {
+    expect(findConnectionMutatingStatements({
+      type: 'postgres',
+      protection: {
+        restrictScriptExecution: true,
+      },
+    }, 'SELECT * FROM users; /*! MySQL-only comment */')).toEqual([]);
+
+    expect(findConnectionMutatingStatements({
+      type: 'mysql',
+      protection: {
+        restrictScriptExecution: true,
+      },
+    }, 'SELECT * FROM users;--compact')).toEqual(['--compact']);
+  });
 });

@@ -104,7 +104,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 			CommitMode:     "pending",
 			BoundaryMode:   transactionBoundaryMode,
 			SQL:            query,
-			StatementCount: countSQLAuditStatements(query),
+			StatementCount: countSQLAuditStatements(transactionDBType, query),
 			Err:            sqlAuditErrorFromResult(result),
 		})
 	}()
@@ -243,7 +243,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		BoundaryMode:  transactionBoundaryMode,
 	})
 
-	statements := splitSQLStatements(query)
+	statements := splitSQLStatementsForDialect(transactionDBType, query)
 	queryStartedAt := time.Now()
 	statementAuditEvents := make([]sqlaudit.Event, 0, len(statements))
 	resultSets, err := executeManagedSQLTransactionStatementsWithObserver(
@@ -363,7 +363,7 @@ func (a *App) DBQueryMultiInTransaction(transactionID string, query string, quer
 		a.recordQueryExecution(runConfig, "", tx.dbType, query, durationMs, 0, queryResultRowsReturned(result))
 	}()
 	query = sanitizeSQLForPgLike(tx.dbType, query)
-	statements := splitSQLStatements(query)
+	statements := splitSQLStatementsForDialect(tx.dbType, query)
 
 	ctx, cancel := newQueryExecutionContext(runConfig)
 	defer cancel()
@@ -623,7 +623,7 @@ func shouldUseManagedSQLTransaction(dbType string, query string) bool {
 	if isManagedSQLTransactionUnsupportedType(dbType) {
 		return false
 	}
-	statements := splitSQLStatements(query)
+	statements := splitSQLStatementsForDialect(dbType, query)
 	hasManagedWrite := false
 	for _, stmt := range statements {
 		stmt = strings.TrimSpace(stmt)

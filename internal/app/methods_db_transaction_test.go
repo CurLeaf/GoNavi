@@ -50,3 +50,17 @@ END;`
 		t.Fatal("expected Oracle read-only anonymous block to stay unmanaged")
 	}
 }
+
+func TestShouldUseManagedSQLTransaction_UsesDialectCommentRules(t *testing.T) {
+	t.Parallel()
+
+	if !shouldUseManagedSQLTransaction("mysql", "DELETE FROM users WHERE id = 1; -- pending") {
+		t.Fatal("expected a valid MySQL trailing comment to preserve the managed transaction")
+	}
+	if shouldUseManagedSQLTransaction("mysql", "DELETE FROM users WHERE id = 1;--comment") {
+		t.Fatal("expected compact MySQL double-dash text to remain an executable statement")
+	}
+	if !shouldUseManagedSQLTransaction("postgres", "DELETE FROM users WHERE id = 1; /*! MySQL-only comment */") {
+		t.Fatal("expected PostgreSQL to ignore a MySQL-only block comment")
+	}
+}
