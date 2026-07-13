@@ -260,6 +260,13 @@ const renderV2TabDisplayPart = (part: TabDisplayPart) => {
   );
 };
 
+const renderV2TabSecondaryParts = (parts: TabDisplayPart[]) => parts.map((part, index) => (
+  <React.Fragment key={part.key}>
+    {index > 0 ? <span className="gn-v2-tab-label-separator" aria-hidden="true">·</span> : null}
+    {renderV2TabDisplayPart(part)}
+  </React.Fragment>
+));
+
 const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
   tab,
   displayModel,
@@ -304,8 +311,12 @@ const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
               : displayModel.primaryText}
           </span>
           {showSecondaryLine ? (
-            <span className="gn-v2-tab-label-secondary" title={displayModel.secondaryText}>
-              {displayModel.secondaryText}
+            <span
+              className="gn-v2-tab-label-secondary"
+              title={displayModel.secondaryText}
+              aria-label={displayModel.secondaryText}
+            >
+              {renderV2TabSecondaryParts(displayModel.secondaryParts)}
             </span>
           ) : null}
         </span>

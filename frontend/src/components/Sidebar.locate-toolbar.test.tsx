@@ -1260,8 +1260,8 @@ describe('Sidebar locate toolbar', () => {
     expect(v2TreeTitleCss).toContain('min-width: 100%;');
     expect(v2TreeTitleCss).toContain('overflow: visible;');
     expect(css).toMatch(/\.gn-v2-tree-status \{[^}]*width: 14px;[^}]*height: 14px;[^}]*flex: 0 0 14px;[^}]*overflow: visible;/s);
-    expect(css).toMatch(/\.gn-v2-tree-status::before \{[^}]*width: 7px;[^}]*height: 7px;[^}]*border-radius: 50%;/s);
-    expect(css).toMatch(/\.gn-v2-tree-status\.is-success::before \{[^}]*background: #22c55e;[^}]*box-shadow: 0 0 0 4px rgba\(34, 197, 94, 0\.18\);/s);
+    expect(css).toMatch(/\.gn-v2-tree-status::before \{[^}]*width: 9px;[^}]*height: 9px;[^}]*border: 1\.5px solid var\(--gn-fg-4\);[^}]*border-radius: 50%;/s);
+    expect(css).toMatch(/\.gn-v2-tree-status\.is-success::before \{[^}]*border: 0;[^}]*background: var\(--gn-status-connected\);[^}]*box-shadow: 0 0 0 3px color-mix\(in srgb, var\(--gn-status-connected\) 22%, transparent\);/s);
     const treeLabelCss = readCssRuleBlock(css, 'body[data-ui-version="v2"] .gn-v2-tree-label');
     expect(treeLabelCss).toContain('flex: 0 0 auto;');
     expect(treeLabelCss).toContain('overflow: visible;');

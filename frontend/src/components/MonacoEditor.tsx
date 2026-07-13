@@ -495,7 +495,13 @@ export const registerGonaviMonacoThemes: BeforeMount = (monaco) => {
   monaco.editor.defineTheme('transparent-dark', {
     base: 'vs-dark',
     inherit: true,
-    rules: [],
+    rules: [
+      { token: 'keyword.sql', foreground: 'C792EA', fontStyle: 'bold' },
+      { token: 'keyword.try.sql', foreground: 'C792EA', fontStyle: 'bold' },
+      { token: 'keyword.catch.sql', foreground: 'C792EA', fontStyle: 'bold' },
+      { token: 'keyword.block.sql', foreground: 'C792EA', fontStyle: 'bold' },
+      { token: 'keyword.choice.sql', foreground: 'C792EA', fontStyle: 'bold' },
+    ],
     colors: {
       'editor.background': '#00000000',
       'editor.lineHighlightBackground': '#ffffff10',
@@ -507,7 +513,13 @@ export const registerGonaviMonacoThemes: BeforeMount = (monaco) => {
   monaco.editor.defineTheme('transparent-light', {
     base: 'vs',
     inherit: true,
-    rules: [],
+    rules: [
+      { token: 'keyword.sql', foreground: '6D28D9', fontStyle: 'bold' },
+      { token: 'keyword.try.sql', foreground: '6D28D9', fontStyle: 'bold' },
+      { token: 'keyword.catch.sql', foreground: '6D28D9', fontStyle: 'bold' },
+      { token: 'keyword.block.sql', foreground: '6D28D9', fontStyle: 'bold' },
+      { token: 'keyword.choice.sql', foreground: '6D28D9', fontStyle: 'bold' },
+    ],
     colors: {
       'editor.background': '#00000000',
       'editor.lineHighlightBackground': '#00000010',

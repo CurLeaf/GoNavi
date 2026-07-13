@@ -289,6 +289,9 @@ describe('TabManager hover info', () => {
     expect(source).toContain('buildTabDisplayModel(tab, connection, appearance.tabDisplay, t)');
     expect(source).toContain('displayModel={displayModel}');
     expect(source).toContain('displayModel.primaryParts.map(renderV2TabDisplayPart)');
+    expect(source).toContain('renderV2TabSecondaryParts(displayModel.secondaryParts)');
+    expect(source).toContain('aria-label={displayModel.secondaryText}');
+    expect(source).toContain('className="gn-v2-tab-label-separator" aria-hidden="true">·</span>');
     expect(source).toContain("if (part.key === 'kind')");
     expect(source).toContain('className="gn-v2-tab-kind"');
     expect(source).toContain('hasDoubleLineTabLabel');
