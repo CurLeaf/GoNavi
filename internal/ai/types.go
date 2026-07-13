@@ -200,8 +200,19 @@ type MCPHTTPServerOptions struct {
 	SchemaOnly bool   `json:"schemaOnly"`
 }
 
+// MCPHTTPServerConfig 表示客户端内置 HTTP MCP 服务的持久化偏好。
+// Token 仅保存在 secret store，不会序列化到 ai_config.json。
+type MCPHTTPServerConfig struct {
+	Enabled    bool   `json:"enabled"`
+	Addr       string `json:"addr,omitempty"`
+	Path       string `json:"path,omitempty"`
+	SchemaOnly bool   `json:"schemaOnly"`
+	Token      string `json:"-"`
+}
+
 // MCPHTTPServerStatus 表示客户端内置 HTTP MCP 服务运行状态。
 type MCPHTTPServerStatus struct {
+	Enabled             bool   `json:"enabled"`
 	Running             bool   `json:"running"`
 	Addr                string `json:"addr"`
 	Path                string `json:"path"`

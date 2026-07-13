@@ -78,6 +78,12 @@ describe('AISettingsModal edit password behavior', () => {
     expect(source).not.toContain("'Authorization Header 已复制'");
   });
 
+  it('refreshes the persisted MCP HTTP status when a toggle request fails', () => {
+    expect(source).toContain('let Service: any;');
+    expect(source).toContain('const refreshedStatus = await Service?.AIGetMCPHTTPServerStatus?.();');
+    expect(source).toContain('状态回填仅用于反映已持久化的开关意图');
+  });
+
   it('localizes MCP HTTP default status fallback', () => {
     expect(source).toContain("const defaultMCPHTTPServerStatus = useMemo<AIMCPHTTPServerStatus>(() => ({");
     expect(source).toContain("message: t('ai_settings.mcp_http.status.not_running')");

@@ -38,6 +38,7 @@ type Service struct {
 	contextLevel       ai.ContextLevel
 	userPromptSettings ai.UserPromptSettings
 	mcpServers         []ai.MCPServerConfig
+	mcpHTTPConfig      ai.MCPHTTPServerConfig
 	skills             []ai.SkillConfig
 	guard              *safety.Guard
 	configDir          string // 配置存储目录
@@ -45,6 +46,9 @@ type Service struct {
 	localizer          *i18n.Localizer
 	cancelFuncs        map[string]context.CancelFunc // 记录每个 session 的 context 取消函数
 	sessionProviders   map[string]aiSessionProviderRuntime
+	mcpHTTPOpMu        sync.Mutex
+	mcpHTTPStartMu     sync.Mutex
+	mcpHTTPStart       *mcpHTTPStartAttempt
 	mcpHTTPMu          sync.Mutex
 	mcpHTTP            *mcpHTTPServerRuntime
 	mcpHTTPLast        ai.MCPHTTPServerStatus
@@ -363,6 +367,7 @@ func (s *Service) startup(ctx context.Context) {
 	s.ctx = ctx
 	s.configDir = resolveConfigDir()
 	s.loadConfig()
+	s.restoreMCPHTTPServer()
 	logger.Infof("AI Service 启动完成，已加载 %d 个 Provider", len(s.providers))
 }
 
@@ -1760,7 +1765,15 @@ func (s *Service) loadConfig() {
 	s.contextLevel = snapshot.ContextLevel
 	s.userPromptSettings = snapshot.UserPromptSettings
 	s.mcpServers = normalizeMCPServerConfigs(snapshot.MCPServers)
+	s.mcpHTTPConfig = normalizeMCPHTTPServerConfig(snapshot.MCPHTTPServer)
 	s.skills = normalizeSkillConfigs(snapshot.Skills, s.serviceLocalizerForLanguage())
+
+	status := mcpHTTPStatusFromConfig(s.mcpHTTPConfig, s.serviceText("ai_settings.mcp_http.status.not_running", nil))
+	s.mcpHTTPMu.Lock()
+	if s.mcpHTTP == nil {
+		s.mcpHTTPLast = status
+	}
+	s.mcpHTTPMu.Unlock()
 }
 
 func (s *Service) saveConfig() error {
@@ -1771,6 +1784,7 @@ func (s *Service) saveConfig() error {
 		ContextLevel:       s.contextLevel,
 		UserPromptSettings: s.userPromptSettings,
 		MCPServers:         s.mcpServers,
+		MCPHTTPServer:      s.mcpHTTPConfig,
 		Skills:             s.skills,
 	})
 }

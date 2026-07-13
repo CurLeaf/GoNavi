@@ -1695,6 +1695,7 @@
   "ai_settings.mcp_http.panel.copy_url": "Copy URL",
   "ai_settings.mcp_http.panel.description": "For remote agents like OpenClaw/Hermans. By default exposes schema tools and limited execute_sql sample queries, still under AI safety controls.",
   "ai_settings.mcp_http.panel.running_hint": "The service is running. Configure the URL and Authorization Header in the remote MCP client.",
+  "ai_settings.mcp_http.panel.retry_start": "Retry start",
   "ai_settings.mcp_http.panel.status.running": "Running",
   "ai_settings.mcp_http.panel.status.stopped": "Stopped",
   "ai_settings.mcp_http.panel.stopped_hint": "You can customize the local listen port and Bearer Token. If Authorization is empty, a random Token is generated on startup.",

@@ -1695,6 +1695,7 @@
   "ai_settings.mcp_http.panel.copy_url": "Копировать URL",
   "ai_settings.mcp_http.panel.description": "Для удалённых агентов (OpenClaw/Hermans). По умолчанию — инструменты схемы и ограниченный execute_sql; по-прежнему под AI-безопасностью.",
   "ai_settings.mcp_http.panel.running_hint": "Служба запущена. Укажите URL и Authorization Header в удаленном MCP-клиенте.",
+  "ai_settings.mcp_http.panel.retry_start": "Запустить снова",
   "ai_settings.mcp_http.panel.status.running": "Запущена",
   "ai_settings.mcp_http.panel.status.stopped": "Остановлена",
   "ai_settings.mcp_http.panel.stopped_hint": "Можно настроить локальный порт прослушивания и Bearer Token. Если Authorization пустой, при запуске будет создан случайный Token.",

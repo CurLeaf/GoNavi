@@ -693,6 +693,8 @@ export interface AIMCPClientInstallStatus {
 }
 
 export interface AIMCPHTTPServerStatus {
+  /** 用户持久化的启用意图；与真实进程运行状态分离。 */
+  enabled?: boolean;
   running: boolean;
   addr: string;
   path: string;

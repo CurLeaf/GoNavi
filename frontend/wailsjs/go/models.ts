@@ -93,6 +93,7 @@ export namespace ai {
 	    }
 	}
 	export class MCPHTTPServerStatus {
+	    enabled: boolean;
 	    running: boolean;
 	    addr: string;
 	    path: string;
@@ -109,6 +110,7 @@ export namespace ai {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
 	        this.running = source["running"];
 	        this.addr = source["addr"];
 	        this.path = source["path"];

@@ -69,11 +69,12 @@ if (
     };
     let mockMCPServers: any[] = [];
     let mockMCPHTTPServerStatus: any = {
+        enabled: false,
         running: false,
         addr: '127.0.0.1:8765',
         path: '/mcp',
         url: 'http://127.0.0.1:8765/mcp',
-        schemaOnly: true,
+        schemaOnly: false,
         message: t('app.browser_mock.mcp_http.not_running'),
     };
     let mockMCPClientStatuses: any[] = [
@@ -585,10 +586,11 @@ if (
                     const token = String(input?.token || 'gnv_browser_mock_token').trim() || 'gnv_browser_mock_token';
                     mockMCPHTTPServerStatus = {
                         running: true,
+                        enabled: true,
                         addr,
                         path,
                         url: `http://${addr}${path}`,
-                        schemaOnly: true,
+                        schemaOnly: Boolean(input?.schemaOnly),
                         token,
                         authorizationHeader: `Bearer ${token}`,
                         startedAt: Date.now(),
@@ -599,6 +601,7 @@ if (
                 AIStopMCPHTTPServer: async () => {
                     mockMCPHTTPServerStatus = {
                         ...mockMCPHTTPServerStatus,
+                        enabled: false,
                         running: false,
                         message: t('app.browser_mock.mcp_http.stopped'),
                     };

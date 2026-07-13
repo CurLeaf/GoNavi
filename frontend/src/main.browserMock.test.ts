@@ -197,12 +197,16 @@ describe('main browser mock', () => {
     const service = (globalThis as any).window.go.aiservice.Service;
 
     await expect(service.AIGetMCPHTTPServerStatus()).resolves.toEqual(expect.objectContaining({
+      enabled: false,
       message: t('app.browser_mock.mcp_http.not_running'),
     }));
-    await expect(service.AIStartMCPHTTPServer({ addr: '127.0.0.1:8765', path: '/mcp' })).resolves.toEqual(expect.objectContaining({
+    await expect(service.AIStartMCPHTTPServer({ addr: '127.0.0.1:8765', path: '/mcp', schemaOnly: false })).resolves.toEqual(expect.objectContaining({
+      enabled: true,
+      schemaOnly: false,
       message: t('app.browser_mock.mcp_http.started'),
     }));
     await expect(service.AIStopMCPHTTPServer()).resolves.toEqual(expect.objectContaining({
+      enabled: false,
       message: t('app.browser_mock.mcp_http.stopped'),
     }));
   });

@@ -1695,6 +1695,7 @@
   "ai_settings.mcp_http.panel.copy_url": "URL をコピー",
   "ai_settings.mcp_http.panel.description": "OpenClaw / Hermans などのリモート Agent 向け。既定では構造ツールと限定 execute_sql サンプル照会を公開し、AI 安全制御の対象です。",
   "ai_settings.mcp_http.panel.running_hint": "サービスは起動中です。URL と Authorization Header をリモート MCP クライアントに設定できます。",
+  "ai_settings.mcp_http.panel.retry_start": "再起動",
   "ai_settings.mcp_http.panel.status.running": "起動中",
   "ai_settings.mcp_http.panel.status.stopped": "停止中",
   "ai_settings.mcp_http.panel.stopped_hint": "ローカルの待ち受けポートと Bearer Token をカスタマイズできます。Authorization が空欄の場合、起動時にランダム Token を自動生成します。",

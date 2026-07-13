@@ -1695,6 +1695,7 @@
   "ai_settings.mcp_http.panel.copy_url": "复制 URL",
   "ai_settings.mcp_http.panel.description": "给 OpenClaw、Hermans 等远程 Agent 使用。默认可开放结构读取与 execute_sql 少量样例查询；仍受 AI 安全控制约束。",
   "ai_settings.mcp_http.panel.running_hint": "服务运行中，可把 URL 和 Authorization Header 配置到远程 MCP 客户端。",
+  "ai_settings.mcp_http.panel.retry_start": "重试启动",
   "ai_settings.mcp_http.panel.status.running": "已启动",
   "ai_settings.mcp_http.panel.status.stopped": "未启动",
   "ai_settings.mcp_http.panel.stopped_hint": "可自定义本机监听端口和 Bearer Token；留空 Authorization 时启动会自动生成随机 Token。",

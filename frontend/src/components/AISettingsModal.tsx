@@ -54,6 +54,7 @@ export interface AISettingsContentProps {
 }
 
 const DEFAULT_MCP_HTTP_SERVER_STATUS: AIMCPHTTPServerStatus = {
+    enabled: false,
     running: false,
     addr: '127.0.0.1:8765',
     path: '/mcp',
@@ -540,9 +541,10 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
     };
 
     const handleToggleMCPHTTPServer = async (checked: boolean) => {
+        let Service: any;
         try {
             setMCPHTTPServerLoading(true);
-            const Service = await resolveAIService();
+            Service = await resolveAIService();
             if (!Service) {
                 throw new Error(t('ai_settings.mcp_http.error.control_unsupported_runtime'));
             }
@@ -573,6 +575,19 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
             }
             void messageApi.success(checked ? t('ai_settings.mcp_http.message.started') : t('ai_settings.mcp_http.message.stopped'));
         } catch (e: any) {
+            try {
+                const refreshedStatus = await Service?.AIGetMCPHTTPServerStatus?.();
+                if (refreshedStatus) {
+                    const normalizedStatus = {
+                        ...defaultMCPHTTPServerStatus,
+                        ...refreshedStatus,
+                    };
+                    setMCPHTTPServerStatus(normalizedStatus);
+                    setMCPHTTPServerDraft((prev) => buildMCPHTTPServerDraftFromStatus(normalizedStatus, prev));
+                }
+            } catch {
+                // 状态回填仅用于反映已持久化的开关意图，保留原始操作错误提示。
+            }
             void messageApi.error(e?.message || t('ai_settings.mcp_http.message.toggle_failed'));
         } finally {
             setMCPHTTPServerLoading(false);

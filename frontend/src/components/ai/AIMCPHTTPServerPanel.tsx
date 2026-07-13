@@ -44,6 +44,7 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
 }) => {
   const i18n = useOptionalI18n();
   const copy = (key: string) => (i18n?.t ?? ((catalogKey) => catalogTranslate('en-US', catalogKey)))(key);
+  const enabled = status?.enabled === true;
   const running = status?.running === true;
   const url = String(status?.url || '').trim();
   const authorizationHeader = String(status?.authorizationHeader || '').trim();
@@ -84,7 +85,7 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
           </div>
         </div>
         <Switch
-          checked={running}
+          checked={enabled}
           loading={loading}
           onChange={onToggle}
           checkedChildren={copy('ai_settings.mcp_http.panel.switch.on')}
@@ -158,9 +159,16 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
           {running
             ? status.message || copy('ai_settings.mcp_http.panel.running_hint')
-            : copy('ai_settings.mcp_http.panel.stopped_hint')}
+            : (enabled && status.message
+              ? status.message
+              : copy('ai_settings.mcp_http.panel.stopped_hint'))}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          {enabled && !running && (
+            <Button size="small" disabled={loading} onClick={() => onToggle(true)}>
+              {copy('ai_settings.mcp_http.panel.retry_start')}
+            </Button>
+          )}
           <code
             style={{
               fontSize: 12,
