@@ -2575,6 +2575,22 @@ const DataGrid: React.FC<DataGridProps> = ({
                   if (eventTarget?.closest?.('[data-grid-column-filter-popover="true"]')) return;
                   if (eventTarget?.closest?.('.ant-select-dropdown')) return;
                   if (eventTarget?.closest?.('.react-resizable-handle')) return;
+                  if (onSort) {
+                      const headerCell = event.currentTarget as HTMLElement;
+                      const upArrow = headerCell.querySelector('.ant-table-column-sorter-up') as HTMLElement | null;
+                      const downArrow = headerCell.querySelector('.ant-table-column-sorter-down') as HTMLElement | null;
+                      const isInArrow = [upArrow, downArrow].some((el) => {
+                          if (!el) return false;
+                          const rect = el.getBoundingClientRect();
+                          return (
+                              event.clientX >= rect.left &&
+                              event.clientX <= rect.right &&
+                              event.clientY >= rect.top &&
+                              event.clientY <= rect.bottom
+                          );
+                      });
+                      if (isInArrow) return;
+                  }
                   if (cellEditMode && canModifyData && isWritableResultColumn(key, effectiveEditLocator)) {
                       event.preventDefault();
                       event.stopPropagation();
@@ -2582,20 +2598,6 @@ const DataGrid: React.FC<DataGridProps> = ({
                       return;
                   }
                   if (!onSort) return;
-                  const headerCell = event.currentTarget as HTMLElement;
-                  const upArrow = headerCell.querySelector('.ant-table-column-sorter-up') as HTMLElement | null;
-                  const downArrow = headerCell.querySelector('.ant-table-column-sorter-down') as HTMLElement | null;
-                  const isInArrow = [upArrow, downArrow].some((el) => {
-                      if (!el) return false;
-                      const rect = el.getBoundingClientRect();
-                      return (
-                          event.clientX >= rect.left &&
-                          event.clientX <= rect.right &&
-                          event.clientY >= rect.top &&
-                          event.clientY <= rect.bottom
-                      );
-                  });
-                  if (isInArrow) return;
                   // 仅允许点击上下箭头触发排序，点击字段名或表头其它区域不触发排序。
                   event.preventDefault();
                   event.stopPropagation();

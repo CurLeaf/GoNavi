@@ -11,6 +11,7 @@ import { GONAVI_ROW_KEY } from './DataGrid';
 import { EventsOn } from '../../wailsjs/runtime';
 import { findConnectionMutatingStatements } from '../utils/connectionReadOnly';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
+import type { GridSortInfoItem } from '../utils/dataGridSort';
 import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from "../utils/mongodb";
 import { getShortcutDisplayLabel, getShortcutPlatform, getShortcutPrimaryModifierDisplayLabel, isEditableElement, isImeComposingKeyEvent, isShortcutMatch, comboToMonacoKeyBinding, normalizeShortcutCombo, resolveShortcutBinding } from "../utils/shortcuts";
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
@@ -19,8 +20,10 @@ import { isPostgresSchemaDialect } from '../utils/connectionDriverType';
 import { isOracleLikeDialect, resolveSqlDialect, resolveSqlFunctions, resolveSqlKeywords } from '../utils/sqlDialect';
 import { applyQueryAutoLimit } from '../utils/queryAutoLimit';
 import {
+    buildQueryResultCountSql,
     buildQueryResultPageSql,
     createInitialQueryResultPagination,
+    parseQueryResultTotalCount,
     resolveQueryResultPaginationTotal,
 } from '../utils/queryResultPagination';
 import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/queryResultTable';
@@ -1107,6 +1110,98 @@ const resetSharedQueryEditorMetadata = () => {
     clearRecord(sharedLazyTablesInFlight);
 };
 
+const parseQueryResultSortInfo = (field: string, order: string): GridSortInfoItem[] => {
+  let candidates: unknown[] = [];
+  try {
+    const parsed = JSON.parse(field);
+    if (Array.isArray(parsed)) candidates = parsed;
+  } catch {
+    // Compatibility with the legacy single-column callback shape.
+  }
+  if (candidates.length === 0) {
+    candidates = [{ columnKey: field, order, enabled: true }];
+  }
+
+  const normalized: GridSortInfoItem[] = [];
+  const seen = new Set<string>();
+  candidates.forEach((candidate) => {
+    if (!candidate || typeof candidate !== 'object') return;
+    const item = candidate as Record<string, unknown>;
+    const columnKey = String(item.columnKey || '').trim();
+    const normalizedOrder = item.order === 'ascend' || item.order === 'descend'
+      ? item.order
+      : '';
+    const dedupeKey = columnKey.toLowerCase();
+    if (!columnKey || !normalizedOrder || seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    normalized.push({
+      columnKey,
+      order: normalizedOrder,
+      enabled: item.enabled !== false,
+    });
+  });
+  return normalized;
+};
+
+const compareQueryResultValues = (left: unknown, right: unknown): number => {
+  if (Object.is(left, right)) return 0;
+  if (left === null || left === undefined) return -1;
+  if (right === null || right === undefined) return 1;
+  if (typeof left === 'bigint' && typeof right === 'bigint') {
+    return left < right ? -1 : 1;
+  }
+  if (typeof left === 'number' && typeof right === 'number') {
+    if (Number.isNaN(left)) return Number.isNaN(right) ? 0 : -1;
+    if (Number.isNaN(right)) return 1;
+    return left < right ? -1 : left > right ? 1 : 0;
+  }
+  if (typeof left === 'boolean' && typeof right === 'boolean') {
+    return Number(left) - Number(right);
+  }
+  return String(left).localeCompare(String(right), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  });
+};
+
+const compareQueryResultOriginalOrder = (
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+  leftIndex: number,
+  rightIndex: number,
+): number => {
+  const leftKey = left?.[GONAVI_ROW_KEY];
+  const rightKey = right?.[GONAVI_ROW_KEY];
+  const leftNumber = Number(leftKey);
+  const rightNumber = Number(rightKey);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && leftNumber !== rightNumber) {
+    return leftNumber - rightNumber;
+  }
+  const keyOrder = String(leftKey ?? '').localeCompare(String(rightKey ?? ''), undefined, { numeric: true });
+  return keyOrder || leftIndex - rightIndex;
+};
+
+const sortCompleteQueryResultRows = (
+  rows: any[],
+  sortInfo: GridSortInfoItem[],
+): any[] => {
+  const activeSortInfo = sortInfo.filter((item) => item.enabled !== false);
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((left, right) => {
+      for (const item of activeSortInfo) {
+        const valueOrder = compareQueryResultValues(
+          left.row?.[item.columnKey],
+          right.row?.[item.columnKey],
+        );
+        if (valueOrder !== 0) {
+          return item.order === 'descend' ? -valueOrder : valueOrder;
+        }
+      }
+      return compareQueryResultOriginalOrder(left.row, right.row, left.index, right.index);
+    })
+    .map(({ row }) => row);
+};
 
 const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isActive = true }) => {
   const appearance = useStore(state => state.appearance);
@@ -1142,6 +1237,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const [sqlSnippetPickerKeyword, setSqlSnippetPickerKeyword] = useState('');
   const runSeqRef = useRef(0);
   const currentQueryIdRef = useRef('');
+  const resultTotalCountSeqRef = useRef(0);
+  const resultTotalCountRequestsRef = useRef<Record<string, { sequence: number; queryId: string }>>({});
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [saveModalMode, setSaveModalMode] = useState<'save' | 'rename'>('save');
   const [saveForm] = Form.useForm();
@@ -1149,6 +1246,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   // Database Selection
   const [currentConnectionId, setCurrentConnectionId] = useState<string>(tab.connectionId);
   const [currentDb, setCurrentDb] = useState<string>(tab.dbName || '');
+  const resultTotalCountContextRef = useRef(`${tab.connectionId}\u0000${tab.dbName || ''}`);
   const [dbList, setDbList] = useState<string[]>([]);
   const [isTextToSqlModalOpen, setIsTextToSqlModalOpen] = useState(false);
   const [textToSqlInstruction, setTextToSqlInstruction] = useState('');
@@ -5970,8 +6068,179 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }
   };
 
-  const handleResultPageChange = async (resultKey: string, page: number, pageSize: number) => {
-      const target = resultSets.find((item) => item.key === resultKey);
+  const handleRequestResultTotalCount = async (resultKey: string) => {
+      const target = resultSetsRef.current.find((item) => item.key === resultKey);
+      if (!target?.page?.baseSql || !currentDb || resultTotalCountRequestsRef.current[resultKey]) return;
+      const conn = connections.find(c => c.id === currentConnectionId);
+      if (!conn) return;
+      const countSql = buildQueryResultCountSql(target.page.baseSql);
+      if (!countSql) return;
+      const config = {
+          ...conn.config,
+          port: Number(conn.config.port),
+          password: conn.config.password || '',
+          database: conn.config.database || '',
+          useSSH: conn.config.useSSH || false,
+          ssh: conn.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' },
+          timeout: Math.max(Number(conn.config.timeout) || 30, 120),
+      };
+      const normalizedDbType = String(resolveSqlDialect(
+          String(config.type || 'mysql'),
+          String((config as any).driver || ''),
+          { oceanBaseProtocol: String((config as any).oceanBaseProtocol || '') },
+      )).toLowerCase();
+      const sequence = ++resultTotalCountSeqRef.current;
+      const requestRunSequence = runSeqRef.current;
+      resultTotalCountRequestsRef.current[resultKey] = { sequence, queryId: '' };
+      setResultSets(prev => prev.map(rs =>
+          rs.key === resultKey && rs.page
+              ? { ...rs, page: { ...rs.page, totalCountLoading: true, totalCountCancelled: false } }
+              : rs
+      ));
+      const countStartedAt = Date.now();
+      const isCurrentRequest = () => {
+          if (resultTotalCountRequestsRef.current[resultKey]?.sequence !== sequence) return false;
+          if (runSeqRef.current !== requestRunSequence) return false;
+          const currentResult = resultSetsRef.current.find((item) => item.key === resultKey);
+          return currentResult?.page?.baseSql === target.page?.baseSql;
+      };
+      const finishLoading = (cancelled = false) => {
+          if (!isCurrentRequest()) return;
+          delete resultTotalCountRequestsRef.current[resultKey];
+          setResultSets(prev => prev.map(rs =>
+              rs.key === resultKey && rs.page
+                  ? { ...rs, page: { ...rs.page, totalCountLoading: false, totalCountCancelled: cancelled } }
+                  : rs
+          ));
+      };
+
+      try {
+          let queryId: string;
+          try {
+              queryId = await GenerateQueryID();
+          } catch {
+              queryId = `query-total-${uuidv4()}`;
+          }
+          if (!isCurrentRequest()) return;
+          resultTotalCountRequestsRef.current[resultKey] = { sequence, queryId };
+          const res = await executeSqlEditorMultiQuery(
+              config,
+              currentDb,
+              countSql,
+              queryId,
+              [countSql],
+              normalizedDbType,
+          );
+          const duration = Date.now() - countStartedAt;
+          addSqlLog({
+              id: `log-${Date.now()}-query-total-count`,
+              timestamp: Date.now(),
+              sql: countSql,
+              status: res?.success ? 'success' : 'error',
+              duration,
+              message: res?.success ? '' : String(res?.message || translate('data_viewer.message.total_count_failed')),
+              dbName: currentDb,
+          });
+          if (!isCurrentRequest()) return;
+          if (!res?.success) {
+              finishLoading();
+              message.error(String(res?.message || translate('data_viewer.message.total_count_failed')));
+              return;
+          }
+          const resultSetData = Array.isArray(res.data) ? res.data[0] : null;
+          const countRow = Array.isArray(resultSetData?.rows) ? resultSetData.rows[0] : null;
+          const total = parseQueryResultTotalCount(countRow);
+          if (total === null) {
+              finishLoading();
+              message.error(translate('data_viewer.message.total_count_parse_failed'));
+              return;
+          }
+
+          delete resultTotalCountRequestsRef.current[resultKey];
+          setResultSets(prev => prev.map(rs =>
+              rs.key === resultKey && rs.page
+                  ? {
+                      ...rs,
+                      page: {
+                          ...rs.page,
+                          total,
+                          totalKnown: true,
+                          totalCountLoading: false,
+                          totalCountCancelled: false,
+                      },
+                  }
+                  : rs
+          ));
+      } catch (error: any) {
+          if (!isCurrentRequest()) return;
+          addSqlLog({
+              id: `log-${Date.now()}-query-total-count-error`,
+              timestamp: Date.now(),
+              sql: countSql,
+              status: 'error',
+              duration: Date.now() - countStartedAt,
+              message: String(error?.message || error || translate('common.unknown')),
+              dbName: currentDb,
+          });
+          finishLoading();
+          message.error(translate('data_viewer.message.total_count_failed_detail', {
+              detail: String(error?.message || error || translate('common.unknown')),
+          }));
+      }
+  };
+
+  const cancelResultTotalCountRequests = async (resultKeys: string[]) => {
+      const uniqueKeys = Array.from(new Set(resultKeys));
+      const pendingRequests = uniqueKeys
+          .map((key) => ({ key, request: resultTotalCountRequestsRef.current[key] }))
+          .filter((item) => Boolean(item.request));
+      if (pendingRequests.length === 0) return;
+      pendingRequests.forEach(({ key }) => {
+          delete resultTotalCountRequestsRef.current[key];
+      });
+      const pendingKeySet = new Set(pendingRequests.map(({ key }) => key));
+      setResultSets(prev => prev.map(rs =>
+          pendingKeySet.has(rs.key) && rs.page
+              ? { ...rs, page: { ...rs.page, totalCountLoading: false, totalCountCancelled: true } }
+              : rs
+      ));
+      await Promise.all(pendingRequests.map(async ({ request }) => {
+          if (!request?.queryId) return;
+          try {
+              await CancelQuery(request.queryId);
+          } catch {
+              // The query may have completed between the local cancellation and the backend call.
+          }
+      }));
+  };
+
+  useEffect(() => {
+      const nextContext = `${currentConnectionId}\u0000${currentDb}`;
+      if (resultTotalCountContextRef.current === nextContext) return;
+      resultTotalCountContextRef.current = nextContext;
+      void cancelResultTotalCountRequests(Object.keys(resultTotalCountRequestsRef.current));
+  }, [currentConnectionId, currentDb]);
+
+  useEffect(() => () => {
+      const requests = Object.values(resultTotalCountRequestsRef.current);
+      resultTotalCountRequestsRef.current = {};
+      requests.forEach((request) => {
+          if (!request.queryId) return;
+          void CancelQuery(request.queryId).catch(() => undefined);
+      });
+  }, []);
+
+  const handleCancelResultTotalCount = async (resultKey: string) => {
+      await cancelResultTotalCountRequests([resultKey]);
+  };
+
+  const handleResultPageChange = async (
+      resultKey: string,
+      page: number,
+      pageSize: number,
+      sortInfoOverride?: GridSortInfoItem[],
+  ) => {
+      const target = resultSetsRef.current.find((item) => item.key === resultKey);
       if (!target?.page?.baseSql || !currentDb) return;
       const conn = connections.find(c => c.id === currentConnectionId);
       if (!conn) return;
@@ -5994,9 +6263,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           baseSql: target.page.baseSql,
           dbType: normalizedDbType,
           driver,
+          oceanBaseProtocol: String((config as any).oceanBaseProtocol || ''),
           page: safePage,
           pageSize: safePageSize,
           lookahead: true,
+          sortInfo: sortInfoOverride || target.sortInfo || [],
       });
 
       try {
@@ -6050,25 +6321,29 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               rowCount: rows.length,
               hasNext,
           });
-          setResultSets(prev => prev.map(rs =>
-              rs.key === resultKey && rs.page
-                  ? {
-                      ...rs,
-                      rows,
-                      columns: cols,
-                      messages: pageMessages,
-                      resultType: 'grid',
-                      truncated: false,
-                      page: {
-                          ...rs.page,
-                          current: safePage,
-                          pageSize: safePageSize,
-                          ...totalState,
-                          loading: false,
-                      },
-                  }
-                  : rs
-          ));
+          setResultSets(prev => prev.map(rs => {
+              if (rs.key !== resultKey || !rs.page) return rs;
+              const hasExactTotal = rs.page.totalKnown === true
+                  && Number.isFinite(Number(rs.page.total))
+                  && Number(rs.page.total) >= 0;
+              return {
+                  ...rs,
+                  rows,
+                  columns: cols,
+                  messages: pageMessages,
+                  resultType: 'grid',
+                  truncated: false,
+                  page: {
+                      ...rs.page,
+                      current: safePage,
+                      pageSize: safePageSize,
+                      ...(hasExactTotal
+                          ? { total: rs.page.total, totalKnown: true }
+                          : totalState),
+                      loading: false,
+                  },
+              };
+          }));
       } catch (err: any) {
           message.error(translate('query_editor.message.page_query_failed', {
               error: formatSqlExecutionError(err?.message || err || translate('common.unknown'), { translate }),
@@ -6081,6 +6356,30 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   : rs
           ));
       }
+  };
+
+  const handleResultSort = async (resultKey: string, field: string, order: string) => {
+      const nextSortInfo = parseQueryResultSortInfo(field, order);
+      const target = resultSetsRef.current.find((item) => item.key === resultKey);
+      if (!target) return;
+
+      if (target.page) {
+          setResultSets(prev => prev.map(rs => (
+              rs.key === resultKey ? { ...rs, sortInfo: nextSortInfo } : rs
+          )));
+          await handleResultPageChange(resultKey, 1, target.page.pageSize, nextSortInfo);
+          return;
+      }
+
+      setResultSets(prev => prev.map(rs => (
+          rs.key === resultKey
+              ? {
+                  ...rs,
+                  rows: sortCompleteQueryResultRows(rs.rows, nextSortInfo),
+                  sortInfo: nextSortInfo,
+              }
+              : rs
+      )));
   };
 
   const handleRun = async () => {
@@ -6097,6 +6396,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         message.error(translate('query_editor.message.select_database_first'));
         return;
     }
+    await cancelResultTotalCountRequests(Object.keys(resultTotalCountRequestsRef.current));
     // 如果已有查询在运行，先取消它
     if (currentQueryIdRef.current) {
         try {
@@ -7841,6 +8141,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   };
 
   const handleCloseResult = (key: string) => {
+      void cancelResultTotalCountRequests([key]);
       setResultSets(prev => {
           const idx = prev.findIndex(r => r.key === key);
           if (idx < 0) return prev;
@@ -7856,6 +8157,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   };
 
   const replaceResultSetsAfterMenuClose = (next: ResultSet[], preferredKey?: string) => {
+      const nextKeys = new Set(next.map((result) => result.key));
+      const removedCountKeys = Object.keys(resultTotalCountRequestsRef.current)
+          .filter((key) => !nextKeys.has(key));
+      void cancelResultTotalCountRequests(removedCountKeys);
       setResultSets(next);
       setActiveResultKey(prevActive => {
           if (preferredKey && next.some(result => result.key === preferredKey)) return preferredKey;
@@ -7882,8 +8187,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   };
 
   const closeAllResultTabs = () => {
-      setResultSets([]);
-      setActiveResultKey('');
+      replaceResultSetsAfterMenuClose([]);
   };
 
   const openResultInWindow = (
@@ -8154,6 +8458,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           onOpenResultInWindow={openResultInWindow}
           onReloadResult={handleReloadResult}
           onResultPageChange={handleResultPageChange}
+          onResultSort={handleResultSort}
+          onRequestResultTotalCount={handleRequestResultTotalCount}
+          onCancelResultTotalCount={handleCancelResultTotalCount}
           onDiagnoseExecutionError={handleDiagnoseExecutionError}
           onCompareResult={(resultKey) => {
             setResultDiffAnchorKey(resultKey);

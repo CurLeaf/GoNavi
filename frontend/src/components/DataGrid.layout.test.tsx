@@ -1032,6 +1032,12 @@ describe('DataGrid layout', () => {
     expect(css).toMatch(/\[data-grid-pagination-total-count="true"\]\.ant-btn \.ant-btn-icon \{[\s\S]*?margin-inline-end: 3px !important;/);
   });
 
+  it('passes the real total-count handler from DataGridShell to the pagination bar', () => {
+    const shellSource = readDataGridShellSource();
+
+    expect(shellSource).toMatch(/<DataGridPaginationBar[\s\S]*?manualTotalCountAvailable=\{[^}]*onRequestTotalCount[^}]*\}[\s\S]*?totalCountLoading=\{pagination\?\.totalCountLoading\}[\s\S]*?onToggleTotalCount=\{handleToggleTotalCount\}/);
+  });
+
   it('hides current-page find in JSON and text record views', () => {
     const source = readDataGridSource();
 

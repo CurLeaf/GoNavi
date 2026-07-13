@@ -7904,6 +7904,236 @@ describe('QueryEditor external SQL save', () => {
     expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ id: 501 });
   });
 
+  it('counts the exact total for a limited query result and updates pagination', async () => {
+    const firstPageRows = Array.from({ length: 500 }, (_item, index) => ({ id: index + 1 }));
+    backendApp.GenerateQueryID
+      .mockResolvedValueOnce('query-page-initial')
+      .mockResolvedValueOnce('query-total-count');
+    backendApp.DBQueryMulti
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { columns: ['id'], rows: firstPageRows, statementIndex: 1 },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { columns: ['__gonavi_total__'], rows: [{ __gonavi_total__: 1234 }], statementIndex: 1 },
+        ],
+      });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'SELECT id FROM users LIMIT 0,500' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.pagination).toMatchObject({
+      total: 1000,
+      totalKnown: false,
+    });
+    expect(dataGridState.latestProps?.onRequestTotalCount).toEqual(expect.any(Function));
+
+    await act(async () => {
+      await dataGridState.latestProps.onRequestTotalCount();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledTimes(2);
+    expect(backendApp.DBQueryMulti).toHaveBeenLastCalledWith(
+      expect.anything(),
+      'main',
+      'SELECT COUNT(*) AS __gonavi_total__ FROM (SELECT id FROM users) __gonavi_query_count__',
+      'query-total-count',
+    );
+    expect(dataGridState.latestProps?.pagination).toMatchObject({
+      total: 1234,
+      totalKnown: true,
+      totalCountLoading: false,
+    });
+  });
+
+  it('cancels a query-result total count without applying its late response', async () => {
+    const firstPageRows = Array.from({ length: 500 }, (_item, index) => ({ id: index + 1 }));
+    let resolveCount!: (value: any) => void;
+    const pendingCount = new Promise((resolve) => {
+      resolveCount = resolve;
+    });
+    backendApp.GenerateQueryID
+      .mockResolvedValueOnce('query-page-initial')
+      .mockResolvedValueOnce('query-total-count');
+    backendApp.CancelQuery.mockResolvedValueOnce({ success: true });
+    backendApp.DBQueryMulti
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { columns: ['id'], rows: firstPageRows, statementIndex: 1 },
+        ],
+      })
+      .mockImplementationOnce(() => pendingCount);
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'SELECT id FROM users LIMIT 0,500' })} />);
+    });
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      void dataGridState.latestProps.onRequestTotalCount();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(dataGridState.latestProps?.pagination?.totalCountLoading).toBe(true);
+    expect(dataGridState.latestProps?.onCancelTotalCount).toEqual(expect.any(Function));
+
+    await act(async () => {
+      await dataGridState.latestProps.onCancelTotalCount();
+    });
+    expect(backendApp.CancelQuery).toHaveBeenCalledWith('query-total-count');
+    expect(dataGridState.latestProps?.pagination).toMatchObject({
+      total: 1000,
+      totalKnown: false,
+      totalCountLoading: false,
+    });
+
+    await act(async () => {
+      resolveCount({
+        success: true,
+        data: [
+          { columns: ['__gonavi_total__'], rows: [{ __gonavi_total__: 9999 }] },
+        ],
+      });
+      await pendingCount;
+      await Promise.resolve();
+    });
+    expect(dataGridState.latestProps?.pagination).toMatchObject({
+      total: 1000,
+      totalKnown: false,
+      totalCountLoading: false,
+    });
+  });
+
+  it('does not apply an old total-count response to a newly executed result with the same key', async () => {
+    const firstQueryRows = Array.from({ length: 500 }, (_item, index) => ({ old_id: index + 1 }));
+    const secondQueryRows = Array.from({ length: 500 }, (_item, index) => ({ new_id: index + 1 }));
+    let resolveOldCount!: (value: any) => void;
+    const oldCount = new Promise((resolve) => {
+      resolveOldCount = resolve;
+    });
+    backendApp.GenerateQueryID
+      .mockResolvedValueOnce('query-first')
+      .mockResolvedValueOnce('query-old-total')
+      .mockResolvedValueOnce('query-second');
+    backendApp.CancelQuery.mockResolvedValue({ success: true });
+    backendApp.DBQueryMulti
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ columns: ['old_id'], rows: firstQueryRows, statementIndex: 1 }],
+      })
+      .mockImplementationOnce(() => oldCount)
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ columns: ['new_id'], rows: secondQueryRows, statementIndex: 1 }],
+      });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'SELECT old_id FROM old_users LIMIT 0,500' })} />);
+    });
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      void dataGridState.latestProps.onRequestTotalCount();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    editorState.value = 'SELECT new_id FROM new_users LIMIT 0,500';
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ new_id: 1 });
+
+    await act(async () => {
+      resolveOldCount({
+        success: true,
+        data: [{ columns: ['__gonavi_total__'], rows: [{ __gonavi_total__: 9999 }] }],
+      });
+      await oldCount;
+      await Promise.resolve();
+    });
+
+    expect(backendApp.CancelQuery).toHaveBeenCalledWith('query-old-total');
+    expect(dataGridState.latestProps?.pagination).toMatchObject({
+      total: 1000,
+      totalKnown: false,
+    });
+  });
+
+  it('keeps an exact counted total while navigating through non-final pages', async () => {
+    const firstPageRows = Array.from({ length: 500 }, (_item, index) => ({ id: index + 1 }));
+    const secondPageWithLookahead = Array.from({ length: 501 }, (_item, index) => ({ id: index + 501 }));
+    backendApp.GenerateQueryID
+      .mockResolvedValueOnce('query-initial')
+      .mockResolvedValueOnce('query-total')
+      .mockResolvedValueOnce('query-page-2');
+    backendApp.DBQueryMulti
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ columns: ['id'], rows: firstPageRows, statementIndex: 1 }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ columns: ['__gonavi_total__'], rows: [{ __gonavi_total__: 1234 }] }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ columns: ['id'], rows: secondPageWithLookahead, statementIndex: 1 }],
+      });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'SELECT id FROM users LIMIT 0,500' })} />);
+    });
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await dataGridState.latestProps.onRequestTotalCount();
+      await Promise.resolve();
+    });
+    expect(dataGridState.latestProps?.pagination).toMatchObject({ total: 1234, totalKnown: true });
+
+    await act(async () => {
+      await dataGridState.latestProps.onPageChange(2, 500);
+      await Promise.resolve();
+    });
+    expect(dataGridState.latestProps?.pagination).toMatchObject({
+      current: 2,
+      total: 1234,
+      totalKnown: true,
+    });
+  });
+
   it('runs SQL editor data-changing CTEs through a pending managed transaction', async () => {
     const sql = 'WITH moved AS (DELETE FROM audit_logs WHERE created_at < NOW() RETURNING id) SELECT * FROM moved';
     backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({

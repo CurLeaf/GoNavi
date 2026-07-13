@@ -448,6 +448,14 @@ const renderDataTableView = () => (
           translate={translateDataGrid}
       />
   );
+  const handleToggleTotalCount = useCallback(() => {
+      if (!onRequestTotalCount) return;
+      if (pagination?.totalCountLoading) {
+          onCancelTotalCount?.();
+          return;
+      }
+      onRequestTotalCount();
+  }, [onCancelTotalCount, onRequestTotalCount, pagination?.totalCountLoading]);
   const paginationContent = (
       <DataGridPaginationBar
           isV2Ui={isV2Ui}
@@ -459,9 +467,12 @@ const renderDataTableView = () => (
           paginationPageText={paginationPageText}
           paginationPageSizeOptions={paginationPageSizeOptions}
           showKnownPageCount={paginationHasKnownTotalPages}
+          manualTotalCountAvailable={prefersManualTotalCount && !!onRequestTotalCount}
+          totalCountLoading={pagination?.totalCountLoading}
           onPageChange={onPageChange}
           onPageSizeChange={handlePageSizeChange}
           onV2PageStep={handleV2PageStep}
+          onToggleTotalCount={onRequestTotalCount ? handleToggleTotalCount : undefined}
           translate={translateDataGrid}
       />
   );
@@ -545,15 +556,6 @@ const renderDataTableView = () => (
           window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
       }, wasClosed ? 350 : 0);
   }, [mergedDisplayData, translateDataGrid]);
-
-  const handleToggleTotalCount = useCallback(() => {
-      if (!onRequestTotalCount) return;
-      if (pagination?.totalCountLoading) {
-          if (onCancelTotalCount) onCancelTotalCount();
-          return;
-      }
-      onRequestTotalCount();
-  }, [onCancelTotalCount, onRequestTotalCount, pagination?.totalCountLoading]);
 
   return (
     <div ref={rootRef} className={`${gridId}${cellEditMode ? ' cell-edit-mode' : ''} data-grid-root${isV2Ui ? ' gn-v2-data-grid' : ''}`} style={{ '--gonavi-header-min-height': `${headerCellMinHeight}px`, flex: '1 1 auto', height: '100%', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, background: 'transparent' } as React.CSSProperties}>

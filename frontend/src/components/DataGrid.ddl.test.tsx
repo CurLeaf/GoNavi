@@ -1084,6 +1084,62 @@ describe('DataGrid DDL interactions', () => {
     renderer!.unmount();
   });
 
+  it('allows sorter arrow clicks through while cell edit mode is active', async () => {
+    messageApi.info.mockResolvedValue(undefined);
+    const onSort = vi.fn();
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', id: 1, name: 'Ada' },
+            { __gonavi_row_key__: 'row-2', id: 2, name: 'Linus' },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+          onSort={onSort}
+          sortInfoExternal={[]}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      renderer!.root.findByType(DataGridToolbarFrame).props.onToggleCellEditMode();
+    });
+    await waitForEffects();
+
+    const nameColumn = testRenderState.latestColumns.find((column) => column.key === 'name');
+    const headerProps = nameColumn.onHeaderCell(nameColumn);
+    const upArrow = {
+      getBoundingClientRect: () => ({ left: 100, right: 112, top: 20, bottom: 32 }),
+    };
+    const event = {
+      target: { closest: vi.fn(() => null) },
+      currentTarget: {
+        querySelector: vi.fn((selector: string) => selector.includes('sorter-up') ? upArrow : null),
+      },
+      clientX: 106,
+      clientY: 26,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      headerProps.onClickCapture(event);
+    });
+
+    const toolbar = renderer!.root.findByType(DataGridToolbarFrame);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(event.stopPropagation).not.toHaveBeenCalled();
+    expect(toolbar.props.selectedCellsSize).toBe(0);
+    renderer!.unmount();
+  });
+
   it('opens the v2 column header context menu from table headers', async () => {
     setCurrentLanguage('en-US');
     storeState.appearance.uiVersion = 'v2';
@@ -1133,6 +1189,56 @@ describe('DataGrid DDL interactions', () => {
     expect(textContent(renderer!.root)).toContain(t('data_grid.context_menu.hide_column_comment'));
     expect(textContent(renderer!.root)).toContain('bigint');
     expect(textContent(renderer!.root)).toContain('主键 ID');
+    renderer!.unmount();
+  });
+
+  it('applies ascending sort from the v2 column header context menu', async () => {
+    setCurrentLanguage('zh-CN');
+    storeState.appearance.uiVersion = 'v2';
+    const onSort = vi.fn();
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1, name: 'Ada' }]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+          onSort={onSort}
+          sortInfoExternal={[]}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    const nameColumn = testRenderState.latestColumns.find((column) => column.key === 'name');
+    const headerProps = nameColumn.onHeaderCell(nameColumn);
+    await act(async () => {
+      headerProps.onContextMenu({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        clientX: 120,
+        clientY: 88,
+      });
+    });
+
+    const ascendingButton = renderer!.root.findAll((node) => (
+      node.type === 'button'
+      && textContent(node) === t('data_grid.context_menu.sort_ascending')
+    ))[0];
+    expect(ascendingButton).toBeTruthy();
+
+    await act(async () => {
+      ascendingButton.props.onClick({ preventDefault: vi.fn(), stopPropagation: vi.fn() });
+    });
+
+    expect(onSort).toHaveBeenCalledWith(
+      JSON.stringify([{ columnKey: 'name', order: 'ascend', enabled: true }]),
+      '',
+    );
     renderer!.unmount();
   });
 

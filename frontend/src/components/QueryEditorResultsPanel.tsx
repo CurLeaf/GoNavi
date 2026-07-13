@@ -3,6 +3,7 @@ import { Button, Dropdown, Tabs, Tooltip, message, type MenuProps } from 'antd';
 import { BugOutlined, CloseOutlined, CopyOutlined, EyeInvisibleOutlined, RobotOutlined } from '@ant-design/icons';
 
 import type { EditRowLocator } from '../utils/rowLocator';
+import type { GridSortInfoItem } from '../utils/dataGridSort';
 import type { QueryResultPaginationState } from '../utils/queryResultPagination';
 import { filterColumnNamesByGlobalHiddenColumns, useGlobalHiddenColumns } from '../utils/globalHiddenColumns';
 import { buildQueryResultColumnPinScope } from '../utils/queryResultColumnPinScope';
@@ -45,6 +46,7 @@ export type QueryEditorResultSet = {
     showRowNumberColumn?: boolean;
     truncated?: boolean;
     pkLoading?: boolean;
+    sortInfo?: GridSortInfoItem[];
     page?: QueryResultPaginationState & { loading?: boolean };
 };
 
@@ -69,6 +71,9 @@ interface QueryEditorResultsPanelProps {
     onOpenResultInWindow?: (key: string, preferred?: OpenResultInWindowPreferred) => void;
     onReloadResult: (key: string, sql: string) => void;
     onResultPageChange: (key: string, page: number, pageSize: number) => void;
+    onResultSort: (key: string, field: string, order: string) => void;
+    onRequestResultTotalCount?: (key: string) => void;
+    onCancelResultTotalCount?: (key: string) => void;
     onDiagnoseExecutionError: () => void;
     onCompareResult?: (resultKey: string) => void;
 }
@@ -102,6 +107,9 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     onOpenResultInWindow,
     onReloadResult,
     onResultPageChange,
+    onResultSort,
+    onRequestResultTotalCount,
+    onCancelResultTotalCount,
     onDiagnoseExecutionError,
     onCompareResult,
 }) => {
@@ -483,8 +491,18 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                             pageSize: rs.page.pageSize,
                             total: rs.page.total,
                             totalKnown: rs.page.totalKnown,
+                            totalCountLoading: rs.page.totalCountLoading,
+                            totalCountCancelled: rs.page.totalCountCancelled,
                         } : undefined}
                         onPageChange={rs.page ? ((page, size) => onResultPageChange(rs.key, page, size)) : undefined}
+                        onSort={(field, order) => onResultSort(rs.key, field, order)}
+                        sortInfoExternal={rs.sortInfo || []}
+                        onRequestTotalCount={rs.page && onRequestResultTotalCount
+                            ? (() => onRequestResultTotalCount(rs.key))
+                            : undefined}
+                        onCancelTotalCount={rs.page && onCancelResultTotalCount
+                            ? (() => onCancelResultTotalCount(rs.key))
+                            : undefined}
                         readOnly={rs.readOnly}
                         toolbarExtraActions={resolvedActiveResultKey === rs.key ? toolbarHideButton : null}
                     />

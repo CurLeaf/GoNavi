@@ -3023,6 +3023,168 @@ describe('QueryEditor external SQL save', () => {
     expect(editorSource).toContain('setActiveResultKey(QUERY_EDITOR_SQL_LOG_TAB_KEY)');
   });
 
+  it('connects each query result sort state and callback to DataGrid', async () => {
+    const onResultSort = vi.fn();
+    const sortInfo = [{ columnKey: 'name', order: 'ascend', enabled: true }];
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(
+        <QueryEditorResultsPanel
+          resultSets={[{
+            key: 'result-1',
+            sql: 'select id, name from users',
+            rows: [{ id: 1, name: 'Ada' }],
+            columns: ['id', 'name'],
+            pkColumns: [],
+            readOnly: true,
+            sortInfo,
+          }]}
+          activeResultKey="result-1"
+          loading={false}
+          executionError=""
+          sqlLogCount={0}
+          darkMode={false}
+          isV2Ui
+          currentDb="main"
+          currentConnectionId="conn-1"
+          toggleShortcutLabel=""
+          onActiveResultKeyChange={vi.fn()}
+          onHide={vi.fn()}
+          onCloseResult={vi.fn()}
+          onCloseOtherResultTabs={vi.fn()}
+          onCloseResultTabsToLeft={vi.fn()}
+          onCloseResultTabsToRight={vi.fn()}
+          onCloseAllResultTabs={vi.fn()}
+          onReloadResult={vi.fn()}
+          onResultPageChange={vi.fn()}
+          onResultSort={onResultSort}
+          onDiagnoseExecutionError={vi.fn()}
+        />,
+      );
+    });
+
+    expect(dataGridState.latestProps?.sortInfoExternal).toEqual(sortInfo);
+    expect(dataGridState.latestProps?.onSort).toEqual(expect.any(Function));
+
+    const serialized = JSON.stringify([{ columnKey: 'id', order: 'descend', enabled: true }]);
+    dataGridState.latestProps.onSort(serialized, '');
+    expect(onResultSort).toHaveBeenCalledWith('result-1', serialized, '');
+    renderer.unmount();
+  });
+
+  it('sorts complete query results locally and restores execution order when cleared', async () => {
+    const query = "select 3 as id, 'Zulu' as name union all select 1, 'Alpha' union all select 2, 'Alpha';";
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{
+        columns: ['id', 'name'],
+        rows: [
+          { id: 3, name: 'Zulu' },
+          { id: 1, name: 'Alpha' },
+          { id: 2, name: 'Alpha' },
+        ],
+      }],
+    });
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'main', query })} />);
+    });
+    await act(async () => {
+      await findButton(renderer, '运行').props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.data.map((row: any) => row.name)).toEqual(['Zulu', 'Alpha', 'Alpha']);
+    expect(dataGridState.latestProps?.sortInfoExternal).toEqual([]);
+
+    await act(async () => {
+      await dataGridState.latestProps.onSort(JSON.stringify([
+        { columnKey: 'name', order: 'ascend', enabled: true },
+        { columnKey: 'id', order: 'descend', enabled: true },
+      ]), '');
+    });
+
+    expect(dataGridState.latestProps?.data.map((row: any) => row.name)).toEqual(['Alpha', 'Alpha', 'Zulu']);
+    expect(dataGridState.latestProps?.data.map((row: any) => row.__gonavi_row_key__)).toEqual([2, 1, 0]);
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await dataGridState.latestProps.onSort('[]', '');
+    });
+
+    expect(dataGridState.latestProps?.data.map((row: any) => row.name)).toEqual(['Zulu', 'Alpha', 'Alpha']);
+    expect(dataGridState.latestProps?.data.map((row: any) => row.__gonavi_row_key__)).toEqual([0, 1, 2]);
+    expect(dataGridState.latestProps?.sortInfoExternal).toEqual([]);
+    renderer.unmount();
+  });
+
+  it('requeries the first page with outer ordering when a pageable result is sorted', async () => {
+    storeState.queryOptions.maxRows = 2;
+    const query = 'select id, name from (select id, name from users) q;';
+    backendApp.DBQueryMulti
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{
+          columns: ['id', 'name'],
+          rows: [{ id: 2, name: 'Beta' }, { id: 1, name: 'Alpha' }],
+        }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{
+          columns: ['id', 'name'],
+          rows: [{ id: 4, name: 'Delta' }, { id: 3, name: 'Charlie' }],
+        }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{
+          columns: ['id', 'name'],
+          rows: [
+            { id: 1, name: 'Alpha' },
+            { id: 2, name: 'Beta' },
+            { id: 3, name: 'Charlie' },
+          ],
+        }],
+      });
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'main', query })} />);
+    });
+    await act(async () => {
+      await findButton(renderer, '运行').props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.pagination).toMatchObject({ current: 1, pageSize: 2 });
+
+    await act(async () => {
+      await dataGridState.latestProps.onPageChange(2, 2);
+    });
+    expect(dataGridState.latestProps?.pagination).toMatchObject({ current: 2, pageSize: 2 });
+
+    await act(async () => {
+      await dataGridState.latestProps.onSort(JSON.stringify([
+        { columnKey: 'name', order: 'ascend', enabled: true },
+      ]), '');
+    });
+
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledTimes(3);
+    const sortedPageSql = String(backendApp.DBQueryMulti.mock.calls[2][2]);
+    expect(sortedPageSql).toContain('AS __gonavi_query_page__ ORDER BY `name` ASC LIMIT 3 OFFSET 0');
+    expect(dataGridState.latestProps?.pagination).toMatchObject({ current: 1, pageSize: 2 });
+    expect(dataGridState.latestProps?.sortInfoExternal).toEqual([
+      { columnKey: 'name', order: 'ascend', enabled: true },
+    ]);
+    expect(dataGridState.latestProps?.data.map((row: any) => row.name)).toEqual(['Alpha', 'Beta']);
+    renderer.unmount();
+  });
+
   it('does not render the embedded sql execution log tab in legacy UI', () => {
     const renderResultsPanel = (isV2Ui: boolean) => create(
       <QueryEditorResultsPanel
@@ -3045,6 +3207,7 @@ describe('QueryEditor external SQL save', () => {
         onCloseAllResultTabs={vi.fn()}
         onReloadResult={vi.fn()}
         onResultPageChange={vi.fn()}
+        onResultSort={vi.fn()}
         onDiagnoseExecutionError={vi.fn()}
       />,
     );
