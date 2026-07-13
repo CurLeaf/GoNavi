@@ -1,0 +1,76 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="$(var.ProductName)"
+           Manufacturer="Syngnat"
+           Language="1033"
+           Version="$(var.ProductVersion)"
+           ProductCode="*"
+           UpgradeCode="$(var.UpgradeCode)"
+           Scope="perMachine"
+           InstallerVersion="500"
+           Compressed="yes">
+    <MajorUpgrade AllowDowngrades="yes"
+                  Schedule="afterInstallInitialize" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="GoNaviIcon" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="GoNaviIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Syngnat/GoNavi" />
+    <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" After="CostFinalize" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+
+    <Feature Id="MainFeature" Title="$(var.ProductName)" Level="1">
+      <ComponentRef Id="MainExecutable" />
+    </Feature>
+
+    <Component Id="MainExecutable"
+               Directory="INSTALLFOLDER"
+               Guid="$(var.ComponentGuid)"
+               Bitness="always64">
+      <File Id="GoNaviExe"
+            Source="$(var.SourceExe)"
+            Name="GoNavi.exe"
+            KeyPath="yes">
+        <Shortcut Id="StartMenuShortcut"
+                  Directory="ProgramMenuFolder"
+                  Name="$(var.ProductName)"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="GoNaviIcon"
+                  Advertise="no" />
+        <Shortcut Id="DesktopShortcut"
+                  Directory="DesktopFolder"
+                  Name="$(var.ProductName)"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="GoNaviIcon"
+                  Advertise="no" />
+      </File>
+      <File Id="GoNaviMsiInstallMarker"
+            Source="$(var.InstallMarker)"
+            Name=".gonavi-msi-install" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Syngnat\$(var.RegistryKeyName)"
+                     Name="InstallType"
+                     Value="MSI"
+                     Type="string"
+                     KeyPath="no" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Syngnat\$(var.RegistryKeyName)"
+                     Name="InstallPath"
+                     Value="[INSTALLFOLDER]GoNavi.exe"
+                     Type="string"
+                     KeyPath="no" />
+    </Component>
+
+    <ui:WixUI Id="WixUI_InstallDir"
+              InstallDirectory="INSTALLFOLDER"
+              ExtendedPathValidation="yes" />
+  </Package>
+
+  <Fragment>
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="$(var.InstallFolderName)" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+    <StandardDirectory Id="DesktopFolder" />
+  </Fragment>
+</Wix>

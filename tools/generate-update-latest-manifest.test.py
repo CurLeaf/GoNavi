@@ -14,10 +14,13 @@ class GenerateUpdateLatestManifestTest(unittest.TestCase):
     def test_generates_manifest_with_sha256(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             assets = Path(tmp)
-            exe = assets / "GoNavi-1.2.3-Windows-Amd64.exe"
+            exe = assets / "GoNavi-1.2.3-Windows-Amd64-Portable.exe"
+            msi = assets / "GoNavi-1.2.3-Windows-Amd64-Installer.msi"
             exe.write_bytes(b"fake-binary")
+            msi.write_bytes(b"fake-installer")
             (assets / "SHA256SUMS").write_text(
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  GoNavi-1.2.3-Windows-Amd64.exe\n",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  GoNavi-1.2.3-Windows-Amd64-Portable.exe\n"
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  GoNavi-1.2.3-Windows-Amd64-Installer.msi\n",
                 encoding="utf-8",
             )
             out = assets / "latest.json"
@@ -43,14 +46,26 @@ class GenerateUpdateLatestManifestTest(unittest.TestCase):
             self.assertEqual(data["channel"], "latest")
             self.assertEqual(data["version"], "1.2.3")
             self.assertEqual(data["tagName"], "v1.2.3")
-            self.assertEqual(len(data["assets"]), 1)
-            asset = data["assets"][0]
-            self.assertEqual(asset["name"], "GoNavi-1.2.3-Windows-Amd64.exe")
+            assets_by_name = {asset["name"]: asset for asset in data["assets"]}
             self.assertEqual(
-                asset["url"],
-                "https://github.com/Syngnat/GoNavi/releases/download/v1.2.3/GoNavi-1.2.3-Windows-Amd64.exe",
+                set(assets_by_name),
+                {
+                    "GoNavi-1.2.3-Windows-Amd64-Portable.exe",
+                    "GoNavi-1.2.3-Windows-Amd64-Installer.msi",
+                },
             )
-            self.assertEqual(asset["sha256"], "a" * 64)
+            portable_asset = assets_by_name["GoNavi-1.2.3-Windows-Amd64-Portable.exe"]
+            self.assertEqual(
+                portable_asset["url"],
+                "https://github.com/Syngnat/GoNavi/releases/download/v1.2.3/GoNavi-1.2.3-Windows-Amd64-Portable.exe",
+            )
+            self.assertEqual(portable_asset["sha256"], "a" * 64)
+            installer_asset = assets_by_name["GoNavi-1.2.3-Windows-Amd64-Installer.msi"]
+            self.assertEqual(
+                installer_asset["url"],
+                "https://github.com/Syngnat/GoNavi/releases/download/v1.2.3/GoNavi-1.2.3-Windows-Amd64-Installer.msi",
+            )
+            self.assertEqual(installer_asset["sha256"], "b" * 64)
             self.assertNotIn("SHA256SUMS", [a["name"] for a in data["assets"]])
 
 
