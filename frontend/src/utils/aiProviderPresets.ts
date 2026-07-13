@@ -39,6 +39,7 @@ export interface ResolvePresetBaseURLInput {
 }
 
 export interface ResolvePresetTransportInput {
+  presetKey?: string;
   presetBackendType: AIProviderType;
   presetFixedApiFormat?: string;
   valuesApiFormat?: string;
@@ -208,6 +209,7 @@ export const resolvePresetBaseURL = ({
 };
 
 export const resolvePresetTransport = ({
+  presetKey,
   presetBackendType,
   presetFixedApiFormat,
   valuesApiFormat,
@@ -223,6 +225,17 @@ export const resolvePresetTransport = ({
     return {
       type: presetBackendType,
       apiFormat: valuesApiFormat || 'openai',
+    };
+  }
+
+  if (
+    presetBackendType === 'openai'
+    && valuesApiFormat === 'openai-responses'
+    && (presetKey === undefined || presetKey === 'openai')
+  ) {
+    return {
+      type: presetBackendType,
+      apiFormat: 'openai-responses',
     };
   }
 

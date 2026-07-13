@@ -59,6 +59,11 @@ func TestNormalizeOpenAICompatibleBaseURL(t *testing.T) {
 			want: "https://api.openai.com/v1",
 		},
 		{
+			name: "strips responses suffix before normalizing",
+			raw:  "https://api.openai.com/v1/responses",
+			want: "https://api.openai.com/v1",
+		},
+		{
 			name: "strips models suffix before normalizing",
 			raw:  "https://ark.cn-beijing.volces.com/api/coding/v3/models",
 			want: "https://ark.cn-beijing.volces.com/api/coding/v3",

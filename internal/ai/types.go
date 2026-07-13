@@ -85,6 +85,7 @@ type StreamChunk struct {
 //   - Anthropic: off | low | medium | high | xhigh | max
 //   - DeepSeek: off | low | medium | high
 //   - Gemini: off | minimal | low | medium | high
+//
 // 不同供应商再映射到 reasoning_effort / thinking / output_config.effort / thinking_level 等字段。
 type ThinkingIntensity string
 
@@ -107,7 +108,7 @@ type ProviderConfig struct {
 	Model                 string            `json:"model"`
 	InlineCompletionModel string            `json:"inlineCompletionModel,omitempty"`
 	Models                []string          `json:"models,omitempty"`
-	APIFormat             string            `json:"apiFormat,omitempty"` // custom 专用: openai | anthropic | gemini | cursor-agent | claude-cli | codebuddy-cli
+	APIFormat             string            `json:"apiFormat,omitempty"` // openai | openai-responses | anthropic | gemini | cursor-agent | claude-cli | codebuddy-cli
 	Headers               map[string]string `json:"headers,omitempty"`
 	MaxTokens             int               `json:"maxTokens"`
 	Temperature           float64           `json:"temperature"`

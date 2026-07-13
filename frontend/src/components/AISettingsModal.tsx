@@ -328,6 +328,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
             // 尝试根据 baseUrl 和 type 推断 preset
             const matchedPreset = matchProviderPreset(editableProvider);
             const resolvedTransport = resolvePresetTransport({
+                presetKey: matchedPreset.key,
                 presetBackendType: matchedPreset.backendType,
                 presetFixedApiFormat: matchedPreset.fixedApiFormat,
                 valuesApiFormat: editableProvider.apiFormat,
@@ -396,6 +397,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                 valuesBaseUrl: values.baseUrl,
             });
             const resolvedTransport = resolvePresetTransport({
+                presetKey: values.presetKey,
                 presetBackendType: preset.backendType,
                 presetFixedApiFormat: preset.fixedApiFormat,
                 valuesApiFormat: values.apiFormat,
@@ -664,6 +666,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                 customModels: values.models,
             });
             const resolvedTransport = resolvePresetTransport({
+                presetKey: values.presetKey || 'openai',
                 presetBackendType: preset.backendType,
                 presetFixedApiFormat: preset.fixedApiFormat,
                 valuesApiFormat: values.apiFormat,
@@ -698,6 +701,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
     const handlePresetChange = (presetKey: string) => {
         const preset = findPreset(presetKey);
         const resolvedTransport = resolvePresetTransport({
+            presetKey,
             presetBackendType: preset.backendType,
             presetFixedApiFormat: preset.fixedApiFormat,
             valuesApiFormat: form.getFieldValue('apiFormat'),

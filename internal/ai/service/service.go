@@ -651,7 +651,11 @@ func formatProviderHTTPBody(body []byte) string {
 func normalizedProviderType(config ai.ProviderConfig) string {
 	providerType := strings.ToLower(strings.TrimSpace(config.Type))
 	if providerType == "custom" && strings.TrimSpace(config.APIFormat) != "" {
-		return strings.ToLower(strings.TrimSpace(config.APIFormat))
+		apiFormat := strings.ToLower(strings.TrimSpace(config.APIFormat))
+		if apiFormat == "openai-responses" {
+			return "openai"
+		}
+		return apiFormat
 	}
 	return providerType
 }

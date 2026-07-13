@@ -10,7 +10,7 @@ import (
 )
 
 // CustomProvider 自定义 Provider，根据 apiFormat 选择底层协议
-// 支持 openai / anthropic / gemini / cursor-agent 等 API 格式
+// 支持 openai / openai-responses / anthropic / gemini / cursor-agent 等 API 格式
 type CustomProvider struct {
 	inner Provider
 	name  string
@@ -30,6 +30,8 @@ func NewCustomProvider(config ai.ProviderConfig) (Provider, error) {
 	var innerProvider Provider
 	var err error
 	switch apiFormat {
+	case "openai-responses":
+		innerProvider, err = NewOpenAIResponsesProvider(config)
 	case "anthropic":
 		innerProvider, err = NewAnthropicProvider(config)
 	case "gemini":

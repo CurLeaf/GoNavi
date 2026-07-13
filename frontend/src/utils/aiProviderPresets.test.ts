@@ -161,6 +161,37 @@ describe('ai provider preset helpers', () => {
       apiFormat: 'gemini',
     });
   });
+
+  it('preserves the Responses protocol for the built-in OpenAI preset', () => {
+    expect(resolvePresetTransport({
+      presetBackendType: 'openai',
+      valuesApiFormat: 'openai-responses',
+    })).toEqual({
+      type: 'openai',
+      apiFormat: 'openai-responses',
+    });
+  });
+
+  it('keeps the legacy OpenAI protocol implicit for existing configurations', () => {
+    expect(resolvePresetTransport({
+      presetBackendType: 'openai',
+      valuesApiFormat: 'openai',
+    })).toEqual({
+      type: 'openai',
+      apiFormat: undefined,
+    });
+  });
+
+  it('does not carry the Responses protocol into another OpenAI-compatible preset', () => {
+    expect(resolvePresetTransport({
+      presetKey: 'deepseek',
+      presetBackendType: 'openai',
+      valuesApiFormat: 'openai-responses',
+    })).toEqual({
+      type: 'openai',
+      apiFormat: undefined,
+    });
+  });
 });
 
 describe('resolveProviderPresetKey', () => {

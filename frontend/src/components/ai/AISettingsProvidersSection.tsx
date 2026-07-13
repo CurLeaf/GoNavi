@@ -113,8 +113,22 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
   const copy = (key: string) => (i18n?.t ?? ((catalogKey) => catalogTranslate('en-US', catalogKey)))(key);
   const presetKeyFromForm = watchedPresetKey || (editingProvider as (AIProviderConfig & { presetKey?: string }) | null)?.presetKey || 'openai';
   const supportsAdvancedEndpoint = presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama' || presetKeyFromForm === 'codebuddy' || presetKeyFromForm === 'cursor';
+  const showsApiFormat = presetKeyFromForm === 'custom' || presetKeyFromForm === 'openai';
   const codeBuddyUsesOptionalSecret = presetKeyFromForm === 'codebuddy';
   const cursorUsesOptionalModel = presetKeyFromForm === 'cursor';
+  const apiFormatOptions = presetKeyFromForm === 'openai'
+    ? [
+        { value: 'openai', label: 'OpenAI Chat' },
+        { value: 'openai-responses', label: 'OpenAI Responses' },
+      ]
+    : [
+        { value: 'openai', label: 'OpenAI Chat' },
+        { value: 'openai-responses', label: 'OpenAI Responses' },
+        { value: 'anthropic', label: 'Anthropic' },
+        { value: 'gemini', label: 'Gemini' },
+        { value: 'cursor-agent', label: 'Cursor Agent' },
+        { value: 'claude-cli', label: 'Claude CLI' },
+      ];
   const sectionLabelColor = darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)';
   const currentFieldGroupStyle = fieldGroupStyle(cardBorder, cardBg);
   const currentFieldLabelStyle = fieldLabelStyle(sectionLabelColor);
@@ -305,7 +319,7 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
           <Form.Item name="type" hidden><Input /></Form.Item>
         </div>
 
-        {supportsAdvancedEndpoint && (
+        {(supportsAdvancedEndpoint || showsApiFormat) && (
           <div style={{ ...currentFieldGroupStyle, marginTop: 16 }}>
             <div style={currentFieldLabelStyle}>
               <RobotOutlined style={{ fontSize: 14 }} /> {copy('ai_settings.form.section.basic')}
@@ -321,16 +335,18 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
               </Form.Item>
             )}
 
-            {presetKeyFromForm === 'custom' && (
+            {showsApiFormat && (
               <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.api_format')}</span>} name="apiFormat" style={{ marginBottom: 16 }}>
                 <div style={{
                   display: 'inline-flex',
+                  flexWrap: 'wrap',
+                  maxWidth: '100%',
                   padding: 4,
                   background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.04)',
                   borderRadius: 8,
                   gap: 4,
                 }}>
-                  {[{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }, { value: 'gemini', label: 'Gemini' }, { value: 'cursor-agent', label: 'Cursor Agent' }, { value: 'claude-cli', label: 'Claude CLI' }].map((format) => (
+                  {apiFormatOptions.map((format) => (
                     <div
                       key={format.value}
                       onClick={() => form.setFieldsValue({ apiFormat: format.value })}
@@ -339,6 +355,7 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
                         borderRadius: 6,
                         fontSize: 13,
                         fontWeight: watchedApiFormat === format.value ? 600 : 500,
+                        whiteSpace: 'nowrap',
                         cursor: 'pointer',
                         background: watchedApiFormat === format.value ? (darkMode ? '#374151' : '#ffffff') : 'transparent',
                         color: watchedApiFormat === format.value ? overlayTheme.titleText : overlayTheme.mutedText,
@@ -353,18 +370,20 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
               </Form.Item>
             )}
 
-            <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.model_list')}</span>} name="models" style={{ marginBottom: 0 }}>
-              <Select
-                mode="tags"
-                size="middle"
-                placeholder={codeBuddyUsesOptionalSecret
-                  ? copy('ai_settings.form.model_list_placeholder.codebuddy')
-                  : cursorUsesOptionalModel
-                    ? copy('ai_settings.form.model_list_placeholder.cursor')
-                    : copy('ai_settings.form.model_list_placeholder')}
-                style={{ width: '100%' }}
-              />
-            </Form.Item>
+            {supportsAdvancedEndpoint && (
+              <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.model_list')}</span>} name="models" style={{ marginBottom: 0 }}>
+                <Select
+                  mode="tags"
+                  size="middle"
+                  placeholder={codeBuddyUsesOptionalSecret
+                    ? copy('ai_settings.form.model_list_placeholder.codebuddy')
+                    : cursorUsesOptionalModel
+                      ? copy('ai_settings.form.model_list_placeholder.cursor')
+                      : copy('ai_settings.form.model_list_placeholder')}
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+            )}
           </div>
         )}
         <Form.Item name="model" hidden><Input /></Form.Item>

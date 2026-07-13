@@ -628,7 +628,7 @@ export interface AIProviderConfig {
   model: string;
   inlineCompletionModel?: string;
   models?: string[];
-  apiFormat?: string; // custom 专用: openai | anthropic | gemini | cursor-agent | claude-cli | codebuddy-cli
+  apiFormat?: string; // openai 可选 openai-responses；custom 支持 openai/anthropic/gemini/CLI 等格式
   headers?: Record<string, string>;
   maxTokens: number;
   temperature: number;

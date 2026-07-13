@@ -166,6 +166,49 @@ describe('AISettingsProvidersSection', () => {
     expect(markup).toContain('Auto-completion model');
     expect(markup).toContain('API Endpoint (URL)');
     expect(markup).toContain('Test connection');
+    expect(markup).toContain('OpenAI Responses');
+  });
+
+  it('renders the Responses protocol selector for the built-in OpenAI preset', () => {
+    const Wrap = () => {
+      const [form] = Form.useForm();
+      return (
+        <AISettingsProvidersSection
+          providers={[provider]}
+          activeProviderId="provider-1"
+          editingProvider={{ ...provider, apiFormat: 'openai-responses' }}
+          isEditing
+          form={form}
+          providerPresets={providerPresets}
+          watchedPresetKey="openai"
+          watchedApiFormat="openai-responses"
+          loading={false}
+          testStatus="idle"
+          primaryPasswordVisible={false}
+          darkMode={false}
+          overlayTheme={overlayTheme}
+          cardBg="#fff"
+          cardBorder="rgba(0,0,0,0.08)"
+          inputBg="#fff"
+          onPrimaryPasswordVisibleChange={() => {}}
+          resolveProviderPreset={() => ({ label: 'OpenAI', icon: <span>O</span> })}
+          resolvePresetByKey={(key) => providerPresets.find((item) => item.key === key) || providerPresets[0]}
+          onAddProvider={() => {}}
+          onEditProvider={() => {}}
+          onDeleteProvider={() => {}}
+          onSetActiveProvider={() => {}}
+          onCancelEdit={() => {}}
+          onPresetChange={() => {}}
+          onTestProvider={() => {}}
+          onSaveProvider={() => {}}
+        />
+      );
+    };
+
+    const markup = renderToStaticMarkup(<Wrap />);
+    expect(markup).toContain('API format');
+    expect(markup).toContain('OpenAI Chat');
+    expect(markup).toContain('OpenAI Responses');
   });
 
   it('uses catalog keys for provider list and form chrome', () => {
