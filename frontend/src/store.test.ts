@@ -2268,4 +2268,29 @@ describe('store appearance persistence', () => {
     expect(persistedSnippets).toHaveLength(1);
     expect(persistedSnippets[0].syntaxHelp).toBe('新说明：目标表、数据源、关联字段均可修改');
   });
+
+  it('preserves custom SQL snippet body whitespace across reloads', async () => {
+    const { useStore } = await importStore();
+    const body = 'SELECT ${1:columns} FROM ${2:table_name}\n  ';
+
+    useStore.getState().saveSqlSnippet({
+      id: 'custom-trailing-whitespace',
+      prefix: 'trail',
+      name: 'Trailing whitespace',
+      body,
+      isBuiltin: false,
+      createdAt: 1710000000000,
+    });
+
+    expect(useStore.getState().sqlSnippets.find((snippet) => snippet.id === 'custom-trailing-whitespace')?.body)
+      .toBe(body);
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.sqlSnippets.find((snippet: { id: string }) => snippet.id === 'custom-trailing-whitespace')?.body)
+      .toBe(body);
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().sqlSnippets.find((snippet) => snippet.id === 'custom-trailing-whitespace')?.body)
+      .toBe(body);
+  });
 });

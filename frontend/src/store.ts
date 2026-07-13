@@ -1664,8 +1664,8 @@ const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
       .toLowerCase()
       .replace(/[^a-z0-9_]/g, "")
       .slice(0, 20);
-    const body = toTrimmedString(raw.body);
-    if (!prefix || !body) return;
+    const body = typeof raw.body === "string" ? raw.body : "";
+    if (!prefix || !body.trim()) return;
     const id = toTrimmedString(raw.id, `snippet-${index + 1}`) || `snippet-${index + 1}`;
     const fallbackName = indexedStoreFallback(
       "store.fallback.sql_snippet_name",
