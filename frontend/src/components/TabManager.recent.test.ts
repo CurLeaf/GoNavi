@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildRecentConnectionShortcuts } from './TabManager';
+import { buildPinnedTableShortcuts, buildRecentConnectionShortcuts } from './TabManager';
 import type { SavedConnection } from '../types';
 
 const connection = (id: string, type: string): SavedConnection => ({
@@ -29,6 +29,27 @@ describe('recent workbench shortcuts', () => {
       expect.objectContaining({
         connection: expect.objectContaining({ id: 'mysql-1' }),
         dbName: 'orders',
+      }),
+    ]);
+  });
+
+  it('only exposes valid pinned tables whose connection still exists', () => {
+    const shortcuts = buildPinnedTableShortcuts([
+      connection('mysql-1', 'mysql'),
+    ], [
+      JSON.stringify(['mysql-1', 'orders', 'public', 'line_items']),
+      JSON.stringify(['missing-1', 'orders', '', 'orphaned_table']),
+      '{bad json',
+      JSON.stringify(['mysql-1', '', '', 'missing_database']),
+      JSON.stringify(['mysql-1', 'orders', 'public', 'line_items']),
+    ]);
+
+    expect(shortcuts).toEqual([
+      expect.objectContaining({
+        connection: expect.objectContaining({ id: 'mysql-1' }),
+        dbName: 'orders',
+        schemaName: 'public',
+        tableName: 'line_items',
       }),
     ]);
   });

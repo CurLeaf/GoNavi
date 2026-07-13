@@ -1280,6 +1280,16 @@ const Sidebar: React.FC<{
       getActiveContext: () => useStore.getState().activeContext,
   });
 
+  useEffect(() => {
+    const handleWorkbenchAddExternalSQLDirectory = () => {
+      void handleAddExternalSQLDirectory({ type: 'external-sql-root' });
+    };
+    window.addEventListener('gonavi:add-external-sql-directory', handleWorkbenchAddExternalSQLDirectory);
+    return () => {
+      window.removeEventListener('gonavi:add-external-sql-directory', handleWorkbenchAddExternalSQLDirectory);
+    };
+  }, [handleAddExternalSQLDirectory]);
+
   const getNodeDatabaseContext = (node: any): { connectionId: string; dbName: string; dbNodeKey: string } | null => {
     if (!node) return null;
     if (node.type === 'database') {

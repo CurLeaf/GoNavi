@@ -1,14 +1,14 @@
 import Modal from './common/ResizableDraggableModal';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Button, Dropdown, message, Tabs, Tooltip } from 'antd';
-import { AppstoreOutlined, CloseOutlined, ConsoleSqlOutlined, DatabaseOutlined, FileTextOutlined, HistoryOutlined, PlusOutlined, RightOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons';
+import { CloseOutlined, ConsoleSqlOutlined, DatabaseOutlined, FileTextOutlined, FolderOpenOutlined, HistoryOutlined, PlusOutlined, PushpinOutlined, RightOutlined, RobotOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import type { MenuProps, TabsProps } from 'antd';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core';
 import { SortableContext, useSortable, horizontalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useStore, type RecentConnectionTarget, type RecentSQLFile } from '../store';
-import type { SavedConnection, SavedQuery, TabData } from '../types';
+import type { ExternalSQLDirectory, SavedConnection, SavedQuery, TabData } from '../types';
 import { t } from '../i18n';
 import {
   buildTabDisplayModel,
@@ -70,6 +70,19 @@ type RecentConnectionShortcut = {
   dbName?: string;
 };
 
+export type PinnedTableShortcut = {
+  connection: SavedConnection;
+  dbName: string;
+  schemaName?: string;
+  tableName: string;
+};
+
+type LinkedExternalSQLDirectoryShortcut = {
+  connection: SavedConnection;
+  dbName?: string;
+  directory: ExternalSQLDirectory;
+};
+
 const RECENT_WORKBENCH_ITEM_LIMIT = 6;
 
 export const buildRecentConnectionShortcuts = (
@@ -105,6 +118,58 @@ export const buildRecentConnectionShortcuts = (
     }
   });
   return result;
+};
+
+export const buildPinnedTableShortcuts = (
+  connections: SavedConnection[],
+  pinnedTableKeys: string[],
+): PinnedTableShortcut[] => {
+  const connectionById = new Map(connections.map((connection) => [connection.id, connection]));
+  const seen = new Set<string>();
+  const result: PinnedTableShortcut[] = [];
+
+  for (const rawKey of pinnedTableKeys) {
+    if (result.length >= RECENT_WORKBENCH_ITEM_LIMIT) break;
+    try {
+      const parsed = JSON.parse(rawKey);
+      if (!Array.isArray(parsed) || parsed.length !== 4) continue;
+      const [rawConnectionId, rawDbName, rawSchemaName, rawTableName] = parsed;
+      const connectionId = String(rawConnectionId || '').trim();
+      const dbName = String(rawDbName || '').trim();
+      const schemaName = String(rawSchemaName || '').trim();
+      const tableName = String(rawTableName || '').trim();
+      const connection = connectionById.get(connectionId);
+      const key = `${connectionId}::${dbName}::${schemaName}::${tableName}`;
+      if (!connection || !dbName || !tableName || seen.has(key)) continue;
+      seen.add(key);
+      result.push({
+        connection,
+        dbName,
+        ...(schemaName ? { schemaName } : {}),
+        tableName,
+      });
+    } catch {
+      // 旧版本或损坏的本地偏好不应阻塞工作台首页。
+    }
+  }
+  return result;
+};
+
+const buildLinkedExternalSQLDirectoryShortcuts = (
+  connections: SavedConnection[],
+  directories: ExternalSQLDirectory[],
+): LinkedExternalSQLDirectoryShortcut[] => {
+  const connectionById = new Map(connections.map((connection) => [connection.id, connection]));
+  return [...directories]
+    .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0))
+    .flatMap((directory) => {
+      const connectionId = String(directory.connectionId || '').trim();
+      const connection = connectionById.get(connectionId);
+      if (!connection) return [];
+      const dbName = String(directory.dbName || connection.config.database || '').trim() || undefined;
+      return [{ connection, ...(dbName ? { dbName } : {}), directory }];
+    })
+    .slice(0, RECENT_WORKBENCH_ITEM_LIMIT);
 };
 
 const buildWorkbenchQueryTabId = (): string =>
@@ -453,8 +518,10 @@ const TabManager: React.FC = React.memo(() => {
   const detachedWorkbenchWindows = useStore(state => state.detachedWorkbenchWindows);
   const connections = useStore(state => state.connections);
   const savedQueries = useStore(state => state.savedQueries);
+  const externalSQLDirectories = useStore(state => state.externalSQLDirectories);
   const recentConnectionTargets = useStore(state => state.recentConnectionTargets);
   const recentSQLFiles = useStore(state => state.recentSQLFiles);
+  const pinnedSidebarTables = useStore(state => state.pinnedSidebarTables);
   const theme = useStore(state => state.theme);
   const appearance = useStore(state => state.appearance);
   const languagePreference = useStore(state => state.languagePreference);
@@ -882,6 +949,14 @@ const TabManager: React.FC = React.memo(() => {
       .slice(0, RECENT_WORKBENCH_ITEM_LIMIT),
     [connectionById, recentSQLFiles],
   );
+  const pinnedTableShortcuts = useMemo(
+    () => buildPinnedTableShortcuts(queryCapableConnections, pinnedSidebarTables),
+    [pinnedSidebarTables, queryCapableConnections],
+  );
+  const linkedExternalSQLDirectoryShortcuts = useMemo(
+    () => buildLinkedExternalSQLDirectoryShortcuts(queryCapableConnections, externalSQLDirectories),
+    [externalSQLDirectories, queryCapableConnections],
+  );
 
   const handleOpenConnectionModal = () => {
     const target = document.querySelector<HTMLButtonElement>('[data-gonavi-create-connection-action="true"]');
@@ -892,6 +967,14 @@ const TabManager: React.FC = React.memo(() => {
     setAIPanelVisible(true);
   };
 
+  const handleFocusObjectSearch = () => {
+    window.dispatchEvent(new CustomEvent('gonavi:focus-sidebar-search'));
+  };
+
+  const handleAddExternalSQLDirectory = () => {
+    window.dispatchEvent(new CustomEvent('gonavi:add-external-sql-directory'));
+  };
+
   const handleOpenRecentConnection = useCallback((shortcut: RecentConnectionShortcut) => {
     addTab({
       id: buildWorkbenchQueryTabId(),
@@ -900,6 +983,24 @@ const TabManager: React.FC = React.memo(() => {
       connectionId: shortcut.connection.id,
       dbName: shortcut.dbName,
       query: '',
+    });
+  }, [addTab]);
+
+  const handleOpenPinnedTable = useCallback((shortcut: PinnedTableShortcut) => {
+    const displayName = shortcut.schemaName
+      ? `${shortcut.schemaName}.${shortcut.tableName}`
+      : shortcut.tableName;
+    addTab({
+      id: `pinned-table:${[shortcut.connection.id, shortcut.dbName, shortcut.schemaName || '', shortcut.tableName]
+        .map(encodeURIComponent)
+        .join(':')}`,
+      title: displayName,
+      type: 'table',
+      connectionId: shortcut.connection.id,
+      dbName: shortcut.dbName,
+      tableName: shortcut.tableName,
+      ...(shortcut.schemaName ? { schemaName: shortcut.schemaName } : {}),
+      objectType: 'table',
     });
   }, [addTab]);
 
@@ -988,130 +1089,177 @@ const TabManager: React.FC = React.memo(() => {
           <Button icon={<ConsoleSqlOutlined />} onClick={() => window.dispatchEvent(new CustomEvent('gonavi:create-query-tab'))}>
             {t('query.new')}
           </Button>
+          <Tooltip title={t('tab_manager.empty.quick.search.description')}>
+            <Button icon={<SearchOutlined />} onClick={handleFocusObjectSearch}>
+              {t('tab_manager.empty.quick.search.title')}
+            </Button>
+          </Tooltip>
           <Button icon={<RobotOutlined />} onClick={handleOpenAI}>
             {t('tab_manager.empty.action.open_ai')}
           </Button>
         </div>
-        <div className="gn-v2-empty-recent" aria-label={t('tab_manager.empty.recent.aria')}>
-          <section className="gn-v2-empty-recent-card">
-            <div className="gn-v2-empty-recent-heading">
-              <span><HistoryOutlined />{t('tab_manager.empty.recent.connection.heading')}</span>
-              <em>{recentConnectionShortcuts.length}</em>
+      </section>
+      <section className="gn-v2-empty-recent" aria-label={t('tab_manager.empty.recent.aria')}>
+        <section className="gn-v2-empty-recent-card">
+          <div className="gn-v2-empty-recent-heading">
+            <span><HistoryOutlined />{t('tab_manager.empty.recent.connection.heading')}</span>
+            <em>{recentConnectionShortcuts.length}</em>
+          </div>
+          {recentConnectionShortcuts.length > 0 ? (
+            <div className="gn-v2-empty-recent-list">
+              {recentConnectionShortcuts.map((shortcut) => (
+                <button
+                  key={`${shortcut.connection.id}::${shortcut.dbName || ''}`}
+                  type="button"
+                  className="gn-v2-empty-recent-item"
+                  onClick={() => handleOpenRecentConnection(shortcut)}
+                >
+                  <DatabaseOutlined />
+                  <span>
+                    <strong title={shortcut.connection.name}>{shortcut.connection.name}</strong>
+                    <small>{shortcut.dbName || t('tab_manager.empty.recent.connection.default_database')}</small>
+                  </span>
+                  <RightOutlined className="gn-v2-empty-recent-arrow" />
+                </button>
+              ))}
             </div>
-            {recentConnectionShortcuts.length > 0 ? (
-              <div className="gn-v2-empty-recent-list">
-                {recentConnectionShortcuts.map((shortcut) => (
+          ) : (
+            <p className="gn-v2-empty-recent-empty">{t('tab_manager.empty.recent.connection.empty')}</p>
+          )}
+        </section>
+        <section className="gn-v2-empty-recent-card">
+          <div className="gn-v2-empty-recent-heading">
+            <span><FileTextOutlined />{t('tab_manager.empty.recent.saved_query.heading')}</span>
+            <em>{recentSavedQueries.length}</em>
+          </div>
+          {recentSavedQueries.length > 0 ? (
+            <div className="gn-v2-empty-recent-list">
+              {recentSavedQueries.map((query) => {
+                const connection = connectionById.get(query.connectionId);
+                return (
                   <button
-                    key={`${shortcut.connection.id}::${shortcut.dbName || ''}`}
+                    key={query.id}
                     type="button"
                     className="gn-v2-empty-recent-item"
-                    onClick={() => handleOpenRecentConnection(shortcut)}
+                    onClick={() => handleOpenSavedQuery(query)}
                   >
-                    <DatabaseOutlined />
+                    <FileTextOutlined />
                     <span>
-                      <strong title={shortcut.connection.name}>{shortcut.connection.name}</strong>
-                      <small>{shortcut.dbName || t('tab_manager.empty.recent.connection.default_database')}</small>
+                      <strong title={query.name || t('sidebar.tree.untitled_query')}>
+                        {query.name || t('sidebar.tree.untitled_query')}
+                      </strong>
+                      <small>{`${connection?.name || query.connectionId} · ${query.dbName || t('tab_manager.empty.recent.connection.default_database')}`}</small>
                     </span>
                     <RightOutlined className="gn-v2-empty-recent-arrow" />
                   </button>
-                ))}
-              </div>
-            ) : (
-              <p className="gn-v2-empty-recent-empty">{t('tab_manager.empty.recent.connection.empty')}</p>
-            )}
-          </section>
-          <section className="gn-v2-empty-recent-card">
-            <div className="gn-v2-empty-recent-heading">
-              <span><FileTextOutlined />{t('tab_manager.empty.recent.saved_query.heading')}</span>
-              <em>{recentSavedQueries.length}</em>
+                );
+              })}
             </div>
-            {recentSavedQueries.length > 0 ? (
-              <div className="gn-v2-empty-recent-list">
-                {recentSavedQueries.map((query) => {
-                  const connection = connectionById.get(query.connectionId);
-                  return (
-                    <button
-                      key={query.id}
-                      type="button"
-                      className="gn-v2-empty-recent-item"
-                      onClick={() => handleOpenSavedQuery(query)}
-                    >
-                      <FileTextOutlined />
-                      <span>
-                        <strong title={query.name || t('sidebar.tree.untitled_query')}>
-                          {query.name || t('sidebar.tree.untitled_query')}
-                        </strong>
-                        <small>{`${connection?.name || query.connectionId} · ${query.dbName || t('tab_manager.empty.recent.connection.default_database')}`}</small>
-                      </span>
-                      <RightOutlined className="gn-v2-empty-recent-arrow" />
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="gn-v2-empty-recent-empty">{t('tab_manager.empty.recent.saved_query.empty')}</p>
-            )}
-          </section>
-          <section className="gn-v2-empty-recent-card">
-            <div className="gn-v2-empty-recent-heading">
-              <span><ConsoleSqlOutlined />{t('tab_manager.empty.recent.sql_file.heading')}</span>
-              <em>{recentSQLFileShortcuts.length}</em>
+          ) : (
+            <p className="gn-v2-empty-recent-empty">{t('tab_manager.empty.recent.saved_query.empty')}</p>
+          )}
+        </section>
+        <section className="gn-v2-empty-recent-card">
+          <div className="gn-v2-empty-recent-heading">
+            <span><ConsoleSqlOutlined />{t('tab_manager.empty.recent.sql_file.heading')}</span>
+            <em>{recentSQLFileShortcuts.length}</em>
+          </div>
+          {recentSQLFileShortcuts.length > 0 ? (
+            <div className="gn-v2-empty-recent-list">
+              {recentSQLFileShortcuts.map((file) => {
+                const connection = connectionById.get(file.connectionId);
+                const openKey = `${file.connectionId}::${file.dbName || ''}::${file.filePath}`;
+                return (
+                  <button
+                    key={openKey}
+                    type="button"
+                    className="gn-v2-empty-recent-item"
+                    disabled={openingRecentSQLFileKey === openKey}
+                    onClick={() => void handleOpenRecentSQLFile(file)}
+                  >
+                    <FileTextOutlined />
+                    <span>
+                      <strong title={file.fileName}>{file.fileName}</strong>
+                      <small>{`${connection?.name || file.connectionId} · ${file.dbName || t('tab_manager.empty.recent.connection.default_database')}`}</small>
+                    </span>
+                    <RightOutlined className="gn-v2-empty-recent-arrow" />
+                  </button>
+                );
+              })}
             </div>
-            {recentSQLFileShortcuts.length > 0 ? (
-              <div className="gn-v2-empty-recent-list">
-                {recentSQLFileShortcuts.map((file) => {
-                  const connection = connectionById.get(file.connectionId);
-                  const openKey = `${file.connectionId}::${file.dbName || ''}::${file.filePath}`;
-                  return (
-                    <button
-                      key={openKey}
-                      type="button"
-                      className="gn-v2-empty-recent-item"
-                      disabled={openingRecentSQLFileKey === openKey}
-                      onClick={() => void handleOpenRecentSQLFile(file)}
-                    >
-                      <FileTextOutlined />
-                      <span>
-                        <strong title={file.fileName}>{file.fileName}</strong>
-                        <small>{`${connection?.name || file.connectionId} · ${file.dbName || t('tab_manager.empty.recent.connection.default_database')}`}</small>
-                      </span>
-                      <RightOutlined className="gn-v2-empty-recent-arrow" />
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="gn-v2-empty-recent-empty">{t('tab_manager.empty.recent.sql_file.empty')}</p>
-            )}
-          </section>
-        </div>
+          ) : (
+            <p className="gn-v2-empty-recent-empty">{t('tab_manager.empty.recent.sql_file.empty')}</p>
+          )}
+        </section>
       </section>
-      <section className="gn-v2-empty-panel" aria-label={t('tab_manager.empty.quick.aria')}>
-        <div className="gn-v2-panel-heading">
-          <span>{t('tab_manager.empty.quick.heading')}</span>
-          <AppstoreOutlined />
-        </div>
-        <button type="button" onClick={handleOpenConnectionModal}>
-          <DatabaseOutlined />
-          <span>
-            <strong>{t('tab_manager.empty.quick.configure_source.title')}</strong>
-            <small>{t('tab_manager.empty.quick.configure_source.description')}</small>
-          </span>
-        </button>
-        <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('gonavi:create-query-tab'))}>
-          <ConsoleSqlOutlined />
-          <span>
-            <strong>{t('tab_manager.empty.quick.sql_workspace.title')}</strong>
-            <small>{t('tab_manager.empty.quick.sql_workspace.description')}</small>
-          </span>
-        </button>
-        <button type="button" onClick={handleOpenAI}>
-          <RobotOutlined />
-          <span>
-            <strong>{t('tab_manager.empty.quick.ai_assist.title')}</strong>
-            <small>{t('tab_manager.empty.quick.ai_assist.description')}</small>
-          </span>
-        </button>
+      <section className="gn-v2-empty-resources" aria-label={t('tab_manager.empty.recent.aria')}>
+        <section className="gn-v2-empty-resource-card">
+          <div className="gn-v2-empty-recent-heading">
+            <span><PushpinOutlined />{t('sidebar.action.pin_table')}</span>
+            <em>{pinnedTableShortcuts.length}</em>
+          </div>
+          {pinnedTableShortcuts.length > 0 ? (
+            <div className="gn-v2-empty-recent-list">
+              {pinnedTableShortcuts.map((shortcut) => {
+                const displayName = shortcut.schemaName
+                  ? `${shortcut.schemaName}.${shortcut.tableName}`
+                  : shortcut.tableName;
+                return (
+                  <button
+                    key={`${shortcut.connection.id}::${shortcut.dbName}::${shortcut.schemaName || ''}::${shortcut.tableName}`}
+                    type="button"
+                    className="gn-v2-empty-recent-item"
+                    onClick={() => handleOpenPinnedTable(shortcut)}
+                  >
+                    <DatabaseOutlined />
+                    <span>
+                      <strong title={displayName}>{displayName}</strong>
+                      <small>{`${shortcut.connection.name} · ${shortcut.dbName}`}</small>
+                    </span>
+                    <RightOutlined className="gn-v2-empty-recent-arrow" />
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="gn-v2-empty-resource-empty">
+              <PushpinOutlined />
+              <p>{t('tab_manager.empty.resource.pinned_tables.empty')}</p>
+              <Button type="link" onClick={handleFocusObjectSearch}>{t('sidebar.command_search.label')}</Button>
+            </div>
+          )}
+        </section>
+        <section className="gn-v2-empty-resource-card">
+          <div className="gn-v2-empty-recent-heading">
+            <span><FolderOpenOutlined />{t('sidebar.external_sql.root')}</span>
+            <em>{linkedExternalSQLDirectoryShortcuts.length}</em>
+          </div>
+          {linkedExternalSQLDirectoryShortcuts.length > 0 ? (
+            <div className="gn-v2-empty-recent-list">
+              {linkedExternalSQLDirectoryShortcuts.map((shortcut) => (
+                <button
+                  key={shortcut.directory.id}
+                  type="button"
+                  className="gn-v2-empty-recent-item"
+                  onClick={() => handleOpenRecentConnection(shortcut)}
+                >
+                  <FolderOpenOutlined />
+                  <span>
+                    <strong title={shortcut.directory.name}>{shortcut.directory.name}</strong>
+                    <small>{`${shortcut.connection.name} · ${shortcut.dbName || t('tab_manager.empty.recent.connection.default_database')}`}</small>
+                  </span>
+                  <RightOutlined className="gn-v2-empty-recent-arrow" />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="gn-v2-empty-resource-empty">
+              <FolderOpenOutlined />
+              <p>{t('tab_manager.empty.resource.sql_directory.empty')}</p>
+              <Button type="link" onClick={handleAddExternalSQLDirectory}>{t('sidebar.menu.add_sql_directory')}</Button>
+            </div>
+          )}
+        </section>
       </section>
     </div>
   );
