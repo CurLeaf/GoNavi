@@ -2124,6 +2124,7 @@ function App() {
       isLatestUpdateDownloaded,
       isUpdateChannelLoading,
       isUpdateChannelSaving,
+      installMode,
       lastUpdateInfo,
       markUpdateProgressDismissed,
       muteLatestUpdate,
@@ -2133,6 +2134,7 @@ function App() {
       showUpdateDownloadProgress,
       updateChannel,
       updateDownloadProgress,
+      updateInstallAction,
   } = useAppUpdateManager({
       runtimeBuildType,
       t,
@@ -4409,6 +4411,16 @@ function App() {
       utilityMutedTextStyle,
       utilityPanelStyle,
   ]);
+  const updateInstallActionLabel = updateInstallAction === 'install-and-restart'
+      ? t('app.about.action.install_and_restart')
+      : (updateInstallAction === 'launch-installer'
+          ? t('app.about.action.launch_installer')
+          : t('app.about.action.restart_to_update'));
+  const updateDownloadActionLabel = lastUpdateInfo?.packageType === 'msi'
+      ? t('app.about.action.download_msi_update')
+      : (lastUpdateInfo?.packageType === 'portable'
+          ? t('app.about.action.download_portable_update')
+          : t('app.about.action.download_update'));
   const renderAboutUpdateActions = (closeAction?: React.ReactNode) => [
       isBackgroundProgressForLatestUpdate && !isLatestUpdateDownloaded ? (
           <Button key="progress" icon={<DownloadOutlined />} onClick={showUpdateDownloadProgress}>{t('app.about.action.download_progress')}</Button>
@@ -4419,7 +4431,7 @@ function App() {
       <Button key="check" icon={<CloudDownloadOutlined />} onClick={() => checkForUpdates(false)}>{t('app.about.action.check_updates')}</Button>,
       closeAction ?? null,
       lastUpdateInfo?.hasUpdate && !isLatestUpdateDownloaded && !isBackgroundProgressForLatestUpdate ? (
-          <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={() => downloadUpdate(lastUpdateInfo, false)}>{t('app.about.action.download_update')}</Button>
+          <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={() => downloadUpdate(lastUpdateInfo, false)}>{updateDownloadActionLabel}</Button>
       ) : null,
       isLatestUpdateDownloaded ? (
           <Button key="open-install-directory" onClick={openDownloadedUpdateDirectory}>
@@ -4430,10 +4442,10 @@ function App() {
           <Button
               key="restart-to-update"
               type="primary"
-              icon={<DownloadOutlined />}
+              icon={<SyncOutlined />}
               onClick={() => { void handleInstallUpdateRequest(); }}
           >
-              {t('app.about.action.restart_to_update')}
+              {updateInstallActionLabel}
           </Button>
       ) : null,
   ].filter(Boolean);
@@ -4578,6 +4590,9 @@ function App() {
       const currentVersionText = lastUpdateInfo?.currentVersion || aboutDisplayVersion;
       const releaseNotesText = lastUpdateInfo?.releaseName || (hasUpdate ? t('app.about.release_notes.fallback') : '-');
       const releaseTimeText = formatAboutReleaseTime(lastUpdateInfo?.releasePublishedAt);
+      const packageType = ['portable', 'msi', 'dmg', 'archive'].includes(String(lastUpdateInfo?.packageType || ''))
+          ? String(lastUpdateInfo?.packageType)
+          : 'unknown';
       const cardBorder = darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(16,24,40,0.11)';
       const cardBg = darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.82)';
       const mutedText = utilityMutedTextStyle.color;
@@ -4587,6 +4602,12 @@ function App() {
           [t('app.about.version.latest'), latestVersionText],
           [t('app.about.version.release_time'), releaseTimeText],
           [t('app.about.version.release_notes'), releaseNotesText],
+          ...(installMode === 'msi' || installMode === 'portable'
+              ? [[t('app.about.version.install_mode'), t(`app.about.install_mode.${installMode}`)]]
+              : []),
+          ...(hasUpdate && packageType !== 'unknown'
+              ? [[t('app.about.version.package_type'), t(`app.about.package_type.${packageType}`)]]
+              : []),
       ];
 
       return (
@@ -8260,8 +8281,8 @@ function App() {
                   <Button key="open-install-directory" onClick={openDownloadedUpdateDirectory}>
                       {t('app.about.action.open_install_directory')}
                   </Button>,
-                  <Button key="restart" type="primary" onClick={() => { void handleInstallUpdateRequest(); }}>
-                      {t('app.about.action.restart_to_update')}
+                  <Button key="restart" type="primary" icon={<SyncOutlined />} onClick={() => { void handleInstallUpdateRequest(); }}>
+                      {updateInstallActionLabel}
                   </Button>
               ] : (updateDownloadProgress.status === 'error' ? [
                   <Button key="close" onClick={hideUpdateDownloadProgress}>{t('common.close')}</Button>
@@ -8274,7 +8295,9 @@ function App() {
                   />
                   <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
                       {updateDownloadProgress.status === 'done'
-                          ? t('app.about.download_progress.complete_hint')
+                          ? (updateInstallAction === 'restart'
+                              ? t('app.about.download_progress.complete_hint')
+                              : t('app.about.download_progress.installer_complete_hint'))
                           : `${formatBytes(updateDownloadProgress.downloaded)} / ${formatBytes(updateDownloadProgress.total)}`}
                   </div>
                   {updateDownloadProgress.message ? (

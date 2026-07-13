@@ -151,6 +151,10 @@ describe('settings center layout', () => {
     expect(appSource).toContain('minWidth: 260');
     expect(appSource).toContain('const releaseTimeText = formatAboutReleaseTime(lastUpdateInfo?.releasePublishedAt);');
     expect(appSource).toContain("[t('app.about.version.release_time'), releaseTimeText]");
+    expect(appSource).toContain("installMode === 'msi' || installMode === 'portable'");
+    expect(appSource).toContain("[t('app.about.version.install_mode'), t(`app.about.install_mode.${installMode}`)]");
+    expect(appSource).toContain("hasUpdate && packageType !== 'unknown'");
+    expect(appSource).toContain("[t('app.about.version.package_type'), t(`app.about.package_type.${packageType}`)]");
     expect(appSource).toContain("gridTemplateColumns: 'minmax(0, 1fr) minmax(220px, 260px)'");
     expect(appSource).toContain('className="gonavi-about-update-channel"');
     expect(appSource).toContain('<Segmented');

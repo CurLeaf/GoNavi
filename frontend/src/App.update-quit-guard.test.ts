@@ -34,5 +34,8 @@ describe('restart-to-update unsaved SQL guard', () => {
     expect(appSource.match(/void handleInstallUpdateRequest\(\);/g)).toHaveLength(2);
     expect(appSource).not.toContain('onClick={handleInstallFromProgress}');
     expect(appSource).not.toContain('handleApplicationQuitRequest(handleInstallFromProgress(');
+    expect(appSource).toContain("updateInstallAction === 'install-and-restart'");
+    expect(appSource).toContain("updateInstallAction === 'launch-installer'");
+    expect(appSource.match(/\{updateInstallActionLabel\}/g)).toHaveLength(2);
   });
 });

@@ -2,7 +2,7 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useAppUpdateManager } from './useAppUpdateManager';
+import { resolveUpdateInstallAction, useAppUpdateManager } from './useAppUpdateManager';
 
 const runtimeApi = vi.hoisted(() => ({
   EventsOn: vi.fn(() => vi.fn()),
@@ -96,6 +96,156 @@ describe('useAppUpdateManager', () => {
     });
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it('resolves Portable and MSI install actions from backend metadata', () => {
+    expect(resolveUpdateInstallAction({ packageType: 'portable', autoRelaunch: true })).toBe('restart');
+    expect(resolveUpdateInstallAction({ packageType: 'msi', autoRelaunch: true })).toBe('install-and-restart');
+    expect(resolveUpdateInstallAction({ packageType: 'msi', autoRelaunch: false })).toBe('launch-installer');
+  });
+
+  it('merges complete MSI download metadata returned by the backend', async () => {
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        channel: 'latest',
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        releaseName: 'Initial release metadata',
+        assetName: 'GoNavi-0.8.2-Windows-Amd64-Installer.msi',
+        packageType: 'msi',
+        installMode: 'msi',
+        autoRelaunch: true,
+        downloaded: false,
+        assetSize: 4096,
+      },
+    });
+    backendApp.DownloadUpdate.mockResolvedValue({
+      success: true,
+      data: {
+        info: {
+          hasUpdate: true,
+          channel: 'latest',
+          currentVersion: '0.8.1',
+          latestVersion: '0.8.2',
+          releaseName: 'Resolved release metadata',
+          assetName: 'GoNavi-0.8.2-Windows-Amd64-Installer.msi',
+          packageType: 'msi',
+          installMode: 'msi',
+          autoRelaunch: true,
+        },
+        downloadPath: 'C:\\ProgramData\\GoNavi\\GoNavi-0.8.2-Windows-Amd64-Installer.msi',
+        packageType: 'msi',
+        installMode: 'msi',
+        autoRelaunch: false,
+      },
+    });
+
+    renderHook();
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+    await act(async () => {
+      await hook?.downloadUpdate(hook?.lastUpdateInfo!, false);
+    });
+
+    expect(hook?.lastUpdateInfo).toMatchObject({
+      releaseName: 'Resolved release metadata',
+      assetName: 'GoNavi-0.8.2-Windows-Amd64-Installer.msi',
+      packageType: 'msi',
+      installMode: 'msi',
+      autoRelaunch: false,
+      downloaded: true,
+      downloadPath: 'C:\\ProgramData\\GoNavi\\GoNavi-0.8.2-Windows-Amd64-Installer.msi',
+    });
+    expect(hook?.installMode).toBe('msi');
+    expect(hook?.updateInstallAction).toBe('launch-installer');
+    expect(hook?.updateDownloadProgress.message).toBe('app.about.download_progress.ready_to_install');
+    expect(messageApi.success).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'app.about.message.download_ready_install_with_path:C:\\ProgramData\\GoNavi\\GoNavi-0.8.2-Windows-Amd64-Installer.msi',
+    }));
+  });
+
+  it('keeps same-version Portable and MSI downloads in separate cache identities', async () => {
+    const portableInfo = {
+      hasUpdate: true,
+      channel: 'latest',
+      currentVersion: '0.8.1',
+      latestVersion: '0.8.2',
+      assetName: 'GoNavi-0.8.2-Windows-Amd64-Portable.exe',
+      packageType: 'portable',
+      installMode: 'portable',
+      autoRelaunch: true,
+      downloaded: false,
+      assetSize: 2048,
+    };
+    const msiInfo = {
+      ...portableInfo,
+      assetName: 'GoNavi-0.8.2-Windows-Amd64-Installer.msi',
+      packageType: 'msi',
+      installMode: 'msi',
+    };
+    backendApp.CheckForUpdates
+      .mockResolvedValueOnce({ success: true, data: portableInfo })
+      .mockResolvedValueOnce({ success: true, data: msiInfo });
+    backendApp.DownloadUpdate
+      .mockResolvedValueOnce({ success: true, data: { info: portableInfo, packageType: 'portable' } })
+      .mockResolvedValueOnce({ success: true, data: { info: msiInfo, packageType: 'msi' } });
+
+    renderHook();
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+    await act(async () => {
+      await hook?.downloadUpdate(hook?.lastUpdateInfo!, false);
+    });
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+
+    expect(hook?.lastUpdateInfo?.packageType).toBe('msi');
+    expect(hook?.isLatestUpdateDownloaded).toBe(false);
+
+    await act(async () => {
+      await hook?.downloadUpdate(hook?.lastUpdateInfo!, false);
+    });
+    expect(backendApp.DownloadUpdate).toHaveBeenCalledTimes(2);
+    expect(hook?.lastUpdateInfo?.packageType).toBe('msi');
+    expect(hook?.isLatestUpdateDownloaded).toBe(true);
+  });
+
+  it('reports a launched MSI installer instead of claiming an automatic restart', async () => {
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        channel: 'latest',
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.2',
+        assetName: 'GoNavi-0.8.2-Windows-Amd64-Installer.msi',
+        packageType: 'msi',
+        installMode: 'msi',
+        autoRelaunch: false,
+        downloaded: true,
+      },
+    });
+    backendApp.InstallUpdateAndRestart.mockResolvedValue({
+      success: true,
+      data: { packageType: 'msi', autoRelaunch: false },
+    });
+
+    renderHook();
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+    await act(async () => {
+      await hook?.handleInstallFromProgress();
+    });
+
+    expect(backendApp.InstallUpdateAndRestart).toHaveBeenCalledTimes(1);
+    expect(hook?.updateInstallAction).toBe('launch-installer');
+    expect(hook?.updateDownloadProgress.message).toBe('app.about.download_progress.installer_started');
   });
 
   it('uses InstallUpdateAndRestart for downloaded macOS updates', async () => {

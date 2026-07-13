@@ -117,6 +117,38 @@ describe("i18n catalog", () => {
     }
   });
 
+  it("keeps MSI and Portable update copy complete across all catalogs", () => {
+    const updateKeys = [
+      "app.about.action.download_msi_update",
+      "app.about.action.download_portable_update",
+      "app.about.action.install_and_restart",
+      "app.about.action.launch_installer",
+      "app.about.download_progress.ready_to_install",
+      "app.about.download_progress.installing_and_restarting",
+      "app.about.download_progress.launching_installer",
+      "app.about.download_progress.restarting_after_install",
+      "app.about.download_progress.installer_started",
+      "app.about.message.download_ready_install",
+      "app.about.message.download_ready_install_with_path",
+      "app.about.update_status.new_version_ready_install",
+      "app.about.version.install_mode",
+      "app.about.version.package_type",
+      "app.about.install_mode.portable",
+      "app.about.install_mode.msi",
+      "app.about.package_type.portable",
+      "app.about.package_type.msi",
+    ] as const;
+    const base = catalogs["en-US"];
+
+    for (const language of SUPPORTED_LANGUAGES) {
+      for (const key of updateKeys) {
+        expect(catalogs[language]).toHaveProperty(key);
+        expect(catalogs[language][key]).toBeTruthy();
+        expect(getPlaceholders(catalogs[language][key])).toEqual(getPlaceholders(base[key]));
+      }
+    }
+  });
+
   it("includes App shell keys required by every supported language", () => {
     const appShellKeys = [
       "app.tools.title",
