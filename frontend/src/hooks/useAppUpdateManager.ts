@@ -314,6 +314,7 @@ export const useAppUpdateManager = ({
         const total = prev.total > 0 ? prev.total : (info.assetSize || 0);
         return {
           ...prev,
+          version: downloadedInfo.latestVersion,
           key: downloadedKey,
           status: 'done',
           percent: 100,
@@ -328,6 +329,7 @@ export const useAppUpdateManager = ({
       // 下载到 100% 后停留在就绪态，由用户确认当前安装方式对应的更新动作。
       setUpdateDownloadProgress((prev) => ({
         ...prev,
+        version: downloadedInfo.latestVersion,
         open: prev.open || !updateUserDismissedRef.current,
         status: 'done',
         percent: 100,

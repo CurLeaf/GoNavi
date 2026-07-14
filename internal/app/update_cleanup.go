@@ -138,8 +138,25 @@ func launchWindowsUpdateWithCleanup(staged *stagedUpdate, targetExe string, pid 
 	return nil
 }
 
-func resolveWindowsUpdateFinalTargetPath(currentTarget string, _ string) string {
-	return strings.TrimSpace(currentTarget)
+func resolveWindowsUpdateFinalTargetPath(currentTarget string, sourcePath string) string {
+	currentTarget = strings.TrimSpace(currentTarget)
+	if currentTarget == "" {
+		return currentTarget
+	}
+	currentName := filepath.Base(currentTarget)
+	sourceName := filepath.Base(strings.TrimSpace(sourcePath))
+	if isVersionedWindowsUpdatePackageName(currentName) && isVersionedWindowsUpdatePackageName(sourceName) {
+		return filepath.Join(filepath.Dir(currentTarget), sourceName)
+	}
+	return currentTarget
+}
+
+func isVersionedWindowsUpdatePackageName(name string) bool {
+	trimmed := strings.TrimSpace(name)
+	lower := strings.ToLower(trimmed)
+	return strings.HasPrefix(trimmed, "GoNavi-") &&
+		strings.Contains(trimmed, "-Windows-") &&
+		strings.HasSuffix(lower, ".exe")
 }
 
 func prepareWindowsStagedUpdateAsset(sourcePath string, stagedDir string) (string, error) {

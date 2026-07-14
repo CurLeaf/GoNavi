@@ -167,6 +167,63 @@ describe('useAppUpdateManager', () => {
     }));
   });
 
+  it('uses the backend download result version for progress and cached update metadata', async () => {
+    backendApp.CheckForUpdates.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: true,
+        channel: 'dev',
+        currentVersion: 'dev-current',
+        latestVersion: 'dev-old',
+        assetName: 'GoNavi-dev-old-Windows-Amd64-Portable.exe',
+        packageType: 'portable',
+        installMode: 'portable',
+        autoRelaunch: true,
+        downloaded: false,
+        assetSize: 4096,
+      },
+    });
+    backendApp.DownloadUpdate.mockResolvedValue({
+      success: true,
+      data: {
+        info: {
+          hasUpdate: true,
+          channel: 'dev',
+          currentVersion: 'dev-current',
+          latestVersion: 'dev-new',
+          assetName: 'GoNavi-dev-new-Windows-Amd64-Portable.exe',
+          packageType: 'portable',
+          installMode: 'portable',
+          autoRelaunch: true,
+        },
+        downloadPath: 'C:\\GoNavi\\GoNavi-dev-new-Windows-Amd64-Portable.exe',
+        packageType: 'portable',
+        installMode: 'portable',
+        autoRelaunch: true,
+      },
+    });
+
+    renderHook();
+    await act(async () => {
+      await hook?.checkForUpdates(false);
+    });
+    await act(async () => {
+      await hook?.downloadUpdate(hook?.lastUpdateInfo!, false);
+    });
+
+    expect(hook?.lastUpdateInfo).toMatchObject({
+      latestVersion: 'dev-new',
+      assetName: 'GoNavi-dev-new-Windows-Amd64-Portable.exe',
+      downloaded: true,
+      downloadPath: 'C:\\GoNavi\\GoNavi-dev-new-Windows-Amd64-Portable.exe',
+    });
+    expect(hook?.updateDownloadProgress).toMatchObject({
+      version: 'dev-new',
+      key: 'dev:dev-new:portable:gonavi-dev-new-windows-amd64-portable.exe',
+      status: 'done',
+    });
+  });
+
   it('keeps same-version Portable and MSI downloads in separate cache identities', async () => {
     const portableInfo = {
       hasUpdate: true,
