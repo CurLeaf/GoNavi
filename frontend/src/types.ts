@@ -373,7 +373,17 @@ export interface GlobalProxyConfig extends ProxyConfig {
 export interface ConnectionTag {
   id: string;
   name: string;
+  /**
+   * Parent group id. An omitted value keeps the group at the sidebar root.
+   * Hosts are always owned by exactly one direct group, while groups can nest.
+   */
+  parentTagId?: string;
   connectionIds: string[];
+  /**
+   * Direct child display order. Entries use the same `tag:<id>` and
+   * `connection:<id>` tokens as the sidebar root order.
+   */
+  childOrder?: string[];
 }
 
 export interface ColumnDefinition {

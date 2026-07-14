@@ -108,7 +108,6 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Form, Popover, Radio
 import {
     buildSidebarRootConnectionToken,
     buildSidebarRootTagToken,
-    resolveSidebarRootOrderTokens,
     useStore,
 } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
@@ -163,6 +162,7 @@ export { resolveSidebarContextMenuPosition } from './sidebarCoreUtils';
 export type { ExternalSQLFileModalMode, SearchScope } from './sidebarCoreUtils';
 import {
   buildSidebarTableChildrenForUi,
+  buildSidebarConnectionTagTree,
   buildV2RailConnectionGroups,
   buildV2SidebarTableSectionedChildren,
   collectSidebarSubtreeKeys,
@@ -170,6 +170,7 @@ import {
   filterV2CommandSearchTreeItems,
   filterV2ExplorerTreeByKind,
   isSidebarTablePinned,
+  isConnectionTagDescendant,
   normalizeSidebarTreeRelativeDropPosition,
   resolveSidebarConnectionIdFromKey,
   resolveSidebarDropInsertBefore,
@@ -177,7 +178,6 @@ import {
   resolveSidebarDropTargetMetricsFromDomEvent,
   resolveSidebarDatabaseTreePruneKeys,
   resolveSidebarNodeConnectionId,
-  resolveSidebarTagDropInsertBefore,
   resolveV2ActiveConnectionId,
   resolveV2CommandSearchPersistentFilter,
   shouldClearSidebarNodeChildrenOnCollapse,
@@ -193,6 +193,7 @@ import {
 
 export {
   buildSidebarTableChildrenForUi,
+  buildSidebarConnectionTagTree,
   buildV2RailConnectionGroups,
   buildV2SidebarTableSectionedChildren,
   collectSidebarSubtreeKeys,
@@ -200,6 +201,7 @@ export {
   filterV2CommandSearchTreeItems,
   filterV2ExplorerTreeByKind,
   isSidebarTablePinned,
+  isConnectionTagDescendant,
   normalizeSidebarTreeRelativeDropPosition,
   resolveSidebarConnectionIdFromKey,
   resolveSidebarDropInsertBefore,
@@ -207,7 +209,6 @@ export {
   resolveSidebarDropTargetMetricsFromDomEvent,
   resolveSidebarDatabaseTreePruneKeys,
   resolveSidebarNodeConnectionId,
-  resolveSidebarTagDropInsertBefore,
   resolveV2ActiveConnectionId,
   resolveV2CommandSearchPersistentFilter,
   shouldClearSidebarNodeChildrenOnCollapse,
@@ -217,6 +218,7 @@ export {
   shouldRunV2CommandSearchEnter,
   sortSidebarTableEntries,
 };
+export { resolveSidebarTagDropInsertBefore } from './sidebarV2Utils';
 export type { V2CommandSearchItem, V2RailConnectionGroup } from './sidebarV2Utils';
 
 type SidebarTreeSwitcherNodeLike = {
@@ -469,9 +471,7 @@ const Sidebar: React.FC<{
   const updateConnectionTag = useStore(state => state.updateConnectionTag);
   const removeConnectionTag = useStore(state => state.removeConnectionTag);
   const moveConnectionToTag = useStore(state => state.moveConnectionToTag);
-  const reorderConnections = useStore(state => state.reorderConnections);
-  const reorderTags = useStore(state => state.reorderTags);
-  const reorderSidebarRoot = useStore(state => state.reorderSidebarRoot);
+  const moveConnectionTag = useStore(state => state.moveConnectionTag);
   const closeTabsByConnection = useStore(state => state.closeTabsByConnection);
   const closeTabsByDatabase = useStore(state => state.closeTabsByDatabase);
   const theme = useStore(state => state.theme);
@@ -966,13 +966,13 @@ const Sidebar: React.FC<{
         } as TreeNode;
       };
 
-      const taggedConnIds = new Set<string>();
-      const tagNodesById = new Map<string, TreeNode>();
-      connectionTags.forEach((tag) => {
-        tag.connectionIds.forEach(id => taggedConnIds.add(id));
-        tagNodesById.set(tag.id, {
-          title: tag.name,
-          key: `tag-${tag.id}`,
+      const buildTreeNode = (item: ReturnType<typeof buildSidebarConnectionTagTree>[number]): TreeNode => {
+        if (item.kind === 'connection') {
+          return buildConnectionNode(item.connection);
+        }
+        return {
+          title: item.tag.name,
+          key: `tag-${item.tag.id}`,
           icon: (
             <span
               className="gn-v2-tree-folder-icon"
@@ -982,46 +982,17 @@ const Sidebar: React.FC<{
             </span>
           ),
           type: 'tag',
-          dataRef: tag,
+          dataRef: item.tag,
           isLeaf: false,
-          children: tag.connectionIds
-            .map(cid => connections.find(c => c.id === cid))
-            .filter(Boolean)
-            .map(conn => buildConnectionNode(conn!)),
-        } as TreeNode);
-      });
+          children: item.children.map(buildTreeNode),
+        } as TreeNode;
+      };
 
-      const ungroupedNodesById = new Map<string, TreeNode>();
-      connections
-        .filter(c => !taggedConnIds.has(c.id))
-        .forEach((conn) => {
-          ungroupedNodesById.set(conn.id, buildConnectionNode(conn));
-        });
-
-      const orderedRootTokens = resolveSidebarRootOrderTokens(
-        sidebarRootOrder,
-        connectionTags,
+      const orderedNodes = buildSidebarConnectionTagTree(
         connections,
-      );
-      const orderedNodes: TreeNode[] = [];
-      orderedRootTokens.forEach((token) => {
-        if (token.startsWith('tag:')) {
-          const tagNode = tagNodesById.get(token.slice('tag:'.length));
-          if (!tagNode) return;
-          orderedNodes.push(tagNode);
-          tagNodesById.delete(token.slice('tag:'.length));
-          return;
-        }
-        if (token.startsWith('connection:')) {
-          const connectionNode = ungroupedNodesById.get(token.slice('connection:'.length));
-          if (!connectionNode) return;
-          orderedNodes.push(connectionNode);
-          ungroupedNodesById.delete(token.slice('connection:'.length));
-        }
-      });
-
-      orderedNodes.push(...Array.from(tagNodesById.values()));
-      orderedNodes.push(...Array.from(ungroupedNodesById.values()));
+        connectionTags,
+        sidebarRootOrder,
+      ).map(buildTreeNode);
       if (allSavedQueriesNode) {
         orderedNodes.push(allSavedQueriesNode);
       }
@@ -2630,6 +2601,52 @@ const Sidebar: React.FC<{
       treeDragSelectSuppressUntilRef,
       setIsTreeDragging,
   });
+  const getTagParentId = (tagId: unknown): string | null => {
+      const tag = connectionTags.find((candidate) => candidate.id === String(tagId || '').trim());
+      const parentTagId = String(tag?.parentTagId || '').trim();
+      return parentTagId || null;
+  };
+
+  const getConnectionParentTagId = (connectionId: unknown): string | null => (
+      connectionTags.find((tag) => tag.connectionIds.includes(String(connectionId || '').trim()))?.id || null
+  );
+
+  const getNodeParentTagId = (node: any): string | null => {
+      if (node?.type === 'tag') return getTagParentId(node?.dataRef?.id);
+      if (node?.type === 'connection') return getConnectionParentTagId(node?.key);
+      return null;
+  };
+
+  const getNodeOrderToken = (node: any): string | null => {
+      if (node?.type === 'tag') {
+          const tagId = String(node?.dataRef?.id || '').trim();
+          return tagId ? buildSidebarRootTagToken(tagId) : null;
+      }
+      if (node?.type === 'connection') {
+          const connectionId = String(node?.key || '').trim();
+          return connectionId ? buildSidebarRootConnectionToken(connectionId) : null;
+      }
+      return null;
+  };
+
+  const allowSidebarTreeDrop = ({ dragNode, dropNode, dropPosition }: any): boolean => {
+      if (!dragNode || !dropNode) return false;
+      if ((dragNode.type !== 'tag' && dragNode.type !== 'connection') || (dropNode.type !== 'tag' && dropNode.type !== 'connection')) {
+          return false;
+      }
+      // Connections cannot contain tree items. A group can contain a group only
+      // when the pointer lands on its content, not on its before/after gap.
+      const droppingIntoTag = dropNode.type === 'tag' && Number(dropPosition) === 0;
+      if (dropNode.type === 'connection' && Number(dropPosition) === 0) return false;
+      if (dragNode.type !== 'tag') return String(dragNode.key) !== String(dropNode.key);
+
+      const dragTagId = String(dragNode?.dataRef?.id || '').trim();
+      const targetParentTagId = droppingIntoTag
+          ? String(dropNode?.dataRef?.id || '').trim() || null
+          : getNodeParentTagId(dropNode);
+      return !!dragTagId && !isConnectionTagDescendant(dragTagId, targetParentTagId, connectionTags);
+  };
+
   const handleDrop = (info: any) => {
       setIsTreeDragging(false);
       const dropPosition = normalizeSidebarTreeRelativeDropPosition(
@@ -2643,128 +2660,34 @@ const Sidebar: React.FC<{
           top: dropTargetMetrics.top,
           height: dropTargetMetrics.height,
       } : null);
-
       const dragNode = info.dragNode;
       const dropNode = domDropNode && domDropNode.key === String(info?.node?.key || '')
           ? info.node
           : (domDropNode
               ? findTreeNodeByKeyRef.current(treeDataRef.current, domDropNode.key) || info.node
               : info.node);
+      if (!dragNode || !dropNode) return;
 
-      const getDropRootToken = (node: any): string => {
-          if (!node) return '';
-          if (node.type === 'tag') {
-              return buildSidebarRootTagToken(String(node?.dataRef?.id || ''));
-          }
-          if (node.type === 'connection') {
-              const groupedTagId = connectionTags.find((tag) =>
-                  tag.connectionIds.includes(String(node.key)),
-              )?.id || '';
-              return groupedTagId
-                  ? buildSidebarRootTagToken(groupedTagId)
-                  : buildSidebarRootConnectionToken(String(node.key));
-          }
-          return '';
-      };
+      const droppingIntoTag = dropNode.type === 'tag' && (
+          info?.dropToGap === false || (info?.dropToGap === undefined && dropPosition === 0)
+      );
+      const targetParentTagId = droppingIntoTag
+          ? String(dropNode?.dataRef?.id || '').trim() || null
+          : getNodeParentTagId(dropNode);
+      const targetToken = droppingIntoTag ? null : getNodeOrderToken(dropNode);
+      const targetInsertBefore = droppingIntoTag ? false : insertBefore;
 
-      // Root tag or ungrouped connection reordering
       if (dragNode.type === 'tag') {
-          if (dropNode.type === 'tag' || dropNode.type === 'connection') {
-              const currentTagOrder = connectionTags.map(t => t.id);
-              const dragTagId = dragNode.dataRef.id;
-              const dropTagId = dropNode.type === 'tag'
-                  ? dropNode.dataRef.id
-                  : (connectionTags.find(t => t.connectionIds.includes(String(dropNode.key)))?.id || '');
-              const dragRootToken = buildSidebarRootTagToken(String(dragTagId));
-              const dropRootToken = getDropRootToken(dropNode);
-
-              if (dropRootToken && dropRootToken !== dragRootToken) {
-                  if (dropTagId) {
-                      const resolvedInsertBefore = resolveSidebarTagDropInsertBefore({
-                          currentTagOrder,
-                          dragTagId,
-                          dropTagId,
-                          relativeDropPosition: dropPosition,
-                          fallbackInsertBefore: insertBefore,
-                          metrics: dropTargetMetrics ? {
-                              clientY: info?.event?.clientY,
-                              top: dropTargetMetrics.top,
-                              height: dropTargetMetrics.height,
-                          } : null,
-                      });
-                      reorderSidebarRoot(dragRootToken, dropRootToken, resolvedInsertBefore);
-                  } else {
-                      reorderSidebarRoot(dragRootToken, dropRootToken, insertBefore);
-                  }
-                  return;
-              }
-
-              const newOrder = currentTagOrder.filter(id => id !== dragTagId);
-              let insertIndex = newOrder.length;
-              if (dropTagId) {
-                  const dropIndex = newOrder.indexOf(dropTagId);
-                  const resolvedInsertBefore = resolveSidebarTagDropInsertBefore({
-                      currentTagOrder,
-                      dragTagId,
-                      dropTagId,
-                      relativeDropPosition: dropPosition,
-                      fallbackInsertBefore: insertBefore,
-                      metrics: dropTargetMetrics ? {
-                          clientY: info?.event?.clientY,
-                          top: dropTargetMetrics.top,
-                          height: dropTargetMetrics.height,
-                      } : null,
-                  });
-
-                  if (resolvedInsertBefore) {
-                      insertIndex = dropIndex;
-                  } else {
-                      insertIndex = dropIndex + 1;
-                  }
-              } else {
-                  // Dropped onto an ungrouped root connection, usually meaning moving to the end of tags
-                  // Since tags are always displayed before ungrouped connections, just put it at the end
-                  insertIndex = newOrder.length;
-              }
-
-              newOrder.splice(insertIndex, 0, dragTagId);
-              reorderTags(newOrder);
-          }
+          const dragTagId = String(dragNode?.dataRef?.id || '').trim();
+          if (!dragTagId || isConnectionTagDescendant(dragTagId, targetParentTagId, connectionTags)) return;
+          moveConnectionTag(dragTagId, targetParentTagId, targetToken, targetInsertBefore);
           return;
       }
 
       if (dragNode.type === 'connection') {
-          const dragTagId = connectionTags.find((tag) =>
-              tag.connectionIds.includes(String(dragNode.key)),
-          )?.id || '';
-          const dragIsUngroupedRoot = !dragTagId;
-          const dropRootToken = getDropRootToken(dropNode);
-          if (dragIsUngroupedRoot && dropNode.type === 'connection' && dropRootToken) {
-              reorderSidebarRoot(
-                  buildSidebarRootConnectionToken(String(dragNode.key)),
-                  dropRootToken,
-                  insertBefore,
-              );
-              return;
-          }
-      }
-
-      // Connection moving to tag (any drop position on a tag node counts as "into")
-      if (dragNode.type === 'connection' && dropNode.type === 'tag') {
-          moveConnectionToTag(dragNode.key, dropNode.dataRef.id);
-          return;
-      }
-
-      // Connection reordering against another connection
-      if (dragNode.type === 'connection' && dropNode.type === 'connection') {
-          const targetTag = connectionTags.find(t => t.connectionIds.includes(dropNode.key));
-          reorderConnections(
-              String(dragNode.key),
-              String(dropNode.key),
-              targetTag?.id || null,
-              insertBefore,
-          );
-          return;
+          const connectionId = String(dragNode.key || '').trim();
+          if (!connectionId || connectionId === String(dropNode.key || '')) return;
+          moveConnectionToTag(connectionId, targetParentTagId, targetToken, targetInsertBefore);
       }
   };
 
@@ -3228,6 +3151,7 @@ const Sidebar: React.FC<{
                         icon: false,
                         nodeDraggable: (node: any) => node.type === 'connection' || node.type === 'tag'
                     }}
+                    allowDrop={allowSidebarTreeDrop}
                     onDragStart={() => {
                         snapshotTreeSelectionBeforeDrag();
                         treeDragSelectSuppressUntilRef.current = Date.now() + 600;
@@ -3325,7 +3249,6 @@ const Sidebar: React.FC<{
             renameViewTarget={renameViewTarget}
             updateConnectionTag={updateConnectionTag}
             addConnectionTag={addConnectionTag}
-            moveConnectionToTag={moveConnectionToTag}
             isCreateDbModalOpen={isCreateDbModalOpen}
             setIsCreateDbModalOpen={setIsCreateDbModalOpen}
             createDbForm={createDbForm}

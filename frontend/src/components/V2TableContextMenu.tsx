@@ -494,6 +494,7 @@ export type V2ConnectionContextMenuTagItem = {
 };
 
 export type V2ConnectionGroupContextMenuActionKey =
+  | 'new-subgroup'
   | 'edit-group'
   | 'delete-group';
 
@@ -522,6 +523,7 @@ export const V2ConnectionGroupContextMenuView: React.FC<{
 
       <div className="gn-v2-context-menu-body">
         {renderItems([
+          { action: 'new-subgroup', icon: <FolderAddOutlined />, title: t('connection.sidebar.group.newSubgroup'), featured: true },
           { action: 'edit-group', icon: <EditOutlined />, title: t('connection.sidebar.group.edit'), kbd: 'F2', featured: true },
         ])}
         <div className="gn-v2-context-menu-divider" />

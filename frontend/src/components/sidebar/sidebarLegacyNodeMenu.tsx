@@ -357,8 +357,26 @@ export const buildSidebarLegacyNodeMenuItems = (
                 label: t('sidebar.menu.edit_tag'),
                 icon: <EditOutlined />,
                 onClick: () => {
-                    createTagForm.setFieldsValue({ name: node.title, connectionIds: node.dataRef.connectionIds });
+                    createTagForm.setFieldsValue({
+                        name: node.title,
+                        parentTagId: node.dataRef.parentTagId,
+                        connectionIds: node.dataRef.connectionIds,
+                    });
                     setRenameViewTarget(node);
+                    setIsCreateTagModalOpen(true);
+                }
+            },
+            {
+                key: 'new-child-tag',
+                label: t('connection.sidebar.group.newSubgroup'),
+                icon: <FolderAddOutlined />,
+                onClick: () => {
+                    createTagForm.resetFields();
+                    createTagForm.setFieldsValue({
+                        parentTagId: node.dataRef.id,
+                        connectionIds: [],
+                    });
+                    setRenameViewTarget(null);
                     setIsCreateTagModalOpen(true);
                 }
             },

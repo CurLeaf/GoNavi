@@ -106,7 +106,7 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().appearance.uiVersion).toBe('v2');
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
-    expect(persisted.version).toBe(15);
+    expect(persisted.version).toBe(16);
     expect(persisted.state.appearance.uiVersion).toBe('v2');
   });
 
@@ -1146,6 +1146,324 @@ describe('store appearance persistence', () => {
       buildSidebarRootConnectionToken('conn-c'),
       buildSidebarRootTagToken('tag-redis'),
     ]);
+  });
+
+  it('migrates flat v15 connection groups to explicit root child order', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        connectionTags: [
+          {
+            id: 'tag-legacy',
+            name: 'Legacy',
+            connectionIds: ['conn-a', 'conn-b'],
+          },
+        ],
+        sidebarRootOrder: ['tag:tag-legacy'],
+      },
+      version: 15,
+    }));
+
+    const {
+      buildSidebarRootConnectionToken,
+      resolveConnectionTagChildOrder,
+      useStore,
+    } = await importStore();
+
+    const legacyTag = useStore.getState().connectionTags[0];
+    expect(legacyTag?.parentTagId).toBeUndefined();
+    expect(legacyTag?.childOrder).toEqual([
+      buildSidebarRootConnectionToken('conn-a'),
+      buildSidebarRootConnectionToken('conn-b'),
+    ]);
+    expect(resolveConnectionTagChildOrder(
+      'tag-legacy',
+      useStore.getState().connectionTags,
+    )).toEqual(legacyTag?.childOrder);
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.version).toBe(16);
+    expect(persisted.state.connectionTags[0].childOrder).toEqual([
+      'connection:conn-a',
+      'connection:conn-b',
+    ]);
+  });
+
+  it('supports three-level groups with hosts and child groups in one ordered list', async () => {
+    const {
+      buildSidebarRootConnectionToken,
+      buildSidebarRootTagToken,
+      resolveConnectionTagChildOrder,
+      useStore,
+    } = await importStore();
+    useStore.getState().replaceConnections(
+      ['host-1', 'host-2', 'host-3', 'host-4', 'host-5', 'host-6'].map((id) => ({
+        id,
+        name: id,
+        config: { id, type: 'mysql', host: `${id}.local`, port: 3306, user: 'root' },
+      })),
+    );
+    useStore.getState().addConnectionTag({
+      id: 'group-1',
+      name: '分组1',
+      connectionIds: ['host-1', 'host-2'],
+    });
+    useStore.getState().addConnectionTag({
+      id: 'group-1-1',
+      name: '分组1-1',
+      parentTagId: 'group-1',
+      connectionIds: ['host-3', 'host-4'],
+    });
+    useStore.getState().addConnectionTag({
+      id: 'group-1-1-1',
+      name: '分组1-1-1',
+      parentTagId: 'group-1-1',
+      connectionIds: ['host-5', 'host-6'],
+    });
+
+    // A child group may be placed between its parent's direct hosts.
+    useStore.getState().moveConnectionTag(
+      'group-1-1',
+      'group-1',
+      buildSidebarRootConnectionToken('host-1'),
+      false,
+    );
+
+    expect(resolveConnectionTagChildOrder(
+      'group-1',
+      useStore.getState().connectionTags,
+    )).toEqual([
+      buildSidebarRootConnectionToken('host-1'),
+      buildSidebarRootTagToken('group-1-1'),
+      buildSidebarRootConnectionToken('host-2'),
+    ]);
+    expect(resolveConnectionTagChildOrder(
+      'group-1-1',
+      useStore.getState().connectionTags,
+    )).toEqual([
+      buildSidebarRootConnectionToken('host-3'),
+      buildSidebarRootConnectionToken('host-4'),
+      buildSidebarRootTagToken('group-1-1-1'),
+    ]);
+    expect(useStore.getState().connectionTags.find(
+      (tag) => tag.id === 'group-1-1-1',
+    )?.parentTagId).toBe('group-1-1');
+  });
+
+  it('keeps a host in exactly one nested group while moving and reordering it', async () => {
+    const {
+      buildSidebarRootConnectionToken,
+      resolveConnectionTagChildOrder,
+      useStore,
+    } = await importStore();
+    useStore.getState().replaceConnections(
+      ['host-1', 'host-2'].map((id) => ({
+        id,
+        name: id,
+        config: { id, type: 'mysql', host: `${id}.local`, port: 3306, user: 'root' },
+      })),
+    );
+    useStore.getState().addConnectionTag({
+      id: 'group-1',
+      name: '分组1',
+      connectionIds: ['host-1'],
+    });
+    useStore.getState().addConnectionTag({
+      id: 'group-1-1',
+      name: '分组1-1',
+      parentTagId: 'group-1',
+      connectionIds: ['host-2'],
+    });
+
+    useStore.getState().moveConnectionToTag(
+      'host-1',
+      'group-1-1',
+      buildSidebarRootConnectionToken('host-2'),
+      true,
+    );
+    useStore.getState().reorderConnections(
+      'host-2',
+      'host-1',
+      'group-1-1',
+      true,
+    );
+
+    const groups = useStore.getState().connectionTags;
+    expect(groups.find((tag) => tag.id === 'group-1')?.connectionIds).toEqual([]);
+    expect(groups.find((tag) => tag.id === 'group-1-1')?.connectionIds).toEqual([
+      'host-2',
+      'host-1',
+    ]);
+    expect(groups.filter((tag) => tag.connectionIds.includes('host-1'))).toHaveLength(1);
+    expect(resolveConnectionTagChildOrder('group-1-1', groups)).toEqual([
+      buildSidebarRootConnectionToken('host-2'),
+      buildSidebarRootConnectionToken('host-1'),
+    ]);
+  });
+
+  it('promotes direct hosts and child groups in place when deleting an intermediate group', async () => {
+    const {
+      buildSidebarRootConnectionToken,
+      buildSidebarRootTagToken,
+      resolveConnectionTagChildOrder,
+      useStore,
+    } = await importStore();
+    useStore.getState().replaceConnections(
+      ['host-1', 'host-2', 'host-3', 'host-4', 'host-5', 'host-6'].map((id) => ({
+        id,
+        name: id,
+        config: { id, type: 'mysql', host: `${id}.local`, port: 3306, user: 'root' },
+      })),
+    );
+    useStore.getState().addConnectionTag({
+      id: 'group-1',
+      name: '分组1',
+      connectionIds: ['host-1', 'host-2'],
+    });
+    useStore.getState().addConnectionTag({
+      id: 'group-1-1',
+      name: '分组1-1',
+      parentTagId: 'group-1',
+      connectionIds: ['host-3', 'host-4'],
+    });
+    useStore.getState().addConnectionTag({
+      id: 'group-1-1-1',
+      name: '分组1-1-1',
+      parentTagId: 'group-1-1',
+      connectionIds: ['host-5', 'host-6'],
+    });
+    useStore.getState().moveConnectionTag(
+      'group-1-1',
+      'group-1',
+      buildSidebarRootConnectionToken('host-1'),
+      false,
+    );
+
+    useStore.getState().removeConnectionTag('group-1-1');
+
+    expect(useStore.getState().connectionTags.some(
+      (tag) => tag.id === 'group-1-1',
+    )).toBe(false);
+    expect(useStore.getState().connectionTags.find(
+      (tag) => tag.id === 'group-1-1-1',
+    )?.parentTagId).toBe('group-1');
+    expect(resolveConnectionTagChildOrder(
+      'group-1',
+      useStore.getState().connectionTags,
+    )).toEqual([
+      buildSidebarRootConnectionToken('host-1'),
+      buildSidebarRootConnectionToken('host-3'),
+      buildSidebarRootConnectionToken('host-4'),
+      buildSidebarRootTagToken('group-1-1-1'),
+      buildSidebarRootConnectionToken('host-2'),
+    ]);
+    expect(useStore.getState().connectionTags.find(
+      (tag) => tag.id === 'group-1',
+    )?.connectionIds).toEqual(['host-1', 'host-3', 'host-4', 'host-2']);
+  });
+
+  it('rejects moving a group into itself or a descendant', async () => {
+    const { useStore } = await importStore();
+    useStore.getState().addConnectionTag({
+      id: 'group-1',
+      name: '分组1',
+      connectionIds: [],
+    });
+    useStore.getState().addConnectionTag({
+      id: 'group-1-1',
+      name: '分组1-1',
+      parentTagId: 'group-1',
+      connectionIds: [],
+    });
+    useStore.getState().addConnectionTag({
+      id: 'group-1-1-1',
+      name: '分组1-1-1',
+      parentTagId: 'group-1-1',
+      connectionIds: [],
+    });
+
+    useStore.getState().moveConnectionTag('group-1', 'group-1-1-1');
+    useStore.getState().moveConnectionTag('group-1-1', 'group-1-1');
+
+    const groups = useStore.getState().connectionTags;
+    expect(groups.find((tag) => tag.id === 'group-1')?.parentTagId).toBeUndefined();
+    expect(groups.find((tag) => tag.id === 'group-1-1')?.parentTagId).toBe('group-1');
+    expect(groups.find((tag) => tag.id === 'group-1-1-1')?.parentTagId).toBe('group-1-1');
+  });
+
+  it('sanitizes malformed persisted group parents and duplicate host ownership', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        connectionTags: [
+          {
+            id: 'group-a',
+            name: 'A',
+            parentTagId: 'group-b',
+            connectionIds: ['shared-host'],
+            childOrder: ['connection:shared-host', 'tag:group-b'],
+          },
+          {
+            id: 'group-b',
+            name: 'B',
+            parentTagId: 'group-a',
+            connectionIds: ['shared-host'],
+          },
+          {
+            id: 'group-orphan',
+            name: 'Orphan',
+            parentTagId: 'missing-group',
+            connectionIds: [],
+          },
+        ],
+      },
+      version: 16,
+    }));
+
+    const { useStore } = await importStore();
+    const groups = useStore.getState().connectionTags;
+
+    expect(groups.find((tag) => tag.id === 'group-a')?.parentTagId).toBeUndefined();
+    expect(groups.find((tag) => tag.id === 'group-b')?.parentTagId).toBeUndefined();
+    expect(groups.find((tag) => tag.id === 'group-orphan')?.parentTagId).toBeUndefined();
+    expect(groups.find((tag) => tag.id === 'group-a')?.connectionIds).toEqual([
+      'shared-host',
+    ]);
+    expect(groups.find((tag) => tag.id === 'group-b')?.connectionIds).toEqual([]);
+  });
+
+  it('removes host tokens from nested group order when deleting a connection', async () => {
+    const {
+      buildSidebarRootConnectionToken,
+      resolveConnectionTagChildOrder,
+      useStore,
+    } = await importStore();
+    useStore.getState().replaceConnections(
+      ['host-1', 'host-2'].map((id) => ({
+        id,
+        name: id,
+        config: { id, type: 'mysql', host: `${id}.local`, port: 3306, user: 'root' },
+      })),
+    );
+    useStore.getState().addConnectionTag({
+      id: 'group-1',
+      name: '分组1',
+      connectionIds: [],
+    });
+    useStore.getState().addConnectionTag({
+      id: 'group-1-1',
+      name: '分组1-1',
+      parentTagId: 'group-1',
+      connectionIds: ['host-1', 'host-2'],
+    });
+
+    useStore.getState().removeConnection('host-1');
+
+    expect(resolveConnectionTagChildOrder(
+      'group-1-1',
+      useStore.getState().connectionTags,
+    )).toEqual([buildSidebarRootConnectionToken('host-2')]);
+    expect(useStore.getState().connectionTags.find(
+      (tag) => tag.id === 'group-1-1',
+    )?.connectionIds).toEqual(['host-2']);
   });
 
   it('keeps legacy global proxy password during hydration until explicit cleanup', async () => {

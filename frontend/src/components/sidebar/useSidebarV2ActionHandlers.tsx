@@ -4,7 +4,7 @@ import type { FormInstance } from 'antd/es/form';
 
 import Modal from '../common/ResizableDraggableModal';
 import { t } from '../../i18n';
-import type { SavedConnection } from '../../types';
+import type { ConnectionTag, SavedConnection } from '../../types';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { resolveConnectionAccentColor, resolveConnectionIconType } from '../../utils/connectionVisual';
 import { buildTableSelectQuery } from '../../utils/objectQueryTemplates';
@@ -27,7 +27,7 @@ import {
 
 type UseSidebarV2ActionHandlersArgs = {
   connections: SavedConnection[];
-  connectionTags: Array<{ id: string; name: string; connectionIds: string[] }>;
+  connectionTags: ConnectionTag[];
   pinnedSidebarTables: any[];
   loadingNodesRef: MutableRefObject<Set<string>>;
   treeDataRef: MutableRefObject<TreeNode[]>;
@@ -502,8 +502,22 @@ export const useSidebarV2ActionHandlers = ({
   const handleV2ConnectionGroupContextMenuAction = (group: V2RailConnectionGroup, action: V2ConnectionGroupContextMenuActionKey) => {
     const tag = connectionTags.find((item) => item.id === group.id);
     if (!tag) return;
+    if (action === 'new-subgroup') {
+      createTagForm.resetFields();
+      createTagForm.setFieldsValue({
+        parentTagId: tag.id,
+        connectionIds: [],
+      });
+      setRenameViewTarget(null);
+      setIsCreateTagModalOpen(true);
+      return;
+    }
     if (action === 'edit-group') {
-      createTagForm.setFieldsValue({ name: tag.name, connectionIds: tag.connectionIds });
+      createTagForm.setFieldsValue({
+        name: tag.name,
+        parentTagId: tag.parentTagId,
+        connectionIds: tag.connectionIds,
+      });
       setRenameViewTarget({
         title: tag.name,
         key: `tag-${tag.id}`,

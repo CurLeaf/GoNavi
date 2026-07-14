@@ -218,7 +218,7 @@ const MIN_KEEPALIVE_INTERVAL_MINUTES = 1;
 const MAX_KEEPALIVE_INTERVAL_MINUTES = 1440;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
-const PERSIST_VERSION = 15;
+const PERSIST_VERSION = 16;
 const UI_VERSION_V2_MIGRATION_VERSION = 14;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
 const PERSIST_WRITE_DEBOUNCE_MS = 160;
@@ -1131,32 +1131,6 @@ const sanitizeConnections = (value: unknown): SavedConnection[] => {
   return result;
 };
 
-const sanitizeConnectionTags = (value: unknown): ConnectionTag[] => {
-  if (!Array.isArray(value)) return [];
-  const result: ConnectionTag[] = [];
-  const idSet = new Set<string>();
-
-  value.forEach((entry, index) => {
-    if (!entry || typeof entry !== "object") return;
-    const raw = entry as Record<string, unknown>;
-    const id =
-      toTrimmedString(raw.id, `tag-${index + 1}`) || `tag-${index + 1}`;
-    if (idSet.has(id)) return;
-    idSet.add(id);
-
-    const fallbackName = indexedStoreFallback(
-      "store.fallback.connection_tag_name",
-      index,
-    );
-    const name = toTrimmedString(raw.name, fallbackName) || fallbackName;
-    const connectionIds = sanitizeStringArray(raw.connectionIds, 256);
-
-    result.push({ id, name, connectionIds });
-  });
-
-  return result;
-};
-
 const SIDEBAR_ROOT_TAG_TOKEN_PREFIX = "tag:";
 const SIDEBAR_ROOT_CONNECTION_TOKEN_PREFIX = "connection:";
 
@@ -1175,7 +1149,17 @@ const isSidebarRootConnectionToken = (token: string): boolean =>
   token.startsWith(SIDEBAR_ROOT_CONNECTION_TOKEN_PREFIX) &&
   token.length > SIDEBAR_ROOT_CONNECTION_TOKEN_PREFIX.length;
 
-const sanitizeSidebarRootOrder = (value: unknown): string[] => {
+const getSidebarTagIdFromToken = (token: string): string =>
+  isSidebarRootTagToken(token)
+    ? token.slice(SIDEBAR_ROOT_TAG_TOKEN_PREFIX.length)
+    : "";
+
+const getSidebarConnectionIdFromToken = (token: string): string =>
+  isSidebarRootConnectionToken(token)
+    ? token.slice(SIDEBAR_ROOT_CONNECTION_TOKEN_PREFIX.length)
+    : "";
+
+const sanitizeSidebarItemOrder = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
   const result: string[] = [];
@@ -1192,6 +1176,157 @@ const sanitizeSidebarRootOrder = (value: unknown): string[] => {
   return result;
 };
 
+const sanitizeSidebarRootOrder = sanitizeSidebarItemOrder;
+
+const normalizeConnectionTagTree = (
+  value: ConnectionTag[],
+): ConnectionTag[] => {
+  const tags: ConnectionTag[] = [];
+  const idSet = new Set<string>();
+
+  value.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return;
+    const id =
+      toTrimmedString(entry.id, `tag-${index + 1}`) || `tag-${index + 1}`;
+    if (idSet.has(id)) return;
+    idSet.add(id);
+
+    const fallbackName = indexedStoreFallback(
+      "store.fallback.connection_tag_name",
+      index,
+    );
+    const name = toTrimmedString(entry.name, fallbackName) || fallbackName;
+    const parentTagId = toTrimmedString(entry.parentTagId) || undefined;
+    tags.push({
+      id,
+      name,
+      parentTagId,
+      connectionIds: sanitizeStringArray(entry.connectionIds, 256),
+      childOrder: sanitizeSidebarItemOrder(entry.childOrder),
+    });
+  });
+
+  const tagById = new Map(tags.map((tag) => [tag.id, tag]));
+  tags.forEach((tag) => {
+    if (
+      !tag.parentTagId ||
+      tag.parentTagId === tag.id ||
+      !tagById.has(tag.parentTagId)
+    ) {
+      tag.parentTagId = undefined;
+    }
+  });
+
+  // Corrupted persisted data must never make the sidebar recurse forever.
+  // Promote every member of a detected parent cycle to the root.
+  tags.forEach((tag) => {
+    const path: string[] = [];
+    const pathIndex = new Map<string, number>();
+    let currentId = tag.id;
+    while (currentId) {
+      const current = tagById.get(currentId);
+      if (!current?.parentTagId) break;
+      const cycleStart = pathIndex.get(currentId);
+      if (cycleStart !== undefined) {
+        path.slice(cycleStart).forEach((cycleTagId) => {
+          const cycleTag = tagById.get(cycleTagId);
+          if (cycleTag) cycleTag.parentTagId = undefined;
+        });
+        break;
+      }
+      pathIndex.set(currentId, path.length);
+      path.push(currentId);
+      currentId = current.parentTagId;
+    }
+  });
+
+  // A host can have one direct owner only. Keep the first persisted owner to
+  // make recovery deterministic and match the flat model's intended invariant.
+  const assignedConnectionIds = new Set<string>();
+  tags.forEach((tag) => {
+    tag.connectionIds = tag.connectionIds.filter((connectionId) => {
+      if (assignedConnectionIds.has(connectionId)) return false;
+      assignedConnectionIds.add(connectionId);
+      return true;
+    });
+  });
+
+  return tags.map((tag) => {
+    const childOrder = resolveConnectionTagChildOrder(tag.id, tags);
+    return {
+      ...tag,
+      // Keep the direct-host array aligned with its display-order subsequence.
+      connectionIds: childOrder
+        .filter(isSidebarRootConnectionToken)
+        .map(getSidebarConnectionIdFromToken),
+      childOrder,
+    };
+  });
+};
+
+const sanitizeConnectionTags = (value: unknown): ConnectionTag[] => {
+  if (!Array.isArray(value)) return [];
+  const result: ConnectionTag[] = [];
+  const idSet = new Set<string>();
+
+  value.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return;
+    const raw = entry as Record<string, unknown>;
+    const id =
+      toTrimmedString(raw.id, `tag-${index + 1}`) || `tag-${index + 1}`;
+    if (idSet.has(id)) return;
+    idSet.add(id);
+
+    const fallbackName = indexedStoreFallback(
+      "store.fallback.connection_tag_name",
+      index,
+    );
+    const name = toTrimmedString(raw.name, fallbackName) || fallbackName;
+    result.push({
+      id,
+      name,
+      parentTagId: toTrimmedString(raw.parentTagId) || undefined,
+      connectionIds: sanitizeStringArray(raw.connectionIds, 256),
+      childOrder: sanitizeSidebarItemOrder(raw.childOrder),
+    });
+  });
+
+  return normalizeConnectionTagTree(result);
+};
+
+export const resolveConnectionTagChildOrder = (
+  tagId: string,
+  connectionTags: ConnectionTag[],
+): string[] => {
+  const tag = connectionTags.find((candidate) => candidate.id === tagId);
+  if (!tag) return [];
+
+  const defaultOrder = [
+    ...sanitizeStringArray(tag.connectionIds, 256).map(
+      buildSidebarRootConnectionToken,
+    ),
+    ...connectionTags
+      .filter((candidate) => candidate.parentTagId === tagId)
+      .map((candidate) => buildSidebarRootTagToken(candidate.id)),
+  ];
+  const validTokens = new Set(defaultOrder);
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  sanitizeSidebarItemOrder(tag.childOrder).forEach((token) => {
+    if (!validTokens.has(token) || seen.has(token)) return;
+    seen.add(token);
+    result.push(token);
+  });
+  defaultOrder.forEach((token) => {
+    if (seen.has(token)) return;
+    seen.add(token);
+    result.push(token);
+  });
+
+  return result;
+};
+
 const buildDefaultSidebarRootOrderTokens = (
   connectionTags: ConnectionTag[],
   connections: SavedConnection[],
@@ -1204,7 +1339,9 @@ const buildDefaultSidebarRootOrderTokens = (
   });
 
   return [
-    ...connectionTags.map((tag) => buildSidebarRootTagToken(tag.id)),
+    ...connectionTags
+      .filter((tag) => !tag.parentTagId)
+      .map((tag) => buildSidebarRootTagToken(tag.id)),
     ...connections
       .filter((connection) => !groupedConnectionIds.has(connection.id))
       .map((connection) => buildSidebarRootConnectionToken(connection.id)),
@@ -1249,10 +1386,23 @@ const resolveHydratedSidebarRootOrderTokens = (
   connections?: SavedConnection[],
 ): string[] => {
   const sanitized = sanitizeSidebarRootOrder(sidebarRootOrder);
-  if (!connectionTags || !connections) {
+  if (!connectionTags) {
     return sanitized;
   }
-  return resolveSidebarRootOrderTokens(sanitized, connectionTags, connections);
+  const rootTagIds = new Set(
+    connectionTags
+      .filter((tag) => !tag.parentTagId)
+      .map((tag) => tag.id),
+  );
+  const rootOnly = sanitized.filter(
+    (token) =>
+      !isSidebarRootTagToken(token) ||
+      rootTagIds.has(getSidebarTagIdFromToken(token)),
+  );
+  if (!connections) {
+    return rootOnly;
+  }
+  return resolveSidebarRootOrderTokens(rootOnly, connectionTags, connections);
 };
 
 const insertSidebarRootTokenBeforeUngrouped = (
@@ -1314,22 +1464,326 @@ const moveSidebarRootToken = (
   return filtered;
 };
 
-const orderConnectionTagsBySidebarRootOrder = (
+type ConnectionTagTreeState = {
+  connectionTags: ConnectionTag[];
+  sidebarRootOrder: string[];
+};
+
+const setConnectionTagChildOrder = (
+  connectionTags: ConnectionTag[],
+  tagId: string,
+  childOrder: string[],
+): ConnectionTag[] =>
+  connectionTags.map((tag) =>
+    tag.id === tagId ? { ...tag, childOrder } : tag,
+  );
+
+const removeSidebarItemTokenFromTagOrders = (
+  connectionTags: ConnectionTag[],
+  token: string,
+): ConnectionTag[] =>
+  connectionTags.map((tag) => ({
+    ...tag,
+    childOrder: sanitizeSidebarItemOrder(tag.childOrder).filter(
+      (item) => item !== token,
+    ),
+  }));
+
+const placeSidebarItemToken = (
+  order: string[],
+  token: string,
+  targetToken?: string | null,
+  insertBefore = false,
+): string[] => {
+  if (!token) return [...order];
+  if (targetToken === token) return [...order];
+  const nextOrder = order.filter((item) => item !== token);
+  if (!targetToken) {
+    return [...nextOrder, token];
+  }
+  const targetIndex = nextOrder.indexOf(targetToken);
+  if (targetIndex === -1) {
+    return [...nextOrder, token];
+  }
+  const insertIndex = insertBefore ? targetIndex : targetIndex + 1;
+  nextOrder.splice(insertIndex, 0, token);
+  return nextOrder;
+};
+
+const replaceSidebarItemToken = (
+  order: string[],
+  token: string,
+  replacements: string[],
+): string[] => {
+  const replacementTokens = Array.from(
+    new Set(replacements.filter(Boolean)),
+  );
+  const replacementSet = new Set(replacementTokens);
+  const result: string[] = [];
+  let inserted = false;
+
+  order.forEach((item) => {
+    if (item === token) {
+      if (!inserted) {
+        result.push(...replacementTokens);
+        inserted = true;
+      }
+      return;
+    }
+    if (replacementSet.has(item)) return;
+    result.push(item);
+  });
+  if (!inserted) {
+    result.push(...replacementTokens);
+  }
+  return result;
+};
+
+const getConnectionOwnerTagId = (
+  connectionId: string,
+  connectionTags: ConnectionTag[],
+): string | undefined =>
+  connectionTags.find((tag) => tag.connectionIds.includes(connectionId))?.id;
+
+const getRootConnectionTagId = (
+  tagId: string | undefined,
+  connectionTags: ConnectionTag[],
+): string | undefined => {
+  if (!tagId) return undefined;
+  const tagById = new Map(connectionTags.map((tag) => [tag.id, tag]));
+  const visited = new Set<string>();
+  let current = tagById.get(tagId);
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    if (!current.parentTagId) return current.id;
+    current = tagById.get(current.parentTagId);
+  }
+  return undefined;
+};
+
+const isConnectionTagSelfOrDescendant = (
+  tagId: string,
+  candidateParentTagId: string,
+  connectionTags: ConnectionTag[],
+): boolean => {
+  const tagById = new Map(connectionTags.map((tag) => [tag.id, tag]));
+  const visited = new Set<string>();
+  let currentId: string | undefined = candidateParentTagId;
+  while (currentId && !visited.has(currentId)) {
+    if (currentId === tagId) return true;
+    visited.add(currentId);
+    currentId = tagById.get(currentId)?.parentTagId;
+  }
+  return false;
+};
+
+const normalizeConnectionTagTreeState = (
   connectionTags: ConnectionTag[],
   sidebarRootOrder: string[],
-): ConnectionTag[] => {
-  const tagMap = new Map(connectionTags.map((tag) => [tag.id, tag]));
-  const orderedTags: ConnectionTag[] = [];
-  sidebarRootOrder.forEach((token) => {
-    if (!isSidebarRootTagToken(token)) return;
-    const tagId = token.slice(SIDEBAR_ROOT_TAG_TOKEN_PREFIX.length);
-    const tag = tagMap.get(tagId);
-    if (!tag) return;
-    orderedTags.push(tag);
-    tagMap.delete(tagId);
+  connections: SavedConnection[],
+): ConnectionTagTreeState => {
+  const nextTags = normalizeConnectionTagTree(connectionTags);
+  return {
+    connectionTags: nextTags,
+    sidebarRootOrder: resolveSidebarRootOrderTokens(
+      sidebarRootOrder,
+      nextTags,
+      connections,
+    ),
+  };
+};
+
+const moveConnectionTagInTree = (
+  connectionTags: ConnectionTag[],
+  sidebarRootOrder: string[],
+  connections: SavedConnection[],
+  tagId: string,
+  targetParentTagId: string | null,
+  targetToken?: string | null,
+  insertBefore = false,
+): ConnectionTagTreeState | null => {
+  const normalized = normalizeConnectionTagTreeState(
+    connectionTags,
+    sidebarRootOrder,
+    connections,
+  );
+  const tagById = new Map(
+    normalized.connectionTags.map((tag) => [tag.id, tag]),
+  );
+  const source = tagById.get(tagId);
+  if (!source) return null;
+
+  const nextParentTagId = toTrimmedString(targetParentTagId) || undefined;
+  if (
+    nextParentTagId &&
+    (!tagById.has(nextParentTagId) ||
+      isConnectionTagSelfOrDescendant(
+        tagId,
+        nextParentTagId,
+        normalized.connectionTags,
+      ))
+  ) {
+    return null;
+  }
+
+  const token = buildSidebarRootTagToken(tagId);
+  let nextTags = removeSidebarItemTokenFromTagOrders(
+    normalized.connectionTags,
+    token,
+  ).map((tag) =>
+    tag.id === tagId ? { ...tag, parentTagId: nextParentTagId } : tag,
+  );
+  let nextRootOrder = normalized.sidebarRootOrder.filter(
+    (item) => item !== token,
+  );
+
+  nextTags = normalizeConnectionTagTree(nextTags);
+  if (nextParentTagId) {
+    const targetOrder = resolveConnectionTagChildOrder(
+      nextParentTagId,
+      nextTags,
+    );
+    nextTags = setConnectionTagChildOrder(
+      nextTags,
+      nextParentTagId,
+      placeSidebarItemToken(targetOrder, token, targetToken, insertBefore),
+    );
+  } else {
+    const targetOrder = resolveSidebarRootOrderTokens(
+      nextRootOrder,
+      nextTags,
+      connections,
+    );
+    nextRootOrder = placeSidebarItemToken(
+      targetOrder,
+      token,
+      targetToken,
+      insertBefore,
+    );
+  }
+
+  return normalizeConnectionTagTreeState(
+    nextTags,
+    nextRootOrder,
+    connections,
+  );
+};
+
+const moveConnectionInTree = (
+  connectionTags: ConnectionTag[],
+  sidebarRootOrder: string[],
+  connections: SavedConnection[],
+  connectionId: string,
+  targetTagId: string | null,
+  targetToken?: string | null,
+  insertBefore = false,
+): ConnectionTagTreeState | null => {
+  if (!connections.some((connection) => connection.id === connectionId)) {
+    return null;
+  }
+  const normalized = normalizeConnectionTagTreeState(
+    connectionTags,
+    sidebarRootOrder,
+    connections,
+  );
+  const nextTargetTagId = toTrimmedString(targetTagId) || undefined;
+  if (
+    nextTargetTagId &&
+    !normalized.connectionTags.some((tag) => tag.id === nextTargetTagId)
+  ) {
+    return null;
+  }
+
+  const sourceTagId = getConnectionOwnerTagId(
+    connectionId,
+    normalized.connectionTags,
+  );
+  const sourceRootTagId = getRootConnectionTagId(
+    sourceTagId,
+    normalized.connectionTags,
+  );
+  const token = buildSidebarRootConnectionToken(connectionId);
+  let nextTags = removeSidebarItemTokenFromTagOrders(
+    normalized.connectionTags,
+    token,
+  ).map((tag) => ({
+    ...tag,
+    connectionIds: tag.connectionIds.filter((id) => id !== connectionId),
+  }));
+  let nextRootOrder = normalized.sidebarRootOrder.filter(
+    (item) => item !== token,
+  );
+
+  if (nextTargetTagId) {
+    nextTags = nextTags.map((tag) =>
+      tag.id === nextTargetTagId
+        ? {
+            ...tag,
+            connectionIds: [...tag.connectionIds, connectionId],
+          }
+        : tag,
+    );
+    nextTags = normalizeConnectionTagTree(nextTags);
+    const targetOrder = resolveConnectionTagChildOrder(
+      nextTargetTagId,
+      nextTags,
+    );
+    nextTags = setConnectionTagChildOrder(
+      nextTags,
+      nextTargetTagId,
+      placeSidebarItemToken(targetOrder, token, targetToken, insertBefore),
+    );
+  } else {
+    nextTags = normalizeConnectionTagTree(nextTags);
+    const rootOrder = resolveSidebarRootOrderTokens(
+      nextRootOrder,
+      nextTags,
+      connections,
+    );
+    nextRootOrder = targetToken
+      ? placeSidebarItemToken(rootOrder, token, targetToken, insertBefore)
+      : sourceRootTagId
+        ? insertSidebarRootTokenAfter(
+            rootOrder,
+            token,
+            buildSidebarRootTagToken(sourceRootTagId),
+          )
+        : insertSidebarRootTokenBeforeUngrouped(rootOrder, token);
+  }
+
+  return normalizeConnectionTagTreeState(
+    nextTags,
+    nextRootOrder,
+    connections,
+  );
+};
+
+const orderUngroupedConnectionsBySidebarRootOrder = (
+  connections: SavedConnection[],
+  connectionTags: ConnectionTag[],
+  sidebarRootOrder: string[],
+): SavedConnection[] => {
+  const rootOrder = resolveSidebarRootOrderTokens(
+    sidebarRootOrder,
+    connectionTags,
+    connections,
+  );
+  const orderMap = new Map<string, number>();
+  rootOrder.forEach((token, index) => {
+    if (isSidebarRootConnectionToken(token)) {
+      orderMap.set(getSidebarConnectionIdFromToken(token), index);
+    }
   });
-  orderedTags.push(...Array.from(tagMap.values()));
-  return orderedTags;
+  return [...connections].sort((left, right) => {
+    const leftIndex = orderMap.get(left.id);
+    const rightIndex = orderMap.get(right.id);
+    if (leftIndex !== undefined && rightIndex !== undefined) {
+      return leftIndex - rightIndex;
+    }
+    if (leftIndex !== undefined) return -1;
+    if (rightIndex !== undefined) return 1;
+    return 0;
+  });
 };
 
 const isLegacyDefaultAppearance = (
@@ -1504,6 +1958,14 @@ interface AppState {
   moveConnectionToTag: (
     connectionId: string,
     targetTagId: string | null,
+    targetToken?: string | null,
+    insertBefore?: boolean,
+  ) => void;
+  moveConnectionTag: (
+    tagId: string,
+    targetParentTagId: string | null,
+    targetToken?: string | null,
+    insertBefore?: boolean,
   ) => void;
   reorderConnections: (
     connectionId: string,
@@ -2980,38 +3442,45 @@ export const useStore = create<AppState>()(
       removeConnection: (id) =>
         set((state) => {
           const nextConnections = state.connections.filter((c) => c.id !== id);
+          const connectionToken = buildSidebarRootConnectionToken(id);
           const nextTags = state.connectionTags.map((tag) => ({
             ...tag,
             connectionIds: tag.connectionIds.filter((cid) => cid !== id),
+            childOrder: sanitizeSidebarItemOrder(tag.childOrder).filter(
+              (token) => token !== connectionToken,
+            ),
           }));
+          const normalized = normalizeConnectionTagTreeState(
+            nextTags,
+            state.sidebarRootOrder.filter(
+              (token) => token !== connectionToken,
+            ),
+            nextConnections,
+          );
           return {
             connections: nextConnections,
-            connectionTags: nextTags,
+            connectionTags: normalized.connectionTags,
             recentConnectionTargets: state.recentConnectionTargets.filter(
               (target) => target.connectionId !== id,
             ),
             recentSQLFiles: state.recentSQLFiles.filter(
               (file) => file.connectionId !== id,
             ),
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              state.sidebarRootOrder.filter(
-                (token) => token !== buildSidebarRootConnectionToken(id),
-              ),
-              nextTags,
-              nextConnections,
-            ),
+            sidebarRootOrder: normalized.sidebarRootOrder,
           };
         }),
       replaceConnections: (connections) =>
         set((state) => {
           const nextConnections = sanitizeConnections(connections);
+          const normalized = normalizeConnectionTagTreeState(
+            state.connectionTags,
+            state.sidebarRootOrder,
+            nextConnections,
+          );
           return {
             connections: nextConnections,
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              state.sidebarRootOrder,
-              state.connectionTags,
-              nextConnections,
-            ),
+            connectionTags: normalized.connectionTags,
+            sidebarRootOrder: normalized.sidebarRootOrder,
             shortcutOptions:
               readPersistedShortcutOptions() ?? state.shortcutOptions,
           };
@@ -3019,94 +3488,241 @@ export const useStore = create<AppState>()(
 
       addConnectionTag: (tag) =>
         set((state) => {
-          const nextTags = [...state.connectionTags, tag];
-          const nextRootOrder = insertSidebarRootTokenBeforeUngrouped(
-            resolveSidebarRootOrderTokens(
-              state.sidebarRootOrder,
-              state.connectionTags,
-              state.connections,
-            ),
-            buildSidebarRootTagToken(tag.id),
+          const normalized = normalizeConnectionTagTreeState(
+            state.connectionTags,
+            state.sidebarRootOrder,
+            state.connections,
           );
-          return {
-            connectionTags: nextTags,
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              nextRootOrder,
-              nextTags,
-              state.connections,
-            ),
-          };
+          const tagId = toTrimmedString(tag.id);
+          if (
+            !tagId ||
+            normalized.connectionTags.some((candidate) => candidate.id === tagId)
+          ) {
+            return normalized;
+          }
+
+          const directConnectionIds = sanitizeStringArray(tag.connectionIds, 256);
+          const directConnectionTokens = new Set(
+            directConnectionIds.map(buildSidebarRootConnectionToken),
+          );
+          const nextTags = normalizeConnectionTagTree([
+            ...normalized.connectionTags.map((candidate) => ({
+              ...candidate,
+              connectionIds: candidate.connectionIds.filter(
+                (connectionId) => !directConnectionIds.includes(connectionId),
+              ),
+              childOrder: sanitizeSidebarItemOrder(candidate.childOrder).filter(
+                (token) => !directConnectionTokens.has(token),
+              ),
+            })),
+            {
+              id: tagId,
+              name:
+                toTrimmedString(
+                  tag.name,
+                  indexedStoreFallback(
+                    "store.fallback.connection_tag_name",
+                    normalized.connectionTags.length,
+                  ),
+                ) ||
+                indexedStoreFallback(
+                  "store.fallback.connection_tag_name",
+                  normalized.connectionTags.length,
+                ),
+              parentTagId: toTrimmedString(tag.parentTagId) || undefined,
+              connectionIds: directConnectionIds,
+              childOrder: sanitizeSidebarItemOrder(tag.childOrder),
+            },
+          ]);
+          const addedTag = nextTags.find((candidate) => candidate.id === tagId);
+          const nextRootOrder = addedTag?.parentTagId
+            ? normalized.sidebarRootOrder
+            : insertSidebarRootTokenBeforeUngrouped(
+                resolveSidebarRootOrderTokens(
+                  normalized.sidebarRootOrder,
+                  nextTags,
+                  state.connections,
+                ).filter(
+                  (token) => token !== buildSidebarRootTagToken(tagId),
+                ),
+                buildSidebarRootTagToken(tagId),
+              );
+          return normalizeConnectionTagTreeState(
+            nextTags,
+            nextRootOrder,
+            state.connections,
+          );
         }),
       updateConnectionTag: (tag) =>
         set((state) => {
-          const nextTags = state.connectionTags.map((t) =>
-            t.id === tag.id ? tag : t,
+          const normalized = normalizeConnectionTagTreeState(
+            state.connectionTags,
+            state.sidebarRootOrder,
+            state.connections,
           );
-          return {
-            connectionTags: nextTags,
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              state.sidebarRootOrder,
+          const existing = normalized.connectionTags.find(
+            (candidate) => candidate.id === tag.id,
+          );
+          if (!existing) return normalized;
+
+          const requestedConnectionIds = sanitizeStringArray(
+            tag.connectionIds,
+            256,
+          );
+          const requestedConnectionTokens = new Set(
+            requestedConnectionIds.map(buildSidebarRootConnectionToken),
+          );
+          const hasRequestedParent = Object.prototype.hasOwnProperty.call(
+            tag,
+            "parentTagId",
+          );
+          const requestedParentTagId = hasRequestedParent
+            ? toTrimmedString(tag.parentTagId) || undefined
+            : existing.parentTagId;
+          const hasRequestedChildOrder = Object.prototype.hasOwnProperty.call(
+            tag,
+            "childOrder",
+          );
+          let nextTags: ConnectionTag[] = normalized.connectionTags.map((candidate) => {
+            if (candidate.id === tag.id) {
+              return {
+                ...candidate,
+                name: toTrimmedString(tag.name, candidate.name) || candidate.name,
+                connectionIds: requestedConnectionIds,
+                childOrder: hasRequestedChildOrder
+                  ? sanitizeSidebarItemOrder(tag.childOrder)
+                  : candidate.childOrder,
+              };
+            }
+            return {
+              ...candidate,
+              connectionIds: candidate.connectionIds.filter(
+                (connectionId) => !requestedConnectionIds.includes(connectionId),
+              ),
+              childOrder: sanitizeSidebarItemOrder(candidate.childOrder).filter(
+                (token) => !requestedConnectionTokens.has(token),
+              ),
+            };
+          });
+          nextTags = normalizeConnectionTagTree(nextTags);
+
+          if (requestedParentTagId !== existing.parentTagId) {
+            const moved = moveConnectionTagInTree(
               nextTags,
+              normalized.sidebarRootOrder,
               state.connections,
-            ),
-          };
+              tag.id,
+              requestedParentTagId ?? null,
+            );
+            if (moved) return moved;
+          }
+          return normalizeConnectionTagTreeState(
+            nextTags,
+            normalized.sidebarRootOrder,
+            state.connections,
+          );
         }),
       removeConnectionTag: (id) =>
         set((state) => {
-          const nextTags = state.connectionTags.filter((t) => t.id !== id);
-          return {
-            connectionTags: nextTags,
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              state.sidebarRootOrder.filter(
-                (token) => token !== buildSidebarRootTagToken(id),
-              ),
-              nextTags,
-              state.connections,
-            ),
-          };
-        }),
-      moveConnectionToTag: (connectionId, targetTagId) =>
-        set((state) => {
-          const newTags = state.connectionTags.map((tag) => {
-            //先从所有tag中移除该connection
-            const filteredIds = tag.connectionIds.filter(
-              (id) => id !== connectionId,
-            );
-            if (tag.id === targetTagId) {
-              return { ...tag, connectionIds: [...filteredIds, connectionId] };
-            }
-            return { ...tag, connectionIds: filteredIds };
-          });
-          const nextRootOrder = resolveSidebarRootOrderTokens(
+          const normalized = normalizeConnectionTagTreeState(
+            state.connectionTags,
             state.sidebarRootOrder,
-            newTags,
             state.connections,
           );
-          const connectionToken = buildSidebarRootConnectionToken(connectionId);
-          if (targetTagId) {
-            return {
-              connectionTags: newTags,
-              sidebarRootOrder: nextRootOrder.filter(
-                (token) => token !== connectionToken,
+          const removedTag = normalized.connectionTags.find(
+            (tag) => tag.id === id,
+          );
+          if (!removedTag) return normalized;
+
+          const removedToken = buildSidebarRootTagToken(id);
+          const promotedOrder = resolveConnectionTagChildOrder(
+            id,
+            normalized.connectionTags,
+          );
+          const parentTagId = removedTag.parentTagId;
+          let nextTags: ConnectionTag[] = normalized.connectionTags
+            .filter((tag) => tag.id !== id)
+            .map((tag) => {
+              const isDirectChild = tag.parentTagId === id;
+              const isParent = parentTagId && tag.id === parentTagId;
+              return {
+                ...tag,
+                parentTagId: isDirectChild ? parentTagId : tag.parentTagId,
+                connectionIds: isParent
+                  ? [...tag.connectionIds, ...removedTag.connectionIds]
+                  : tag.connectionIds,
+              };
+            });
+          let nextRootOrder = normalized.sidebarRootOrder;
+
+          if (parentTagId) {
+            const parentOrder = resolveConnectionTagChildOrder(
+              parentTagId,
+              normalized.connectionTags,
+            );
+            nextTags = setConnectionTagChildOrder(
+              nextTags,
+              parentTagId,
+              replaceSidebarItemToken(
+                parentOrder,
+                removedToken,
+                promotedOrder,
               ),
-            };
+            );
+          } else {
+            nextRootOrder = replaceSidebarItemToken(
+              normalized.sidebarRootOrder,
+              removedToken,
+              promotedOrder,
+            );
           }
 
-          const sourceToken = buildSidebarRootTagToken(
-            state.connectionTags.find((tag) =>
-              tag.connectionIds.includes(connectionId),
-            )?.id || "",
+          return normalizeConnectionTagTreeState(
+            nextTags,
+            nextRootOrder,
+            state.connections,
           );
-          const insertedRootOrder = sourceToken
-            ? insertSidebarRootTokenAfter(nextRootOrder, connectionToken, sourceToken)
-            : insertSidebarRootTokenBeforeUngrouped(nextRootOrder, connectionToken);
-          return {
-            connectionTags: newTags,
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              insertedRootOrder,
-              newTags,
-              state.connections,
-            ),
+        }),
+      moveConnectionToTag: (
+        connectionId,
+        targetTagId,
+        targetToken,
+        insertBefore = false,
+      ) =>
+        set((state) => {
+          const moved = moveConnectionInTree(
+            state.connectionTags,
+            state.sidebarRootOrder,
+            state.connections,
+            connectionId,
+            targetTagId,
+            targetToken,
+            insertBefore,
+          );
+          return moved || {
+            connectionTags: state.connectionTags,
+            sidebarRootOrder: state.sidebarRootOrder,
+          };
+        }),
+      moveConnectionTag: (
+        tagId,
+        targetParentTagId,
+        targetToken,
+        insertBefore = false,
+      ) =>
+        set((state) => {
+          const moved = moveConnectionTagInTree(
+            state.connectionTags,
+            state.sidebarRootOrder,
+            state.connections,
+            tagId,
+            targetParentTagId,
+            targetToken,
+            insertBefore,
+          );
+          return moved || {
+            connectionTags: state.connectionTags,
+            sidebarRootOrder: state.sidebarRootOrder,
           };
         }),
       reorderConnections: (
@@ -3119,144 +3735,103 @@ export const useStore = create<AppState>()(
           if (
             !connectionId ||
             !targetConnectionId ||
-            connectionId === targetConnectionId
+            connectionId === targetConnectionId ||
+            !state.connections.some(
+              (connection) => connection.id === targetConnectionId,
+            )
           ) {
             return {
               connections: state.connections,
               connectionTags: state.connectionTags,
             };
           }
-
-          const normalizeInsertIndex = (
-            length: number,
-            index: number,
-          ): number => Math.max(0, Math.min(length, index));
-
-          const nextTags = state.connectionTags.map((tag) => ({
-            ...tag,
-            connectionIds: tag.connectionIds.filter((id) => id !== connectionId),
-          }));
-
-          if (targetTagId) {
-            const updatedTags = nextTags.map((tag) => {
-              if (tag.id !== targetTagId) {
-                return tag;
-              }
-              const targetIndex = tag.connectionIds.indexOf(targetConnectionId);
-              if (targetIndex === -1) {
-                return {
-                  ...tag,
-                  connectionIds: [...tag.connectionIds, connectionId],
-                };
-              }
-              const insertIndex = normalizeInsertIndex(
-                tag.connectionIds.length,
-                insertBefore ? targetIndex : targetIndex + 1,
-              );
-              const nextIds = [...tag.connectionIds];
-              nextIds.splice(insertIndex, 0, connectionId);
-              return { ...tag, connectionIds: nextIds };
-            });
+          const moved = moveConnectionInTree(
+            state.connectionTags,
+            state.sidebarRootOrder,
+            state.connections,
+            connectionId,
+            targetTagId,
+            buildSidebarRootConnectionToken(targetConnectionId),
+            insertBefore,
+          );
+          if (!moved) {
             return {
               connections: state.connections,
-              connectionTags: updatedTags,
-              sidebarRootOrder: resolveSidebarRootOrderTokens(
-                state.sidebarRootOrder,
-                updatedTags,
-                state.connections,
-              ),
+              connectionTags: state.connectionTags,
+              sidebarRootOrder: state.sidebarRootOrder,
             };
           }
-
-          const ungroupedIds = state.connections
-            .map((conn) => conn.id)
-            .filter((id) => id !== connectionId)
-            .filter((id) => !nextTags.some((tag) => tag.connectionIds.includes(id)));
-          const targetIndex = ungroupedIds.indexOf(targetConnectionId);
-          const insertIndex =
-            targetIndex === -1
-              ? ungroupedIds.length
-              : normalizeInsertIndex(
-                  ungroupedIds.length,
-                  insertBefore ? targetIndex : targetIndex + 1,
-                );
-          const nextUngroupedIds = [...ungroupedIds];
-          nextUngroupedIds.splice(insertIndex, 0, connectionId);
-          const ungroupedOrderMap = new Map(
-            nextUngroupedIds.map((id, index) => [id, index]),
-          );
-          const nextConnections = [...state.connections].sort((a, b) => {
-            const indexA = ungroupedOrderMap.get(a.id);
-            const indexB = ungroupedOrderMap.get(b.id);
-            if (typeof indexA === 'number' && typeof indexB === 'number') {
-              return indexA - indexB;
-            }
-            if (typeof indexA === 'number') {
-              return -1;
-            }
-            if (typeof indexB === 'number') {
-              return 1;
-            }
-            return 0;
-          });
-
+          const nextConnections = targetTagId
+            ? state.connections
+            : orderUngroupedConnectionsBySidebarRootOrder(
+                state.connections,
+                moved.connectionTags,
+                moved.sidebarRootOrder,
+              );
           return {
             connections: nextConnections,
-            connectionTags: nextTags,
+            connectionTags: moved.connectionTags,
             sidebarRootOrder: resolveSidebarRootOrderTokens(
-              state.sidebarRootOrder,
-              nextTags,
+              moved.sidebarRootOrder,
+              moved.connectionTags,
               nextConnections,
             ),
           };
         }),
       reorderTags: (tagIds) =>
         set((state) => {
-          const nextRootOrder = resolveSidebarRootOrderTokens(
-            state.sidebarRootOrder,
+          const normalized = normalizeConnectionTagTreeState(
             state.connectionTags,
+            state.sidebarRootOrder,
             state.connections,
           );
-          const orderedRootOrder = [
-            ...tagIds.map((id) => buildSidebarRootTagToken(id)),
-            ...nextRootOrder.filter((token) => !isSidebarRootTagToken(token)),
-          ];
-          const newTags = orderConnectionTagsBySidebarRootOrder(
-            state.connectionTags,
-            orderedRootOrder,
+          const rootTagIds = new Set(
+            normalized.connectionTags
+              .filter((tag) => !tag.parentTagId)
+              .map((tag) => tag.id),
           );
-          return {
-            connectionTags: newTags,
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              orderedRootOrder,
-              newTags,
-              state.connections,
+          const requestedTagTokens = Array.from(
+            new Set(
+              tagIds
+                .filter((id) => rootTagIds.has(id))
+                .map(buildSidebarRootTagToken),
             ),
-          };
+          );
+          const orderedRootOrder = [
+            ...requestedTagTokens,
+            ...normalized.sidebarRootOrder.filter(
+              (token) =>
+                isSidebarRootTagToken(token) &&
+                !requestedTagTokens.includes(token),
+            ),
+            ...normalized.sidebarRootOrder.filter(
+              (token) => !isSidebarRootTagToken(token),
+            ),
+          ];
+          return normalizeConnectionTagTreeState(
+            normalized.connectionTags,
+            orderedRootOrder,
+            state.connections,
+          );
         }),
       reorderSidebarRoot: (sourceToken, targetToken, insertBefore) =>
         set((state) => {
+          const normalized = normalizeConnectionTagTreeState(
+            state.connectionTags,
+            state.sidebarRootOrder,
+            state.connections,
+          );
           const nextRootOrder = moveSidebarRootToken(
-            resolveSidebarRootOrderTokens(
-              state.sidebarRootOrder,
-              state.connectionTags,
-              state.connections,
-            ),
+            normalized.sidebarRootOrder,
             sourceToken,
             targetToken,
             insertBefore,
           );
-          return {
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              nextRootOrder,
-              state.connectionTags,
-              state.connections,
-            ),
-            connectionTags: orderConnectionTagsBySidebarRootOrder(
-              state.connectionTags,
-              nextRootOrder,
-            ),
-          };
+          return normalizeConnectionTagTreeState(
+            normalized.connectionTags,
+            nextRootOrder,
+            state.connections,
+          );
         }),
 
       addTab: (tab) =>

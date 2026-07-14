@@ -6,6 +6,7 @@ import { readV2ThemeCss } from '../test/readV2ThemeCss';
 
 import Sidebar, {
   buildAllSavedQueriesTreeNode,
+  buildSidebarConnectionTagTree,
   buildSidebarTableChildrenForUi,
   buildV2SidebarTableSectionedChildren,
   buildSQLFileExecutionFooter,
@@ -15,6 +16,7 @@ import Sidebar, {
   filterV2ExplorerTreeByKind,
   getV2RailConnectionGroupBadgeText,
   hasSidebarLazyChildren,
+  isConnectionTagDescendant,
   normalizeSidebarTreeRelativeDropPosition,
   parseV2CommandSearchQuery,
   resolveV2CommandSearchPersistentFilter,
@@ -130,15 +132,35 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../store', () => ({
   buildSidebarRootConnectionToken: (connectionId: string) => `connection:${connectionId.trim()}`,
   buildSidebarRootTagToken: (tagId: string) => `tag:${tagId.trim()}`,
+  resolveConnectionTagChildOrder: (
+    tagId: string,
+    connectionTags: Array<{ id: string; parentTagId?: string; connectionIds: string[]; childOrder?: string[] }>,
+  ) => {
+    const tag = connectionTags.find((candidate) => candidate.id === tagId);
+    if (!tag) return [];
+    const fallback = [
+      ...tag.connectionIds.map((connectionId) => `connection:${connectionId}`),
+      ...connectionTags
+        .filter((candidate) => candidate.parentTagId === tagId)
+        .map((candidate) => `tag:${candidate.id}`),
+    ];
+    const valid = new Set(fallback);
+    const seen = new Set<string>();
+    return [...(tag.childOrder || []), ...fallback].filter((token) => {
+      if (!valid.has(token) || seen.has(token)) return false;
+      seen.add(token);
+      return true;
+    });
+  },
   resolveSidebarRootOrderTokens: (
     sidebarRootOrder: unknown,
-    connectionTags: Array<{ id: string; connectionIds: string[] }>,
+    connectionTags: Array<{ id: string; parentTagId?: string; connectionIds: string[] }>,
     connections: Array<{ id: string }>,
   ) => {
     const groupedConnectionIds = new Set<string>();
     connectionTags.forEach((tag) => tag.connectionIds.forEach((id) => groupedConnectionIds.add(id)));
     const fallback = [
-      ...connectionTags.map((tag) => `tag:${tag.id}`),
+      ...connectionTags.filter((tag) => !tag.parentTagId).map((tag) => `tag:${tag.id}`),
       ...connections
         .filter((conn) => !groupedConnectionIds.has(conn.id))
         .map((conn) => `connection:${conn.id}`),
@@ -190,6 +212,7 @@ vi.mock('../store', () => ({
     updateConnectionTag: mocks.noop,
     removeConnectionTag: mocks.noop,
     moveConnectionToTag: mocks.noop,
+    moveConnectionTag: mocks.noop,
     reorderConnections: mocks.noop,
     reorderTags: mocks.noop,
     reorderSidebarRoot: mocks.noop,
@@ -615,6 +638,72 @@ describe('Sidebar locate toolbar', () => {
     ]);
     expect(getV2RailConnectionGroupBadgeText('Production')).toBe('PR');
     expect(getV2RailConnectionGroupBadgeText('生产环境')).toBe('生');
+  });
+
+  it('builds arbitrarily nested host groups with mixed host and subgroup order', () => {
+    const connections = [
+      'host1', 'host2', 'host3', 'host4', 'host5', 'host6',
+    ].map((id) => ({ id, name: id, config: { type: 'mysql', host: `${id}.local` } })) as any[];
+    const tags = [
+      {
+        id: 'group-1',
+        name: '分组1',
+        connectionIds: ['host1', 'host2'],
+        childOrder: ['connection:host1', 'connection:host2', 'tag:group-1-1'],
+      },
+      {
+        id: 'group-1-1',
+        name: '分组1-1',
+        parentTagId: 'group-1',
+        connectionIds: ['host3', 'host4'],
+        childOrder: ['connection:host3', 'connection:host4', 'tag:group-1-1-1'],
+      },
+      {
+        id: 'group-1-1-1',
+        name: '分组1-1-1',
+        parentTagId: 'group-1-1',
+        connectionIds: ['host5', 'host6'],
+        childOrder: ['connection:host5', 'connection:host6'],
+      },
+    ] as any[];
+
+    const outline = (items: ReturnType<typeof buildSidebarConnectionTagTree>): unknown[] => items.map((item) => (
+      item.kind === 'connection'
+        ? item.id
+        : { id: item.id, children: outline(item.children) }
+    ));
+
+    expect(outline(buildSidebarConnectionTagTree(connections, tags, ['tag:group-1']))).toEqual([
+      {
+        id: 'group-1',
+        children: [
+          'host1',
+          'host2',
+          {
+            id: 'group-1-1',
+            children: [
+              'host3',
+              'host4',
+              { id: 'group-1-1-1', children: ['host5', 'host6'] },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(isConnectionTagDescendant('group-1', 'group-1-1-1', tags)).toBe(true);
+    expect(isConnectionTagDescendant('group-1-1', 'group-1', tags)).toBe(false);
+  });
+
+  it('keeps malformed group parents and parent cycles visible at the root', () => {
+    const tags = [
+      { id: 'a', name: 'A', parentTagId: 'b', connectionIds: [] },
+      { id: 'b', name: 'B', parentTagId: 'a', connectionIds: [] },
+      { id: 'orphan', name: 'Orphan', parentTagId: 'missing', connectionIds: [] },
+    ] as any[];
+
+    expect(
+      buildSidebarConnectionTagTree([], tags, []).map((item) => item.id),
+    ).toEqual(['a', 'b', 'orphan']);
   });
 
   it('keeps the sidebar memoized so parent-only button state does not repaint the tree', () => {
@@ -1446,44 +1535,40 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('treeData={isV2Ui ? v2VisibleTreeData : displayTreeData}');
   });
 
-  it('reorders dragged connections instead of only moving them between groups', () => {
+  it('uses the hierarchy actions for mixed sibling host and subgroup drag ordering', () => {
     const source = readSidebarSource();
     const utilsSource = readFileSync(new URL('./sidebarV2Utils.ts', import.meta.url), 'utf8');
 
-    expect(source).toContain('const reorderConnections = useStore(state => state.reorderConnections);');
-    expect(source).toContain('reorderConnections(');
+    expect(source).toContain('const moveConnectionTag = useStore(state => state.moveConnectionTag);');
+    expect(source).toContain('moveConnectionTag(dragTagId, targetParentTagId, targetToken, targetInsertBefore);');
+    expect(source).toContain('moveConnectionToTag(connectionId, targetParentTagId, targetToken, targetInsertBefore);');
     expect(source).toContain('const insertBefore = resolveSidebarDropInsertBefore(');
     expect(source).toContain('const domDropNode = resolveSidebarDropNodeFromDomEvent(info?.event);');
     expect(source).toContain('const dropTargetMetrics = resolveSidebarDropTargetMetricsFromDomEvent(info?.event);');
     expect(source).toContain("findTreeNodeByKeyRef.current(treeDataRef.current, domDropNode.key)");
     expect(utilsSource).toContain("const treeNode = baseElement.closest('.ant-tree-treenode') as HTMLElement | null;");
-    expect(source).toContain('insertBefore,');
+    expect(source).toContain("info?.dropToGap === false");
   });
 
-  it('reorders dragged tags relative to grouped connections instead of always appending them', () => {
+  it('rejects a drag path that would put a group into itself or one of its descendants', () => {
     const source = readSidebarSource();
 
-    expect(source).toContain("connectionTags.find(t => t.connectionIds.includes(String(dropNode.key)))?.id || ''");
-    expect(source).toContain('const dropTagId = dropNode.type === \'tag\'');
-    expect(source).toContain('if (dropTagId) {');
+    expect(source).toContain('const allowSidebarTreeDrop = ({ dragNode, dropNode, dropPosition }: any): boolean => {');
+    expect(source).toContain('!isConnectionTagDescendant(dragTagId, targetParentTagId, connectionTags)');
+    expect(source).toContain('allowDrop={allowSidebarTreeDrop}');
   });
 
-  it('wires v2 tree root dragging through the shared sidebar root order action', () => {
+  it('keeps selection preservation while routing tree drag through the shared hierarchy path', () => {
     const source = readSidebarSource();
 
-    expect(source).toContain('const reorderSidebarRoot = useStore(state => state.reorderSidebarRoot);');
     expect(source).toContain('const treeDragSelectSuppressUntilRef = useRef(0);');
     expect(source).toContain('const treeDragSelectionSnapshotRef = useRef<');
     expect(source).toContain('snapshotTreeSelectionBeforeDrag();');
     expect(source).toContain('restoreTreeSelectionAfterDrag();');
     expect(source).toContain('if (Date.now() < treeDragSelectSuppressUntilRef.current) {');
-    expect(source).toContain('const getDropRootToken = (node: any): string => {');
-    expect(source).toContain("return buildSidebarRootTagToken(String(node?.dataRef?.id || ''));");
-    expect(source).toContain(': buildSidebarRootConnectionToken(String(node.key));');
-    expect(source).toContain('const dragRootToken = buildSidebarRootTagToken(String(dragTagId));');
-    expect(source).toContain('reorderSidebarRoot(dragRootToken, dropRootToken, resolvedInsertBefore);');
-    expect(source).toContain('reorderSidebarRoot(dragRootToken, dropRootToken, insertBefore);');
-    expect(source).toContain('buildSidebarRootConnectionToken(String(dragNode.key))');
+    expect(source).toContain('const getNodeOrderToken = (node: any): string | null => {');
+    expect(source).toContain('const targetParentTagId = droppingIntoTag');
+    expect(source).toContain('const targetToken = droppingIntoTag ? null : getNodeOrderToken(dropNode);');
     expect(source).toContain('onDrop={handleDrop}');
   });
 
@@ -2554,6 +2639,7 @@ describe('Sidebar locate toolbar', () => {
   it('localizes v2 connection shell fallbacks and group controls without changing raw names', () => {
     const source = readSidebarSource();
     const menuSource = readFileSync(new URL('./V2TableContextMenu.tsx', import.meta.url), 'utf8');
+    const utilsSource = readFileSync(new URL('./sidebarV2Utils.ts', import.meta.url), 'utf8');
 
     expect(source).toContain("connectionName={String(conn?.name || node.title || t('connection.unnamed'))}");
     expect(source).toContain("title: String(node.title || conn.name || t('connection.unnamed'))");
@@ -2561,7 +2647,7 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain("title: String(node.title || dataRef.dbName || t('database.unnamed'))");
     expect(source).toContain("meta: conn?.name || dataRef.id || t('database.label')");
     expect(source).toContain("const activeConnectionDisplayName = String(activeConnection?.name || '').trim() || t('sidebar.active_connection.no_host_selected');");
-    expect(source).toContain("name: tag.name || t('connection.sidebar.group.untitled'),");
+    expect(utilsSource).toContain("name: item.tag.name || t('connection.sidebar.group.untitled'),");
     expect(source).toContain('groupName={group.name}');
     expect(source).toContain('count={group.connections.length}');
     expect(menuSource).toContain("title={groupName || t('connection.sidebar.group.untitled')}");

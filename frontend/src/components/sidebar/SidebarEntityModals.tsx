@@ -1,16 +1,65 @@
 import React from 'react';
-import { Checkbox, Form, Input, Space } from 'antd';
+import { Checkbox, Form, Input, Select, Space } from 'antd';
 import type { FormInstance } from 'antd/es/form';
 import { FolderOpenOutlined } from '@ant-design/icons';
 import Modal from '../common/ResizableDraggableModal';
-import type { SavedConnection, SavedQuery } from '../../types';
+import type { ConnectionTag, SavedConnection, SavedQuery } from '../../types';
 import { t } from '../../i18n';
 import { noAutoCapInputProps } from '../../utils/inputAutoCap';
 
-type ConnectionTag = {
-  id: string;
-  name: string;
-  connectionIds: string[];
+const getConnectionTagDescendantIds = (
+  connectionTags: ConnectionTag[],
+  rootTagId: string,
+): Set<string> => {
+  const descendants = new Set<string>();
+  const pending = [rootTagId];
+  while (pending.length > 0) {
+    const parentTagId = pending.pop();
+    if (!parentTagId) continue;
+    connectionTags.forEach((tag) => {
+      if (tag.parentTagId !== parentTagId || descendants.has(tag.id)) return;
+      descendants.add(tag.id);
+      pending.push(tag.id);
+    });
+  }
+  return descendants;
+};
+
+export const buildConnectionTagParentOptions = (
+  connectionTags: ConnectionTag[],
+  editingTagId: string,
+) => {
+  const excludedTagIds = editingTagId
+    ? new Set([editingTagId, ...getConnectionTagDescendantIds(connectionTags, editingTagId)])
+    : new Set<string>();
+  const tagById = new Map(connectionTags.map((tag) => [tag.id, tag]));
+
+  return connectionTags
+    .filter((tag) => !excludedTagIds.has(tag.id))
+    .map((tag) => {
+      const names: string[] = [];
+      const visited = new Set<string>();
+      let current: ConnectionTag | undefined = tag;
+      while (current && !visited.has(current.id)) {
+        visited.add(current.id);
+        names.unshift(current.name);
+        current = current.parentTagId ? tagById.get(current.parentTagId) : undefined;
+      }
+      return { value: tag.id, label: names.join(' / ') || tag.name };
+    });
+};
+
+const resolveConnectionTagParentId = (
+  value: unknown,
+  connectionTags: ConnectionTag[],
+  editingTagId: string,
+): string | undefined => {
+  const parentTagId = typeof value === 'string' ? value.trim() : '';
+  if (!parentTagId) return undefined;
+  return buildConnectionTagParentOptions(connectionTags, editingTagId)
+    .some((option) => option.value === parentTagId)
+    ? parentTagId
+    : undefined;
 };
 
 type SidebarEntityModalsProps = {
@@ -26,7 +75,6 @@ type SidebarEntityModalsProps = {
   renameViewTarget: any;
   updateConnectionTag: (tag: ConnectionTag) => void;
   addConnectionTag: (tag: ConnectionTag) => void;
-  moveConnectionToTag: (connectionId: string, tagId: string) => void;
   isCreateDbModalOpen: boolean;
   setIsCreateDbModalOpen: (open: boolean) => void;
   createDbForm: FormInstance;
@@ -81,7 +129,6 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
   renameViewTarget,
   updateConnectionTag,
   addConnectionTag,
-  moveConnectionToTag,
   isCreateDbModalOpen,
   setIsCreateDbModalOpen,
   createDbForm,
@@ -134,27 +181,28 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
       styles={{ content: modalPanelStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 10 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 12 } }}
       onOk={() => {
         createTagForm.validateFields().then(values => {
+          const editingTagId = renameViewTarget?.type === 'tag'
+            ? String(renameViewTarget?.dataRef?.id || '')
+            : '';
+          const parentTagId = resolveConnectionTagParentId(
+            values.parentTagId,
+            connectionTags,
+            editingTagId,
+          );
           if (renameViewTarget?.type === 'tag') {
             updateConnectionTag({
               ...renameViewTarget.dataRef,
               name: values.name,
+              parentTagId,
               connectionIds: values.connectionIds || [],
-            });
-            const allOtherTagsIds = connectionTags.filter(tag => tag.id !== renameViewTarget.dataRef.id).flatMap(tag => tag.connectionIds);
-            (values.connectionIds || []).forEach((connectionId: string) => {
-              if (allOtherTagsIds.includes(connectionId)) {
-                moveConnectionToTag(connectionId, renameViewTarget.dataRef.id);
-              }
             });
           } else {
             const tagId = Date.now().toString();
             addConnectionTag({
               id: tagId,
               name: values.name,
+              parentTagId,
               connectionIds: values.connectionIds || [],
-            });
-            (values.connectionIds || []).forEach((connectionId: string) => {
-              moveConnectionToTag(connectionId, tagId);
             });
           }
           setIsCreateTagModalOpen(false);
@@ -166,6 +214,16 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
         <div style={modalSectionStyle}>
           <Form.Item name="name" label={t('sidebar.field.tag_name')} rules={[{ required: true, message: t('sidebar.validation.tag_name_required') }]}>
             <Input placeholder={t('sidebar.placeholder.tag_name')} />
+          </Form.Item>
+          <Form.Item name="parentTagId" label={t('sidebar.field.parent_group')}>
+            <Select
+              allowClear
+              placeholder={t('sidebar.placeholder.parent_group')}
+              options={buildConnectionTagParentOptions(
+                connectionTags,
+                renameViewTarget?.type === 'tag' ? String(renameViewTarget?.dataRef?.id || '') : '',
+              )}
+            />
           </Form.Item>
           <Form.Item name="connectionIds" label={t('sidebar.field.select_connections')} style={{ marginBottom: 0 }}>
             <Checkbox.Group style={{ width: '100%' }}>
