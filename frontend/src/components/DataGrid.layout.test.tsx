@@ -2603,6 +2603,11 @@ describe('DataGrid layout', () => {
     expect(source).toContain('const pendingExternalScrollLeftRef = useRef<number | null>(null);');
     expect(source).toContain('const externalScrollSequenceRef = useRef(0);');
     expect(source).toContain('const externalScrollbarDraggingRef = useRef(false);');
+    expect(source).toContain('const EXTERNAL_HORIZONTAL_SCROLL_IDLE_SETTLE_MS = 80;');
+    expect(source).toContain('const externalScrollInteractionTimerRef = useRef<number | null>(null);');
+    expect(source).toContain('const externalScrollInteractionUntilRef = useRef(0);');
+    expect(source).toContain('const isExternalScrollbarInteractionActive = useCallback(() => (');
+    expect(source).toContain('const refreshExternalScrollbarInteraction = useCallback(() => {');
     expect(source).toContain('const scheduleVirtualHorizontalWheel = useCallback');
     expect(source).toContain('pendingTableHorizontalDeltaRef.current += delta;');
     expect(source).toContain('tableHorizontalWheelRafRef.current = requestAnimationFrame');
@@ -2611,14 +2616,24 @@ describe('DataGrid layout', () => {
     expect(source).toContain('applyVirtualHorizontalOffset(tableContainer, nextLeft, { forceInternalScroll: true });');
     expect(source).toContain('}, [horizontalScrollVisible, scheduleVirtualHorizontalAlignment, tableRenderData, tableScrollX, virtualEditingCell]);');
     expect(source).toContain('tableInstance.scrollTo({ left: clampedOffset, top: holderEl.scrollTop });');
+    expect(source).toContain('deferPostScrollVisualReassert?: boolean');
+    expect(source).toContain('if (!options?.deferPostScrollVisualReassert) {');
     expect(source).toContain('const requestedExternalScrollLeft = pendingExternalScrollLeftRef.current ?? latestExternalScroll.scrollLeft;');
-    expect(source).toContain('applyVirtualHorizontalOffset(tableContainer, requestedExternalScrollLeft, { forceInternalScroll: true });');
+    expect(source).toContain('deferPostScrollVisualReassert: true');
+    expect(source).toContain('if (isExternalScrollbarInteractionActive()) {');
+    expect(source).toContain('syncVirtualHorizontalVisualOffset(tableContainer, resolvedScrollLeft);');
     expect(source).not.toContain('const synced = syncVirtualHorizontalVisualOffset(tableContainer, externalScroll.scrollLeft);');
     expect(source).toContain('const handleExternalHorizontalScrollPointerDown = useCallback');
     expect(source).toContain('const handleExternalHorizontalScrollPointerRelease = useCallback');
     expect(source).toContain('const finishExternalScrollbarDrag = useCallback');
     expect(source).toContain('const handleExternalHorizontalScrollLostPointerCapture = useCallback');
-    expect(source).toContain('if (externalScrollbarDraggingRef.current) {');
+    expect(source).toContain('externalScrollbarDraggingRef.current\n      || Date.now() < externalScrollInteractionUntilRef.current');
+    const finishExternalScrollbarDragSource = source.slice(
+      source.indexOf('const finishExternalScrollbarDrag = useCallback'),
+      source.indexOf('const handleExternalHorizontalScrollPointerRelease = useCallback'),
+    );
+    expect(finishExternalScrollbarDragSource).toContain('if (isExternalScrollbarInteractionActive()) {');
+    expect(finishExternalScrollbarDragSource).not.toContain('clearExternalScrollbarInteraction();');
     expect(source).toContain('onPointerDown={handleExternalHorizontalScrollPointerDown}');
     expect(source).toContain('onPointerUp={handleExternalHorizontalScrollPointerRelease}');
     expect(source).toContain('onPointerCancel={handleExternalHorizontalScrollPointerRelease}');
