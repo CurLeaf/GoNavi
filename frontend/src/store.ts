@@ -115,6 +115,10 @@ import {
   sanitizeSidebarTableMetadataFields,
   type SidebarTableMetadataField,
 } from "./utils/sidebarTableMetadata";
+import {
+  sanitizeSidebarHiddenObjectGroups,
+  type SidebarObjectGroupKey,
+} from "./utils/sidebarObjectVisibility";
 
 export type TableDoubleClickAction = "open-data" | "open-design";
 export type ThemeMode = "light" | "dark";
@@ -133,6 +137,7 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
   v2CommandSearchPersistentFilterEnabled: boolean;
   v2SidebarPersistedFilter: string;
   v2SidebarRailScale: number;
+  sidebarHiddenObjectGroups: SidebarObjectGroupKey[];
   customUIFontFamily: string | null;
   customMonoFontFamily: string | null;
   newQuerySqlTemplate: string | null;
@@ -155,6 +160,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   v2CommandSearchPersistentFilterEnabled: false,
   v2SidebarPersistedFilter: "",
   v2SidebarRailScale: DEFAULT_V2_SIDEBAR_RAIL_SCALE,
+  sidebarHiddenObjectGroups: [],
   customUIFontFamily: null,
   customMonoFontFamily: null,
   newQuerySqlTemplate: null,
@@ -3069,6 +3075,9 @@ const sanitizeAppearance = (
     ),
     v2SidebarRailScale: sanitizeV2SidebarRailScale(
       appearance.v2SidebarRailScale,
+    ),
+    sidebarHiddenObjectGroups: sanitizeSidebarHiddenObjectGroups(
+      appearance.sidebarHiddenObjectGroups,
     ),
     customUIFontFamily: sanitizeFontFamilyInput(appearance.customUIFontFamily),
     customMonoFontFamily: sanitizeFontFamilyInput(appearance.customMonoFontFamily),

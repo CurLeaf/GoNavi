@@ -160,6 +160,7 @@ import { useExportProgressDialog } from './ExportProgressModal';
 import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLRootNode, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
 import { resolveSidebarTableMetadataFields } from '../utils/sidebarTableMetadata';
+import { filterSidebarTreeByHiddenObjectGroups } from '../utils/sidebarObjectVisibility';
 import { t } from '../i18n';
 import MessagePublishModal from './MessagePublishModal';
 import {
@@ -687,6 +688,12 @@ const Sidebar: React.FC<{
   const allSavedQueriesNode = useMemo<TreeNode | null>(() => {
       return buildAllSavedQueriesTreeNode(savedQueries, connections, savedQueryGroups);
   }, [connections, savedQueries, savedQueryGroups]);
+  const sidebarHiddenObjectGroups = appearance.sidebarHiddenObjectGroups;
+  const visibleSidebarTreeData = useMemo(
+      () => filterSidebarTreeByHiddenObjectGroups(treeData, sidebarHiddenObjectGroups),
+      [sidebarHiddenObjectGroups, treeData],
+  );
+  const sidebarObjectVisibilitySignature = sidebarHiddenObjectGroups.join('|') || 'all';
   const snapshotTreeSelectionBeforeDrag = useCallback(() => {
       treeDragSelectionSnapshotRef.current = {
           selectedKeys: [...selectedKeys],
@@ -2484,7 +2491,7 @@ const Sidebar: React.FC<{
       setV2CommandActiveIndex,
       v2ExplorerFilter,
       sidebarTableMetadataFields,
-      treeData,
+      treeData: visibleSidebarTreeData,
       treeViewportWidth,
       treeHeight,
       isV2Ui,
@@ -3267,7 +3274,7 @@ const Sidebar: React.FC<{
         >
             <div className="sidebar-tree-scroll-content">
                 <Tree
-                    key={isV2Ui ? `v2-tree-${v2ExplorerFilter}` : 'legacy-tree'}
+                    key={`${isV2Ui ? `v2-tree-${v2ExplorerFilter}` : 'legacy-tree'}-${sidebarObjectVisibilitySignature}`}
                     ref={treeRef}
                     showIcon
                     draggable={{

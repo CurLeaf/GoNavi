@@ -15,7 +15,7 @@ const aiSettingsModalSource = readFileSync(
 describe('settings center layout', () => {
   it('uses the same split navigation shell as the tool center', () => {
     expect(appSource).toContain("type SettingsCenterGroupKey = 'preferences' | 'services' | 'about';");
-    expect(appSource).toContain("type SettingsCenterPaneKey = 'language' | 'theme' | 'sidebar-metadata' | 'proxy' | 'web-auth' | 'ai' | 'about-go-navi';");
+    expect(appSource).toContain("type SettingsCenterPaneKey = 'language' | 'theme' | 'sidebar-metadata' | 'sidebar-objects' | 'proxy' | 'web-auth' | 'ai' | 'about-go-navi';");
     expect(appSource).toContain("const [activeSettingsCenterGroupKey, setActiveSettingsCenterGroupKey] = useState<SettingsCenterGroupKey>('preferences');");
     expect(appSource).toContain("const [activeSettingsCenterPane, setActiveSettingsCenterPane] = useState<SettingsCenterPaneState | null>(null);");
     expect(appSource).toContain('style={toolCenterModalWorkspaceStyle}');
@@ -45,6 +45,17 @@ describe('settings center layout', () => {
     expect(appSource).toContain("sidebarTableMetadataFields: DEFAULT_SIDEBAR_TABLE_METADATA_FIELDS");
     expect(appSource).toContain("t('sidebar.v2_table_group_menu.display_table_rows')");
     expect(appSource).not.toContain("setIsLanguageModalOpen(true)");
+  });
+
+  it('adds persistent sidebar object visibility controls to preferences', () => {
+    expect(appSource).toContain("key: 'sidebar-objects'");
+    expect(appSource).toContain("title: t('app.settings.sidebar_objects.title')");
+    expect(appSource).toContain("description: t('app.settings.sidebar_objects.description')");
+    expect(appSource).toContain("handleOpenSettingsCenterPane('preferences', 'sidebar-objects')");
+    expect(appSource).toContain("if (activeSettingsCenterPane.key === 'sidebar-objects')");
+    expect(appSource).toContain('renderSidebarObjectVisibilitySettingsPane();');
+    expect(appSource).toContain('sidebarHiddenObjectGroups');
+    expect(appSource).toContain('SIDEBAR_OBJECT_GROUP_KEYS.filter((key) => key !== \'tables\')');
   });
 
   it('adds browser auth management into the services settings group', () => {

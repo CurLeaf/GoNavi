@@ -106,6 +106,10 @@ import {
   type SidebarTableMetadataField,
 } from './utils/sidebarTableMetadata';
 import {
+  SIDEBAR_OBJECT_GROUP_KEYS,
+  type SidebarObjectGroupKey,
+} from './utils/sidebarObjectVisibility';
+import {
   getSecurityUpdateStatusMeta,
   resolveSecurityUpdateEntryVisibility,
 } from './utils/securityUpdatePresentation';
@@ -465,7 +469,7 @@ type ToolCenterPaneState = {
 };
 
 type SettingsCenterGroupKey = 'preferences' | 'services' | 'about';
-type SettingsCenterPaneKey = 'language' | 'theme' | 'sidebar-metadata' | 'proxy' | 'web-auth' | 'ai' | 'about-go-navi';
+type SettingsCenterPaneKey = 'language' | 'theme' | 'sidebar-metadata' | 'sidebar-objects' | 'proxy' | 'web-auth' | 'ai' | 'about-go-navi';
 type SettingsCenterPaneState = {
   key: SettingsCenterPaneKey;
   group: SettingsCenterGroupKey;
@@ -4415,6 +4419,81 @@ function App() {
       utilityMutedTextStyle,
       utilityPanelStyle,
   ]);
+  const renderSidebarObjectVisibilitySettingsPane = useCallback(() => {
+      const hiddenObjectGroups = new Set(appearance.sidebarHiddenObjectGroups);
+      const objectGroupItems: Array<{ key: SidebarObjectGroupKey; label: string }> = [
+          { key: 'savedQueries', label: t('sidebar.tree.saved_queries') },
+          { key: 'tables', label: t('sidebar.object_group.tables') },
+          { key: 'views', label: t('sidebar.object_group.views') },
+          { key: 'materializedViews', label: t('sidebar.object_group.materialized_views') },
+          { key: 'routines', label: t('sidebar.object_group.routines') },
+          { key: 'triggers', label: t('sidebar.object_group.triggers') },
+          { key: 'events', label: t('sidebar.object_group.events') },
+          { key: 'sequences', label: t('sidebar.object_group.sequences') },
+          { key: 'packages', label: t('sidebar.object_group.packages') },
+      ];
+      const setObjectGroupVisible = (key: SidebarObjectGroupKey, visible: boolean) => {
+          const nextHiddenObjectGroups = visible
+              ? appearance.sidebarHiddenObjectGroups.filter((item) => item !== key)
+              : Array.from(new Set([...appearance.sidebarHiddenObjectGroups, key]));
+          setAppearance({ sidebarHiddenObjectGroups: nextHiddenObjectGroups });
+      };
+
+      return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
+              <div style={utilityPanelStyle}>
+                  <div style={{ marginBottom: 8, fontWeight: 600 }}>{t('app.settings.sidebar_objects.title')}</div>
+                  <div style={{ ...utilityMutedTextStyle, marginBottom: 14 }}>
+                      {t('app.settings.sidebar_objects.description')}
+                  </div>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                      {objectGroupItems.map((item) => (
+                          <div
+                              key={item.key}
+                              data-sidebar-object-group-setting={item.key}
+                              style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  gap: 12,
+                                  minHeight: 36,
+                                  padding: '0 2px',
+                                  borderBottom: `1px solid ${overlayTheme.divider}`,
+                              }}
+                          >
+                              <span>{item.label}</span>
+                              <Switch
+                                  checked={!hiddenObjectGroups.has(item.key)}
+                                  aria-label={item.label}
+                                  onChange={(visible) => setObjectGroupVisible(item.key, visible)}
+                              />
+                          </div>
+                      ))}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+                      <Button onClick={() => setAppearance({ sidebarHiddenObjectGroups: [] })}>
+                          {t('app.settings.sidebar_objects.action.show_all')}
+                      </Button>
+                      <Button
+                          type="primary"
+                          onClick={() => setAppearance({
+                              sidebarHiddenObjectGroups: SIDEBAR_OBJECT_GROUP_KEYS.filter((key) => key !== 'tables'),
+                          })}
+                      >
+                          {t('app.settings.sidebar_objects.action.tables_only')}
+                      </Button>
+                  </div>
+              </div>
+          </div>
+      );
+  }, [
+      appearance.sidebarHiddenObjectGroups,
+      overlayTheme.divider,
+      setAppearance,
+      t,
+      utilityMutedTextStyle,
+      utilityPanelStyle,
+  ]);
   const updateInstallActionLabel = updateInstallAction === 'install-and-restart'
       ? t('app.about.action.install_and_restart')
       : (updateInstallAction === 'launch-installer'
@@ -6431,6 +6510,13 @@ function App() {
                   description: t('app.settings.sidebar_metadata.description'),
                   onClick: () => handleOpenSettingsCenterPane('preferences', 'sidebar-metadata'),
               },
+              {
+                  key: 'sidebar-objects',
+                  icon: <FolderOpenOutlined />,
+                  title: t('app.settings.sidebar_objects.title'),
+                  description: t('app.settings.sidebar_objects.description'),
+                  onClick: () => handleOpenSettingsCenterPane('preferences', 'sidebar-objects'),
+              },
           ],
       },
       {
@@ -6523,6 +6609,9 @@ function App() {
       }
       if (activeSettingsCenterPane.key === 'sidebar-metadata') {
           return renderSidebarMetadataSettingsPane();
+      }
+      if (activeSettingsCenterPane.key === 'sidebar-objects') {
+          return renderSidebarObjectVisibilitySettingsPane();
       }
       if (activeSettingsCenterPane.key === 'proxy') {
           return renderProxySettingsContent();

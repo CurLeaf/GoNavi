@@ -75,6 +75,7 @@ describe('store appearance persistence', () => {
     expect(appearance.v2CommandSearchPersistentFilterEnabled).toBe(false);
     expect(appearance.v2SidebarPersistedFilter).toBe('');
     expect(appearance.v2SidebarRailScale).toBe(1);
+    expect(appearance.sidebarHiddenObjectGroups).toEqual([]);
     expect(appearance.showDataTableVerticalBorders).toBe(false);
     expect(appearance.showDataTableRowNumber).toBe(true);
     expect(appearance.dataTableDensity).toBe('comfortable');
@@ -151,6 +152,33 @@ describe('store appearance persistence', () => {
     expect(appearance.dataTableDensity).toBe('compact');
     expect(appearance.tableDoubleClickAction).toBe('open-design');
     expect(appearance.v2SidebarRailScale).toBe(1.55);
+  });
+
+  it('persists and sanitizes hidden sidebar object groups', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setAppearance({
+      sidebarHiddenObjectGroups: ['views', 'routines', 'views'],
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.appearance.sidebarHiddenObjectGroups).toEqual(['views', 'routines']);
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().appearance.sidebarHiddenObjectGroups).toEqual(['views', 'routines']);
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        appearance: {
+          sidebarHiddenObjectGroups: ['tables', 'unknown', 'tables', 1],
+        },
+      },
+      version: 16,
+    }));
+    vi.resetModules();
+    const sanitized = await importStore();
+    expect(sanitized.useStore.getState().appearance.sidebarHiddenObjectGroups).toEqual(['tables']);
   });
 
   it('migrates legacy sidebar table comment settings into metadata fields and persists explicit selections', async () => {
