@@ -67,6 +67,36 @@ describe('sqlEditorTransaction', () => {
     ])).toBe(false);
   });
 
+  it('keeps DML inside anonymous BEGIN...END blocks in a managed transaction', () => {
+    const sqlServerBlock = [
+      'BEGIN',
+      "  PRINT 'DELETE is text here';",
+      '  -- INSERT INTO audit_logs(id) VALUES (1);',
+      "  UPDATE users SET name = 'new' WHERE id = 1;",
+      'END;',
+    ].join('\n');
+    const oracleBlock = [
+      'BEGIN',
+      "  UPDATE users SET name = 'new' WHERE id = 1;",
+      'END;',
+    ].join('\n');
+
+    expect(shouldUseSqlEditorManagedTransactionForType(
+      'sqlserver',
+      findSqlStatementRanges(sqlServerBlock, 'sqlserver').map((range) => range.text),
+    )).toBe(true);
+    expect(shouldUseSqlEditorManagedTransactionForType(
+      'oracle',
+      findSqlStatementRanges(oracleBlock, 'oracle').map((range) => range.text),
+    )).toBe(true);
+  });
+
+  it('does not wrap BEGIN TRANSACTION as an anonymous block', () => {
+    expect(shouldUseSqlEditorManagedTransactionForType('sqlserver', [
+      "BEGIN TRANSACTION; UPDATE users SET name = 'new' WHERE id = 1; COMMIT TRANSACTION;",
+    ])).toBe(false);
+  });
+
   it.each([
     ['trino', 'UPDATE hive.default.orders SET status = \'done\''],
     ['tdengine', 'INSERT INTO meters(ts, current) VALUES (NOW, 10.2)'],

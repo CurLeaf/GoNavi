@@ -636,7 +636,7 @@ func shouldUseManagedSQLTransaction(dbType string, query string) bool {
 		if isReadOnlySQLQuery(dbType, stmt) {
 			continue
 		}
-		if isOracleLikeAnonymousBlockManagedWrite(dbType, stmt) {
+		if isManagedSQLBlockWrite(dbType, stmt) {
 			hasManagedWrite = true
 			continue
 		}
@@ -699,22 +699,27 @@ func isBeginTransactionControlStatement(stmt string, keywordEnd int) bool {
 	}
 }
 
-func isOracleLikeAnonymousBlockManagedWrite(dbType string, stmt string) bool {
-	if !isOracleLikeDBType(dbType) {
-		return false
-	}
-
-	switch nextSQLSignificantToken(strings.TrimSpace(stmt), 0) {
-	case "begin", "declare":
-		return sqlContainsKeyword(stmt, "insert") ||
-			sqlContainsKeyword(stmt, "update") ||
-			sqlContainsKeyword(stmt, "delete") ||
-			sqlContainsKeyword(stmt, "merge") ||
-			sqlContainsKeyword(stmt, "replace") ||
-			sqlContainsKeyword(stmt, "upsert")
+func isManagedSQLBlockWrite(dbType string, stmt string) bool {
+	keyword, keywordEnd := nextSQLKeyword(stmt, 0)
+	switch {
+	case isOracleLikeDBType(dbType):
+		if keyword != "begin" && keyword != "declare" {
+			return false
+		}
+	case isSQLServerDBType(dbType):
+		if keyword != "begin" || isBeginTransactionControlStatement(stmt, keywordEnd) {
+			return false
+		}
 	default:
 		return false
 	}
+
+	return sqlContainsKeyword(stmt, "insert") ||
+		sqlContainsKeyword(stmt, "update") ||
+		sqlContainsKeyword(stmt, "delete") ||
+		sqlContainsKeyword(stmt, "merge") ||
+		sqlContainsKeyword(stmt, "replace") ||
+		sqlContainsKeyword(stmt, "upsert")
 }
 
 func (a *App) DBCommitTransaction(transactionID string) connection.QueryResult {

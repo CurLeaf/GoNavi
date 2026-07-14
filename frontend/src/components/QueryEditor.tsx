@@ -6633,13 +6633,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 setActiveResultKey('');
                 return;
             }
-            const useManagedTransaction = shouldUseSqlEditorManagedTransactionForType(connCaps.type, sourceStatements);
+            const useManagedTransaction = shouldUseSqlEditorManagedTransactionForType(normalizedDbType, sourceStatements);
             if (useManagedTransaction && pendingSqlTransactionRef.current) {
                 message.warning(translate('query_editor.transaction.message.pending_managed_transaction'));
                 return;
             }
             const managedTransactionStatementCount = sourceStatements
-                .filter((statement) => shouldUseSqlEditorManagedTransactionForType(connCaps.type, [statement]))
+                .filter((statement) => shouldUseSqlEditorManagedTransactionForType(normalizedDbType, [statement]))
                 .length || sourceStatements.length;
 
             const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;

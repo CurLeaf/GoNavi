@@ -135,7 +135,9 @@ const backendApp = vi.hoisted(() => ({
   DBQueryMultiInTransaction: vi.fn(),
   DBQueryMultiTransactional: vi.fn(),
   DBCommitTransaction: vi.fn(),
+  DBCommitTransactionWithTrigger: vi.fn(),
   DBRollbackTransaction: vi.fn(),
+  DBRollbackTransactionWithTrigger: vi.fn(),
   DBGetTables: vi.fn(),
   DBGetAllColumns: vi.fn(),
   DBGetDatabases: vi.fn(),
@@ -840,7 +842,9 @@ describe('QueryEditor external SQL save', () => {
     backendApp.DBQueryMultiInTransaction.mockResolvedValue({ success: true, data: [] });
     backendApp.DBQueryMultiTransactional.mockResolvedValue({ success: true, data: [] });
     backendApp.DBCommitTransaction.mockResolvedValue({ success: true, message: '事务已提交' });
+    backendApp.DBCommitTransactionWithTrigger.mockResolvedValue({ success: true, message: '事务已提交' });
     backendApp.DBRollbackTransaction.mockResolvedValue({ success: true, message: '事务已回滚' });
+    backendApp.DBRollbackTransactionWithTrigger.mockResolvedValue({ success: true, message: '事务已回滚' });
     backendApp.DBGetColumns.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetIndexes.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetAllColumns.mockResolvedValue({ success: true, data: [] });
@@ -7536,7 +7540,7 @@ describe('QueryEditor external SQL save', () => {
       await Promise.resolve();
     });
 
-    expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-1');
+    expect(backendApp.DBCommitTransactionWithTrigger).toHaveBeenCalledWith('tx-1', 'manual');
     expect(storeState.addSqlLog).toHaveBeenCalledWith(expect.objectContaining({
       sql: "START TRANSACTION;\nUPDATE users SET name = 'new' WHERE id = 1;\nCOMMIT;",
       status: 'success',
@@ -7737,7 +7741,7 @@ describe('QueryEditor external SQL save', () => {
       await Promise.resolve();
     });
 
-    expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-with-dml');
+    expect(backendApp.DBCommitTransactionWithTrigger).toHaveBeenCalledWith('tx-with-dml', 'manual');
   });
 
   it('shows the pending statement count for multi-SQL manual transactions', async () => {
@@ -8198,7 +8202,7 @@ describe('QueryEditor external SQL save', () => {
       });
 
       expect(textContent(renderer!.root)).toContain('3s 后自动提交');
-      expect(backendApp.DBCommitTransaction).not.toHaveBeenCalled();
+      expect(backendApp.DBCommitTransactionWithTrigger).not.toHaveBeenCalled();
 
       await act(async () => {
         vi.advanceTimersByTime(3000);
@@ -8206,7 +8210,7 @@ describe('QueryEditor external SQL save', () => {
         await Promise.resolve();
       });
 
-      expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-auto');
+      expect(backendApp.DBCommitTransactionWithTrigger).toHaveBeenCalledWith('tx-auto', 'auto');
       expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -8246,7 +8250,7 @@ describe('QueryEditor external SQL save', () => {
       expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
       expect(textContent(renderer!.root)).toContain('自动提交中');
       expect(textContent(renderer!.root)).toContain('提交 (1)');
-      expect(backendApp.DBCommitTransaction).not.toHaveBeenCalled();
+      expect(backendApp.DBCommitTransactionWithTrigger).not.toHaveBeenCalled();
 
       await act(async () => {
         vi.runOnlyPendingTimers();
@@ -8254,7 +8258,7 @@ describe('QueryEditor external SQL save', () => {
         await Promise.resolve();
       });
 
-      expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-auto-now');
+      expect(backendApp.DBCommitTransactionWithTrigger).toHaveBeenCalledWith('tx-auto-now', 'auto');
       expect(textContent(renderer!.root)).not.toContain('自动提交中');
     } finally {
       vi.useRealTimers();
@@ -8815,11 +8819,13 @@ describe('QueryEditor external SQL save', () => {
     renderer?.unmount();
   });
 
-  it('keeps Oracle anonymous PL/SQL blocks intact when running from the editor', async () => {
+  it('keeps Oracle anonymous PL/SQL block DML pending for a manual transaction', async () => {
     storeState.connections[0].config.type = 'oracle';
     storeState.connections[0].config.database = 'ORCLPDB1';
-    backendApp.DBQueryMulti.mockResolvedValueOnce({
+    backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({
       success: true,
+      transactionId: 'tx-oracle-block',
+      transactionPending: true,
       data: [{ columns: ['affectedRows'], rows: [{ affectedRows: 1 }] }],
     });
     const plsql = [
@@ -8843,11 +8849,28 @@ describe('QueryEditor external SQL save', () => {
       await Promise.resolve();
     });
 
-    expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(expect.anything(), 'ORCLPDB1', plsql, 'query-1');
+    expect(backendApp.DBQueryMultiTransactional).toHaveBeenCalledWith(expect.anything(), 'ORCLPDB1', plsql, 'query-1');
+    expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
+    expect(storeState.sqlEditorPendingTransactions['tab-1']).toMatchObject({
+      id: 'tx-oracle-block',
+      dbType: 'oracle',
+      statements: [plsql],
+    });
+    expect(textContent(renderer!.root)).toContain('提交');
+    expect(textContent(renderer!.root)).toContain('回滚');
     expect(storeState.addSqlLog).toHaveBeenCalledWith(expect.objectContaining({
       sql: plsql,
       status: 'success',
     }));
+
+    await act(async () => {
+      await findButton(renderer!, '回滚').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(backendApp.DBRollbackTransactionWithTrigger).toHaveBeenCalledWith('tx-oracle-block', 'manual');
     renderer?.unmount();
   });
 

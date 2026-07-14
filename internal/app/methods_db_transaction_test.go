@@ -51,6 +51,46 @@ END;`
 	}
 }
 
+func TestShouldUseManagedSQLTransaction_SQLServerBeginEndWithDMLUsesManagedTransaction(t *testing.T) {
+	t.Parallel()
+
+	query := `BEGIN
+    PRINT 'the word DELETE here is only text';
+    -- INSERT INTO audit_logs(id) VALUES (1);
+    UPDATE users SET name = 'new' WHERE id = 1;
+END;`
+	if !shouldUseManagedSQLTransaction("sqlserver", query) {
+		t.Fatal("expected SQL Server BEGIN...END block with DML to use SQL editor managed transaction")
+	}
+}
+
+func TestShouldUseManagedSQLTransaction_SQLServerBeginEndWithoutExecutableDMLStaysUnmanaged(t *testing.T) {
+	t.Parallel()
+
+	query := `BEGIN
+    PRINT 'UPDATE users SET name = ''new''';
+    -- DELETE FROM users WHERE id = 1;
+    /* INSERT INTO audit_logs(id) VALUES (1); */
+END;`
+	if shouldUseManagedSQLTransaction("sqlserver", query) {
+		t.Fatal("expected SQL Server BEGIN...END block with DML keywords only in comments or strings to stay unmanaged")
+	}
+}
+
+func TestShouldUseManagedSQLTransaction_SQLServerExplicitBeginStaysUnmanaged(t *testing.T) {
+	t.Parallel()
+
+	for _, query := range []string{
+		"BEGIN TRANSACTION; UPDATE users SET name = 'new' WHERE id = 1; COMMIT TRANSACTION;",
+		"BEGIN TRAN; UPDATE users SET name = 'new' WHERE id = 1; COMMIT TRAN;",
+		"BEGIN WORK; UPDATE users SET name = 'new' WHERE id = 1; COMMIT WORK;",
+	} {
+		if shouldUseManagedSQLTransaction("sqlserver", query) {
+			t.Fatalf("expected explicit SQL Server transaction to stay unmanaged: %q", query)
+		}
+	}
+}
+
 func TestShouldUseManagedSQLTransaction_UsesDialectCommentRules(t *testing.T) {
 	t.Parallel()
 

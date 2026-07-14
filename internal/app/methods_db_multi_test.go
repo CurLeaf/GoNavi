@@ -21,6 +21,7 @@ type fakeBatchWriteDB struct {
 	lastQuery    string
 	lastCtx      context.Context
 	queryCalls   int
+	queryQueries []string
 	queryMap     map[string][]map[string]interface{}
 	fieldMap     map[string][]string
 	messageMap   map[string][]string
@@ -212,6 +213,7 @@ func (f *fakeBatchWriteDB) ExecContext(ctx context.Context, query string) (int64
 func (f *fakeBatchWriteDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	f.lastCtx = ctx
 	f.queryCalls++
+	f.queryQueries = append(f.queryQueries, query)
 	if err := f.queryErr[query]; err != nil {
 		return nil, nil, err
 	}
@@ -1072,6 +1074,58 @@ func TestDBQueryMultiTransactionalKeepsDMLTransactionOpenUntilCommit(t *testing.
 	}
 	if got := fakeDB.execQueries[len(fakeDB.execQueries)-1]; got != "COMMIT" {
 		t.Fatalf("expected final exec to be COMMIT, got %q", got)
+	}
+}
+
+func TestDBQueryMultiTransactionalKeepsSQLServerBeginEndBlockOpenUntilRollback(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	block := `BEGIN
+    UPDATE users SET name = 'new' WHERE id = 1;
+END;`
+	fakeDB := &fakeBatchWriteDB{
+		execAffected: map[string]int64{block: 1},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "sqlserver", Host: "127.0.0.1", Port: 1433, User: "sa"}
+
+	result := app.DBQueryMultiTransactional(config, "testdb", block, "sqlserver-begin-end-tx-query")
+	if !result.Success {
+		t.Fatalf("expected SQL Server BEGIN...END transaction success, got failure: %s", result.Message)
+	}
+	if result.TransactionID == "" || !result.TransactionPending {
+		t.Fatalf("expected pending transaction metadata, got id=%q pending=%v", result.TransactionID, result.TransactionPending)
+	}
+	if fakeDB.session == nil {
+		t.Fatal("expected SQL Server transactional block to open a pinned session")
+	}
+	if fakeDB.session.closed {
+		t.Fatal("expected SQL Server transaction session to stay open before rollback")
+	}
+	if !reflect.DeepEqual(fakeDB.execQueries, []string{"BEGIN TRANSACTION"}) {
+		t.Fatalf("expected SQL Server transaction begin before rollback, got %#v", fakeDB.execQueries)
+	}
+	if !reflect.DeepEqual(fakeDB.queryQueries, []string{block}) {
+		t.Fatalf("expected SQL Server block to execute through the pinned query session, got %#v", fakeDB.queryQueries)
+	}
+
+	rollbackResult := app.DBRollbackTransaction(result.TransactionID)
+	if !rollbackResult.Success {
+		t.Fatalf("expected SQL Server rollback success, got failure: %s", rollbackResult.Message)
+	}
+	if !fakeDB.session.closed {
+		t.Fatal("expected SQL Server transaction session to close after rollback")
+	}
+	wantExecs := []string{"BEGIN TRANSACTION", "ROLLBACK TRANSACTION"}
+	if !reflect.DeepEqual(fakeDB.execQueries, wantExecs) {
+		t.Fatalf("expected SQL Server rollback without commit, got %#v", fakeDB.execQueries)
 	}
 }
 
