@@ -660,6 +660,7 @@ function App() {
   const replaceConnections = useStore(state => state.replaceConnections);
   const replaceGlobalProxy = useStore(state => state.replaceGlobalProxy);
   const replaceSavedQueries = useStore(state => state.replaceSavedQueries);
+  const reloadSavedQueryGroups = useStore(state => state.reloadSavedQueryGroups);
   const queryOptions = useStore(state => state.queryOptions);
   const setQueryOptions = useStore(state => state.setQueryOptions);
   const shortcutOptions = useStore(state => state.shortcutOptions);
@@ -1033,6 +1034,9 @@ function App() {
                       }
                   },
               });
+              if (!cancelled) {
+                  await reloadSavedQueryGroups();
+              }
           } catch (err) {
               console.warn('Failed to bootstrap saved queries', err);
           }
@@ -1042,7 +1046,7 @@ function App() {
       return () => {
           cancelled = true;
       };
-  }, [isStoreHydrated, replaceSavedQueries]);
+  }, [isStoreHydrated, reloadSavedQueryGroups, replaceSavedQueries]);
 
   const normalizeSecurityUpdateStatus = useCallback((status?: Partial<SecurityUpdateStatus> | null): SecurityUpdateStatus => {
       const fallback = createEmptySecurityUpdateStatus();

@@ -44,6 +44,7 @@ if (
 
     const mockConnections: any[] = [];
     const mockSavedQueries: any[] = [];
+    const mockSavedQueryGroups: any[] = [];
     const mockQueryTables = [
         { table_name: 'videos', table_comment: 'sample video records' },
         { table_name: 'users', table_comment: 'sample users' },
@@ -229,6 +230,64 @@ if (
         return cloneBrowserMockValue(view);
     };
 
+    const uniqueMockStringArray = (value: unknown): string[] => {
+        if (!Array.isArray(value)) return [];
+        const seen = new Set<string>();
+        return value.reduce<string[]>((result, item) => {
+            const next = String(item || '').trim();
+            if (!next || seen.has(next)) return result;
+            seen.add(next);
+            result.push(next);
+            return result;
+        }, []);
+    };
+
+    const saveMockSavedQueryGroup = (input: any) => {
+        const nextId = String(input?.id || `saved-query-group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+        const index = mockSavedQueryGroups.findIndex((item) => item.id === nextId);
+        const existing = index >= 0 ? mockSavedQueryGroups[index] : undefined;
+        const queryIds = uniqueMockStringArray(input?.queryIds);
+        const childOrder = uniqueMockStringArray(input?.childOrder);
+        const view = {
+            id: nextId,
+            name: String(input?.name || existing?.name || t('sidebar.saved_query_group.untitled')).trim(),
+            parentGroupId: String(input?.parentGroupId || '').trim() || undefined,
+            queryIds,
+            childOrder,
+        };
+        if (index >= 0) {
+            mockSavedQueryGroups[index] = view;
+        } else {
+            mockSavedQueryGroups.push(view);
+        }
+        mockSavedQueryGroups.forEach((group) => {
+            if (group.id === nextId) return;
+            group.queryIds = uniqueMockStringArray(group.queryIds).filter((queryId) => !queryIds.includes(queryId));
+            group.childOrder = uniqueMockStringArray(group.childOrder)
+                .filter((token) => !queryIds.includes(String(token).replace(/^query:/, '')));
+        });
+        return cloneBrowserMockValue(view);
+    };
+
+    const deleteMockSavedQueryGroup = (id: string) => {
+        const index = mockSavedQueryGroups.findIndex((item) => item.id === id);
+        if (index < 0) return;
+        const removed = mockSavedQueryGroups[index];
+        mockSavedQueryGroups.splice(index, 1);
+        mockSavedQueryGroups.forEach((group) => {
+            if (group.parentGroupId === removed.id) {
+                group.parentGroupId = removed.parentGroupId || undefined;
+            }
+            if (group.id === removed.parentGroupId) {
+                group.queryIds = uniqueMockStringArray([...(group.queryIds || []), ...(removed.queryIds || [])]);
+                group.childOrder = uniqueMockStringArray([
+                    ...(group.childOrder || []).filter((token: string) => token !== `group:${removed.id}`),
+                    ...(removed.childOrder || []),
+                ]);
+            }
+        });
+    };
+
     const saveMockGlobalProxy = (input: any) => {
         const nextPassword = String(input?.password ?? '');
         const clearPassword = input?.clearPassword === true;
@@ -382,16 +441,65 @@ if (
                 ExportSQLAuditFile: async (_filter: any, format: string) => ({ success: true, data: { filePath: `gonavi-sql-audit.${format}` } }),
                 ClearSQLAuditEvents: async () => ({ success: true }),
                 GetSavedQueries: async () => cloneBrowserMockValue(mockSavedQueries),
+                GetSavedQueryGroups: async () => cloneBrowserMockValue(mockSavedQueryGroups),
                 SaveQuery: async (input: any) => saveMockQuery(input),
+                SaveSavedQueryGroup: async (input: any) => saveMockSavedQueryGroup(input),
                 ImportSavedQueries: async (payload: any) => {
                     const items = Array.isArray(payload) ? payload : payload?.queries;
                     (Array.isArray(items) ? items : []).forEach((item) => saveMockQuery(item));
+                    const groups: unknown[] = Array.isArray(payload?.groups) ? payload.groups : [];
+                    groups.forEach((group) => saveMockSavedQueryGroup(group));
                     return cloneBrowserMockValue(mockSavedQueries);
                 },
                 DeleteQuery: async (id: string) => {
                     const index = mockSavedQueries.findIndex((item) => item.id === id);
                     if (index >= 0) {
                         mockSavedQueries.splice(index, 1);
+                    }
+                    mockSavedQueryGroups.forEach((group) => {
+                        group.queryIds = uniqueMockStringArray(group.queryIds).filter((queryId) => queryId !== id);
+                        group.childOrder = uniqueMockStringArray(group.childOrder)
+                            .filter((token) => token !== `query:${id}`);
+                    });
+                    return null;
+                },
+                DeleteSavedQueryGroup: async (id: string) => {
+                    deleteMockSavedQueryGroup(id);
+                    return null;
+                },
+                MoveSavedQueryToGroup: async (queryId: string, groupId: string) => {
+                    if (!mockSavedQueries.some((query) => query.id === queryId)) {
+                        throw new Error('saved query not found');
+                    }
+                    const target = groupId ? mockSavedQueryGroups.find((group) => group.id === groupId) : null;
+                    if (groupId && !target) {
+                        throw new Error('saved query group not found');
+                    }
+                    mockSavedQueryGroups.forEach((group) => {
+                        group.queryIds = uniqueMockStringArray(group.queryIds).filter((id) => id !== queryId);
+                        group.childOrder = uniqueMockStringArray(group.childOrder)
+                            .filter((token) => token !== `query:${queryId}`);
+                    });
+                    if (target) {
+                        target.queryIds = uniqueMockStringArray([...(target.queryIds || []), queryId]);
+                        target.childOrder = uniqueMockStringArray([...(target.childOrder || []), `query:${queryId}`]);
+                    }
+                    return null;
+                },
+                MoveSavedQueryGroup: async (groupId: string, parentGroupId: string) => {
+                    const target = mockSavedQueryGroups.find((group) => group.id === groupId);
+                    if (!target) throw new Error('saved query group not found');
+                    if (parentGroupId && !mockSavedQueryGroups.some((group) => group.id === parentGroupId)) {
+                        throw new Error('saved query parent group not found');
+                    }
+                    mockSavedQueryGroups.forEach((group) => {
+                        group.childOrder = uniqueMockStringArray(group.childOrder)
+                            .filter((token) => token !== `group:${groupId}`);
+                    });
+                    target.parentGroupId = parentGroupId || undefined;
+                    if (parentGroupId) {
+                        const parent = mockSavedQueryGroups.find((group) => group.id === parentGroupId);
+                        parent.childOrder = uniqueMockStringArray([...(parent.childOrder || []), `group:${groupId}`]);
                     }
                     return null;
                 },

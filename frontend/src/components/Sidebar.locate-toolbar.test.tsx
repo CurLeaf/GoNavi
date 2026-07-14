@@ -194,9 +194,14 @@ vi.mock('../store', () => ({
   useStore: (selector: (state: any) => any) => selector({
     connections: mocks.state.connections,
     savedQueries: [],
+    savedQueryGroups: [],
     externalSQLDirectories: [],
     saveQuery: mocks.noop,
     deleteQuery: mocks.noop,
+    saveSavedQueryGroup: mocks.noop,
+    deleteSavedQueryGroup: mocks.noop,
+    moveSavedQueryToGroup: mocks.noop,
+    reloadSavedQueryGroups: mocks.noop,
     saveExternalSQLDirectory: mocks.noop,
     deleteExternalSQLDirectory: mocks.noop,
     addConnection: mocks.noop,
@@ -771,6 +776,77 @@ describe('Sidebar locate toolbar', () => {
       key: 'all-saved-query-saved-orphan',
       title: 'Legacy Report',
     });
+  });
+
+  it('renders saved query groups in mixed child order and keeps grouped SQL out of the ungrouped branch', () => {
+    const tree = buildAllSavedQueriesTreeNode(
+      [
+        {
+          id: 'query-root',
+          name: 'Root query',
+          sql: 'select 1',
+          connectionId: 'conn-1',
+          dbName: 'app',
+          createdAt: 100,
+        },
+        {
+          id: 'query-child',
+          name: 'Child query',
+          sql: 'select 2',
+          connectionId: 'conn-1',
+          dbName: 'app',
+          createdAt: 200,
+        },
+        {
+          id: 'query-ungrouped',
+          name: 'Ungrouped query',
+          sql: 'select 3',
+          connectionId: 'conn-1',
+          dbName: 'app',
+          createdAt: 300,
+        },
+      ],
+      [{
+        id: 'conn-1',
+        name: 'Primary',
+        config: { type: 'mysql', host: 'db.local', port: 3306 },
+      }] as any,
+      [
+        {
+          id: 'root-group',
+          name: 'Root group',
+          queryIds: ['query-root'],
+          childOrder: ['group:child-group', 'query:query-root'],
+        },
+        {
+          id: 'child-group',
+          name: 'Child group',
+          parentGroupId: 'root-group',
+          queryIds: ['query-child'],
+          childOrder: ['query:query-child'],
+        },
+      ],
+    );
+
+    const rootGroup = tree?.children?.find((child) => child.key === 'saved-query-manual-group-root-group');
+    expect(rootGroup?.children?.map((child) => child.key)).toEqual([
+      'saved-query-manual-group-child-group',
+      'all-saved-query-query-root',
+    ]);
+    expect(rootGroup?.children?.[0].children?.map((child) => child.key)).toEqual([
+      'all-saved-query-query-child',
+    ]);
+
+    const ungrouped = tree?.children?.find((child) => child.key === 'all-saved-queries-ungrouped');
+    expect(ungrouped?.children?.[0]).toMatchObject({
+      key: 'all-saved-queries-connection-conn-1',
+      title: 'Primary',
+    });
+    expect(ungrouped?.children?.[0].children?.[0].children?.map((child) => child.key)).toEqual([
+      'all-saved-query-query-ungrouped',
+    ]);
+    expect(JSON.stringify(ungrouped)).not.toContain('all-saved-query-query-root');
+    expect(JSON.stringify(ungrouped)).not.toContain('all-saved-query-query-child');
   });
 
   it('releases backend database connections when disconnecting a sidebar connection', () => {

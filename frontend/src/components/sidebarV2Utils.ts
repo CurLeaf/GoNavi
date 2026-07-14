@@ -40,6 +40,7 @@ export type SidebarTreeNodeType =
   | 'saved-query'
   | 'all-saved-queries'
   | 'saved-query-group'
+  | 'saved-query-manual-group'
   | 'unmatched-saved-queries'
   | 'external-sql-root'
   | 'external-sql-directory'

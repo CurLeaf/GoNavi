@@ -560,6 +560,17 @@ export interface SavedQuery {
   originalConnectionId?: string;
 }
 
+export interface SavedQueryGroup {
+  id: string;
+  name: string;
+  parentGroupId?: string;
+  queryIds: string[];
+  /**
+   * Mixed direct-child order. Tokens use `query:<id>` and `group:<id>`.
+   */
+  childOrder?: string[];
+}
+
 export interface SqlSnippet {
   id: string;
   prefix: string;

@@ -28,9 +28,13 @@ import {
 } from '@ant-design/icons';
 import { t } from '../../i18n';
 import { useStore } from '../../store';
-import type { SavedConnection, SavedQuery } from '../../types';
+import type { SavedConnection, SavedQuery, SavedQueryGroup } from '../../types';
 import { getDataSourceCapabilities } from '../../utils/dataSourceCapabilities';
 import { buildTableSelectQuery } from '../../utils/objectQueryTemplates';
+import {
+  buildSavedQueryGroupPath,
+  getSavedQueryGroupOwnerIds,
+} from '../../utils/savedQueryGroups';
 import {
   MAX_REDIS_DB_ALIAS_LENGTH,
   buildRedisDbNodeLabel,
@@ -195,6 +199,10 @@ export const buildSidebarLegacyNodeMenuItems = (
     openRenameSavedQueryModal,
     resolveSavedQueryDisplayName,
     deleteQuery,
+    savedQueryGroups,
+    openSavedQueryGroupModal,
+    deleteSavedQueryGroup,
+    moveSavedQueryToGroup,
     treeDataRef,
     setTreeData,
     handleAddExternalSQLDirectory,
@@ -1027,9 +1035,75 @@ export const buildSidebarLegacyNodeMenuItems = (
         ];
     }
 
+    if (node.type === 'all-saved-queries') {
+        return [
+            {
+                key: 'new-saved-query-group',
+                label: t('sidebar.saved_query_group.new_group'),
+                icon: <FolderAddOutlined />,
+                onClick: () => void openSavedQueryGroupModal(null, null),
+            },
+        ];
+    }
+
+    if (node.type === 'saved-query-manual-group') {
+        const group = node.dataRef as SavedQueryGroup;
+        return [
+            {
+                key: 'new-saved-query-subgroup',
+                label: t('sidebar.saved_query_group.new_subgroup'),
+                icon: <FolderAddOutlined />,
+                onClick: () => void openSavedQueryGroupModal(null, group.id),
+            },
+            {
+                key: 'edit-saved-query-group',
+                label: t('sidebar.saved_query_group.edit'),
+                icon: <EditOutlined />,
+                onClick: () => void openSavedQueryGroupModal(group),
+            },
+            { type: 'divider' },
+            {
+                key: 'delete-saved-query-group',
+                label: t('sidebar.saved_query_group.delete'),
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => {
+                    Modal.confirm({
+                        title: t('sidebar.modal.confirm_delete.title'),
+                        content: t('sidebar.saved_query_group.delete_confirm', { name: group.name }),
+                        okButtonProps: { danger: true },
+                        onOk: async () => {
+                            try {
+                                await deleteSavedQueryGroup(group.id);
+                                message.success(t('sidebar.message.saved_query_group_deleted'));
+                            } catch (error) {
+                                message.error(t('sidebar.message.saved_query_group_delete_failed', {
+                                    error: error instanceof Error ? error.message : String(error),
+                                }));
+                                throw error;
+                            }
+                        },
+                    });
+                },
+            },
+        ];
+    }
+
     // 已存查询节点的右键菜单
     if (node.type === 'saved-query') {
         const q = node.dataRef as SavedQuery;
+        const queryGroupOwners = getSavedQueryGroupOwnerIds(savedQueryGroups || []);
+        const currentGroupId = queryGroupOwners.get(q.id) || '';
+        const moveQuery = async (targetGroupId: string) => {
+            try {
+                await moveSavedQueryToGroup(q.id, targetGroupId);
+                message.success(t('sidebar.message.saved_query_group_moved'));
+            } catch (error) {
+                message.error(t('sidebar.message.saved_query_group_move_failed', {
+                    error: error instanceof Error ? error.message : String(error),
+                }));
+            }
+        };
         const rebindMenuItems: MenuProps['items'] = isSavedQueryUnmatched(q)
             ? [
                 {
@@ -1047,6 +1121,13 @@ export const buildSidebarLegacyNodeMenuItems = (
                 },
             ]
             : [];
+        const moveToGroupMenuItems: NonNullable<MenuProps['items']> = (savedQueryGroups || []).map((group: SavedQueryGroup) => ({
+            key: `move-saved-query-to-group-${group.id}`,
+            label: buildSavedQueryGroupPath(group.id, savedQueryGroups || []).join(' / ') || group.name,
+            icon: <FolderOutlined />,
+            disabled: group.id === currentGroupId,
+            onClick: () => void moveQuery(group.id),
+        }));
         return [
             {
                 key: 'open-query',
@@ -1065,6 +1146,19 @@ export const buildSidebarLegacyNodeMenuItems = (
                 }
             },
             ...rebindMenuItems,
+            {
+                key: 'move-saved-query-to-group',
+                label: t('sidebar.saved_query_group.move_to_group'),
+                icon: <FolderOpenOutlined />,
+                disabled: moveToGroupMenuItems.length === 0,
+                children: moveToGroupMenuItems.length > 0 ? moveToGroupMenuItems : undefined,
+            },
+            ...(currentGroupId ? [{
+                key: 'move-saved-query-to-ungrouped',
+                label: t('sidebar.saved_query_group.move_to_ungrouped'),
+                icon: <FolderOutlined />,
+                onClick: () => void moveQuery(''),
+            }] : []),
             { type: 'divider' },
             {
                 key: 'rename-query',

@@ -198,6 +198,10 @@ export function DeleteSQLFile(arg1) {
   return window['go']['app']['App']['DeleteSQLFile'](arg1);
 }
 
+export function DeleteSavedQueryGroup(arg1) {
+  return window['go']['app']['App']['DeleteSavedQueryGroup'](arg1);
+}
+
 export function DiagnoseQuery(arg1, arg2, arg3) {
   return window['go']['app']['App']['DiagnoseQuery'](arg1, arg2, arg3);
 }
@@ -362,6 +366,10 @@ export function GetSavedQueries() {
   return window['go']['app']['App']['GetSavedQueries']();
 }
 
+export function GetSavedQueryGroups() {
+  return window['go']['app']['App']['GetSavedQueryGroups']();
+}
+
 export function GetSecurityUpdateStatus() {
   return window['go']['app']['App']['GetSecurityUpdateStatus']();
 }
@@ -484,6 +492,14 @@ export function LogWindowDiagnostic(arg1, arg2) {
 
 export function MongoDiscoverMembers(arg1) {
   return window['go']['app']['App']['MongoDiscoverMembers'](arg1);
+}
+
+export function MoveSavedQueryGroup(arg1, arg2) {
+  return window['go']['app']['App']['MoveSavedQueryGroup'](arg1, arg2);
+}
+
+export function MoveSavedQueryToGroup(arg1, arg2) {
+  return window['go']['app']['App']['MoveSavedQueryToGroup'](arg1, arg2);
 }
 
 export function MySQLConnect(arg1) {
@@ -736,6 +752,10 @@ export function SaveGlobalProxy(arg1) {
 
 export function SaveQuery(arg1) {
   return window['go']['app']['App']['SaveQuery'](arg1);
+}
+
+export function SaveSavedQueryGroup(arg1) {
+  return window['go']['app']['App']['SaveSavedQueryGroup'](arg1);
 }
 
 export function SelectCertificateFile(arg1, arg2) {

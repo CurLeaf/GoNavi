@@ -106,6 +106,8 @@ export function DeleteSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function DeleteSQLFile(arg1:string):Promise<connection.QueryResult>;
 
+export function DeleteSavedQueryGroup(arg1:string):Promise<void>;
+
 export function DiagnoseQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DismissSecurityUpdateReminder():Promise<app.SecurityUpdateStatus>;
@@ -188,6 +190,8 @@ export function GetSavedConnections():Promise<Array<connection.SavedConnectionVi
 
 export function GetSavedQueries():Promise<Array<connection.SavedQuery>>;
 
+export function GetSavedQueryGroups():Promise<Array<connection.SavedQueryGroup>>;
+
 export function GetSecurityUpdateStatus():Promise<app.SecurityUpdateStatus>;
 
 export function GetSlowQueries(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:number):Promise<connection.QueryResult>;
@@ -249,6 +253,10 @@ export function ListSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 export function LogWindowDiagnostic(arg1:string,arg2:string):Promise<void>;
 
 export function MongoDiscoverMembers(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
+
+export function MoveSavedQueryGroup(arg1:string,arg2:string):Promise<void>;
+
+export function MoveSavedQueryToGroup(arg1:string,arg2:string):Promise<void>;
 
 export function MySQLConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
@@ -375,6 +383,8 @@ export function SaveConnection(arg1:connection.SavedConnectionInput):Promise<con
 export function SaveGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
 
 export function SaveQuery(arg1:connection.SavedQuery):Promise<connection.SavedQuery>;
+
+export function SaveSavedQueryGroup(arg1:connection.SavedQueryGroup):Promise<connection.SavedQueryGroup>;
 
 export function SelectCertificateFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
 

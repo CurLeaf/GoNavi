@@ -12,6 +12,7 @@ import {
   SchemaVisibilityRule,
   TabData,
   SavedQuery,
+  SavedQueryGroup,
   ConnectionTag,
   AIChatMessage,
   AIContextItem,
@@ -80,11 +81,17 @@ import {
 } from "./utils/redisDbAlias";
 import {
   captureLegacySavedQueriesSnapshot,
+  deleteSavedQueryGroupFromBackend,
   deleteSavedQueryFromBackend,
+  getSavedQueryGroupsFromBackend,
+  moveSavedQueryGroupInBackend,
+  moveSavedQueryToGroupInBackend,
   sanitizeSavedQueries,
+  saveSavedQueryGroupToBackend,
   saveSavedQueryToBackend,
   type SavedQueryBackend,
 } from "./utils/savedQueryPersistence";
+import { normalizeSavedQueryGroups } from "./utils/savedQueryGroups";
 import {
   clearQueryTabDraft,
   getPersistedQueryTabDraftEntry,
@@ -1883,6 +1890,7 @@ interface AppState {
   activeTabId: string | null;
   activeContext: { connectionId: string; dbName: string } | null;
   savedQueries: SavedQuery[];
+  savedQueryGroups: SavedQueryGroup[];
   externalSQLDirectories: ExternalSQLDirectory[];
   recentConnectionTargets: RecentConnectionTarget[];
   recentSQLFiles: RecentSQLFile[];
@@ -2032,6 +2040,12 @@ interface AppState {
   closeDetachedQueryResultWindowsBySourceTab: (sourceQueryTabId: string) => void;
 
   replaceSavedQueries: (queries: SavedQuery[]) => void;
+  replaceSavedQueryGroups: (groups: SavedQueryGroup[]) => void;
+  reloadSavedQueryGroups: () => Promise<SavedQueryGroup[]>;
+  saveSavedQueryGroup: (group: SavedQueryGroup) => Promise<SavedQueryGroup>;
+  deleteSavedQueryGroup: (id: string) => Promise<void>;
+  moveSavedQueryToGroup: (queryId: string, groupId?: string | null) => Promise<void>;
+  moveSavedQueryGroup: (groupId: string, parentGroupId?: string | null) => Promise<void>;
   saveQuery: (query: SavedQuery) => Promise<SavedQuery>;
   deleteQuery: (id: string) => Promise<void>;
   saveExternalSQLDirectory: (directory: ExternalSQLDirectory) => void;
@@ -3356,6 +3370,7 @@ export const useStore = create<AppState>()(
       activeTabId: null,
       activeContext: null,
       savedQueries: [],
+      savedQueryGroups: [],
       externalSQLDirectories: [],
       recentConnectionTargets: [],
       recentSQLFiles: [],
@@ -4588,6 +4603,60 @@ export const useStore = create<AppState>()(
       replaceSavedQueries: (queries) =>
         set({ savedQueries: sanitizeSavedQueries(queries) }),
 
+      replaceSavedQueryGroups: (groups) =>
+        set((state) => ({
+          savedQueryGroups: normalizeSavedQueryGroups(
+            groups,
+            state.savedQueries.map((query) => query.id),
+          ),
+        })),
+
+      reloadSavedQueryGroups: async () => {
+        const groups = await getSavedQueryGroupsFromBackend(
+          resolveSavedQueryBackend(),
+        );
+        const normalized = normalizeSavedQueryGroups(
+          groups,
+          get().savedQueries.map((query) => query.id),
+        );
+        set({ savedQueryGroups: normalized });
+        return normalized;
+      },
+
+      saveSavedQueryGroup: async (group) => {
+        const saved = await saveSavedQueryGroupToBackend(
+          resolveSavedQueryBackend(),
+          group,
+        );
+        // The backend normalizes ownership and mixed child order. Reload after
+        // every write rather than applying an optimistic local patch.
+        await get().reloadSavedQueryGroups();
+        return saved;
+      },
+
+      deleteSavedQueryGroup: async (id) => {
+        await deleteSavedQueryGroupFromBackend(resolveSavedQueryBackend(), id);
+        await get().reloadSavedQueryGroups();
+      },
+
+      moveSavedQueryToGroup: async (queryId, groupId) => {
+        await moveSavedQueryToGroupInBackend(
+          resolveSavedQueryBackend(),
+          queryId,
+          groupId,
+        );
+        await get().reloadSavedQueryGroups();
+      },
+
+      moveSavedQueryGroup: async (groupId, parentGroupId) => {
+        await moveSavedQueryGroupInBackend(
+          resolveSavedQueryBackend(),
+          groupId,
+          parentGroupId,
+        );
+        await get().reloadSavedQueryGroups();
+      },
+
       saveQuery: async (query) => {
         const saved = await saveSavedQueryToBackend(
           resolveSavedQueryBackend(),
@@ -4609,8 +4678,17 @@ export const useStore = create<AppState>()(
 
       deleteQuery: async (id) => {
         await deleteSavedQueryFromBackend(resolveSavedQueryBackend(), id);
+        const groups = await getSavedQueryGroupsFromBackend(
+          resolveSavedQueryBackend(),
+        );
         set((state) => ({
           savedQueries: state.savedQueries.filter((q) => q.id !== id),
+          savedQueryGroups: normalizeSavedQueryGroups(
+            groups,
+            state.savedQueries
+              .filter((query) => query.id !== id)
+              .map((query) => query.id),
+          ),
         }));
       },
 
@@ -5447,6 +5525,7 @@ export const useStore = create<AppState>()(
           state.connections === undefined ? undefined : nextState.connections,
         );
         delete nextState.savedQueries;
+        delete nextState.savedQueryGroups;
         nextState.externalSQLDirectories = sanitizeExternalSQLDirectories(
           state.externalSQLDirectories,
         );
@@ -5575,6 +5654,7 @@ export const useStore = create<AppState>()(
           detachedAIChatWindow: null,
           activeTabId: sanitizeActiveTabId(state.activeTabId, safeTabs),
           savedQueries: currentState.savedQueries,
+          savedQueryGroups: currentState.savedQueryGroups,
           externalSQLDirectories: sanitizeExternalSQLDirectories(
             state.externalSQLDirectories,
           ),

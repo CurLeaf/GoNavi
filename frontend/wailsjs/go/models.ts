@@ -1438,8 +1438,29 @@ export namespace connection {
 	        this.originalConnectionId = source["originalConnectionId"];
 	    }
 	}
+	export class SavedQueryGroup {
+	    id: string;
+	    name: string;
+	    parentGroupId: string;
+	    queryIds: string[];
+	    childOrder: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new SavedQueryGroup(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.parentGroupId = source["parentGroupId"];
+	        this.queryIds = source["queryIds"];
+	        this.childOrder = source["childOrder"];
+	    }
+	}
 	export class SavedQueryImportPayload {
 	    queries: SavedQuery[];
+	    groups?: SavedQueryGroup[];
 	    legacyConnections?: SavedConnectionInput[];
 	
 	    static createFrom(source: any = {}) {
@@ -1449,6 +1470,7 @@ export namespace connection {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.queries = this.convertValues(source["queries"], SavedQuery);
+	        this.groups = this.convertValues(source["groups"], SavedQueryGroup);
 	        this.legacyConnections = this.convertValues(source["legacyConnections"], SavedConnectionInput);
 	    }
 	

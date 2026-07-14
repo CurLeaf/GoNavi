@@ -105,6 +105,60 @@ describe('Sidebar nested group menu', () => {
     });
   });
 
+  it('exposes saved query group actions from the saved-query tree', () => {
+    const openSavedQueryGroupModal = vi.fn();
+    const moveSavedQueryToGroup = vi.fn();
+    const savedQueryGroups = [{
+      id: 'group-1',
+      name: 'Group 1',
+      queryIds: ['query-1'],
+      childOrder: ['query:query-1'],
+    }];
+    const context = {
+      openSavedQueryGroupModal,
+      deleteSavedQueryGroup: vi.fn(),
+      moveSavedQueryToGroup,
+      savedQueryGroups,
+      connections: [],
+      isSavedQueryUnmatched: () => false,
+      addTab: vi.fn(),
+      resolveSavedQueryDisplayName: (name: string) => name,
+      deleteQuery: vi.fn(),
+    };
+
+    const rootItems = buildSidebarLegacyNodeMenuItems({ type: 'all-saved-queries' }, context) as any[];
+    const newGroup = rootItems.find((item) => item?.key === 'new-saved-query-group');
+    newGroup.onClick();
+    expect(openSavedQueryGroupModal).toHaveBeenCalledWith(null, null);
+
+    const groupItems = buildSidebarLegacyNodeMenuItems({
+      type: 'saved-query-manual-group',
+      dataRef: savedQueryGroups[0],
+    }, context) as any[];
+    const newSubgroup = groupItems.find((item) => item?.key === 'new-saved-query-subgroup');
+    const editGroup = groupItems.find((item) => item?.key === 'edit-saved-query-group');
+    newSubgroup.onClick();
+    expect(openSavedQueryGroupModal).toHaveBeenLastCalledWith(null, 'group-1');
+    editGroup.onClick();
+    expect(openSavedQueryGroupModal).toHaveBeenLastCalledWith(savedQueryGroups[0]);
+
+    const queryItems = buildSidebarLegacyNodeMenuItems({
+      type: 'saved-query',
+      dataRef: {
+        id: 'query-1',
+        name: 'Grouped query',
+        sql: 'select 1',
+        connectionId: 'conn-1',
+        dbName: 'app',
+        createdAt: 1,
+      },
+    }, context) as any[];
+    const moveToGroup = queryItems.find((item) => item?.key === 'move-saved-query-to-group');
+    const moveOut = queryItems.find((item) => item?.key === 'move-saved-query-to-ungrouped');
+    expect(moveToGroup.children).toHaveLength(1);
+    expect(moveOut).toBeDefined();
+  });
+
   it('keeps modal and both menu implementations aligned with nested grouping', () => {
     expect(modalSource).toContain('name="parentTagId"');
     expect(modalSource).toContain('parentTagId,');

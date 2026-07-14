@@ -15,6 +15,7 @@ import {
 } from './sidebar/useSidebarBatchExport';
 import { SidebarBatchExportModals } from './sidebar/SidebarBatchExportModals';
 import { SidebarEntityModals } from './sidebar/SidebarEntityModals';
+import { SavedQueryGroupModal } from './sidebar/SavedQueryGroupModal';
 import { renderSidebarV2TreeTitle } from './sidebar/SidebarTreeTitle';
 import {
   useSidebarV2ContextMenu,
@@ -111,7 +112,7 @@ import {
     useStore,
 } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-		import { SavedConnection, SavedQuery, ExternalSQLDirectory, ExternalSQLTreeEntry, SchemaVisibilityRule } from '../types';
+		import { SavedConnection, SavedQuery, SavedQueryGroup, ExternalSQLDirectory, ExternalSQLTreeEntry, SchemaVisibilityRule } from '../types';
 import { getDbIcon } from './DatabaseIcons';
 		import { ListSQLDirectory } from '../../wailsjs/go/app/App';
 import { supportsTableTruncateAction } from './tableDataDangerActions';
@@ -135,6 +136,15 @@ import {
     type SidebarLocateTreeNodeLike,
 } from '../utils/sidebarLocate';
 import { resolveConnectionAccentColor, resolveConnectionIconType } from '../utils/connectionVisual';
+import {
+  getSavedQueryGroupIdFromToken,
+  getSavedQueryGroupOwnerIds,
+  getSavedQueryIdFromGroupToken,
+  isSavedQueryGroupQueryToken,
+  isSavedQueryGroupToken,
+  normalizeSavedQueryGroups,
+  resolveSavedQueryGroupChildOrder,
+} from '../utils/savedQueryGroups';
 import {
   getSchemaVisibilityRule,
   moveSchemaVisibilityRule,
@@ -325,14 +335,16 @@ const isSavedQueryUnmatchedForConnectionIds = (query: SavedQuery, connectionIds:
 export const buildAllSavedQueriesTreeNode = (
   savedQueries: SavedQuery[],
   connections: SavedConnection[],
+  savedQueryGroups: SavedQueryGroup[] = [],
 ): TreeNode | null => {
-  if (savedQueries.length === 0) {
+  const normalizedGroups = normalizeSavedQueryGroups(
+    savedQueryGroups,
+    savedQueries.map((query) => query.id),
+  );
+  if (savedQueries.length === 0 && normalizedGroups.length === 0) {
       return null;
   }
 
-  const connectionIds = new Set(connections.map((conn) => conn.id));
-  const unmatchedSavedQueries = savedQueries.filter((query) => isSavedQueryUnmatchedForConnectionIds(query, connectionIds));
-  const unmatchedIds = new Set(unmatchedSavedQueries.map((query) => query.id));
   const createQueryNode = (query: SavedQuery): TreeNode => ({
       title: query.name || t('sidebar.tree.untitled_query'),
       key: `all-saved-query-${query.id}`,
@@ -358,61 +370,115 @@ export const buildAllSavedQueriesTreeNode = (
       }));
   };
 
-  const groupedByConnection = new Map<string, SavedQuery[]>();
-  savedQueries.forEach((query) => {
-      if (unmatchedIds.has(query.id)) {
-          return;
-      }
-      groupedByConnection.set(query.connectionId, [
-          ...(groupedByConnection.get(query.connectionId) || []),
-          query,
-      ]);
-  });
-
-  const children: TreeNode[] = [];
-  connections.forEach((conn) => {
-      const connectionQueries = groupedByConnection.get(conn.id);
-      if (!connectionQueries || connectionQueries.length === 0) {
-          return;
-      }
-      const iconType = resolveConnectionIconType(conn);
-      const iconColor = resolveConnectionAccentColor(conn);
-      children.push({
-          title: conn.name || conn.id,
-          key: `all-saved-queries-connection-${conn.id}`,
-          icon: getDbIcon(iconType, iconColor, 22),
-          type: 'saved-query-group',
-          selectable: false,
-          isLeaf: false,
-          children: buildDatabaseGroups(connectionQueries, `all-saved-queries-connection-${conn.id}`),
-      });
-  });
-
-  if (unmatchedSavedQueries.length > 0) {
-      const groupedByOriginalConnection = new Map<string, SavedQuery[]>();
-      unmatchedSavedQueries.forEach((query) => {
-          const originalConnectionId = String(query.originalConnectionId || query.connectionId || t('sidebar.tree.unknown_connection')).trim() || t('sidebar.tree.unknown_connection');
-          groupedByOriginalConnection.set(originalConnectionId, [
-              ...(groupedByOriginalConnection.get(originalConnectionId) || []),
+  const buildAutomaticChildren = (queries: SavedQuery[]): TreeNode[] => {
+      const connectionIds = new Set(connections.map((conn) => conn.id));
+      const unmatchedSavedQueries = queries.filter((query) => isSavedQueryUnmatchedForConnectionIds(query, connectionIds));
+      const unmatchedIds = new Set(unmatchedSavedQueries.map((query) => query.id));
+      const groupedByConnection = new Map<string, SavedQuery[]>();
+      queries.forEach((query) => {
+          if (unmatchedIds.has(query.id)) return;
+          groupedByConnection.set(query.connectionId, [
+              ...(groupedByConnection.get(query.connectionId) || []),
               query,
           ]);
       });
-      children.push({
-          title: t('sidebar.tree.unmatched_saved_queries'),
-          key: 'all-saved-queries-unmatched',
-          icon: <WarningOutlined />,
-          type: 'saved-query-group',
-          selectable: false,
-          isLeaf: false,
-          children: Array.from(groupedByOriginalConnection.entries()).map(([connectionLabel, items]) => ({
-              title: connectionLabel,
-              key: `all-saved-queries-unmatched-${encodeURIComponent(connectionLabel)}`,
-              icon: <FolderOpenOutlined />,
+
+      const automaticChildren: TreeNode[] = [];
+      connections.forEach((conn) => {
+          const connectionQueries = groupedByConnection.get(conn.id);
+          if (!connectionQueries || connectionQueries.length === 0) return;
+          const iconType = resolveConnectionIconType(conn);
+          const iconColor = resolveConnectionAccentColor(conn);
+          automaticChildren.push({
+              title: conn.name || conn.id,
+              key: `all-saved-queries-connection-${conn.id}`,
+              icon: getDbIcon(iconType, iconColor, 22),
               type: 'saved-query-group',
               selectable: false,
               isLeaf: false,
-              children: buildDatabaseGroups(items, `all-saved-queries-unmatched-${encodeURIComponent(connectionLabel)}`),
-          })),
+              children: buildDatabaseGroups(connectionQueries, `all-saved-queries-connection-${conn.id}`),
+          });
+      });
+
+      if (unmatchedSavedQueries.length > 0) {
+          const groupedByOriginalConnection = new Map<string, SavedQuery[]>();
+          unmatchedSavedQueries.forEach((query) => {
+              const originalConnectionId = String(query.originalConnectionId || query.connectionId || t('sidebar.tree.unknown_connection')).trim() || t('sidebar.tree.unknown_connection');
+              groupedByOriginalConnection.set(originalConnectionId, [
+                  ...(groupedByOriginalConnection.get(originalConnectionId) || []),
+                  query,
+              ]);
+          });
+          automaticChildren.push({
+              title: t('sidebar.tree.unmatched_saved_queries'),
+              key: 'all-saved-queries-unmatched',
+              icon: <WarningOutlined />,
+              type: 'saved-query-group',
+              selectable: false,
+              isLeaf: false,
+              children: Array.from(groupedByOriginalConnection.entries()).map(([connectionLabel, items]) => ({
+                  title: connectionLabel,
+                  key: `all-saved-queries-unmatched-${encodeURIComponent(connectionLabel)}`,
+                  icon: <FolderOpenOutlined />,
+                  type: 'saved-query-group',
+                  selectable: false,
+                  isLeaf: false,
+                  children: buildDatabaseGroups(items, `all-saved-queries-unmatched-${encodeURIComponent(connectionLabel)}`),
+              })),
+          });
+      }
+      return automaticChildren;
+  };
+
+  const queryById = new Map(savedQueries.map((query) => [query.id, query]));
+  const groupById = new Map(normalizedGroups.map((group) => [group.id, group]));
+  const groupOwners = getSavedQueryGroupOwnerIds(normalizedGroups);
+  const buildManualGroupNode = (group: SavedQueryGroup, ancestors = new Set<string>()): TreeNode => {
+      const nextAncestors = new Set(ancestors);
+      nextAncestors.add(group.id);
+      const children = resolveSavedQueryGroupChildOrder(group.id, normalizedGroups).flatMap((token): TreeNode[] => {
+          if (isSavedQueryGroupQueryToken(token)) {
+              const query = queryById.get(getSavedQueryIdFromGroupToken(token));
+              return query ? [createQueryNode(query)] : [];
+          }
+          if (isSavedQueryGroupToken(token)) {
+              const childGroupId = getSavedQueryGroupIdFromToken(token);
+              const childGroup = groupById.get(childGroupId);
+              if (!childGroup || childGroup.parentGroupId !== group.id || nextAncestors.has(childGroup.id)) return [];
+              return [buildManualGroupNode(childGroup, nextAncestors)];
+          }
+          return [];
+      });
+      return {
+          title: group.name || t('sidebar.saved_query_group.untitled'),
+          key: `saved-query-manual-group-${group.id}`,
+          icon: <FolderOutlined />,
+          type: 'saved-query-manual-group',
+          dataRef: group,
+          selectable: false,
+          isLeaf: false,
+          children,
+      };
+  };
+
+  const automaticChildren = buildAutomaticChildren(
+      savedQueries.filter((query) => !groupOwners.has(query.id)),
+  );
+  const children: TreeNode[] = normalizedGroups
+      .filter((group) => !group.parentGroupId)
+      .map((group) => buildManualGroupNode(group));
+
+  if (normalizedGroups.length === 0) {
+      children.push(...automaticChildren);
+  } else if (automaticChildren.length > 0) {
+      children.push({
+          title: t('sidebar.tree.ungrouped_saved_queries'),
+          key: 'all-saved-queries-ungrouped',
+          icon: <FolderOpenOutlined />,
+          type: 'saved-query-group',
+          selectable: false,
+          isLeaf: false,
+          children: automaticChildren,
       });
   }
 
@@ -448,9 +514,14 @@ const Sidebar: React.FC<{
 }) => {
   const connections = useStore(state => state.connections);
   const savedQueries = useStore(state => state.savedQueries);
+  const savedQueryGroups = useStore(state => state.savedQueryGroups);
   const externalSQLDirectories = useStore(state => state.externalSQLDirectories);
   const saveQuery = useStore(state => state.saveQuery);
   const deleteQuery = useStore(state => state.deleteQuery);
+  const saveSavedQueryGroup = useStore(state => state.saveSavedQueryGroup);
+  const deleteSavedQueryGroup = useStore(state => state.deleteSavedQueryGroup);
+  const moveSavedQueryToGroup = useStore(state => state.moveSavedQueryToGroup);
+  const reloadSavedQueryGroups = useStore(state => state.reloadSavedQueryGroups);
   const saveExternalSQLDirectory = useStore(state => state.saveExternalSQLDirectory);
   const deleteExternalSQLDirectory = useStore(state => state.deleteExternalSQLDirectory);
   const updateRecentSQLFilePath = useStore(state => state.updateRecentSQLFilePath);
@@ -614,8 +685,8 @@ const Sidebar: React.FC<{
       [connectionIdSet, savedQueries],
   );
   const allSavedQueriesNode = useMemo<TreeNode | null>(() => {
-      return buildAllSavedQueriesTreeNode(savedQueries, connections);
-  }, [connections, savedQueries]);
+      return buildAllSavedQueriesTreeNode(savedQueries, connections, savedQueryGroups);
+  }, [connections, savedQueries, savedQueryGroups]);
   const snapshotTreeSelectionBeforeDrag = useCallback(() => {
       treeDragSelectionSnapshotRef.current = {
           selectedKeys: [...selectedKeys],
@@ -824,6 +895,9 @@ const Sidebar: React.FC<{
   const [isRenameSavedQueryModalOpen, setIsRenameSavedQueryModalOpen] = useState(false);
   const [renameSavedQueryForm] = Form.useForm();
   const [renameSavedQueryTarget, setRenameSavedQueryTarget] = useState<SavedQuery | null>(null);
+  const [isSavedQueryGroupModalOpen, setIsSavedQueryGroupModalOpen] = useState(false);
+  const [savedQueryGroupTargetId, setSavedQueryGroupTargetId] = useState<string | null>(null);
+  const [savedQueryGroupInitialParentId, setSavedQueryGroupInitialParentId] = useState<string | null>(null);
   // Connection Tag Modals
   const [isCreateTagModalOpen, setIsCreateTagModalOpen] = useState(false);
   const [createTagForm] = Form.useForm();
@@ -1447,7 +1521,7 @@ const Sidebar: React.FC<{
   }, []);
 
   const onLoadData = async ({ key, children, dataRef, type }: any) => {
-    if (type === 'tag' || type === 'all-saved-queries' || type === 'saved-query-group' || type === 'unmatched-saved-queries') return;
+    if (type === 'tag' || type === 'all-saved-queries' || type === 'saved-query-group' || type === 'saved-query-manual-group' || type === 'unmatched-saved-queries') return;
     if (hasSidebarLazyChildren(children)) return;
 
     if (type === 'connection') {
@@ -1967,6 +2041,51 @@ const Sidebar: React.FC<{
       const rawName = String(name || '').trim();
       return rawName || t('query_editor.save_modal.unnamed');
   };
+
+  const openSavedQueryGroupModal = useCallback(async (
+      target?: SavedQueryGroup | null,
+      initialParentGroupId?: string | null,
+  ) => {
+      try {
+          const groups = await reloadSavedQueryGroups();
+          const targetId = String(target?.id || '').trim();
+          if (targetId && !groups.some((group) => group.id === targetId)) {
+              message.warning(t('sidebar.message.saved_query_group_not_found'));
+              return;
+          }
+          const parentId = String(initialParentGroupId || '').trim();
+          setSavedQueryGroupTargetId(targetId || null);
+          setSavedQueryGroupInitialParentId(
+              parentId && groups.some((group) => group.id === parentId) ? parentId : null,
+          );
+          setIsSavedQueryGroupModalOpen(true);
+      } catch (error) {
+          message.error(t('sidebar.message.saved_query_group_load_failed', {
+              error: error instanceof Error ? error.message : String(error),
+          }));
+      }
+  }, [reloadSavedQueryGroups]);
+
+  const closeSavedQueryGroupModal = useCallback(() => {
+      setIsSavedQueryGroupModalOpen(false);
+      setSavedQueryGroupTargetId(null);
+      setSavedQueryGroupInitialParentId(null);
+  }, []);
+
+  const handleSaveSavedQueryGroup = useCallback(async (group: SavedQueryGroup) => {
+      const isEditing = Boolean(group.id);
+      await saveSavedQueryGroup(group);
+      message.success(t(
+          isEditing
+              ? 'sidebar.message.saved_query_group_updated'
+              : 'sidebar.message.saved_query_group_created',
+      ));
+  }, [saveSavedQueryGroup]);
+
+  const savedQueryGroupTarget = useMemo(
+      () => savedQueryGroups.find((group) => group.id === savedQueryGroupTargetId) || null,
+      [savedQueryGroupTargetId, savedQueryGroups],
+  );
 
   const {
       loadDatabases,
@@ -2576,6 +2695,10 @@ const Sidebar: React.FC<{
     openRenameSavedQueryModal,
     resolveSavedQueryDisplayName,
     deleteQuery,
+    savedQueryGroups,
+    openSavedQueryGroupModal,
+    deleteSavedQueryGroup,
+    moveSavedQueryToGroup,
     treeDataRef,
     setTreeData,
     handleAddExternalSQLDirectory,
@@ -3288,6 +3411,20 @@ const Sidebar: React.FC<{
             renameSavedQueryTarget={renameSavedQueryTarget}
             setRenameSavedQueryTarget={setRenameSavedQueryTarget}
             handleRenameSavedQuery={handleRenameSavedQuery}
+        />
+
+        <SavedQueryGroupModal
+            open={isSavedQueryGroupModalOpen}
+            groups={savedQueryGroups}
+            savedQueries={savedQueries}
+            target={savedQueryGroupTarget}
+            initialParentGroupId={savedQueryGroupInitialParentId}
+            modalPanelStyle={modalPanelStyle}
+            modalSectionStyle={modalSectionStyle}
+            modalScrollSectionStyle={modalScrollSectionStyle}
+            renderModalTitle={renderSidebarModalTitle}
+            onClose={closeSavedQueryGroupModal}
+            onSave={handleSaveSavedQueryGroup}
         />
 
         <Modal
