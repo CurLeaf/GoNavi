@@ -2461,6 +2461,52 @@ describe('QueryEditor external SQL save', () => {
     });
   });
 
+  it('suggests Oracle views after their metadata has loaded', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'APP';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'APP' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+    backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+      if (String(sql || '').includes('USER_VIEWS')) {
+        return { success: true, data: [{ view_name: 'PERSON_VIEW' }] };
+      }
+      return { success: true, data: [] };
+    });
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '', dbName: 'APP' })} />);
+    });
+    await act(async () => {
+      for (let i = 0; i < 12; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    const sqlProvider = findSqlCompletionProvider();
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.value = 'SELECT * FROM person';
+    editorState.latestOnChange?.(editorState.value);
+    const result = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: editorState.value.length + 1 },
+    );
+
+    expect(result.suggestions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: 'PERSON_VIEW',
+        insertText: 'PERSON_VIEW',
+        detail: '视图 (APP)',
+      }),
+    ]));
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
   it('fuzzy matches table names in FROM completion before column candidates', async () => {
     let renderer!: ReactTestRenderer;
     autoFetchState.visible = true;
@@ -8612,6 +8658,10 @@ describe('QueryEditor external SQL save', () => {
     (storeState.connections[0].config as any).oceanBaseProtocol = 'oracle';
     storeState.connections[0].config.user = 'dev';
     storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [{ Table: 'DEV.EDC_LOG' }],
+    });
     backendApp.DBQueryMulti.mockResolvedValueOnce({
       success: true,
       data: [{ columns: ['WAFER_ID', ORACLE_ROWID_LOCATOR_COLUMN], rows: [{ WAFER_ID: 'R015Z10F08', [ORACLE_ROWID_LOCATOR_COLUMN]: 'AAAA' }] }],
@@ -8654,6 +8704,48 @@ describe('QueryEditor external SQL save', () => {
       status: 'success',
     }));
     expect(messageApi.warning).not.toHaveBeenCalled();
+    renderer?.unmount();
+  });
+
+  it('does not inject ROWID for an OceanBase Oracle synonym that is not a base table', async () => {
+    storeState.connections[0].config.type = 'oceanbase';
+    (storeState.connections[0].config as any).oceanBaseProtocol = 'oracle';
+    storeState.connections[0].config.user = 'B';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBGetTables.mockResolvedValue({
+      success: true,
+      data: [{ Table: 'B.OTHER_TABLE' }],
+    });
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'ID', key: '' }, { name: 'NAME', key: '' }],
+    });
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['ID', 'NAME'], rows: [{ ID: 7, NAME: 'synonym-row' }] }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'ORCLPDB1', query: 'SELECT * FROM person' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const executedSql = String(backendApp.DBQueryMulti.mock.calls[0][2]);
+    expect(executedSql).toMatch(/FROM\s+person/i);
+    expect(executedSql).not.toMatch(/\bROWID\b/i);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'all-columns',
+      columns: ['ID', 'NAME'],
+      readOnly: false,
+    });
     renderer?.unmount();
   });
 

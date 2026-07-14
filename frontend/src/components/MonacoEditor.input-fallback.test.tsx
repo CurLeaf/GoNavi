@@ -23,12 +23,12 @@ class FakeTextAreaElement extends FakeHTMLElement {
     this.listeners.get(type)?.delete(listener);
   }
 
-  dispatchPrintableBeforeInput(text: string): void {
+  dispatchPrintableBeforeInput(text: string, defaultPrevented = false): void {
     const event = {
       data: text,
       inputType: 'insertText',
       isComposing: false,
-      defaultPrevented: false,
+      defaultPrevented,
     } as InputEvent;
     this.listeners.get('beforeinput')?.forEach((listener) => listener(event));
   }
@@ -167,6 +167,29 @@ describe('MonacoEditor printable input fallback', () => {
     );
     expect(value).toBe('ab');
     expect(position).toEqual({ lineNumber: 1, column: 3 });
+  });
+
+  it('recovers a default-prevented leading character when later input reaches the model', () => {
+    installPrintableInputFallback(editor, {
+      editor: { EditorOption: { readOnly: 1 } },
+    });
+
+    value = 'SELECT * FROM person';
+    position = { lineNumber: 1, column: value.length + 1 };
+    input.dispatchPrintableBeforeInput('s', true);
+    input.dispatchPrintableBeforeInput('f');
+    value = 'SELECT * FROM personf';
+    position = { lineNumber: 1, column: value.length + 1 };
+    modelContentListener?.();
+
+    vi.advanceTimersByTime(80);
+
+    expect(editor.executeEdits).toHaveBeenCalledWith(
+      'gonavi-printable-input-fallback',
+      [expect.objectContaining({ text: 'sf' })],
+    );
+    expect(value).toBe('SELECT * FROM personsf');
+    expect(position).toEqual({ lineNumber: 1, column: value.length + 1 });
   });
 
   it('settles the previous missing input before buffering text after a cursor move', () => {

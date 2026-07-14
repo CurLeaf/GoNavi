@@ -17,6 +17,7 @@ import { getShortcutDisplayLabel, getShortcutPlatform, getShortcutPrimaryModifie
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { isPostgresSchemaDialect } from '../utils/connectionDriverType';
+import { resolveOceanBaseProtocolFromConfig } from '../utils/oceanBaseProtocol';
 import { isOracleLikeDialect, resolveSqlDialect, resolveSqlFunctions, resolveSqlKeywords } from '../utils/sqlDialect';
 import { applyQueryAutoLimit } from '../utils/queryAutoLimit';
 import {
@@ -135,6 +136,7 @@ import {
     getQueryEditorDecorationModelTextIfLightweight,
     getQueryEditorObjectResolveText,
     getTabQueryValue,
+    isOracleBaseTableReference,
     isDocumentLevelShortcutTarget,
     isQueryEditorPrimaryMouseButton,
     normalizeCommentText,
@@ -198,6 +200,17 @@ const QUERY_EDITOR_MAC_FIND_WITH_SELECTION_GUARD_ACTION_ID = 'gonavi.suppressMac
 const QUERY_EDITOR_AI_INLINE_DEBOUNCE_MS = 220;
 const QUERY_EDITOR_AI_INLINE_CONTEXT_KEY = 'gonaviAiInlineSuggestionVisible';
 const QUERY_EDITOR_IME_FALLBACK_DELAY_MS = 80;
+
+const isOceanBaseOracleConnection = (config: any): boolean => {
+    const type = String(config?.type || '').trim().toLowerCase();
+    const driver = String(config?.driver || '').trim().toLowerCase();
+    if (type !== 'oceanbase' && driver !== 'oceanbase') return false;
+    try {
+        return resolveOceanBaseProtocolFromConfig(config || {}) === 'oracle';
+    } catch {
+        return false;
+    }
+};
 
 const normalizeQueryEditorInlineMemorySqlKey = (sql: string): string => (
     String(sql || '')
@@ -4895,6 +4908,49 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       routineType: normalizeRoutineType(routine.routineType),
                   };
               };
+              const getViewTypeLabel = (materialized: boolean) => (
+                  materialized
+                      ? translate('query_editor.object_info.materialized_view')
+                      : translate('sidebar.object.view')
+              );
+              const buildViewSuggestionMeta = (view: CompletionViewMeta) => {
+                  const rawDbName = String(view.dbName || '').trim();
+                  const rawViewName = String(view.viewName || '').trim();
+                  const parsed = splitSchemaAndTable(rawViewName);
+                  const schemaName = String(view.schemaName || parsed.schema || '').trim();
+                  const objectName = String(parsed.table || rawViewName).trim();
+                  const schemaMatchesDb = !!schemaName
+                      && !!rawDbName
+                      && schemaName.toLowerCase() === rawDbName.toLowerCase();
+                  const isCurrentDb = rawDbName.toLowerCase() === getActiveCompletionDbName().toLowerCase();
+                  const schemaQualifiedName = parsed.schema
+                      ? rawViewName
+                      : (schemaName && !schemaMatchesDb ? `${schemaName}.${objectName}` : objectName);
+                  const displayName = isCurrentDb && schemaMatchesDb
+                      ? objectName
+                      : schemaQualifiedName;
+                  const dbQualifiedLabel = rawDbName && !isCurrentDb
+                      ? `${rawDbName}.${displayName}`
+                      : displayName;
+                  const insertName = rawDbName && !isCurrentDb
+                      ? dbQualifiedLabel
+                      : displayName;
+                  return {
+                      displayName,
+                      dbQualifiedLabel,
+                      insertText: quoteCompletionPath(insertName),
+                      objectName,
+                      schemaName,
+                  };
+              };
+              const getViewSuggestionScope = (view: CompletionViewMeta, meta: ReturnType<typeof buildViewSuggestionMeta>) => {
+                  const dbName = String(view.dbName || '').trim();
+                  const schemaName = String(meta.schemaName || '').trim();
+                  if (!schemaName || schemaName.toLowerCase() === dbName.toLowerCase()) {
+                      return dbName;
+                  }
+                  return dbName ? `${dbName}.${schemaName}` : schemaName;
+              };
 
               const buildConnConfig = () => {
                   const connId = sharedCurrentConnectionId;
@@ -5127,6 +5183,26 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           sortText: '0' + suggestionMeta.displayName
                       };
                       });
+                      const viewSuggestions = [
+                          ...sharedViewsData.map((view) => ({ view, materialized: false })),
+                          ...sharedMaterializedViewsData.map((view) => ({ view, materialized: true })),
+                      ]
+                          .filter(({ view }) => String(view.dbName || '').toLowerCase() === qualifierLower)
+                          .map(({ view, materialized }) => ({ view, materialized, meta: buildViewSuggestionMeta(view) }))
+                          .filter(({ view, meta }) => (
+                              !prefix
+                              || meta.displayName.toLowerCase().startsWith(prefix)
+                              || meta.objectName.toLowerCase().startsWith(prefix)
+                              || String(view.viewName || '').toLowerCase().startsWith(prefix)
+                          ))
+                          .map(({ view, materialized, meta }) => ({
+                              label: meta.displayName,
+                              kind: monaco.languages.CompletionItemKind.Class,
+                              insertText: quoteCompletionPath(meta.displayName),
+                              detail: `${getViewTypeLabel(materialized)} (${view.dbName})`,
+                              range,
+                              sortText: '05' + meta.displayName,
+                          }));
                       const routineSuggestions = sharedRoutinesData
                           .filter((routine) => String(routine.dbName || '').toLowerCase() === qualifierLower)
                           .map((routine) => ({ routine, meta: buildRoutineSuggestionMeta(routine) }))
@@ -5145,7 +5221,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                               range,
                               sortText: '1' + meta.displayName,
                           }));
-                      return { suggestions: [...suggestions, ...routineSuggestions] };
+                      return { suggestions: [...suggestions, ...viewSuggestions, ...routineSuggestions] };
                   }
 
                   // qualifier 是 schema（如 dbo/public）时，仅补全表名，避免输入 dbo. 后再补成 dbo.dbo.table
@@ -5160,21 +5236,39 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           };
                       })
                       .filter(t => t.schema.toLowerCase() === qualifierLower && !!t.table);
+                  const schemaViews = [
+                      ...sharedViewsData.map((view) => ({ view, materialized: false })),
+                      ...sharedMaterializedViewsData.map((view) => ({ view, materialized: true })),
+                  ]
+                      .map(({ view, materialized }) => ({ view, materialized, meta: buildViewSuggestionMeta(view) }))
+                      .filter(({ meta }) => meta.schemaName.toLowerCase() === qualifierLower && !!meta.objectName);
 
-                  if (schemaTables.length > 0) {
+                  if (schemaTables.length > 0 || schemaViews.length > 0) {
                       const filtered = prefix
                           ? schemaTables.filter(t => t.table.toLowerCase().startsWith(prefix))
                           : schemaTables;
 
-                      const suggestions = filtered.map(t => ({
-                          label: t.table,
-                          kind: monaco.languages.CompletionItemKind.Class,
-                          insertText: quoteCompletionPart(t.table),
-                          detail: appendCommentToDetail(`${translate('query_editor.object_info.table')} (${t.dbName}${t.schema ? '.' + t.schema : ''})`, t.comment),
-                          documentation: buildCompletionDocumentation(t.comment),
-                          range,
-                          sortText: '0' + t.table
-                      }));
+                      const suggestions = [
+                          ...filtered.map(t => ({
+                              label: t.table,
+                              kind: monaco.languages.CompletionItemKind.Class,
+                              insertText: quoteCompletionPart(t.table),
+                              detail: appendCommentToDetail(`${translate('query_editor.object_info.table')} (${t.dbName}${t.schema ? '.' + t.schema : ''})`, t.comment),
+                              documentation: buildCompletionDocumentation(t.comment),
+                              range,
+                              sortText: '0' + t.table
+                          })),
+                          ...schemaViews
+                              .filter(({ meta }) => !prefix || meta.objectName.toLowerCase().startsWith(prefix))
+                              .map(({ view, materialized, meta }) => ({
+                              label: meta.objectName,
+                              kind: monaco.languages.CompletionItemKind.Class,
+                              insertText: quoteCompletionPart(meta.objectName),
+                                  detail: `${getViewTypeLabel(materialized)} (${getViewSuggestionScope(view, meta)})`,
+                                  range,
+                                  sortText: '05' + meta.objectName,
+                              })),
+                      ];
                       const routineSuggestions = sharedRoutinesData
                           .filter((routine) => {
                               const meta = buildRoutineSuggestionMeta(routine);
@@ -5424,6 +5518,38 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   };
               });
 
+              const completionViews = [
+                  ...sharedViewsData.map((view) => ({ view, materialized: false })),
+                  ...sharedMaterializedViewsData.map((view) => ({ view, materialized: true })),
+              ].filter(({ view }) => (
+                  !expectsTableName
+                  || !currentDatabase
+                  || isCurrentCompletionDatabase(view.dbName || '')
+              ));
+              const viewSuggestions = completionViews
+                  .map(({ view, materialized }) => ({ view, materialized, meta: buildViewSuggestionMeta(view) }))
+                  .filter(({ view, meta }) => (
+                      includesWordPrefix(meta.dbQualifiedLabel)
+                      || includesWordPrefix(meta.displayName)
+                      || includesWordPrefix(meta.objectName)
+                      || includesWordPrefix(view.viewName || '')
+                  ))
+                  .map(({ view, materialized, meta }) => {
+                      const isCurrentDb = isCurrentCompletionDatabase(view.dbName || '');
+                      const label = isCurrentDb ? meta.displayName : meta.dbQualifiedLabel;
+                      return {
+                          label,
+                          kind: monaco.languages.CompletionItemKind.Class,
+                          insertText: meta.insertText,
+                          detail: `${getViewTypeLabel(materialized)} (${getViewSuggestionScope(view, meta)})`,
+                          range,
+                          sortText: (isCurrentDb ? sortGroups.tableCurrent : sortGroups.tableOther)
+                              + '1'
+                              + getPrefixMatchRank(label, meta.displayName, meta.objectName, view.viewName || '')
+                              + label,
+                      };
+                  });
+
               const routineSuggestions = sharedRoutinesData
                   .map((routine) => ({ routine, meta: buildRoutineSuggestionMeta(routine) }))
                   .filter(({ routine, meta }) => {
@@ -5492,6 +5618,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       ...keywordSuggestions,
                       ...funcSuggestions,
                       ...tableSuggestions,
+                      ...viewSuggestions,
                       ...dbSuggestions,
                       ...routineSuggestions,
                       ...relevantColumns,
@@ -5499,6 +5626,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   : [
                       ...relevantColumns,   // FROM 表的列最优先
                       ...tableSuggestions,  // 表次之
+                      ...viewSuggestions,   // 视图和表同属可查询对象
                       ...dbSuggestions,     // 数据库
                       ...routineSuggestions, // 存储过程/函数
                       ...funcSuggestions,   // 内置函数
@@ -6643,6 +6771,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 .length || sourceStatements.length;
 
             const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;
+            const oceanBaseOracleConnection = isOceanBaseOracleConnection(config);
             const defaultOracleSchema = isOracleLikeDialect(normalizedDbType)
                 ? resolveOracleLikeDefaultSchemaName(config)
                 : '';
@@ -6694,8 +6823,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 }
             };
             const executedSourceStatements: string[] = [];
+            const allowOracleRowIDByStatement: boolean[] = [];
             for (const statement of sourceStatements) {
                 let executableStatement = statement;
+                let allowOracleRowID = !oceanBaseOracleConnection;
                 if (isOracleLikeDialect(normalizedDbType)) {
                     const leadingTable = matchLeadingSelectTableReference(statement);
                     if (leadingTable) {
@@ -6706,6 +6837,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         let exactQualifiedTable: string | undefined;
                         for (const oracleLookupDbName of oracleLookupDbCandidates) {
                             const oracleTables = oracleLookupDbName ? await getOracleTablesForDb(oracleLookupDbName) : [];
+                            if (
+                                oceanBaseOracleConnection
+                                && isOracleBaseTableReference(statement, oracleLookupDbName, oracleTables)
+                            ) {
+                                allowOracleRowID = true;
+                            }
                             exactQualifiedTable = resolveOracleExactCaseTableReference(statement, oracleLookupDbName, oracleTables, {
                                 qualifyUnqualified: Boolean(
                                     leadingSegments.length === 1
@@ -6723,6 +6860,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                     }
                 }
                 executedSourceStatements.push(executableStatement);
+                allowOracleRowIDByStatement.push(allowOracleRowID);
             }
             const statementPlans: QueryStatementPlan[] = [];
             for (let index = 0; index < sourceStatements.length; index += 1) {
@@ -6735,6 +6873,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         currentDb,
                         config,
                         forceReadOnly: forceReadOnlyResult,
+                        allowOracleRowID: allowOracleRowIDByStatement[index],
                     }));
                 } catch (planError) {
                     // 行定位计划失败绝不能阻断查询执行，兜底裸计划保证结果页始终呈现。

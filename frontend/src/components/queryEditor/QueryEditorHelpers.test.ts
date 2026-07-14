@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     collectQueryEditorReferencedDatabaseNames,
+    isOracleBaseTableReference,
     resolveOracleLikeDefaultSchemaName,
     resolveOracleLikeExecutionSchemaName,
     resolveOracleLikeLookupSchemaCandidates,
@@ -57,6 +58,17 @@ describe('QueryEditorHelpers Oracle-like execution schema', () => {
 
         expect(resolveOracleLikeExecutionSchemaName(config, 'APP_OWNER')).toBe('APP_OWNER');
         expect(resolveOracleLikeLookupSchemaCandidates(config, 'APP_OWNER')).toEqual(['APP_OWNER']);
+    });
+
+    it('recognizes base tables but not synonyms when deciding whether ROWID is safe', () => {
+        const baseTables = [
+            { dbName: 'A', tableName: 'A.PERSON' },
+            { dbName: 'B', tableName: 'B.ORDERS' },
+        ];
+
+        expect(isOracleBaseTableReference('SELECT * FROM A.person', 'A', baseTables)).toBe(true);
+        expect(isOracleBaseTableReference('SELECT * FROM person', 'B', baseTables)).toBe(false);
+        expect(isOracleBaseTableReference('SELECT * FROM person_view', 'B', baseTables)).toBe(false);
     });
 });
 

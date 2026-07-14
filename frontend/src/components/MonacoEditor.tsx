@@ -420,8 +420,7 @@ export const installPrintableInputFallback = (editor: any, monaco: any) => {
   const handleBeforeInput = (event: InputEvent) => {
     const text = String(event.data || '');
     if (
-      event.defaultPrevented
-      || event.isComposing
+      event.isComposing
       || event.inputType !== 'insertText'
       || !text
       || text.length > 8

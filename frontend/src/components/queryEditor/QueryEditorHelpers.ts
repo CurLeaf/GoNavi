@@ -1240,6 +1240,33 @@ export const rewriteLeadingSelectTableReference = (sql: string, replacement: str
     return `${match.prefix}${replacement}${match.suffix}`;
 };
 
+export const isOracleBaseTableReference = (
+    statement: string,
+    currentDb: string,
+    tables: CompletionTableMeta[],
+): boolean => {
+    const leadingTable = matchLeadingSelectTableReference(statement);
+    if (!leadingTable) return false;
+
+    const segments = splitQueryIdentifierPathSegments(leadingTable.tableText);
+    if (segments.length === 0 || segments.length > 2) return false;
+
+    const explicitSchemaName = segments.length === 2 ? String(segments[0]?.value || '').trim() : '';
+    const objectName = String(segments[segments.length - 1]?.value || '').trim();
+    const targetSchemaName = explicitSchemaName || String(currentDb || '').trim();
+    if (!objectName || !targetSchemaName) return false;
+
+    const normalizedSchemaName = targetSchemaName.toLowerCase();
+    return tables.some((table) => {
+        if (String(table.dbName || '').trim().toLowerCase() !== normalizedSchemaName) return false;
+        const parsed = splitSidebarQualifiedName(String(table.tableName || ''));
+        const tableObjectName = String(parsed.objectName || table.tableName || '').trim();
+        const tableSchemaName = String(parsed.schemaName || table.dbName || '').trim();
+        if (tableObjectName.toLowerCase() !== objectName.toLowerCase()) return false;
+        return !explicitSchemaName || tableSchemaName.toLowerCase() === normalizedSchemaName;
+    });
+};
+
 export const resolveOracleExactCaseTableReference = (
     statement: string,
     currentDb: string,
@@ -2330,6 +2357,7 @@ export const resolveQueryLocatorPlan = async ({
     currentDb,
     config,
     forceReadOnly,
+    allowOracleRowID = true,
 }: {
     statement: string;
     originalStatement?: string;
@@ -2337,6 +2365,7 @@ export const resolveQueryLocatorPlan = async ({
     currentDb: string;
     config: any;
     forceReadOnly: boolean;
+    allowOracleRowID?: boolean;
 }): Promise<QueryStatementPlan> => {
     const plan: QueryStatementPlan = {
         originalSql: originalStatement || statement,
@@ -2452,7 +2481,7 @@ export const resolveQueryLocatorPlan = async ({
             const uniqueKeyGroup = uniqueKeyGroups.find((group) => group.length > 0);
             if (uniqueKeyGroup) {
                 plan.editLocator = buildColumnLocator('unique-key', uniqueKeyGroup);
-            } else if (isOracleLikeDialect(dbType)) {
+            } else if (allowOracleRowID && isOracleLikeDialect(dbType)) {
                 needsOracleRowIDExpression = true;
                 plan.editLocator = {
                     strategy: 'oracle-rowid',
