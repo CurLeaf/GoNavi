@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildConnectionTagParentOptions } from './sidebar/SidebarEntityModals';
+import {
+  buildConnectionTagParentOptions,
+  buildConnectionTagSelectableConnections,
+} from './sidebar/SidebarEntityModals';
 import { buildSidebarLegacyNodeMenuItems } from './sidebar/sidebarLegacyNodeMenu';
 
 const locales = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'] as const;
@@ -20,6 +23,42 @@ describe('Sidebar nested group menu', () => {
     ], 'root');
 
     expect(options).toEqual([{ value: 'other', label: 'Other' }]);
+  });
+
+  it('only offers unassigned connections when creating and retains the edited group members', () => {
+    const connections = [
+      {
+        id: 'host-current',
+        name: 'Current group host',
+        config: { type: 'mysql', host: 'current.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'host-other',
+        name: 'Other group host',
+        config: { type: 'mysql', host: 'other.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'host-unassigned',
+        name: 'Ungrouped host',
+        config: { type: 'mysql', host: 'unassigned.local', port: 3306, user: 'root' },
+      },
+    ];
+    const connectionTags = [
+      { id: 'current', name: 'Current', connectionIds: ['host-current'] },
+      { id: 'other', name: 'Other', connectionIds: ['host-other'] },
+    ];
+
+    expect(
+      buildConnectionTagSelectableConnections(connections, connectionTags, '')
+        .map((connection) => connection.id),
+    ).toEqual(['host-unassigned']);
+    expect(
+      buildConnectionTagSelectableConnections(connections, connectionTags, 'current')
+        .map((connection) => connection.id),
+    ).toEqual(['host-current', 'host-unassigned']);
+    expect(
+      buildConnectionTagSelectableConnections(connections.slice(0, 2), connectionTags, ''),
+    ).toEqual([]);
   });
 
   it('preselects the clicked legacy group when creating a child group', () => {
@@ -69,6 +108,8 @@ describe('Sidebar nested group menu', () => {
   it('keeps modal and both menu implementations aligned with nested grouping', () => {
     expect(modalSource).toContain('name="parentTagId"');
     expect(modalSource).toContain('parentTagId,');
+    expect(modalSource).toContain('Empty.PRESENTED_IMAGE_SIMPLE');
+    expect(modalSource).toContain("sidebar.modal.tag.no_available_connections");
     expect(legacyMenuSource).toContain("key: 'new-child-tag'");
     expect(legacyMenuSource).toContain("t('connection.sidebar.group.newSubgroup')");
     expect(v2MenuSource).toContain("| 'new-subgroup'");
@@ -81,6 +122,7 @@ describe('Sidebar nested group menu', () => {
       'connection.sidebar.group.newSubgroup',
       'sidebar.field.parent_group',
       'sidebar.placeholder.parent_group',
+      'sidebar.modal.tag.no_available_connections',
       'connection.sidebar.group.deleteConfirmContent',
       'sidebar.modal.confirm_delete_tag.content',
     ].forEach((key) => {

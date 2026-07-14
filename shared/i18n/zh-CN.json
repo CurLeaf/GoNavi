@@ -7296,6 +7296,7 @@
   "sidebar.modal.tag.create_title": "新建分组",
   "sidebar.modal.tag.edit_description": "更新分组名称和包含的连接。",
   "sidebar.modal.tag.edit_title": "编辑分组",
+  "sidebar.modal.tag.no_available_connections": "所有连接已归属其他分组",
   "sidebar.object.function": "函数",
   "sidebar.object.procedure": "存储过程",
   "sidebar.object.view": "视图",

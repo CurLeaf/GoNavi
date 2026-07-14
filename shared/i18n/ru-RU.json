@@ -7296,6 +7296,7 @@
   "sidebar.modal.tag.create_title": "Создать группу",
   "sidebar.modal.tag.edit_description": "Обновите имя группы и входящие в нее подключения.",
   "sidebar.modal.tag.edit_title": "Изменить группу",
+  "sidebar.modal.tag.no_available_connections": "Все подключения уже входят в другие группы",
   "sidebar.object.function": "Функция",
   "sidebar.object.procedure": "Процедура",
   "sidebar.object.view": "Представление",

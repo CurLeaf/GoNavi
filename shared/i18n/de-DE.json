@@ -7296,6 +7296,7 @@
   "sidebar.modal.tag.create_title": "Gruppe erstellen",
   "sidebar.modal.tag.edit_description": "Gruppenname und enthaltene Verbindungen aktualisieren.",
   "sidebar.modal.tag.edit_title": "Gruppe bearbeiten",
+  "sidebar.modal.tag.no_available_connections": "Alle Verbindungen gehören bereits anderen Gruppen an",
   "sidebar.object.function": "Funktion",
   "sidebar.object.procedure": "Prozedur",
   "sidebar.object.view": "Ansicht",

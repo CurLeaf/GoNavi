@@ -7296,6 +7296,7 @@
   "sidebar.modal.tag.create_title": "建立分組",
   "sidebar.modal.tag.edit_description": "更新分組名稱和包含的連線。",
   "sidebar.modal.tag.edit_title": "編輯分組",
+  "sidebar.modal.tag.no_available_connections": "所有連線已歸屬其他群組",
   "sidebar.object.function": "函式",
   "sidebar.object.procedure": "預存程序",
   "sidebar.object.view": "檢視",

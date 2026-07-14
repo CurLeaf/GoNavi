@@ -1,5 +1,5 @@
 import React from 'react';
-import { Checkbox, Form, Input, Select, Space } from 'antd';
+import { Checkbox, Empty, Form, Input, Select, Space } from 'antd';
 import type { FormInstance } from 'antd/es/form';
 import { FolderOpenOutlined } from '@ant-design/icons';
 import Modal from '../common/ResizableDraggableModal';
@@ -47,6 +47,26 @@ export const buildConnectionTagParentOptions = (
       }
       return { value: tag.id, label: names.join(' / ') || tag.name };
     });
+};
+
+export const buildConnectionTagSelectableConnections = (
+  connections: SavedConnection[],
+  connectionTags: ConnectionTag[],
+  editingTagId: string,
+): SavedConnection[] => {
+  const currentTagId = editingTagId.trim();
+  const connectionIdsAssignedToOtherTags = new Set<string>();
+
+  connectionTags.forEach((tag) => {
+    if (tag.id === currentTagId) return;
+    tag.connectionIds.forEach((connectionId) => {
+      connectionIdsAssignedToOtherTags.add(connectionId);
+    });
+  });
+
+  return connections.filter(
+    (connection) => !connectionIdsAssignedToOtherTags.has(connection.id),
+  );
 };
 
 const resolveConnectionTagParentId = (
@@ -168,8 +188,17 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
   renameSavedQueryTarget,
   setRenameSavedQueryTarget,
   handleRenameSavedQuery,
-}) => (
-  <>
+}) => {
+  const editingTagId = renameViewTarget?.type === 'tag'
+    ? String(renameViewTarget?.dataRef?.id || '')
+    : '';
+  const selectableConnections = buildConnectionTagSelectableConnections(
+    connections,
+    connectionTags,
+    editingTagId,
+  );
+
+  return (<>
     <Modal
       title={renderSidebarModalTitle(
         <FolderOpenOutlined />,
@@ -181,9 +210,6 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
       styles={{ content: modalPanelStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 10 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 12 } }}
       onOk={() => {
         createTagForm.validateFields().then(values => {
-          const editingTagId = renameViewTarget?.type === 'tag'
-            ? String(renameViewTarget?.dataRef?.id || '')
-            : '';
           const parentTagId = resolveConnectionTagParentId(
             values.parentTagId,
             connectionTags,
@@ -221,7 +247,7 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
               placeholder={t('sidebar.placeholder.parent_group')}
               options={buildConnectionTagParentOptions(
                 connectionTags,
-                renameViewTarget?.type === 'tag' ? String(renameViewTarget?.dataRef?.id || '') : '',
+                editingTagId,
               )}
             />
           </Form.Item>
@@ -229,11 +255,16 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
             <Checkbox.Group style={{ width: '100%' }}>
               <div style={modalScrollSectionStyle}>
                 <Space direction="vertical" style={{ width: '100%' }}>
-                  {connections.map(conn => (
+                  {selectableConnections.length > 0 ? selectableConnections.map(conn => (
                     <Checkbox key={conn.id} value={conn.id}>
                       {conn.name} {conn.config.host ? `(${conn.config.host})` : ''}
                     </Checkbox>
-                  ))}
+                  )) : (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description={t('sidebar.modal.tag.no_available_connections')}
+                    />
+                  )}
                 </Space>
               </div>
             </Checkbox.Group>
@@ -380,5 +411,5 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
         </Form.Item>
       </Form>
     </Modal>
-  </>
-);
+  </>);
+};

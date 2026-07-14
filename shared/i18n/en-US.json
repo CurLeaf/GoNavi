@@ -7296,6 +7296,7 @@
   "sidebar.modal.tag.create_title": "New group",
   "sidebar.modal.tag.edit_description": "Update the group name and included connections.",
   "sidebar.modal.tag.edit_title": "Edit group",
+  "sidebar.modal.tag.no_available_connections": "All connections already belong to other groups",
   "sidebar.object.function": "Function",
   "sidebar.object.procedure": "Procedure",
   "sidebar.object.view": "View",

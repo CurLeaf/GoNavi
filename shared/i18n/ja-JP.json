@@ -7296,6 +7296,7 @@
   "sidebar.modal.tag.create_title": "グループを作成",
   "sidebar.modal.tag.edit_description": "グループ名と含める接続を更新します。",
   "sidebar.modal.tag.edit_title": "グループを編集",
+  "sidebar.modal.tag.no_available_connections": "すべての接続は他のグループに所属しています",
   "sidebar.object.function": "関数",
   "sidebar.object.procedure": "プロシージャ",
   "sidebar.object.view": "ビュー",
