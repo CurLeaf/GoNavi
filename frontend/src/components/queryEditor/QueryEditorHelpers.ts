@@ -22,6 +22,7 @@ import { t as translate } from '../../i18n';
 export type CompletionTableMeta = {dbName: string, tableName: string, comment?: string};
 export type CompletionColumnMeta = {dbName: string, tableName: string, name: string, type: string, comment?: string};
 export type CompletionViewMeta = {dbName: string, viewName: string, schemaName?: string};
+export type CompletionSynonymMeta = {ownerName: string, synonymName: string, targetSchemaName?: string, targetName?: string};
 export type CompletionTriggerMeta = {dbName: string, triggerName: string, tableName: string, schemaName?: string};
 export type CompletionRoutineMeta = {dbName: string, routineName: string, routineType: string, schemaName?: string};
 export type CompletionSequenceMeta = {dbName: string, sequenceName: string, schemaName?: string};
@@ -884,6 +885,21 @@ export const buildCompletionViewsMetadataQuerySpecs = (dialect: string, dbName: 
         default:
             return [];
     }
+};
+
+export const buildCompletionSynonymsMetadataQuerySpecs = (dialect: string): MetadataQuerySpec[] => {
+    if (dialect !== 'oracle') {
+        return [];
+    }
+    return [{
+        sql: `SELECT OWNER AS synonym_owner, SYNONYM_NAME AS synonym_name,
+  TABLE_OWNER AS target_schema_name, TABLE_NAME AS target_name
+FROM ALL_SYNONYMS
+WHERE DB_LINK IS NULL
+  AND TABLE_NAME IS NOT NULL
+  AND (OWNER = USER OR OWNER = 'PUBLIC')
+ORDER BY CASE WHEN OWNER = USER THEN 0 WHEN OWNER = 'PUBLIC' THEN 1 ELSE 2 END, SYNONYM_NAME`,
+    }];
 };
 
 export const buildCompletionMaterializedViewsMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {

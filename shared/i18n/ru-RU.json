@@ -6434,6 +6434,7 @@
   "query_editor.object_info.label.table": "Таблица",
   "query_editor.object_info.label.type": "Тип",
   "query_editor.object_info.materialized_view": "Материализованное представление",
+  "query_editor.object_info.synonym": "Синоним",
   "query_editor.object_info.table": "Таблица",
   "query_editor.placeholder.connection": "Выберите подключение",
   "query_editor.placeholder.database": "Выберите базу данных",

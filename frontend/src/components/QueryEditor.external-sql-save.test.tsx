@@ -2507,6 +2507,141 @@ describe('QueryEditor external SQL save', () => {
     });
   });
 
+  it('does not repeat an Oracle view owner across users and de-duplicates its result columns', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.user = 'B';
+    storeState.connections[0].config.database = 'B';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'B' }, { Database: 'A' }] });
+    backendApp.DBGetTables.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBGetAllColumns.mockImplementation(async (_config: any, dbName: string) => ({
+      success: true,
+      data: dbName === 'A'
+        ? [
+          { tableName: 'V_PERSON', name: 'ID', type: 'NUMBER' },
+          { tableName: 'V_PERSON', name: 'NAME', type: 'VARCHAR2' },
+          { tableName: 'V_PERSON', name: 'NAME', type: 'VARCHAR2' },
+        ]
+        : [],
+    }));
+    backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+      if (/ALL_VIEWS/i.test(sql) && /OWNER = 'A'/i.test(sql)) {
+        return { success: true, data: [{ schema_name: 'A', view_name: 'V_PERSON' }] };
+      }
+      return { success: true, data: [] };
+    });
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'SELECT * FROM A.V_PERSON v', dbName: 'B' })} />);
+    });
+    await act(async () => {
+      for (let i = 0; i < 48; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    const sqlProvider = findSqlCompletionProvider();
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.value = 'SELECT * FROM A.V';
+    editorState.latestOnChange?.(editorState.value);
+    const viewItems = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: editorState.value.length + 1 },
+    );
+    expect(viewItems.suggestions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: 'V_PERSON',
+        insertText: 'V_PERSON',
+        detail: '视图 (A)',
+      }),
+    ]));
+    expect(viewItems.suggestions.some((item: any) => item.label === 'A.V_PERSON')).toBe(false);
+
+    editorState.value = 'SELECT v. FROM A.V_PERSON v';
+    editorState.latestOnChange?.(editorState.value);
+    const columnItems = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: 'SELECT v.'.length + 1 },
+    );
+    expect(columnItems.suggestions.filter((item: any) => item.label === 'ID')).toHaveLength(1);
+    expect(columnItems.suggestions.filter((item: any) => item.label === 'NAME')).toHaveLength(1);
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
+  it('suggests Oracle private synonyms directly and resolves their columns through the synonym owner', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.user = 'B';
+    storeState.connections[0].config.database = 'A';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'A' }] });
+    backendApp.DBGetTables.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBGetAllColumns.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBGetColumns.mockImplementation(async (_config: any, dbName: string, tableName: string) => ({
+      success: true,
+      data: dbName === 'B' && tableName === 'PERSON'
+        ? [
+          { name: 'ID', type: 'NUMBER' },
+          { name: 'NAME', type: 'VARCHAR2' },
+        ]
+        : [],
+    }));
+    backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+      if (/ALL_SYNONYMS/i.test(sql)) {
+        return {
+          success: true,
+          data: [{ synonym_owner: 'B', synonym_name: 'PERSON', target_schema_name: 'A', target_name: 'PERSON' }],
+        };
+      }
+      return { success: true, data: [] };
+    });
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '', dbName: 'A' })} />);
+    });
+    await act(async () => {
+      for (let i = 0; i < 32; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    const sqlProvider = findSqlCompletionProvider();
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.value = 'SELECT * FROM per';
+    editorState.latestOnChange?.(editorState.value);
+    const synonymItems = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: editorState.value.length + 1 },
+    );
+    expect(synonymItems.suggestions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: 'PERSON',
+        insertText: 'PERSON',
+        detail: '同义词 (A.PERSON)',
+      }),
+    ]));
+    expect(backendApp.DBQuery).toHaveBeenCalledWith(expect.anything(), 'A', expect.stringMatching(/ALL_SYNONYMS/i));
+
+    editorState.value = 'SELECT p. FROM PERSON p';
+    editorState.latestOnChange?.(editorState.value);
+    const columnItems = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: 'SELECT p.'.length + 1 },
+    );
+    expect(backendApp.DBGetColumns).toHaveBeenCalledWith(expect.anything(), 'B', 'PERSON');
+    expect(columnItems.suggestions.map((item: any) => item.label)).toEqual(expect.arrayContaining(['ID', 'NAME']));
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
   it('fuzzy matches table names in FROM completion before column candidates', async () => {
     let renderer!: ReactTestRenderer;
     autoFetchState.visible = true;

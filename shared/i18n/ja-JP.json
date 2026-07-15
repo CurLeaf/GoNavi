@@ -6434,6 +6434,7 @@
   "query_editor.object_info.label.table": "テーブル",
   "query_editor.object_info.label.type": "型",
   "query_editor.object_info.materialized_view": "マテリアライズドビュー",
+  "query_editor.object_info.synonym": "同義語",
   "query_editor.object_info.table": "テーブル",
   "query_editor.placeholder.connection": "接続を選択",
   "query_editor.placeholder.database": "データベースを選択",

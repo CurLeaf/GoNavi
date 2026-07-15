@@ -6434,6 +6434,7 @@
   "query_editor.object_info.label.table": "資料表",
   "query_editor.object_info.label.type": "類型",
   "query_editor.object_info.materialized_view": "物化檢視",
+  "query_editor.object_info.synonym": "同義詞",
   "query_editor.object_info.table": "資料表",
   "query_editor.placeholder.connection": "選擇連線",
   "query_editor.placeholder.database": "選擇資料庫",
