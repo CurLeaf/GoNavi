@@ -435,17 +435,23 @@ const buildViewsMetadataQuerySpecs = (
     }
     case "oracle":
     case "dm":
+      if (safeDbName) {
+        // CURRENT_SCHEMA does not change USER. When a read-only account selects
+        // another Oracle schema, USER_VIEWS would successfully return that
+        // account's (usually empty) catalog and prevent the target schema from
+        // being queried. Read the explicitly selected owner first instead.
+        return [
+          {
+            sql: `SELECT OWNER AS schema_name, VIEW_NAME AS view_name FROM ALL_VIEWS WHERE OWNER = '${safeDbName.toUpperCase()}' ORDER BY VIEW_NAME`,
+          },
+        ];
+      }
       return normalizeMetadataQuerySpecs([
         {
           sql: `SELECT VIEW_NAME AS view_name FROM USER_VIEWS ORDER BY VIEW_NAME`,
         },
         {
           sql: `SELECT OWNER AS schema_name, VIEW_NAME AS view_name FROM ALL_VIEWS WHERE OWNER = USER ORDER BY VIEW_NAME`,
-        },
-        {
-          sql: safeDbName
-            ? `SELECT OWNER AS schema_name, VIEW_NAME AS view_name FROM ALL_VIEWS WHERE OWNER = '${safeDbName.toUpperCase()}' ORDER BY VIEW_NAME`
-            : "",
         },
       ]);
     case "sqlite":
@@ -589,17 +595,22 @@ const buildFunctionsMetadataQuerySpecs = (
     }
     case "oracle":
     case "dm":
+      if (safeDbName) {
+        // See the corresponding view query above. Oracle CURRENT_SCHEMA only
+        // changes name resolution, so USER_OBJECTS still belongs to the login
+        // account rather than the schema selected in the sidebar.
+        return [
+          {
+            sql: `SELECT OWNER AS schema_name, OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM ALL_OBJECTS WHERE OWNER = '${safeDbName.toUpperCase()}' AND OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME`,
+          },
+        ];
+      }
       return normalizeMetadataQuerySpecs([
         {
           sql: `SELECT OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM USER_OBJECTS WHERE OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME`,
         },
         {
           sql: `SELECT OWNER AS schema_name, OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM ALL_OBJECTS WHERE OWNER = USER AND OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME`,
-        },
-        {
-          sql: safeDbName
-            ? `SELECT OWNER AS schema_name, OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM ALL_OBJECTS WHERE OWNER = '${safeDbName.toUpperCase()}' AND OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME`
-            : "",
         },
       ]);
     case "duckdb":
@@ -625,8 +636,16 @@ const buildSequencesMetadataQuerySpecs = (
       return normalizeMetadataQuerySpecs([
         {
           sql: safeDbName
-            ? `SELECT SEQUENCE_OWNER AS schema_name, SEQUENCE_NAME AS sequence_name FROM ALL_SEQUENCES WHERE SEQUENCE_OWNER = '${safeDbName.toUpperCase()}' ORDER BY SEQUENCE_NAME`
+            ? `SELECT OWNER AS schema_name, OBJECT_NAME AS sequence_name FROM ALL_OBJECTS WHERE OWNER = '${safeDbName.toUpperCase()}' AND OBJECT_TYPE = 'SEQUENCE' ORDER BY OBJECT_NAME`
             : `SELECT SEQUENCE_NAME AS sequence_name FROM USER_SEQUENCES ORDER BY SEQUENCE_NAME`,
+        },
+        {
+          // Some Oracle-compatible servers expose ALL_SEQUENCES only partially.
+          // ALL_OBJECTS is also the catalog used by packages and routines, while
+          // this keeps ALL_SEQUENCES as a fallback for standard Oracle servers.
+          sql: safeDbName
+            ? `SELECT SEQUENCE_OWNER AS schema_name, SEQUENCE_NAME AS sequence_name FROM ALL_SEQUENCES WHERE SEQUENCE_OWNER = '${safeDbName.toUpperCase()}' ORDER BY SEQUENCE_NAME`
+            : "",
         },
       ]);
     default:
