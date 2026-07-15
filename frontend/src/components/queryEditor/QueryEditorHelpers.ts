@@ -897,7 +897,7 @@ export const buildCompletionSynonymsMetadataQuerySpecs = (dialect: string): Meta
 FROM ALL_SYNONYMS
 WHERE DB_LINK IS NULL
   AND TABLE_NAME IS NOT NULL
-ORDER BY CASE WHEN OWNER = USER THEN 0 WHEN OWNER = 'PUBLIC' THEN 1 ELSE 2 END, SYNONYM_NAME`,
+ORDER BY SYNONYM_NAME`,
     }];
 };
 
