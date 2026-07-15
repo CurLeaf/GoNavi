@@ -6434,6 +6434,7 @@
   "query_editor.object_info.label.table": "表",
   "query_editor.object_info.label.type": "类型",
   "query_editor.object_info.materialized_view": "物化视图",
+  "query_editor.object_info.synonym": "同义词",
   "query_editor.object_info.table": "表",
   "query_editor.placeholder.connection": "选择连接",
   "query_editor.placeholder.database": "选择数据库",

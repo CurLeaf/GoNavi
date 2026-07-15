@@ -6434,6 +6434,7 @@
   "query_editor.object_info.label.table": "Table",
   "query_editor.object_info.label.type": "Type",
   "query_editor.object_info.materialized_view": "Materialized view",
+  "query_editor.object_info.synonym": "Synonym",
   "query_editor.object_info.table": "Table",
   "query_editor.placeholder.connection": "Select connection",
   "query_editor.placeholder.database": "Select database",

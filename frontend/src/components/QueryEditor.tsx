@@ -95,6 +95,7 @@ import {
     type CompletionPackageMeta,
     type CompletionRoutineMeta,
     type CompletionSequenceMeta,
+    type CompletionSynonymMeta,
     type CompletionTableMeta,
     type CompletionTriggerMeta,
     type CompletionViewMeta,
@@ -116,6 +117,7 @@ import {
     buildCompletionMaterializedViewsMetadataQuerySpecs,
     buildCompletionPackagesMetadataQuerySpecs,
     buildCompletionSequencesMetadataQuerySpecs,
+    buildCompletionSynonymsMetadataQuerySpecs,
     buildCompletionTableCommentSQL,
     buildCompletionTriggersMetadataQuerySpecs,
     buildCompletionViewsMetadataQuerySpecs,
@@ -881,7 +883,7 @@ const resolveQueryEditorAiConnectionHost = (connection: any): string => {
 
 // HMR 重载时释放旧注册避免补全和 hover 内容重复
 const _g = globalThis as any;
-const SQL_COMPLETION_PROVIDER_VERSION = '20260702-ai-inline-sql-v1';
+const SQL_COMPLETION_PROVIDER_VERSION = '20260715-oracle-view-synonym-v1';
 if (!_g.__gonaviSqlCompletionState) {
     _g.__gonaviSqlCompletionState = { registered: false, version: '', disposables: [] as any[] };
 }
@@ -902,6 +904,15 @@ let sharedAllColumnsData: CompletionColumnMeta[] = [];
 // AI 补全的元数据预热可能把整库列（数十万条）灌入 sharedAllColumnsData，普通补全逐列全量
 // 扫描会阻塞主线程；按 (库, 表名末段) 建索引，并以数组身份为键缓存，数组重新赋值时自动失效。
 const sharedColumnsIndexCache = new WeakMap<CompletionColumnMeta[], Map<string, CompletionColumnMeta[]>>();
+const dedupeCompletionColumnsByName = (columns: CompletionColumnMeta[]): CompletionColumnMeta[] => {
+    const seen = new Set<string>();
+    return columns.filter((column) => {
+        const key = String(column.name || '').trim().toLowerCase();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+};
 const findSharedPreloadedColumns = (dbName: string, tableName: string): CompletionColumnMeta[] => {
     const columns = sharedAllColumnsData;
     let index = sharedColumnsIndexCache.get(columns);
@@ -926,7 +937,7 @@ const findSharedPreloadedColumns = (dbName: string, tableName: string): Completi
         sharedColumnsIndexCache.set(columns, index);
     }
     const key = `${String(dbName || '').toLowerCase()}\u0000${String(tableName || '').toLowerCase()}`;
-    return index.get(key) || [];
+    return dedupeCompletionColumnsByName(index.get(key) || []);
 };
 
 // 普通建议的“相关列”按 SQL 中引用的表标识符（db.table / table / 纯表名）匹配，
@@ -973,6 +984,7 @@ const collectSharedColumnsForTableIdents = (
 let sharedVisibleDbs: string[] = [];
 let sharedViewsData: CompletionViewMeta[] = [];
 let sharedMaterializedViewsData: CompletionViewMeta[] = [];
+let sharedSynonymsData: CompletionSynonymMeta[] = [];
 let sharedTriggersData: CompletionTriggerMeta[] = [];
 let sharedRoutinesData: CompletionRoutineMeta[] = [];
 let sharedSequencesData: CompletionSequenceMeta[] = [];
@@ -1113,6 +1125,7 @@ const resetSharedQueryEditorMetadata = () => {
     sharedVisibleDbs = [];
     sharedViewsData = [];
     sharedMaterializedViewsData = [];
+    sharedSynonymsData = [];
     sharedTriggersData = [];
     sharedRoutinesData = [];
     sharedSequencesData = [];
@@ -1339,6 +1352,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const allColumnsRef = useRef<CompletionColumnMeta[]>([]); // Store all columns (cross-db)
   const viewsRef = useRef<CompletionViewMeta[]>([]);
   const materializedViewsRef = useRef<CompletionViewMeta[]>([]);
+  const synonymsRef = useRef<CompletionSynonymMeta[]>([]);
   const triggersRef = useRef<CompletionTriggerMeta[]>([]);
   const routinesRef = useRef<CompletionRoutineMeta[]>([]);
   const sequencesRef = useRef<CompletionSequenceMeta[]>([]);
@@ -1761,6 +1775,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       allColumnsRef.current = [];
       viewsRef.current = [];
       materializedViewsRef.current = [];
+      synonymsRef.current = [];
       triggersRef.current = [];
       routinesRef.current = [];
       columnsCacheRef.current = {};
@@ -2190,6 +2205,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       sharedVisibleDbs = visibleDbsRef.current;
       sharedViewsData = viewsRef.current;
       sharedMaterializedViewsData = materializedViewsRef.current;
+      sharedSynonymsData = synonymsRef.current;
       sharedTriggersData = triggersRef.current;
       sharedRoutinesData = routinesRef.current;
       sharedSequencesData = sequencesRef.current;
@@ -2872,6 +2888,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const allColumns: CompletionColumnMeta[] = [];
           const allViews: CompletionViewMeta[] = [];
           const allMaterializedViews: CompletionViewMeta[] = [];
+          const allSynonyms: CompletionSynonymMeta[] = [];
           const allTriggers: CompletionTriggerMeta[] = [];
           const allRoutines: CompletionRoutineMeta[] = [];
           const allSequences: CompletionSequenceMeta[] = [];
@@ -2885,6 +2902,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               allColumnsRef.current = [...allColumns];
               viewsRef.current = [...allViews];
               materializedViewsRef.current = [...allMaterializedViews];
+              synonymsRef.current = [...allSynonyms];
               triggersRef.current = [...allTriggers];
               routinesRef.current = [...allRoutines];
               sequencesRef.current = [...allSequences];
@@ -2895,6 +2913,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   sharedAllColumnsData = allColumnsRef.current;
                   sharedViewsData = viewsRef.current;
                   sharedMaterializedViewsData = materializedViewsRef.current;
+                  sharedSynonymsData = synonymsRef.current;
                   sharedTriggersData = triggersRef.current;
                   sharedRoutinesData = routinesRef.current;
                   sharedSequencesData = sequencesRef.current;
@@ -2902,6 +2921,40 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               }
               return true;
           };
+
+          const synonymResults = await queryCompletionMetadataRowsBySpecs(
+              config,
+              metadataDbName,
+              buildCompletionSynonymsMetadataQuerySpecs(metadataDialect),
+          );
+          if (cancelled) return;
+          const seenSynonyms = new Set<string>();
+          synonymResults.forEach((queryResult) => {
+              queryResult.rows.forEach((row) => {
+                  const rawSynonymName = String(getCaseInsensitiveValue(row, ['synonym_name', 'synonymname', 'name']) || '').trim()
+                      || getFirstRowValue(row);
+                  const synonymParts = splitSidebarQualifiedName(rawSynonymName);
+                  const synonymName = String(synonymParts.objectName || rawSynonymName).trim();
+                  if (!synonymName) return;
+
+                  const ownerName = String(getCaseInsensitiveValue(row, ['synonym_owner', 'owner', 'schema_name']) || synonymParts.schemaName || '').trim();
+                  const rawTargetName = String(getCaseInsensitiveValue(row, ['target_name', 'table_name', 'table']) || '').trim();
+                  const targetParts = splitSidebarQualifiedName(rawTargetName);
+                  const targetName = String(targetParts.objectName || rawTargetName).trim();
+                  if (!targetName) return;
+
+                  const targetSchemaName = String(getCaseInsensitiveValue(row, ['target_schema_name', 'table_owner', 'target_owner']) || targetParts.schemaName || '').trim();
+                  const uniqueKey = synonymName.toLowerCase();
+                  if (seenSynonyms.has(uniqueKey)) return;
+                  seenSynonyms.add(uniqueKey);
+                  allSynonyms.push({
+                      ownerName,
+                      synonymName,
+                      targetSchemaName: targetSchemaName || undefined,
+                      targetName,
+                  });
+              });
+          });
 
           for (const dbName of metadataDbNames) {
               if (cancelled) return;
@@ -4923,9 +4976,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       && !!rawDbName
                       && schemaName.toLowerCase() === rawDbName.toLowerCase();
                   const isCurrentDb = rawDbName.toLowerCase() === getActiveCompletionDbName().toLowerCase();
-                  const schemaQualifiedName = parsed.schema
-                      ? rawViewName
-                      : (schemaName && !schemaMatchesDb ? `${schemaName}.${objectName}` : objectName);
+                  const schemaQualifiedName = schemaName && !schemaMatchesDb
+                      ? `${schemaName}.${objectName}`
+                      : objectName;
                   const displayName = isCurrentDb && schemaMatchesDb
                       ? objectName
                       : schemaQualifiedName;
@@ -4950,6 +5003,25 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       return dbName;
                   }
                   return dbName ? `${dbName}.${schemaName}` : schemaName;
+              };
+              const getSynonymTargetName = (synonym: CompletionSynonymMeta) => {
+                  const targetSchemaName = String(synonym.targetSchemaName || '').trim();
+                  const targetName = String(synonym.targetName || '').trim();
+                  return targetSchemaName && targetName ? `${targetSchemaName}.${targetName}` : targetName;
+              };
+              const buildSynonymSuggestion = (synonym: CompletionSynonymMeta, sortText: string) => {
+                  const synonymName = String(synonym.synonymName || '').trim();
+                  const targetName = getSynonymTargetName(synonym);
+                  return {
+                      label: synonymName,
+                      kind: monaco.languages.CompletionItemKind.Class,
+                      insertText: quoteCompletionPath(synonymName),
+                      detail: targetName
+                          ? `${translate('query_editor.object_info.synonym')} (${targetName})`
+                          : translate('query_editor.object_info.synonym'),
+                      range,
+                      sortText,
+                  };
               };
 
               const buildConnConfig = () => {
@@ -5031,7 +5103,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   columns: ColumnDefinition[],
                   dbName: string,
                   tableName: string,
-              ): CompletionColumnMeta[] => columns
+              ): CompletionColumnMeta[] => dedupeCompletionColumnsByName(columns
                   .map((column) => ({
                       dbName,
                       tableName,
@@ -5039,7 +5111,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       type: getColumnDefinitionType(column),
                       comment: getColumnDefinitionComment(column),
                   }))
-                  .filter((column) => !!column.name);
+                  .filter((column) => !!column.name));
 
               const findPreloadedColumns = (dbName: string, tableName: string) =>
                   findSharedPreloadedColumns(dbName, tableName);
@@ -5066,18 +5138,40 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   }
               };
 
+              const findCompletionSynonym = (dbName: string, tableIdent: string): CompletionSynonymMeta | undefined => {
+                  const parsed = splitSchemaAndTable(tableIdent);
+                  const synonymName = String(parsed.table || tableIdent).trim().toLowerCase();
+                  if (!synonymName) return undefined;
+                  const matches = sharedSynonymsData.filter((synonym) => (
+                      String(synonym.synonymName || '').trim().toLowerCase() === synonymName
+                  ));
+                  if (matches.length === 0) return undefined;
+
+                  const explicitOwner = String(parsed.schema || '').trim().toLowerCase();
+                  if (explicitOwner) {
+                      return matches.find((synonym) => String(synonym.ownerName || '').trim().toLowerCase() === explicitOwner);
+                  }
+
+                  const currentOwner = String(dbName || '').trim().toLowerCase();
+                  return matches.find((synonym) => String(synonym.ownerName || '').trim().toLowerCase() === currentOwner)
+                      || matches[0];
+              };
+
               const getCompletionColumnsByTable = async (dbName: string, tableIdent: string) => {
                   const connId = sharedCurrentConnectionId;
                   const targetDb = String(dbName || '').trim();
                   const targetTable = String(tableIdent || '').trim();
                   if (!connId || !targetDb || !targetTable) return [] as CompletionColumnMeta[];
 
-                  const preloaded = findPreloadedColumns(targetDb, targetTable);
+                  const synonym = findCompletionSynonym(targetDb, targetTable);
+                  const lookupDbName = String(synonym?.ownerName || targetDb).trim();
+                  const lookupTableName = String(synonym?.synonymName || targetTable).trim();
+                  const preloaded = synonym ? [] : findPreloadedColumns(targetDb, targetTable);
                   if (preloaded.length > 0) {
                       return preloaded;
                   }
 
-                  const key = `${connId}|${targetDb}|${targetTable}`;
+                  const key = `${connId}|${lookupDbName}|${lookupTableName}`;
                   const cached = sharedColumnsCacheData[key] as ColumnDefinition[] | undefined;
                   if (cached) {
                       const cachedColumns = toCompletionColumns(cached, targetDb, targetTable);
@@ -5088,7 +5182,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   const config = buildConnConfig();
                   if (!config) return [] as CompletionColumnMeta[];
 
-                  const res = await DBGetColumns(buildRpcConnectionConfig(config) as any, targetDb, targetTable);
+                  const res = await DBGetColumns(buildRpcConnectionConfig(config) as any, lookupDbName, lookupTableName);
                   if (res?.success && Array.isArray(res.data)) {
                       const cols = res.data as ColumnDefinition[];
                       sharedColumnsCacheData[key] = cols;
@@ -5203,6 +5297,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                               range,
                               sortText: '05' + meta.displayName,
                           }));
+                      const synonymSuggestions = sharedSynonymsData
+                          .filter((synonym) => String(synonym.ownerName || '').trim().toLowerCase() === qualifierLower)
+                          .filter((synonym) => !prefix || String(synonym.synonymName || '').toLowerCase().startsWith(prefix))
+                          .map((synonym) => buildSynonymSuggestion(synonym, '06' + synonym.synonymName));
                       const routineSuggestions = sharedRoutinesData
                           .filter((routine) => String(routine.dbName || '').toLowerCase() === qualifierLower)
                           .map((routine) => ({ routine, meta: buildRoutineSuggestionMeta(routine) }))
@@ -5221,7 +5319,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                               range,
                               sortText: '1' + meta.displayName,
                           }));
-                      return { suggestions: [...suggestions, ...viewSuggestions, ...routineSuggestions] };
+                      return { suggestions: [...suggestions, ...viewSuggestions, ...synonymSuggestions, ...routineSuggestions] };
                   }
 
                   // qualifier 是 schema（如 dbo/public）时，仅补全表名，避免输入 dbo. 后再补成 dbo.dbo.table
@@ -5242,8 +5340,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   ]
                       .map(({ view, materialized }) => ({ view, materialized, meta: buildViewSuggestionMeta(view) }))
                       .filter(({ meta }) => meta.schemaName.toLowerCase() === qualifierLower && !!meta.objectName);
+                  const schemaSynonyms = sharedSynonymsData
+                      .filter((synonym) => String(synonym.ownerName || '').trim().toLowerCase() === qualifierLower);
 
-                  if (schemaTables.length > 0 || schemaViews.length > 0) {
+                  if (schemaTables.length > 0 || schemaViews.length > 0 || schemaSynonyms.length > 0) {
                       const filtered = prefix
                           ? schemaTables.filter(t => t.table.toLowerCase().startsWith(prefix))
                           : schemaTables;
@@ -5268,6 +5368,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                                   range,
                                   sortText: '05' + meta.objectName,
                               })),
+                          ...schemaSynonyms
+                              .filter((synonym) => !prefix || String(synonym.synonymName || '').toLowerCase().startsWith(prefix))
+                              .map((synonym) => buildSynonymSuggestion(synonym, '06' + synonym.synonymName)),
                       ];
                       const routineSuggestions = sharedRoutinesData
                           .filter((routine) => {
@@ -5550,6 +5653,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       };
                   });
 
+              const synonymSuggestions = sharedSynonymsData
+                  .filter((synonym) => includesWordPrefix(synonym.synonymName || ''))
+                  .map((synonym) => buildSynonymSuggestion(
+                      synonym,
+                      sortGroups.tableCurrent + '05' + getPrefixMatchRank(synonym.synonymName || '') + synonym.synonymName,
+                  ));
+
               const routineSuggestions = sharedRoutinesData
                   .map((routine) => ({ routine, meta: buildRoutineSuggestionMeta(routine) }))
                   .filter(({ routine, meta }) => {
@@ -5619,6 +5729,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       ...funcSuggestions,
                       ...tableSuggestions,
                       ...viewSuggestions,
+                      ...synonymSuggestions,
                       ...dbSuggestions,
                       ...routineSuggestions,
                       ...relevantColumns,
@@ -5627,6 +5738,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       ...relevantColumns,   // FROM 表的列最优先
                       ...tableSuggestions,  // 表次之
                       ...viewSuggestions,   // 视图和表同属可查询对象
+                      ...synonymSuggestions, // 同义词也可直接作为查询对象
                       ...dbSuggestions,     // 数据库
                       ...routineSuggestions, // 存储过程/函数
                       ...funcSuggestions,   // 内置函数
