@@ -307,9 +307,13 @@ func (o *OracleDB) GetTables(dbName string) ([]string, error) {
 	// dbName is Schema/Owner
 	// 始终返回 OWNER.TABLE_NAME，避免下游 SQL 缺少 schema 前缀导致 ORA-00942（refs issue #445）
 	// 列别名用双引号包裹强制大写，避免不同驱动版本返回不一致 case 导致 row map 取值失败
+	// 同时查询 all_synonyms 以支持同义词提示（refs: OceanBase/Oracle 模式下同义词可像表一样被引用）
 	var query string
 	if dbName != "" {
-		query = fmt.Sprintf(`SELECT owner AS "OWNER", table_name AS "TABLE_NAME" FROM all_tables WHERE owner = '%s' ORDER BY table_name`, escapeOracleMetadataLiteral(dbName))
+		query = fmt.Sprintf(`SELECT owner AS "OWNER", table_name AS "TABLE_NAME" FROM all_tables WHERE owner = '%s'
+UNION ALL
+SELECT owner AS "OWNER", synonym_name AS "TABLE_NAME" FROM all_synonyms WHERE owner = '%s'
+ORDER BY table_name`, escapeOracleMetadataLiteral(dbName), escapeOracleMetadataLiteral(dbName))
 	} else {
 		query = `SELECT USER AS "OWNER", table_name AS "TABLE_NAME" FROM user_tables ORDER BY table_name`
 	}
