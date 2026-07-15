@@ -404,6 +404,8 @@ export function SelectSQLFileForExecution():Promise<connection.QueryResult>;
 
 export function SelectSSHKeyFile(arg1:string):Promise<connection.QueryResult>;
 
+export function SetApplicationBrandIcon(arg1:string):Promise<connection.QueryResult>;
+
 export function SetLanguage(arg1:string):Promise<void>;
 
 export function SetMacNativeWindowControls(arg1:boolean):Promise<void>;

@@ -38,6 +38,13 @@ import {
   DEFAULT_SQL_SNIPPETS,
   BUILTIN_SNIPPET_MAP,
 } from "./utils/sqlSnippetDefaults";
+import {
+  DEFAULT_BRAND_ICON_ID,
+  sanitizeBrandIconId,
+} from "./brand/brandIcons";
+
+const sanitizeBrandIconIdLocal = (value: unknown): string =>
+  sanitizeBrandIconId(value) || DEFAULT_BRAND_ICON_ID;
 import { toPersistedGlobalProxy } from "./utils/globalProxyDraft";
 import {
   DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
@@ -1902,6 +1909,8 @@ interface AppState {
   recentSQLFiles: RecentSQLFile[];
   theme: ThemeMode;
   themePreference: ThemePreference;
+  /** Built-in brand mascot icon id (01-10), used in title bar / about / favicon. */
+  brandIconId: string;
   languagePreference: LanguagePreference;
   appearance: AppearanceSettings;
   uiScale: number;
@@ -2063,6 +2072,7 @@ interface AppState {
 
   setTheme: (theme: ThemeMode) => void;
   setThemePreference: (themePreference: ThemePreference) => void;
+  setBrandIconId: (brandIconId: string) => void;
   setLanguagePreference: (languagePreference: LanguagePreference) => void;
   setAppearance: (appearance: Partial<AppearanceSettings>) => void;
   setRedisDbAlias: (
@@ -3385,6 +3395,7 @@ export const useStore = create<AppState>()(
       recentSQLFiles: [],
       theme: "light",
       themePreference: "light",
+      brandIconId: "02",
       languagePreference: DEFAULT_LANGUAGE_PREFERENCE,
       appearance: { ...DEFAULT_APPEARANCE },
       uiScale: DEFAULT_UI_SCALE,
@@ -4811,6 +4822,10 @@ export const useStore = create<AppState>()(
         set({
           themePreference: sanitizeThemePreference(themePreference),
         }),
+      setBrandIconId: (brandIconId) =>
+        set({
+          brandIconId: sanitizeBrandIconIdLocal(brandIconId),
+        }),
       setLanguagePreference: (languagePreference) =>
         set({
           languagePreference: sanitizeLanguagePreference(languagePreference),
@@ -5547,6 +5562,7 @@ export const useStore = create<AppState>()(
           state.themePreference,
           nextState.theme,
         );
+        nextState.brandIconId = sanitizeBrandIconIdLocal(state.brandIconId);
         nextState.languagePreference = sanitizeLanguagePreference(
           state.languagePreference,
         );
@@ -5676,6 +5692,7 @@ export const useStore = create<AppState>()(
             state.themePreference,
             sanitizeTheme(state.theme),
           ),
+          brandIconId: sanitizeBrandIconIdLocal(state.brandIconId),
           languagePreference: sanitizeLanguagePreference(
             state.languagePreference,
           ),
@@ -5739,6 +5756,7 @@ export const useStore = create<AppState>()(
           recentSQLFiles: sanitizeRecentSQLFiles(state.recentSQLFiles),
           theme: state.theme,
           themePreference: state.themePreference,
+          brandIconId: sanitizeBrandIconIdLocal(state.brandIconId),
           languagePreference: state.languagePreference,
           appearance: state.appearance,
           uiScale: state.uiScale,

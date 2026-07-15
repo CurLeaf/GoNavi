@@ -33,6 +33,7 @@ var desktopOnlyAppMethods = map[string]struct{}{
 	"Shutdown":                      {},
 	"SetWindowTranslucency":         {},
 	"SetMacNativeWindowControls":    {},
+	"SetApplicationBrandIcon":       {},
 	"ResetWebViewZoom":              {},
 	"SelectDataRootDirectory":       {},
 	"GetDataRootDirectoryInfo":      {},

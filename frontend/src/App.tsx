@@ -28,6 +28,13 @@ import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModa
 import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModal';
 import LanguageSettingsPanel from './components/LanguageSettingsPanel';
 import WebAuthSettingsPanel from './components/WebAuthSettingsPanel';
+import BrandIconPicker from './components/BrandIconPicker';
+import {
+  resolveBrandDockSrc,
+  resolveBrandIconSrc,
+  type BrandIconId,
+} from './brand/brandIcons';
+import { composeMacOSDockIconBase64 } from './brand/macDockIcon';
 import CustomThemeManager from './components/settings/CustomThemeManager';
 import CustomThemeStyleHost, {
   type CustomThemeAntTokenSnapshot,
@@ -171,7 +178,7 @@ import { useAppUpdateManager } from './hooks/useAppUpdateManager';
 import { useAppLogPanelResize } from './hooks/useAppLogPanelResize';
 import { useAppSidebarResize } from './hooks/useAppSidebarResize';
 import { useAppUtilityStyles } from './hooks/useAppUtilityStyles';
-import { ApplyDataRootDirectory, CancelApplicationQuit, ForceQuitApplication, GetDataRootDirectoryInfo, GetSavedConnections, ListInstalledFontFamilies, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
+import { ApplyDataRootDirectory, CancelApplicationQuit, ForceQuitApplication, GetDataRootDirectoryInfo, GetSavedConnections, ListInstalledFontFamilies, OpenDataRootDirectory, SelectDataRootDirectory, SetApplicationBrandIcon, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import { getAntdLocale } from './i18n/frameworkLocale';
 import { useI18n } from './i18n/provider';
 import './App.css';
@@ -469,7 +476,7 @@ type ToolCenterPaneState = {
 };
 
 type SettingsCenterGroupKey = 'preferences' | 'services' | 'about';
-type SettingsCenterPaneKey = 'language' | 'theme' | 'sidebar-metadata' | 'sidebar-objects' | 'proxy' | 'web-auth' | 'ai' | 'about-go-navi';
+type SettingsCenterPaneKey = 'language' | 'theme' | 'brand-icon' | 'sidebar-metadata' | 'sidebar-objects' | 'proxy' | 'web-auth' | 'ai' | 'about-go-navi';
 type SettingsCenterPaneState = {
   key: SettingsCenterPaneKey;
   group: SettingsCenterGroupKey;
@@ -647,6 +654,8 @@ function App() {
   const windowState = useStore(state => state.windowState);
   const themeMode = useStore(state => state.theme);
   const themePreference = useStore(state => state.themePreference);
+  const brandIconId = useStore(state => state.brandIconId);
+  const setBrandIconId = useStore(state => state.setBrandIconId);
   const setTheme = useStore(state => state.setTheme);
   const setThemePreference = useStore(state => state.setThemePreference);
   const customThemes = useCustomThemeStore(state => state.themes);
@@ -792,6 +801,47 @@ function App() {
       }
       void safeWindowRuntimeCall(() => WindowSetLightTheme(), undefined);
   }, [effectiveThemePreference, resolvedThemeMode, setTheme, themeMode]);
+
+  // Apply selected brand mascot to favicon + macOS Dock icon.
+  useEffect(() => {
+      if (typeof document === 'undefined') return;
+      const href = resolveBrandIconSrc(brandIconId);
+      let link = document.querySelector<HTMLLinkElement>("link[rel='icon'][data-brand-icon='true']");
+      if (!link) {
+          link = document.createElement('link');
+          link.rel = 'icon';
+          link.setAttribute('data-brand-icon', 'true');
+          document.head.appendChild(link);
+      }
+      link.type = 'image/png';
+      link.href = href;
+
+      let cancelled = false;
+      const applyDockIcon = async () => {
+          try {
+              if (typeof (window as any).go?.app?.App?.SetApplicationBrandIcon !== 'function'
+                  && typeof SetApplicationBrandIcon !== 'function') {
+                  return;
+              }
+              // Use pre-baked full-bleed dock tiles (soft brand-blue fill, mascot large).
+              const dockHref = resolveBrandDockSrc(brandIconId);
+              const b64 = await composeMacOSDockIconBase64(dockHref);
+              if (cancelled) return;
+              if (typeof SetApplicationBrandIcon === 'function') {
+                  await SetApplicationBrandIcon(b64);
+              } else {
+                  await (window as any).go.app.App.SetApplicationBrandIcon(b64);
+              }
+          } catch {
+              // Dock icon update is best-effort (desktop macOS only).
+          }
+      };
+      void applyDockIcon();
+      return () => {
+          cancelled = true;
+      };
+  }, [brandIconId]);
+
   const selectPresetTheme = useCallback((preference: ThemePreference) => {
       // Custom CSS is an independent skin layer. Selecting a built-in preset
       // first disables that layer, then preserves the existing 3-mode contract.
@@ -4708,22 +4758,22 @@ function App() {
                 }}
               >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 18, minWidth: 0 }}>
-                      <div
+                      <img
+                        src={resolveBrandIconSrc(brandIconId)}
+                        alt="GoNavi"
+                        width={108}
+                        height={108}
+                        draggable={false}
                         style={{
-                            width: 64,
-                            height: 64,
-                            borderRadius: 14,
-                            background: 'linear-gradient(135deg, #19b968 0%, #058d40 100%)',
-                            display: 'grid',
-                            placeItems: 'center',
-                            color: '#fff',
-                            fontSize: 36,
-                            boxShadow: darkMode ? '0 12px 26px rgba(0,0,0,0.26)' : '0 10px 22px rgba(16,185,129,0.22)',
+                            width: 108,
+                            height: 108,
+                            borderRadius: 18,
+                            objectFit: 'contain',
+                            background: '#fff',
+                            boxShadow: darkMode ? '0 12px 26px rgba(0,0,0,0.26)' : '0 10px 22px rgba(16,24,40,0.12)',
                             flexShrink: 0,
                         }}
-                      >
-                          <SendOutlined />
-                      </div>
+                      />
                       <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 24, lineHeight: 1.1, fontWeight: 800, color: overlayTheme.titleText }}>GoNavi</div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
@@ -6504,6 +6554,13 @@ function App() {
                   },
               },
               {
+                  key: 'brand-icon',
+                  icon: <AppstoreOutlined />,
+                  title: t('app.settings.entry.brand_icon.title'),
+                  description: t('app.settings.entry.brand_icon.description'),
+                  onClick: () => handleOpenSettingsCenterPane('preferences', 'brand-icon'),
+              },
+              {
                   key: 'sidebar-metadata',
                   icon: <TableOutlined />,
                   title: t('app.settings.sidebar_metadata.title'),
@@ -6607,6 +6664,28 @@ function App() {
               </div>
           );
       }
+      if (activeSettingsCenterPane.key === 'brand-icon') {
+          return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '12px 0 20px' }}>
+                  <div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: overlayTheme.titleText }}>
+                          {t('app.settings.entry.brand_icon.title')}
+                      </div>
+                      <div style={{ marginTop: 6, color: utilityMutedTextStyle.color, fontSize: 13, lineHeight: 1.5 }}>
+                          {t('app.settings.entry.brand_icon.help')}
+                      </div>
+                  </div>
+                  <BrandIconPicker
+                    value={brandIconId}
+                    darkMode={darkMode}
+                    onChange={(id: BrandIconId) => {
+                        setBrandIconId(id);
+                        message.success(t('app.settings.entry.brand_icon.applied'));
+                    }}
+                  />
+              </div>
+          );
+      }
       if (activeSettingsCenterPane.key === 'sidebar-metadata') {
           return renderSidebarMetadataSettingsPane();
       }
@@ -6695,7 +6774,21 @@ function App() {
             } as any}
           >
               <div style={{ display: 'flex', alignItems: 'center', gap: Math.max(6, Math.round(8 * effectiveUiScale)), fontWeight: 600, minWidth: 0 }}>
-                  {/* Logo can be added here if available */}
+                  <img
+                    src={resolveBrandIconSrc(brandIconId)}
+                    alt="GoNavi"
+                    width={Math.max(24, Math.round(28 * effectiveUiScale))}
+                    height={Math.max(24, Math.round(28 * effectiveUiScale))}
+                    draggable={false}
+                    style={{
+                      width: Math.max(24, Math.round(28 * effectiveUiScale)),
+                      height: Math.max(24, Math.round(28 * effectiveUiScale)),
+                      objectFit: 'contain',
+                      borderRadius: 8,
+                      flexShrink: 0,
+                      background: '#fff',
+                    }}
+                  />
                   GoNavi
               </div>
               {isWebRuntime ? (

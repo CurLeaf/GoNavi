@@ -794,6 +794,10 @@ export function SelectSSHKeyFile(arg1) {
   return window['go']['app']['App']['SelectSSHKeyFile'](arg1);
 }
 
+export function SetApplicationBrandIcon(arg1) {
+  return window['go']['app']['App']['SetApplicationBrandIcon'](arg1);
+}
+
 export function SetLanguage(arg1) {
   return window['go']['app']['App']['SetLanguage'](arg1);
 }

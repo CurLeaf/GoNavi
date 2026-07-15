@@ -1,0 +1,96 @@
+{
+  "version": 8,
+  "defaultId": "02",
+  "icons": [
+    {
+      "id": "01",
+      "slug": "database-hug",
+      "titleZh": "抱库小狗",
+      "titleEn": "Database hug",
+      "iconPath": "/brand-icons/01-database-hug.png",
+      "icon2xPath": "/brand-icons/01-database-hug@2x.png",
+      "fullPath": "/brand-icons/01-database-hug-full.png"
+    },
+    {
+      "id": "02",
+      "slug": "database-search",
+      "titleZh": "搜库小狗",
+      "titleEn": "Database search",
+      "iconPath": "/brand-icons/02-database-search.png",
+      "icon2xPath": "/brand-icons/02-database-search@2x.png",
+      "fullPath": "/brand-icons/02-database-search-full.png"
+    },
+    {
+      "id": "03",
+      "slug": "bandana-badge",
+      "titleZh": "头巾徽章",
+      "titleEn": "Bandana badge",
+      "iconPath": "/brand-icons/03-bandana-badge.png",
+      "icon2xPath": "/brand-icons/03-bandana-badge@2x.png",
+      "fullPath": "/brand-icons/03-bandana-badge-full.png"
+    },
+    {
+      "id": "04",
+      "slug": "magnifier-wink",
+      "titleZh": "放大镜眨眼",
+      "titleEn": "Magnifier wink",
+      "iconPath": "/brand-icons/04-magnifier-wink.png",
+      "icon2xPath": "/brand-icons/04-magnifier-wink@2x.png",
+      "fullPath": "/brand-icons/04-magnifier-wink-full.png"
+    },
+    {
+      "id": "05",
+      "slug": "window-peek",
+      "titleZh": "窗口探头",
+      "titleEn": "Window peek",
+      "iconPath": "/brand-icons/05-window-peek.png",
+      "icon2xPath": "/brand-icons/05-window-peek@2x.png",
+      "fullPath": "/brand-icons/05-window-peek-full.png"
+    },
+    {
+      "id": "06",
+      "slug": "hex-collar",
+      "titleZh": "六边项圈",
+      "titleEn": "Hex collar",
+      "iconPath": "/brand-icons/06-hex-collar.png",
+      "icon2xPath": "/brand-icons/06-hex-collar@2x.png",
+      "fullPath": "/brand-icons/06-hex-collar-full.png"
+    },
+    {
+      "id": "07",
+      "slug": "graph-sit",
+      "titleZh": "关系图",
+      "titleEn": "Graph sit",
+      "iconPath": "/brand-icons/07-graph-sit.png",
+      "icon2xPath": "/brand-icons/07-graph-sit@2x.png",
+      "fullPath": "/brand-icons/07-graph-sit-full.png"
+    },
+    {
+      "id": "08",
+      "slug": "cloud-banner",
+      "titleZh": "云朵横幅",
+      "titleEn": "Cloud banner",
+      "iconPath": "/brand-icons/08-cloud-banner.png",
+      "icon2xPath": "/brand-icons/08-cloud-banner@2x.png",
+      "fullPath": "/brand-icons/08-cloud-banner-full.png"
+    },
+    {
+      "id": "09",
+      "slug": "terminal-sit",
+      "titleZh": "终端旁坐",
+      "titleEn": "Terminal sit",
+      "iconPath": "/brand-icons/09-terminal-sit.png",
+      "icon2xPath": "/brand-icons/09-terminal-sit@2x.png",
+      "fullPath": "/brand-icons/09-terminal-sit-full.png"
+    },
+    {
+      "id": "10",
+      "slug": "compass-bandana",
+      "titleZh": "罗盘头巾",
+      "titleEn": "Compass bandana",
+      "iconPath": "/brand-icons/10-compass-bandana.png",
+      "icon2xPath": "/brand-icons/10-compass-bandana@2x.png",
+      "fullPath": "/brand-icons/10-compass-bandana-full.png"
+    }
+  ]
+}
