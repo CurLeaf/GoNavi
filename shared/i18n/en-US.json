@@ -3024,6 +3024,7 @@
   "app.update.backend.error.network_eof": "The GitHub connection was interrupted (EOF). Retry, or test the global proxy route.",
   "app.update.backend.error.network_failed": "Failed to reach GitHub: {{detail}}",
   "app.update.backend.error.online_update_unsupported": "Online update is not supported on this platform: {{platform}}",
+  "app.update.backend.error.other_instances_running": "Other GoNavi instances are still running. Close the other GoNavi windows and retry the update",
   "app.update.backend.error.package_download_forbidden": "Failed to download the update package: HTTP 403 Forbidden. Check proxy access to github.com / release-assets.githubusercontent.com, or set GONAVI_GITHUB_TOKEN and retry. {{detail}}",
   "app.update.backend.error.package_download_http_failed": "Failed to download update package: HTTP {{status}}",
   "app.update.backend.error.package_file_busy": "Update download failed because the file is busy: {{detail}}",

@@ -47,15 +47,16 @@ type cachedGitHubRelease struct {
 var updateReleaseCache sync.Map // apiURL -> cachedGitHubRelease
 
 var (
-	updateFetchLatestRelease   = fetchLatestRelease
-	updateFetchDevRelease      = fetchDevRelease
-	updateFetchReleaseSHA256   = fetchReleaseSHA256
-	updateLogCheckError        = func(err error) { logger.Error(err, "检查更新失败") }
-	updateResolveInstallTarget = resolveUpdateInstallTarget
-	updateResolveInstallMode   = resolveCurrentUpdateInstallMode
-	updateLaunchInstallScript  = launchUpdateScript
-	updateQuitSleep            = time.Sleep
-	updateExitProcess          = os.Exit
+	updateFetchLatestRelease        = fetchLatestRelease
+	updateFetchDevRelease           = fetchDevRelease
+	updateFetchReleaseSHA256        = fetchReleaseSHA256
+	updateLogCheckError             = func(err error) { logger.Error(err, "检查更新失败") }
+	updateResolveInstallTarget      = resolveUpdateInstallTarget
+	updateResolveInstallMode        = resolveCurrentUpdateInstallMode
+	updateLaunchInstallScript       = launchUpdateScript
+	updateFindOtherWindowsInstances = findOtherWindowsUpdateInstances
+	updateQuitSleep                 = time.Sleep
+	updateExitProcess               = os.Exit
 )
 
 type updateState struct {
@@ -129,6 +130,11 @@ type updatePathCandidate struct {
 	workspaceDir string
 	stagedDir    string
 	assetPath    string
+}
+
+type windowsUpdateProcess struct {
+	PID        uint32
+	Executable string
 }
 
 type githubRelease struct {
@@ -299,13 +305,40 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 		}
 	}
 
-	if stdRuntime.GOOS == "windows" && staged.InstallMode == updateInstallModePortable {
-		if err := ensureWindowsUpdateTargetWritable(updateResolveInstallTarget()); err != nil {
+	if stdRuntime.GOOS == "windows" {
+		installTarget := updateResolveInstallTarget()
+		if staged.InstallMode == updateInstallModePortable {
+			if err := ensureWindowsUpdateTargetWritable(installTarget); err != nil {
+				return connection.QueryResult{
+					Success: false,
+					Message: a.appText("app.update.backend.message.install_launch_failed", map[string]any{
+						"detail": a.localizedUpdateError(err),
+					}),
+				}
+			}
+		}
+
+		finalTarget := resolveWindowsUpdateFinalTargetPath(installTarget, staged.FilePath)
+		otherInstances, err := updateFindOtherWindowsInstances([]string{installTarget, finalTarget}, os.Getpid())
+		if err != nil {
 			return connection.QueryResult{
 				Success: false,
 				Message: a.appText("app.update.backend.message.install_launch_failed", map[string]any{
-					"detail": a.localizedUpdateError(err),
+					"detail": err.Error(),
 				}),
+			}
+		}
+		if len(otherInstances) > 0 {
+			runningPIDs := otherWindowsUpdateProcessIDs(otherInstances)
+			logger.Warnf("阻止 Windows 更新：检测到其他实例 current=%s target=%s pids=%v", installTarget, finalTarget, runningPIDs)
+			return connection.QueryResult{
+				Success: false,
+				Message: a.appText("app.update.backend.message.install_launch_failed", map[string]any{
+					"detail": a.appText("app.update.backend.error.other_instances_running", nil),
+				}),
+				Data: map[string]any{
+					"runningPids": runningPIDs,
+				},
 			}
 		}
 	}

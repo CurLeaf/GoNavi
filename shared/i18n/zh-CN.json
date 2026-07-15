@@ -3024,6 +3024,7 @@
   "app.update.backend.error.network_eof": "连接 GitHub 时连接被中断（EOF）。请重试，或测试全局代理出口。",
   "app.update.backend.error.network_failed": "连接 GitHub 失败：{{detail}}",
   "app.update.backend.error.online_update_unsupported": "当前平台暂不支持在线更新：{{platform}}",
+  "app.update.backend.error.other_instances_running": "检测到其他 GoNavi 实例仍在运行。请先关闭其他 GoNavi 窗口，再重试更新",
   "app.update.backend.error.package_download_forbidden": "下载更新包失败：HTTP 403（资源访问被拒绝）。可检查代理对 github.com / release-assets.githubusercontent.com 的访问，或配置 GONAVI_GITHUB_TOKEN 后重试。{{detail}}",
   "app.update.backend.error.package_download_http_failed": "下载更新包失败：HTTP {{status}}",
   "app.update.backend.error.package_file_busy": "更新下载失败，文件被占用：{{detail}}",

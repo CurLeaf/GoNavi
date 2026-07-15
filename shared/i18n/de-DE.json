@@ -3024,6 +3024,7 @@
   "app.update.backend.error.network_eof": "Die GitHub-Verbindung wurde unterbrochen (EOF). Versuchen Sie es erneut oder testen Sie die globale Proxy-Route.",
   "app.update.backend.error.network_failed": "GitHub konnte nicht erreicht werden: {{detail}}",
   "app.update.backend.error.online_update_unsupported": "Online-Update wird auf dieser Plattform nicht unterstützt: {{platform}}",
+  "app.update.backend.error.other_instances_running": "Andere GoNavi-Instanzen werden noch ausgeführt. Schließen Sie die anderen GoNavi-Fenster und versuchen Sie das Update erneut",
   "app.update.backend.error.package_download_forbidden": "Update-Paket-Download fehlgeschlagen: HTTP 403 Forbidden. Prüfen Sie den Proxy-Zugriff auf github.com / release-assets.githubusercontent.com oder setzen Sie GONAVI_GITHUB_TOKEN. {{detail}}",
   "app.update.backend.error.package_download_http_failed": "Updatepaket konnte nicht heruntergeladen werden: HTTP {{status}}",
   "app.update.backend.error.package_file_busy": "Updatedownload fehlgeschlagen, weil die Datei belegt ist: {{detail}}",

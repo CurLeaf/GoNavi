@@ -3024,6 +3024,7 @@
   "app.update.backend.error.network_eof": "GitHub への接続が途中で切断されました（EOF）。再試行するか、グローバルプロキシ経路をテストしてください。",
   "app.update.backend.error.network_failed": "GitHub に接続できません: {{detail}}",
   "app.update.backend.error.online_update_unsupported": "このプラットフォームではオンライン更新に対応していません: {{platform}}",
+  "app.update.backend.error.other_instances_running": "他の GoNavi インスタンスが実行中です。他の GoNavi ウィンドウを閉じてから、更新を再試行してください",
   "app.update.backend.error.package_download_forbidden": "更新パッケージのダウンロードに失敗しました: HTTP 403。github.com / release-assets.githubusercontent.com へのプロキシ経路を確認するか、GONAVI_GITHUB_TOKEN を設定して再試行してください。{{detail}}",
   "app.update.backend.error.package_download_http_failed": "更新パッケージのダウンロードに失敗しました: HTTP {{status}}",
   "app.update.backend.error.package_file_busy": "ファイルが使用中のため、更新のダウンロードに失敗しました: {{detail}}",

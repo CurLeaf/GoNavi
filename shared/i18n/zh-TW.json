@@ -3024,6 +3024,7 @@
   "app.update.backend.error.network_eof": "連線到 GitHub 時連線中斷（EOF）。請重試，或測試全域代理出口。",
   "app.update.backend.error.network_failed": "連線到 GitHub 失敗：{{detail}}",
   "app.update.backend.error.online_update_unsupported": "目前平台暫不支援線上更新：{{platform}}",
+  "app.update.backend.error.other_instances_running": "偵測到其他 GoNavi 執行個體仍在執行。請先關閉其他 GoNavi 視窗，再重試更新",
   "app.update.backend.error.package_download_forbidden": "下載更新套件失敗：HTTP 403（資源存取被拒絕）。可檢查代理對 github.com / release-assets.githubusercontent.com 的存取，或設定 GONAVI_GITHUB_TOKEN 後重試。{{detail}}",
   "app.update.backend.error.package_download_http_failed": "下載更新套件失敗：HTTP {{status}}",
   "app.update.backend.error.package_file_busy": "更新下載失敗，檔案被占用：{{detail}}",

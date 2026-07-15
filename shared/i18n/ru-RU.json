@@ -3024,6 +3024,7 @@
   "app.update.backend.error.network_eof": "Подключение к GitHub было прервано (EOF). Повторите попытку или проверьте маршрут глобального прокси.",
   "app.update.backend.error.network_failed": "Не удалось подключиться к GitHub: {{detail}}",
   "app.update.backend.error.online_update_unsupported": "Онлайн-обновление не поддерживается на этой платформе: {{platform}}",
+  "app.update.backend.error.other_instances_running": "Другие экземпляры GoNavi всё ещё запущены. Закройте остальные окна GoNavi и повторите обновление",
   "app.update.backend.error.package_download_forbidden": "Не удалось скачать пакет обновления: HTTP 403. Проверьте доступ прокси к github.com / release-assets.githubusercontent.com или задайте GONAVI_GITHUB_TOKEN. {{detail}}",
   "app.update.backend.error.package_download_http_failed": "Не удалось скачать пакет обновления: HTTP {{status}}",
   "app.update.backend.error.package_file_busy": "Не удалось скачать обновление, потому что файл занят: {{detail}}",
