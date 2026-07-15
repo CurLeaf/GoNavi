@@ -2,8 +2,9 @@
 
 package app
 
+import "errors"
+
 func setApplicationIconPNG(png []byte) error {
-	// Dock icon updates are only supported on macOS for now.
 	_ = png
-	return nil
+	return errors.New("application icon updates are only supported on macOS")
 }

@@ -16,9 +16,10 @@ export type BrandIconDefinition = {
   titleZh: string;
   titleEn: string;
   iconPath: string;
-  icon2xPath: string;
   fullPath: string;
-  /** Full-bleed macOS Dock tile (opaque, no nested card). */
+  /** Transparent complete lockup used by the About surface. */
+  aboutPath: string;
+  /** Opaque source tile composed into a rounded macOS Dock image at runtime. */
   dockPath: string;
 };
 
@@ -31,8 +32,8 @@ export const BRAND_ICONS: BrandIconDefinition[] = [
     titleZh: '抱库小狗',
     titleEn: 'Database hug',
     iconPath: '/brand-icons/01-database-hug.png',
-    icon2xPath: '/brand-icons/01-database-hug@2x.png',
     fullPath: '/brand-icons/01-database-hug-full.png',
+    aboutPath: '/brand-icons/01-database-hug-about.png',
     dockPath: '/brand-icons/01-database-hug-dock.png',
   },
   {
@@ -41,8 +42,8 @@ export const BRAND_ICONS: BrandIconDefinition[] = [
     titleZh: '搜库小狗',
     titleEn: 'Database search',
     iconPath: '/brand-icons/02-database-search.png',
-    icon2xPath: '/brand-icons/02-database-search@2x.png',
     fullPath: '/brand-icons/02-database-search-full.png',
+    aboutPath: '/brand-icons/02-database-search-about.png',
     dockPath: '/brand-icons/02-database-search-dock.png',
   },
   {
@@ -51,8 +52,8 @@ export const BRAND_ICONS: BrandIconDefinition[] = [
     titleZh: '头巾徽章',
     titleEn: 'Bandana badge',
     iconPath: '/brand-icons/03-bandana-badge.png',
-    icon2xPath: '/brand-icons/03-bandana-badge@2x.png',
     fullPath: '/brand-icons/03-bandana-badge-full.png',
+    aboutPath: '/brand-icons/03-bandana-badge-about.png',
     dockPath: '/brand-icons/03-bandana-badge-dock.png',
   },
   {
@@ -61,8 +62,8 @@ export const BRAND_ICONS: BrandIconDefinition[] = [
     titleZh: '放大镜眨眼',
     titleEn: 'Magnifier wink',
     iconPath: '/brand-icons/04-magnifier-wink.png',
-    icon2xPath: '/brand-icons/04-magnifier-wink@2x.png',
     fullPath: '/brand-icons/04-magnifier-wink-full.png',
+    aboutPath: '/brand-icons/04-magnifier-wink-about.png',
     dockPath: '/brand-icons/04-magnifier-wink-dock.png',
   },
   {
@@ -71,8 +72,8 @@ export const BRAND_ICONS: BrandIconDefinition[] = [
     titleZh: '窗口探头',
     titleEn: 'Window peek',
     iconPath: '/brand-icons/05-window-peek.png',
-    icon2xPath: '/brand-icons/05-window-peek@2x.png',
     fullPath: '/brand-icons/05-window-peek-full.png',
+    aboutPath: '/brand-icons/05-window-peek-about.png',
     dockPath: '/brand-icons/05-window-peek-dock.png',
   },
   {
@@ -81,8 +82,8 @@ export const BRAND_ICONS: BrandIconDefinition[] = [
     titleZh: '六边项圈',
     titleEn: 'Hex collar',
     iconPath: '/brand-icons/06-hex-collar.png',
-    icon2xPath: '/brand-icons/06-hex-collar@2x.png',
     fullPath: '/brand-icons/06-hex-collar-full.png',
+    aboutPath: '/brand-icons/06-hex-collar-about.png',
     dockPath: '/brand-icons/06-hex-collar-dock.png',
   },
   {
@@ -91,8 +92,8 @@ export const BRAND_ICONS: BrandIconDefinition[] = [
     titleZh: '关系图',
     titleEn: 'Graph sit',
     iconPath: '/brand-icons/07-graph-sit.png',
-    icon2xPath: '/brand-icons/07-graph-sit@2x.png',
     fullPath: '/brand-icons/07-graph-sit-full.png',
+    aboutPath: '/brand-icons/07-graph-sit-about.png',
     dockPath: '/brand-icons/07-graph-sit-dock.png',
   },
   {
@@ -101,8 +102,8 @@ export const BRAND_ICONS: BrandIconDefinition[] = [
     titleZh: '云朵横幅',
     titleEn: 'Cloud banner',
     iconPath: '/brand-icons/08-cloud-banner.png',
-    icon2xPath: '/brand-icons/08-cloud-banner@2x.png',
     fullPath: '/brand-icons/08-cloud-banner-full.png',
+    aboutPath: '/brand-icons/08-cloud-banner-about.png',
     dockPath: '/brand-icons/08-cloud-banner-dock.png',
   },
   {
@@ -111,8 +112,8 @@ export const BRAND_ICONS: BrandIconDefinition[] = [
     titleZh: '终端旁坐',
     titleEn: 'Terminal sit',
     iconPath: '/brand-icons/09-terminal-sit.png',
-    icon2xPath: '/brand-icons/09-terminal-sit@2x.png',
     fullPath: '/brand-icons/09-terminal-sit-full.png',
+    aboutPath: '/brand-icons/09-terminal-sit-about.png',
     dockPath: '/brand-icons/09-terminal-sit-dock.png',
   },
   {
@@ -121,8 +122,8 @@ export const BRAND_ICONS: BrandIconDefinition[] = [
     titleZh: '罗盘头巾',
     titleEn: 'Compass bandana',
     iconPath: '/brand-icons/10-compass-bandana.png',
-    icon2xPath: '/brand-icons/10-compass-bandana@2x.png',
     fullPath: '/brand-icons/10-compass-bandana-full.png',
+    aboutPath: '/brand-icons/10-compass-bandana-about.png',
     dockPath: '/brand-icons/10-compass-bandana-dock.png',
   },
 ];
@@ -141,16 +142,19 @@ export function resolveBrandIcon(id?: unknown): BrandIconDefinition {
   return BRAND_ICON_BY_ID.get(sanitizeBrandIconId(id)) || BRAND_ICONS[1];
 }
 
-export function resolveBrandIconSrc(id?: unknown, prefer2x = true): string {
-  const icon = resolveBrandIcon(id);
-  return prefer2x ? icon.icon2xPath : icon.iconPath;
+export function resolveBrandIconSrc(id?: unknown): string {
+  return resolveBrandIcon(id).iconPath;
 }
 
 export function resolveBrandFullSrc(id?: unknown): string {
   return resolveBrandIcon(id).fullPath;
 }
 
-/** Opaque full-bleed tile for macOS Dock (system applies squircle). */
+export function resolveBrandAboutSrc(id?: unknown): string {
+  return resolveBrandIcon(id).aboutPath;
+}
+
+/** Opaque source tile for the rounded macOS Dock composition. */
 export function resolveBrandDockSrc(id?: unknown): string {
   return resolveBrandIcon(id).dockPath;
 }

@@ -7,6 +7,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -41,6 +42,50 @@ type Database interface {
 	GetForeignKeys(dbName, tableName string) ([]connection.ForeignKeyDefinition, error)
 	// GetTriggers 返回指定表的触发器定义列表。
 	GetTriggers(dbName, tableName string) ([]connection.TriggerDefinition, error)
+}
+
+// TableRowCounter is an optional metadata interface for drivers that can
+// provide exact table row counts alongside a table list.
+type TableRowCounter interface {
+	GetTableRowCounts(dbName string, tables []string) (map[string]int64, error)
+}
+
+func getSQLiteTableRowCounts(query func(string) ([]map[string]interface{}, []string, error), tables []string) (map[string]int64, error) {
+	counts := make(map[string]int64, len(tables))
+	var firstErr error
+	for _, rawTableName := range tables {
+		tableName := strings.TrimSpace(rawTableName)
+		if tableName == "" {
+			continue
+		}
+		escapedTableName := strings.ReplaceAll(tableName, `"`, `""`)
+		data, _, err := query(fmt.Sprintf(`SELECT COUNT(*) AS table_rows FROM "%s"`, escapedTableName))
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("读取 SQLite 表 %q 行数失败: %w", tableName, err)
+			}
+			continue
+		}
+		if len(data) == 0 {
+			continue
+		}
+		rawCount, ok := data[0]["table_rows"]
+		if !ok {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("读取 SQLite 表 %q 行数失败: 查询结果缺少 table_rows", tableName)
+			}
+			continue
+		}
+		count, err := strconv.ParseInt(strings.TrimSpace(fmt.Sprint(rawCount)), 10, 64)
+		if err != nil || count < 0 {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("读取 SQLite 表 %q 行数失败: 无效行数 %v", tableName, rawCount)
+			}
+			continue
+		}
+		counts[tableName] = count
+	}
+	return counts, firstErr
 }
 
 // MultiResultQuerier 是可选接口，支持多结果集的驱动实现此接口。

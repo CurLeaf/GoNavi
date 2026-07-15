@@ -11,6 +11,7 @@ import {
   buildSchemasMetadataQuerySpecs,
   buildSequencesMetadataQuerySpecs,
   buildViewsMetadataQuerySpecs,
+  getSidebarTableName,
   loadFunctions,
   loadPackages,
   loadSequences,
@@ -21,6 +22,12 @@ const mockedDBQuery = vi.mocked(DBQuery);
 
 beforeEach(() => {
   mockedDBQuery.mockReset();
+});
+
+describe("sidebar table metadata", () => {
+  it("keeps the table name when SQLite table rows include an exact row count", () => {
+    expect(getSidebarTableName({ Rows: "2", Table: "orders" })).toBe("orders");
+  });
 });
 
 describe("buildSchemasMetadataQuerySpecs", () => {

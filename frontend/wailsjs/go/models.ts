@@ -5,11 +5,11 @@ export namespace ai {
 	    temperature?: number;
 	    maxTokens?: number;
 	    thinkingIntensity?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ChatSendOptions(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.model = source["model"];
@@ -25,11 +25,11 @@ export namespace ai {
 	    configPath?: string;
 	    command?: string;
 	    args?: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new MCPClientInstallResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.success = source["success"];

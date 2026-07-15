@@ -1947,6 +1947,7 @@ func (a *App) DBGetTables(config connection.ConnectionConfig, dbName string) con
 				logger.Error(retryErr, "DBGetTables 重建连接失败：%s", formatConnSummary(runConfig))
 				return connection.QueryResult{Success: false, Message: retryErr.Error()}
 			}
+			dbInst = retryInst
 			tables, err = retryInst.GetTables(dbName)
 		}
 	}
@@ -1955,9 +1956,22 @@ func (a *App) DBGetTables(config connection.ConnectionConfig, dbName string) con
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
+	tableRowCounts := map[string]int64{}
+	if rowCounter, ok := dbInst.(db.TableRowCounter); ok {
+		var countErr error
+		tableRowCounts, countErr = rowCounter.GetTableRowCounts(dbName, tables)
+		if countErr != nil {
+			logger.Warnf("DBGetTables 获取表行数失败（保留已获取的表列表）：%s err=%v", formatConnSummary(runConfig), countErr)
+		}
+	}
+
 	resData := make([]map[string]string, 0, len(tables))
 	for _, name := range tables {
-		resData = append(resData, map[string]string{"Table": name})
+		item := map[string]string{"Table": name}
+		if rowCount, ok := tableRowCounts[name]; ok {
+			item["Rows"] = strconv.FormatInt(rowCount, 10)
+		}
+		resData = append(resData, item)
 	}
 
 	return connection.QueryResult{Success: true, Data: resData}

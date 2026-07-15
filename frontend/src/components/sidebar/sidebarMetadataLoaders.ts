@@ -231,6 +231,17 @@ const getMySQLShowTablesName = (row: Record<string, any>): string => {
   return "";
 };
 
+const getSidebarTableName = (row: Record<string, any>): string => {
+  return getCaseInsensitiveValue(row, [
+    "Table",
+    "table",
+    "table_name",
+    "TABLE_NAME",
+    "Name",
+    "name",
+  ]) || getMySQLShowTablesName(row) || getFirstRowValue(row);
+};
+
 const parseMetadataRowCount = (
   row: Record<string, any>,
 ): number | undefined => {
@@ -1301,6 +1312,7 @@ export {
   getFirstRowValue,
   getMetadataDialect,
   getMySQLShowTablesName,
+  getSidebarTableName,
   getSidebarTableDisplayName,
   isSphinxConnection,
   loadDatabaseEvents,

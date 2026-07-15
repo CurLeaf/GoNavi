@@ -976,6 +976,33 @@ describe('QueryEditor external SQL save', () => {
     expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ SPID: 52, STATUS: 'RUNNABLE' });
   });
 
+  it('renders SQLite select results even when the result panel starts hidden', async () => {
+    storeState.connections[0].config.type = 'sqlite';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['id', 'name'], rows: [{ id: 1, name: 'SQLite row' }] }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'main', query: "SELECT 1 AS id, 'SQLite row' AS name" })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(textContent(renderer!.toJSON())).toContain('结果 1');
+    expect(dataGridState.latestProps?.columnNames).toEqual(['id', 'name']);
+    expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ id: 1, name: 'SQLite row' });
+    renderer.unmount();
+  });
+
   it('renders standalone message result for sqlserver statistics statements', async () => {
     storeState.connections[0].config.type = 'sqlserver';
     storeState.connections[0].config.database = 'master';

@@ -30,11 +30,12 @@ import LanguageSettingsPanel from './components/LanguageSettingsPanel';
 import WebAuthSettingsPanel from './components/WebAuthSettingsPanel';
 import BrandIconPicker from './components/BrandIconPicker';
 import {
+  resolveBrandAboutSrc,
   resolveBrandDockSrc,
   resolveBrandIconSrc,
   type BrandIconId,
 } from './brand/brandIcons';
-import { composeMacOSDockIconBase64 } from './brand/macDockIcon';
+import { composeMacOSDockIconBase64, shouldSyncMacOSDockIcon } from './brand/macDockIcon';
 import CustomThemeManager from './components/settings/CustomThemeManager';
 import CustomThemeStyleHost, {
   type CustomThemeAntTokenSnapshot,
@@ -802,7 +803,7 @@ function App() {
       void safeWindowRuntimeCall(() => WindowSetLightTheme(), undefined);
   }, [effectiveThemePreference, resolvedThemeMode, setTheme, themeMode]);
 
-  // Apply selected brand mascot to favicon + macOS Dock icon.
+  // Apply selected brand mascot to favicon + native macOS Dock icon.
   useEffect(() => {
       if (typeof document === 'undefined') return;
       const href = resolveBrandIconSrc(brandIconId);
@@ -819,28 +820,30 @@ function App() {
       let cancelled = false;
       const applyDockIcon = async () => {
           try {
-              if (typeof (window as any).go?.app?.App?.SetApplicationBrandIcon !== 'function'
-                  && typeof SetApplicationBrandIcon !== 'function') {
+              const environment = await Environment();
+              if (cancelled || !shouldSyncMacOSDockIcon(environment)) {
                   return;
               }
-              // Use pre-baked full-bleed dock tiles (soft brand-blue fill, mascot large).
               const dockHref = resolveBrandDockSrc(brandIconId);
               const b64 = await composeMacOSDockIconBase64(dockHref);
               if (cancelled) return;
-              if (typeof SetApplicationBrandIcon === 'function') {
-                  await SetApplicationBrandIcon(b64);
-              } else {
-                  await (window as any).go.app.App.SetApplicationBrandIcon(b64);
+              const result = await SetApplicationBrandIcon(b64);
+              if (!result.success && !cancelled) {
+                  console.warn('Failed to update the macOS Dock icon:', result.message);
+                  message.warning(t('app.settings.entry.brand_icon.dock_sync_failed'));
               }
-          } catch {
-              // Dock icon update is best-effort (desktop macOS only).
+          } catch (error) {
+              if (!cancelled) {
+                  console.warn('Failed to update the macOS Dock icon:', error);
+                  message.warning(t('app.settings.entry.brand_icon.dock_sync_failed'));
+              }
           }
       };
       void applyDockIcon();
       return () => {
           cancelled = true;
       };
-  }, [brandIconId]);
+  }, [brandIconId, t]);
 
   const selectPresetTheme = useCallback((preference: ThemePreference) => {
       // Custom CSS is an independent skin layer. Selecting a built-in preset
@@ -4759,7 +4762,7 @@ function App() {
               >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 18, minWidth: 0 }}>
                       <img
-                        src={resolveBrandIconSrc(brandIconId)}
+                        src={resolveBrandAboutSrc(brandIconId)}
                         alt="GoNavi"
                         width={108}
                         height={108}
@@ -4767,10 +4770,9 @@ function App() {
                         style={{
                             width: 108,
                             height: 108,
-                            borderRadius: 18,
                             objectFit: 'contain',
-                            background: '#fff',
-                            boxShadow: darkMode ? '0 12px 26px rgba(0,0,0,0.26)' : '0 10px 22px rgba(16,24,40,0.12)',
+                            background: 'transparent',
+                            boxShadow: 'none',
                             flexShrink: 0,
                         }}
                       />

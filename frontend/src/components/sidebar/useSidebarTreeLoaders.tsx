@@ -29,6 +29,7 @@ import {
   getCaseInsensitiveValue,
   getMetadataDialect,
   getMySQLShowTablesName,
+  getSidebarTableName,
   getSidebarTableDisplayName,
   isSphinxConnection,
   loadDatabaseEvents,
@@ -540,6 +541,13 @@ export const useSidebarTreeLoaders = ({
                         });
                     });
                 };
+                tableRows.forEach((row: Record<string, any>) => {
+                    const tableName = getSidebarTableName(row);
+                    const rowCount = parseMetadataRowCount(row);
+                    if (tableName && rowCount !== undefined) {
+                        mergeTableMetadata(tableName, { rowCount });
+                    }
+                });
                 if (tableStatsResult?.success && Array.isArray(tableStatsResult.data)) {
                     tableStatsResult.data.forEach((row: Record<string, any>) => {
                         const rawTableName = String(
@@ -596,7 +604,7 @@ export const useSidebarTreeLoaders = ({
                     });
                 }
 	            const tableEntries = tableRows.map((row: any) => {
-	                const tableName = Object.values(row)[0] as string;
+	                const tableName = getSidebarTableName(row as Record<string, any>);
 	                const parsed = splitQualifiedName(tableName);
                     const metadataKeys = buildTableMetadataKeys(tableName);
                     const resolvedMetadata = metadataKeys
@@ -618,7 +626,7 @@ export const useSidebarTreeLoaders = ({
 	                    tableName,
 	                    schemaName: mappedSchemaName,
 	                    displayName: getSidebarTableDisplayName(conn, tableName),
-                        rowCount: resolvedMetadata?.rowCount,
+                        rowCount: parseMetadataRowCount(row) ?? resolvedMetadata?.rowCount,
                         tableSize: resolvedMetadata?.tableSize,
                         createdAt: resolvedMetadata?.createdAt,
                         updatedAt: resolvedMetadata?.updatedAt,
