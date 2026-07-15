@@ -2616,18 +2616,23 @@ describe('DataGrid layout', () => {
     expect(source).toContain('applyVirtualHorizontalOffset(tableContainer, nextLeft, { forceInternalScroll: true });');
     expect(source).toContain('}, [horizontalScrollVisible, scheduleVirtualHorizontalAlignment, tableRenderData, tableScrollX, virtualEditingCell]);');
     expect(source).toContain('tableInstance.scrollTo({ left: clampedOffset, top: holderEl.scrollTop });');
-    expect(source).toContain('deferPostScrollVisualReassert?: boolean');
-    expect(source).toContain('if (!options?.deferPostScrollVisualReassert) {');
     expect(source).toContain('const requestedExternalScrollLeft = pendingExternalScrollLeftRef.current ?? latestExternalScroll.scrollLeft;');
-    expect(source).toContain('deferPostScrollVisualReassert: true');
     expect(source).toContain('if (isExternalScrollbarInteractionActive()) {');
-    expect(source).toContain('syncVirtualHorizontalVisualOffset(tableContainer, resolvedScrollLeft);');
+    expect(source).toContain('const visual = syncVirtualHorizontalVisualOffset(tableContainer, requestedExternalScrollLeft);');
+    expect(source).toContain('lastTableScrollLeftRef.current = visual.clampedOffset;');
+    expect(source).toContain('applyVirtualHorizontalOffset(tableContainer, resolvedScrollLeft, { forceInternalScroll: true });');
+    expect(source).not.toContain('deferPostScrollVisualReassert');
     expect(source).not.toContain('const synced = syncVirtualHorizontalVisualOffset(tableContainer, externalScroll.scrollLeft);');
     expect(source).toContain('const handleExternalHorizontalScrollPointerDown = useCallback');
     expect(source).toContain('const handleExternalHorizontalScrollPointerRelease = useCallback');
     expect(source).toContain('const finishExternalScrollbarDrag = useCallback');
     expect(source).toContain('const handleExternalHorizontalScrollLostPointerCapture = useCallback');
-    expect(source).toContain('externalScrollbarDraggingRef.current\n      || Date.now() < externalScrollInteractionUntilRef.current');
+    const interactionActiveSource = source.slice(
+      source.indexOf('const isExternalScrollbarInteractionActive = useCallback'),
+      source.indexOf('const clearExternalScrollbarInteraction = useCallback'),
+    );
+    expect(interactionActiveSource).toContain('externalScrollbarDraggingRef.current');
+    expect(interactionActiveSource).toContain('Date.now() < externalScrollInteractionUntilRef.current');
     const finishExternalScrollbarDragSource = source.slice(
       source.indexOf('const finishExternalScrollbarDrag = useCallback'),
       source.indexOf('const handleExternalHorizontalScrollPointerRelease = useCallback'),
