@@ -63,9 +63,12 @@ export const filterSidebarTreeByHiddenObjectGroups = <T extends SidebarObjectVis
     if (objectGroupKey && hidden.has(objectGroupKey)) return [];
 
     if (!node.children || node.children.length === 0) return [node];
-    const children = filterSidebarTreeByHiddenObjectGroups(node.children as T[], hiddenObjectGroups);
+    const originalChildren = node.children;
+    const children = filterSidebarTreeByHiddenObjectGroups(originalChildren as T[], hiddenObjectGroups);
     if (isSchemaGroupNode(node) && children.length === 0) return [];
-    if (children.length === node.children.length) return [node];
+    const childrenUnchanged = children.length === originalChildren.length
+      && children.every((child, index) => child === originalChildren[index]);
+    if (childrenUnchanged) return [node];
 
     return [{
       ...node,
