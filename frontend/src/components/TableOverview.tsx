@@ -210,10 +210,10 @@ ORDER BY s.name, t.name`;
         case 'dm':
         case 'oracle': {
             const owner = (schemaName || dbName).toUpperCase();
-            return `SELECT table_name, comments AS table_comment, num_rows AS table_rows, 0 AS data_length, 0 AS index_length FROM all_tab_comments JOIN all_tables USING (table_name, owner) WHERE owner = '${escapeLiteral(owner)}' ORDER BY table_name`;
+            return `SELECT table_name, comments AS table_comment, num_rows AS table_rows, NULL AS data_length, NULL AS index_length FROM all_tab_comments JOIN all_tables USING (table_name, owner) WHERE owner = '${escapeLiteral(owner)}' ORDER BY table_name`;
         }
         default:
-            return `SELECT table_name, '' AS table_comment, 0 AS table_rows, 0 AS data_length, 0 AS index_length FROM information_schema.tables WHERE table_schema = '${escapeLiteral(dbName)}' AND table_type = 'BASE TABLE' ORDER BY table_name`;
+            return `SELECT table_name, '' AS table_comment, 0 AS table_rows, NULL AS data_length, NULL AS index_length FROM information_schema.tables WHERE table_schema = '${escapeLiteral(dbName)}' AND table_type = 'BASE TABLE' ORDER BY table_name`;
     }
 };
 

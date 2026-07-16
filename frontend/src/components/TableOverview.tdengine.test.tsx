@@ -242,6 +242,61 @@ describe('TableOverview metadata compatibility', () => {
     expect(renderedText).toContain('100%');
   });
 
+  it.each([
+    { type: 'oracle', dbName: 'APP' },
+    { type: 'trino', dbName: 'catalog' },
+  ])('keeps unsupported $type storage metrics unknown', async ({ type, dbName }) => {
+    storeState.connections = [
+      {
+        id: 'conn-1',
+        config: {
+          type,
+          host: '127.0.0.1',
+          port: 0,
+          user: 'tester',
+          password: 'secret',
+          database: dbName,
+          useSSH: false,
+          ssh: { host: '', port: 22, user: '', password: '', keyPath: '' },
+        },
+      },
+    ];
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [
+        {
+          table_name: 'orders',
+          table_rows: '8',
+          data_length: null,
+          index_length: null,
+        },
+      ],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<TableOverview tab={{
+        id: 'tab-1',
+        title: `表概览 - ${dbName}`,
+        type: 'table-overview',
+        connectionId: 'conn-1',
+        dbName,
+      } as any} />);
+    });
+    await flushPromises();
+
+    expect(backendApp.DBGetTables).not.toHaveBeenCalled();
+    expect(backendApp.DBQuery).toHaveBeenCalledOnce();
+    const metadataSQL = String(backendApp.DBQuery.mock.calls[0]?.[2] || '');
+    expect(metadataSQL).toMatch(/NULL AS data_length/i);
+    expect(metadataSQL).toMatch(/NULL AS index_length/i);
+
+    const renderedText = collectText(renderer!.toJSON());
+    expect(renderedText).toContain('orders');
+    expect(renderedText).toContain('—');
+    expect(renderedText).not.toContain('0 B');
+  });
+
   it('uses the table default open behavior for v2 card double-clicks', async () => {
     storeState.appearance = { uiVersion: 'v2', tableDoubleClickAction: 'open-design' };
     let renderer: ReactTestRenderer;
