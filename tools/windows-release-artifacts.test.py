@@ -72,8 +72,17 @@ class WindowsReleaseArtifactsTest(unittest.TestCase):
         self.assertIsNotNone(package.find("wix:MediaTemplate", ns))
         self.assertIsNotNone(package.find("wix:Property[@Id='ARPPRODUCTICON']", ns))
         self.assertIsNotNone(package.find("wix:SetProperty[@Id='ARPINSTALLLOCATION']", ns))
-        self.assertIsNotNone(package.find(".//wix:Shortcut[@Id='StartMenuShortcut']", ns))
-        self.assertIsNotNone(package.find(".//wix:Shortcut[@Id='DesktopShortcut']", ns))
+        executable = package.find(".//wix:File[@Id='GoNaviExe']", ns)
+        self.assertIsNotNone(executable)
+        assert executable is not None
+        start_menu_shortcut = executable.find("wix:Shortcut[@Id='StartMenuShortcut']", ns)
+        self.assertIsNotNone(start_menu_shortcut)
+        assert start_menu_shortcut is not None
+        self.assertNotIn("Icon", start_menu_shortcut.attrib)
+        desktop_shortcut = executable.find("wix:Shortcut[@Id='DesktopShortcut']", ns)
+        self.assertIsNotNone(desktop_shortcut)
+        assert desktop_shortcut is not None
+        self.assertNotIn("Icon", desktop_shortcut.attrib)
         marker = package.find(".//wix:RegistryValue[@Name='InstallType']", ns)
         self.assertIsNotNone(marker)
         assert marker is not None
