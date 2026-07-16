@@ -138,7 +138,7 @@ const collectText = (node: any): string => {
   return collectText(node.children || []);
 };
 
-describe('TableOverview tdengine compatibility', () => {
+describe('TableOverview metadata compatibility', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     storeState.appearance = { uiVersion: 'legacy', tableDoubleClickAction: 'open-data' };
@@ -189,6 +189,57 @@ describe('TableOverview tdengine compatibility', () => {
     const renderedText = collectText(renderer!.toJSON());
     expect(renderedText).toContain('meters');
     expect(renderedText).toContain('d001');
+  });
+
+  it('loads sqlite overview rows through DBGetTables instead of information_schema SQL', async () => {
+    storeState.connections = [
+      {
+        id: 'conn-1',
+        config: {
+          type: 'sqlite',
+          host: '',
+          port: 0,
+          user: '',
+          password: '',
+          database: 'E:\\data\\app.db',
+          useSSH: false,
+          ssh: { host: '', port: 22, user: '', password: '', keyPath: '' },
+        },
+      },
+    ];
+    backendApp.DBGetTables.mockResolvedValue({
+      success: true,
+      data: [
+        { Table: 'users', Rows: '12', Data_length: '4096', Index_length: '8192' },
+        { Table: 'orders', Rows: '34', Data_length: '2048', Index_length: '0' },
+      ],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<TableOverview tab={{
+        id: 'tab-1',
+        title: '表概览 - main',
+        type: 'table-overview',
+        connectionId: 'conn-1',
+        dbName: 'main',
+      } as any} />);
+    });
+    await flushPromises();
+
+    expect(backendApp.DBGetTables).toHaveBeenCalledWith(expect.any(Object), 'main');
+    expect(backendApp.DBQuery).not.toHaveBeenCalled();
+    expect(messageApi.error).not.toHaveBeenCalled();
+    const renderedText = collectText(renderer!.toJSON());
+    expect(renderedText).toContain('users');
+    expect(renderedText).toContain('12');
+    expect(renderedText).toContain('orders');
+    expect(renderedText).toContain('34');
+    expect(renderedText).toContain('4.0 KB');
+    expect(renderedText).toContain('8.0 KB');
+    expect(renderedText).toContain('2.0 KB');
+    expect(renderedText).toContain('0 B');
+    expect(renderedText).toContain('100%');
   });
 
   it('uses the table default open behavior for v2 card double-clicks', async () => {

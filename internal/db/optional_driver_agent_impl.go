@@ -861,6 +861,20 @@ func (d *OptionalDriverAgentDB) GetTables(dbName string) ([]string, error) {
 	return tables, nil
 }
 
+func (d *OptionalDriverAgentDB) GetTableRowCounts(_ string, tables []string) (map[string]int64, error) {
+	if normalizeRuntimeDriverType(d.driverType) != "sqlite" {
+		return map[string]int64{}, nil
+	}
+	return getSQLiteTableRowCounts(d.Query, tables)
+}
+
+func (d *OptionalDriverAgentDB) GetTableStorageStats(_ string, tables []string) (map[string]TableStorageStats, error) {
+	if normalizeRuntimeDriverType(d.driverType) != "sqlite" {
+		return map[string]TableStorageStats{}, nil
+	}
+	return getSQLiteTableStorageStats(d.Query, tables)
+}
+
 func (d *OptionalDriverAgentDB) GetCreateStatement(dbName, tableName string) (string, error) {
 	client, err := d.requireClient()
 	if err != nil {

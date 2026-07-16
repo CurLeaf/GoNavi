@@ -94,7 +94,8 @@ const resolveOverviewContextMenuPosition = (
 };
 
 const formatSize = (bytes: number): string => {
-    if (!bytes || bytes <= 0) return '—';
+    if (!Number.isFinite(bytes) || bytes < 0) return '—';
+    if (bytes === 0) return '0 B';
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -102,7 +103,7 @@ const formatSize = (bytes: number): string => {
 };
 
 const formatRows = (count: number): string => {
-    if (count === undefined || count === null || count < 0) return '—';
+    if (count === undefined || count === null || !Number.isFinite(count) || count < 0) return '—';
     if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
     if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
     return String(count);
@@ -227,19 +228,19 @@ const parseTableStats = (dialect: string, rows: Record<string, any>[]): TableSta
             return undefined;
         };
         const strVal = (keys: string[]) => String(get(keys) ?? '').trim();
-        const numVal = (keys: string[]) => {
+        const numVal = (keys: string[], missingValue = 0) => {
             const v = get(keys);
-            if (v === null || v === undefined || v === '') return 0;
+            if (v === null || v === undefined || v === '') return missingValue;
             const n = Number(v);
-            return isNaN(n) ? 0 : Math.max(0, Math.round(n));
+            return isNaN(n) ? missingValue : Math.max(0, Math.round(n));
         };
 
         return {
             name: strVal(['Name', 'name', 'table_name', 'tablename', 'TABLE_NAME', 'Table', 'table', 'Device', 'device']),
             comment: strVal(['Comment', 'table_comment', 'TABLE_COMMENT', 'comments']),
-            rows: numVal(['Rows', 'table_rows', 'TABLE_ROWS', 'num_rows', 'reltuples', 'total_rows']),
-            dataSize: numVal(['Data_length', 'data_length', 'DATA_LENGTH', 'total_bytes']),
-            indexSize: numVal(['Index_length', 'index_length', 'INDEX_LENGTH']),
+            rows: numVal(['Rows', 'table_rows', 'TABLE_ROWS', 'num_rows', 'reltuples', 'total_rows'], -1),
+            dataSize: numVal(['Data_length', 'data_length', 'DATA_LENGTH', 'total_bytes'], -1),
+            indexSize: numVal(['Index_length', 'index_length', 'INDEX_LENGTH'], -1),
             engine: strVal(['Engine', 'engine']),
             createTime: strVal(['Create_time', 'create_time']),
             updateTime: strVal(['Update_time', 'update_time']),
@@ -296,7 +297,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 useSSH: connection.config.useSSH || false,
                 ssh: connection.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' },
             };
-            if (metadataDialect === 'tdengine') {
+            if (metadataDialect === 'tdengine' || metadataDialect === 'sqlite' || metadataDialect === 'sqlite3') {
                 const res = await DBGetTables(buildRpcConnectionConfig(config) as any, tab.dbName || '');
                 if (res.success && Array.isArray(res.data)) {
                     setTables(parseTableStats(metadataDialect, res.data));
@@ -815,11 +816,21 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         { key: 'dataSize', label: getSortMenuLabel('dataSize', 'table_overview.sort.size'), onClick: () => toggleSort('dataSize') },
     ];
 
-    const totalRows = useMemo(() => tables.reduce((s, t) => s + t.rows, 0), [tables]);
-    const totalSize = useMemo(() => tables.reduce((s, t) => s + t.dataSize + t.indexSize, 0), [tables]);
+    const hasKnownTableSize = useCallback((table: TableStatRow) => table.dataSize >= 0 || table.indexSize >= 0, []);
+    const getCombinedTableSize = useCallback((table: TableStatRow) => (
+        Math.max(0, table.dataSize) + Math.max(0, table.indexSize)
+    ), []);
+    const totalRows = useMemo(() => {
+        const knownRows = tables.filter(table => table.rows >= 0);
+        return knownRows.length > 0 ? knownRows.reduce((sum, table) => sum + table.rows, 0) : -1;
+    }, [tables]);
+    const totalSize = useMemo(() => {
+        const knownSizes = tables.filter(hasKnownTableSize);
+        return knownSizes.length > 0 ? knownSizes.reduce((sum, table) => sum + getCombinedTableSize(table), 0) : -1;
+    }, [getCombinedTableSize, hasKnownTableSize, tables]);
     const maxCombinedSize = useMemo(() => sortedFiltered.reduce((max, table) => {
-        return Math.max(max, table.dataSize + table.indexSize);
-    }, 0), [sortedFiltered]);
+        return Math.max(max, getCombinedTableSize(table));
+    }, 0), [getCombinedTableSize, sortedFiltered]);
     const allowTruncate = supportsTableTruncateAction(connection?.config?.type || '', connection?.config?.driver);
 
     const renderToolbarSummary = () => {
@@ -1104,7 +1115,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             </div>
             {isV2Ui && (
                 <div className="gn-v2-table-size-bar">
-                    <span style={{ width: `${Math.min(100, Math.max(4, maxCombinedSize > 0 ? Math.round(((table.dataSize + table.indexSize) / maxCombinedSize) * 100) : 4))}%` }} />
+                    <span style={{ width: `${Math.min(100, Math.max(4, maxCombinedSize > 0 && hasKnownTableSize(table) ? Math.round((getCombinedTableSize(table) / maxCombinedSize) * 100) : 4))}%` }} />
                 </div>
             )}
         </div>
@@ -1126,9 +1137,9 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     };
 
     const renderListTable = (table: TableStatRow) => {
-        const combinedSize = table.dataSize + table.indexSize;
-        const sizeRatio = maxCombinedSize > 0 ? combinedSize / maxCombinedSize : 0;
-        const fillWidth = maxCombinedSize > 0 ? `${Math.max(10, Math.round(sizeRatio * 100))}%` : '0%';
+        const combinedSize = getCombinedTableSize(table);
+        const sizeRatio = maxCombinedSize > 0 && hasKnownTableSize(table) ? combinedSize / maxCombinedSize : 0;
+        const fillWidth = maxCombinedSize > 0 && hasKnownTableSize(table) ? `${Math.max(10, Math.round(sizeRatio * 100))}%` : '0%';
         const fillColor = darkMode ? 'rgba(22,119,255,0.18)' : 'rgba(22,119,255,0.12)';
         const rowSecondary = table.comment || (table.engine
             ? t('table_overview.row.engine_table', { engine: table.engine })
@@ -1221,7 +1232,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                             <div style={{ minWidth: 96, textAlign: 'right' }}>
                                 <div style={{ color: textMuted }}>{t('table_overview.metric.relative_size')}</div>
                                 <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                                    {maxCombinedSize > 0 ? `${Math.round(sizeRatio * 100)}%` : '—'}
+                                    {maxCombinedSize > 0 && hasKnownTableSize(table) ? `${Math.round(sizeRatio * 100)}%` : '—'}
                                 </div>
                             </div>
                         </div>

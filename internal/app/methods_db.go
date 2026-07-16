@@ -1964,12 +1964,24 @@ func (a *App) DBGetTables(config connection.ConnectionConfig, dbName string) con
 			logger.Warnf("DBGetTables 获取表行数失败（保留已获取的表列表）：%s err=%v", formatConnSummary(runConfig), countErr)
 		}
 	}
+	tableStorageStats := map[string]db.TableStorageStats{}
+	if storageProvider, ok := dbInst.(db.TableStorageStatsProvider); ok {
+		var storageErr error
+		tableStorageStats, storageErr = storageProvider.GetTableStorageStats(dbName, tables)
+		if storageErr != nil {
+			logger.Warnf("DBGetTables 获取表存储大小失败（保留已获取的表列表）：%s err=%v", formatConnSummary(runConfig), storageErr)
+		}
+	}
 
 	resData := make([]map[string]string, 0, len(tables))
 	for _, name := range tables {
 		item := map[string]string{"Table": name}
 		if rowCount, ok := tableRowCounts[name]; ok {
 			item["Rows"] = strconv.FormatInt(rowCount, 10)
+		}
+		if storageStats, ok := tableStorageStats[name]; ok {
+			item["Data_length"] = strconv.FormatInt(storageStats.DataLength, 10)
+			item["Index_length"] = strconv.FormatInt(storageStats.IndexLength, 10)
 		}
 		resData = append(resData, item)
 	}
