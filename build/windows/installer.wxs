@@ -31,17 +31,17 @@
             Source="$(var.SourceExe)"
             Name="GoNavi.exe"
             KeyPath="yes">
+        <!-- Keep shortcut icons bound to the stable executable path. Referencing the MSI Icon table
+             can leave Windows shell caches pointing at the removed product cache after a major upgrade. -->
         <Shortcut Id="StartMenuShortcut"
                   Directory="ProgramMenuFolder"
                   Name="$(var.ProductName)"
                   WorkingDirectory="INSTALLFOLDER"
-                  Icon="GoNaviIcon"
                   Advertise="no" />
         <Shortcut Id="DesktopShortcut"
                   Directory="DesktopFolder"
                   Name="$(var.ProductName)"
                   WorkingDirectory="INSTALLFOLDER"
-                  Icon="GoNaviIcon"
                   Advertise="no" />
       </File>
       <File Id="GoNaviMsiInstallMarker"
