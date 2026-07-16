@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
@@ -104,18 +105,99 @@ func TestElasticsearchPing(t *testing.T) {
 	})
 }
 
+func TestElasticsearchConnectValidatesIndexListing(t *testing.T) {
+	var aliasListingRequested atomic.Bool
+	server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodHead && r.URL.Path == "/":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/*/_alias":
+			aliasListingRequested.Store(true)
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	host, port, ok := parseHostPortWithDefault(strings.TrimPrefix(server.URL, "http://"), defaultEsPort)
+	if !ok {
+		t.Fatalf("无法解析测试服务器地址：%s", server.URL)
+	}
+
+	db := &ElasticsearchDB{}
+	err := db.Connect(connection.ConnectionConfig{
+		Type:    "elasticsearch",
+		Host:    host,
+		Port:    port,
+		Timeout: 2,
+	})
+	if err == nil {
+		t.Fatal("Connect 应在索引枚举被拒绝时失败")
+	}
+	if !aliasListingRequested.Load() {
+		t.Fatal("Connect 应使用轻量 alias 端点验证索引枚举能力")
+	}
+	if !strings.Contains(err.Error(), "获取索引列表失败") || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("Connect 应返回索引枚举错误，实际：%v", err)
+	}
+}
+
+func TestElasticsearchConnectAllowsEmptyCluster(t *testing.T) {
+	var aliasListingRequested atomic.Bool
+	server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodHead && r.URL.Path == "/":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/*/_alias":
+			aliasListingRequested.Store(true)
+			query := r.URL.Query()
+			if query.Get("allow_no_indices") != "true" || query.Get("ignore_unavailable") != "true" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, map[string]interface{}{})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	host, port, ok := parseHostPortWithDefault(strings.TrimPrefix(server.URL, "http://"), defaultEsPort)
+	if !ok {
+		t.Fatalf("无法解析测试服务器地址：%s", server.URL)
+	}
+
+	db := &ElasticsearchDB{}
+	if err := db.Connect(connection.ConnectionConfig{
+		Type:    "elasticsearch",
+		Host:    host,
+		Port:    port,
+		Timeout: 2,
+	}); err != nil {
+		t.Fatalf("Connect 应允许没有索引的空集群：%v", err)
+	}
+	if !aliasListingRequested.Load() {
+		t.Fatal("Connect 应验证空集群的索引枚举能力")
+	}
+}
+
 // TestElasticsearchGetDatabases 测试获取索引列表。
 func TestElasticsearchGetDatabases(t *testing.T) {
-	t.Run("正常获取全部索引", func(t *testing.T) {
+	t.Run("使用轻量别名端点获取全部索引", func(t *testing.T) {
+		var fullIndexDefinitionsRequested atomic.Bool
 		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodGet && (r.URL.Path == "/" || r.URL.Path == "/*") && !strings.Contains(r.URL.Path, "_") {
+			if r.Method == http.MethodGet && r.URL.Path == "/*/_alias" {
 				writeJSON(w, map[string]interface{}{
-					"logs-2024": map[string]interface{}{},
-					"users":     map[string]interface{}{},
-					".security": map[string]interface{}{},
-					".kibana_1": map[string]interface{}{},
-					"products":  map[string]interface{}{},
+					"logs-2024": map[string]interface{}{"aliases": map[string]interface{}{}},
+					"users":     map[string]interface{}{"aliases": map[string]interface{}{}},
+					".security": map[string]interface{}{"aliases": map[string]interface{}{}},
+					".kibana_1": map[string]interface{}{"aliases": map[string]interface{}{}},
+					"products":  map[string]interface{}{"aliases": map[string]interface{}{}},
 				})
+				return
+			}
+			if r.Method == http.MethodGet && r.URL.Path == "/*" {
+				fullIndexDefinitionsRequested.Store(true)
+				w.WriteHeader(http.StatusForbidden)
 				return
 			}
 			w.WriteHeader(http.StatusNotFound)
@@ -136,6 +218,9 @@ func TestElasticsearchGetDatabases(t *testing.T) {
 			if databases[i] != name {
 				t.Fatalf("索引 [%d] 期望 %q，实际 %q", i, name, databases[i])
 			}
+		}
+		if fullIndexDefinitionsRequested.Load() {
+			t.Fatal("GetDatabases 不应请求包含 settings/mappings 的完整索引定义")
 		}
 	})
 
@@ -998,13 +1083,9 @@ func TestESMockIntegration(t *testing.T) {
 		case r.Method == http.MethodHead && path == "/":
 			w.WriteHeader(http.StatusOK)
 
-		// Indices.Get("*") — 返回所有索引
-		case r.Method == http.MethodGet && (path == "/" || path == "/*") && !strings.Contains(path, "_"):
-			writeJSON(w, map[string]interface{}{
-				"products":  map[string]interface{}{},
-				"orders":    map[string]interface{}{},
-				".internal": map[string]interface{}{},
-			})
+		// 完整索引定义响应可能过大，列表加载不应请求该端点。
+		case r.Method == http.MethodGet && path == "/*":
+			w.WriteHeader(http.StatusForbidden)
 
 		// Indices.GetAlias — 返回别名映射
 		case strings.Contains(path, "/_alias") && r.Method == http.MethodGet:
@@ -1014,6 +1095,8 @@ func TestESMockIntegration(t *testing.T) {
 						"products-alias": map[string]interface{}{},
 					},
 				},
+				"orders":    map[string]interface{}{"aliases": map[string]interface{}{}},
+				".internal": map[string]interface{}{"aliases": map[string]interface{}{}},
 			})
 
 		// Mapping

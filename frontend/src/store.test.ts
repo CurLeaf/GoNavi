@@ -789,6 +789,8 @@ describe('store appearance persistence', () => {
       { id: 'kingbase', name: 'Kingbase', config: { id: 'kingbase', type: 'kingbase8', host: 'kingbase.local', port: 54321, user: 'system' } },
       { id: 'dm', name: 'Dameng', config: { id: 'dm', type: 'dm8', host: 'dm.local', port: 5236, user: 'SYSDBA' } },
       { id: 'sqlite', name: 'SQLite', config: { id: 'sqlite', type: 'sqlite3', host: 'D:/db/app.sqlite', port: 0, user: '' } },
+      { id: 'milvusdb', name: 'Milvus DB', config: { id: 'milvusdb', type: 'milvusdb', host: 'milvus.local', port: 19530, user: '' } },
+      { id: 'milvus-db', name: 'Milvus DB Alias', config: { id: 'milvus-db', type: 'milvus-db', host: 'milvus-alias.local', port: 19530, user: '' } },
     ]);
 
     expect(useStore.getState().connections.map((conn) => conn.config.type)).toEqual([
@@ -797,7 +799,43 @@ describe('store appearance persistence', () => {
       'kingbase',
       'dameng',
       'sqlite',
+      'milvus',
+      'milvus',
     ]);
+  });
+
+  it('preserves built-in document, vector, and messaging datasource types', async () => {
+    const { useStore } = await importStore();
+
+    const datasourceTypes = [
+      ['chroma', 8000],
+      ['qdrant', 6333],
+      ['milvus', 19530],
+      ['rocketmq', 9876],
+      ['mqtt', 1883],
+      ['rabbitmq', 15672],
+    ] as const;
+
+    useStore.getState().replaceConnections(
+      datasourceTypes.map(([type, port]) => ({
+        id: `conn-${type}`,
+        name: type,
+        config: {
+          id: `conn-${type}`,
+          type,
+          host: `${type}.local`,
+          port,
+          user: '',
+        },
+      })),
+    );
+
+    expect(
+      useStore.getState().connections.map((conn) => [
+        conn.config.type,
+        conn.config.port,
+      ]),
+    ).toEqual(datasourceTypes);
   });
 
   it('preserves SSL certificate paths for SSL-capable saved connections', async () => {

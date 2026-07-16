@@ -126,6 +126,12 @@ import {
   sanitizeSidebarHiddenObjectGroups,
   type SidebarObjectGroupKey,
 } from "./utils/sidebarObjectVisibility";
+import {
+  CONNECTION_TYPE_GROUPS,
+  getConnectionTypeDefaultPort,
+} from "./utils/connectionTypeCatalog";
+import { supportsSSLForType } from "./utils/connectionTypeCapabilities";
+import { normalizeDriverType } from "./utils/connectionDriverType";
 
 export type TableDoubleClickAction = "open-data" | "open-design";
 export type ThemeMode = "light" | "dark";
@@ -422,119 +428,12 @@ const resolveOceanBaseProtocol = (
   }
 };
 const SUPPORTED_CONNECTION_TYPES = new Set([
-  "mysql",
-  "goldendb",
-  "mariadb",
-  "oceanbase",
+  ...CONNECTION_TYPE_GROUPS.flatMap((group) =>
+    group.items.map((item) => item.key),
+  ),
+  // Legacy persisted alias, normalized to diros before support is checked.
   "doris",
-  "diros",
-  "starrocks",
-  "sphinx",
-  "clickhouse",
-  "trino",
-  "postgres",
-  "redis",
-  "tdengine",
-  "iotdb",
-  "kafka",
-  "oracle",
-  "dameng",
-  "kingbase",
-  "sqlserver",
-  "iris",
-  "mongodb",
-  "elasticsearch",
-  "highgo",
-  "vastbase",
-  "opengauss",
-  "gaussdb",
-  "jvm",
-  "sqlite",
-  "duckdb",
-  "custom",
 ]);
-const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
-  "mysql",
-  "goldendb",
-  "mariadb",
-  "oceanbase",
-  "diros",
-  "starrocks",
-  "sphinx",
-  "dameng",
-  "clickhouse",
-  "trino",
-  "postgres",
-  "sqlserver",
-  "oracle",
-  "kingbase",
-  "highgo",
-  "vastbase",
-  "opengauss",
-  "gaussdb",
-  "mongodb",
-  "redis",
-  "elasticsearch",
-  "tdengine",
-  "kafka",
-]);
-
-const getDefaultPortByType = (type: string): number => {
-  switch (type) {
-    case "jvm":
-      return DEFAULT_JVM_PORT;
-    case "mysql":
-    case "mariadb":
-      return 3306;
-    case "goldendb":
-      return 1523;
-    case "oceanbase":
-      return 2881;
-    case "doris":
-    case "diros":
-    case "starrocks":
-      return 9030;
-    case "duckdb":
-      return 0;
-    case "sphinx":
-      return 9306;
-    case "clickhouse":
-      return 9000;
-    case "trino":
-      return 8080;
-    case "postgres":
-    case "vastbase":
-    case "opengauss":
-    case "gaussdb":
-      return 5432;
-    case "redis":
-      return 6379;
-    case "tdengine":
-      return 6041;
-    case "iotdb":
-      return 6667;
-    case "kafka":
-      return 9092;
-    case "oracle":
-      return 1521;
-    case "dameng":
-      return 5236;
-    case "kingbase":
-      return 54321;
-    case "sqlserver":
-      return 1433;
-    case "iris":
-      return 1972;
-    case "mongodb":
-      return 27017;
-    case "elasticsearch":
-      return 9200;
-    case "highgo":
-      return 5866;
-    default:
-      return 3306;
-  }
-};
 
 const toTrimmedString = (value: unknown, fallback = ""): string => {
   if (typeof value === "string") {
@@ -701,7 +600,7 @@ const sanitizeConnectionIconColor = (value: unknown): string | undefined => {
 };
 
 const normalizeConnectionType = (value: unknown): string => {
-  const type = toTrimmedString(value).toLowerCase();
+  const type = normalizeDriverType(toTrimmedString(value));
   if (type === "doris") {
     return "diros";
   }
@@ -890,11 +789,11 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
       ? (value as Record<string, unknown>)
       : {};
   const type = normalizeConnectionType(raw.type);
-  const defaultPort = getDefaultPortByType(type);
+  const defaultPort = getConnectionTypeDefaultPort(type);
   const savePassword =
     typeof raw.savePassword === "boolean" ? raw.savePassword : true;
   const mongoSrv = !!raw.mongoSrv;
-  const sslCapable = SSL_SUPPORTED_CONNECTION_TYPES.has(type);
+  const sslCapable = supportsSSLForType(type);
   const sslModeRaw = toTrimmedString(raw.sslMode, "preferred").toLowerCase();
   const sslMode: "preferred" | "required" | "skip-verify" | "disable" =
     sslModeRaw === "required"

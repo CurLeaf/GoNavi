@@ -102,6 +102,12 @@ func (e *ElasticsearchDB) Connect(config connection.ConnectionConfig) error {
 			lastErr = err
 			continue
 		}
+		if _, err := e.GetDatabases(); err != nil {
+			e.client = nil
+			logger.Warnf("Elasticsearch 索引枚举验证失败：%d/%d 模式=%s 错误=%v", idx+1, len(attempts), sslLabel, err)
+			lastErr = err
+			continue
+		}
 
 		logger.Infof("Elasticsearch 连接成功：%d/%d 模式=%s", idx+1, len(attempts), sslLabel)
 		if idx > 0 {
@@ -331,9 +337,13 @@ func (e *ElasticsearchDB) GetDatabases() ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	res, err := e.client.Indices.Get(
-		[]string{"*"},
-		e.client.Indices.Get.WithContext(ctx),
+	// Alias API 只返回索引名和别名，避免列表加载下载全部 settings/mappings。
+	res, err := e.client.Indices.GetAlias(
+		e.client.Indices.GetAlias.WithContext(ctx),
+		e.client.Indices.GetAlias.WithIndex("*"),
+		e.client.Indices.GetAlias.WithExpandWildcards("all"),
+		e.client.Indices.GetAlias.WithAllowNoIndices(true),
+		e.client.Indices.GetAlias.WithIgnoreUnavailable(true),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("获取索引列表失败：%w", err)

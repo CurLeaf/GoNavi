@@ -138,6 +138,7 @@ mongodb:internal/db/mongodb_impl_v1.go|\
 tdengine:internal/db/tdengine_impl.go|\
 iotdb:internal/db/iotdb_impl.go|\
 clickhouse:internal/db/clickhouse_impl.go|\
+clickhouse:internal/db/clickhouse_legacy_http.go|\
 elasticsearch:internal/db/elasticsearch_impl.go|\
 elasticsearch:internal/db/elasticsearch_helpers.go|\
 trino:internal/db/trino_impl.go)

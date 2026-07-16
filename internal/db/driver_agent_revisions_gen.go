@@ -22,8 +22,8 @@ func init() {
 		"mongodb":       "src-2610395b35c2e708",
 		"tdengine":      "src-779b9b537f08856f",
 		"iotdb":         "src-7edea4aba8d4869e",
-		"clickhouse":    "src-0197342ca5afa8b5",
-		"elasticsearch": "src-08e8e80cb17a409a",
+		"clickhouse":    "src-5872eb0d28e8ab82",
+		"elasticsearch": "src-85079509f9c31623",
 		"trino":         "src-ba947f211ce7b19f",
 	}
 }
