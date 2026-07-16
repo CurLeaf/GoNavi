@@ -10,7 +10,8 @@ import { buildQueryResultColumnPinScope } from '../utils/queryResultColumnPinSco
 import { t as defaultTranslate } from '../i18n';
 import { useOptionalI18n } from '../i18n/provider';
 import {
-  resolveResultDetachPreferredBounds,
+  resolveNativeDetachPreferredBounds,
+  shouldDetachAtScreenPoint,
   shouldDetachTabByDrag,
   type DetachedWindowBounds,
 } from '../utils/detachedWindow';
@@ -123,6 +124,10 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
         title: string;
         startX: number;
         startY: number;
+        startScreenX: number;
+        startScreenY: number;
+        pointerId: number;
+        captureTarget: HTMLElement;
         active: boolean;
     } | null>(null);
 
@@ -148,8 +153,17 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
             title,
             startX: event.clientX,
             startY: event.clientY,
+            startScreenX: event.screenX,
+            startScreenY: event.screenY,
+            pointerId: event.pointerId,
+            captureTarget: event.currentTarget,
             active: false,
         };
+        try {
+            event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+            // Some embedded WebViews do not expose pointer capture for tab labels.
+        }
 
         const previousUserSelect = document.body.style.userSelect;
         const previousWebkitUserSelect = (document.body.style as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect || '';
@@ -180,6 +194,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
         };
 
         const clearListeners = () => {
+            const drag = resultTabDragRef.current;
             window.removeEventListener('pointermove', handleMove);
             window.removeEventListener('pointerup', handleUp);
             window.removeEventListener('pointercancel', handleUp);
@@ -189,6 +204,9 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                 document.body.style.userSelect = previousUserSelect;
                 (document.body.style as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect = previousWebkitUserSelect;
                 document.documentElement.classList.remove('gn-result-tab-detaching');
+            }
+            if (drag?.captureTarget.hasPointerCapture?.(drag.pointerId)) {
+                drag.captureTarget.releasePointerCapture(drag.pointerId);
             }
             resultTabDragRef.current = null;
             setDraggingResultKey(null);
@@ -225,7 +243,19 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                 return;
             }
             const dy = upEvent.clientY - drag.startY;
-            const shouldDetach = drag.active && shouldDetachTabByDrag(dy);
+            const releaseScreenX = Number.isFinite(upEvent.screenX)
+                ? upEvent.screenX
+                : drag.startScreenX + (upEvent.clientX - drag.startX);
+            const releaseScreenY = Number.isFinite(upEvent.screenY)
+                ? upEvent.screenY
+                : drag.startScreenY + (upEvent.clientY - drag.startY);
+            const releasedOutsideHost = shouldDetachAtScreenPoint(releaseScreenX, releaseScreenY, {
+                x: window.screenX,
+                y: window.screenY,
+                width: window.outerWidth || window.innerWidth,
+                height: window.outerHeight || window.innerHeight,
+            });
+            const shouldDetach = drag.active && (shouldDetachTabByDrag(dy) || releasedOutsideHost);
             if (drag.active) {
                 upEvent.preventDefault();
                 clearNativeSelection();
@@ -233,7 +263,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
             // 先清预览再打开真实窗口，避免叠两层
             clearListeners();
             if (shouldDetach) {
-                onOpenResultInWindow(key, resolveResultDetachPreferredBounds(upEvent.clientX, upEvent.clientY));
+                onOpenResultInWindow(key, resolveNativeDetachPreferredBounds(releaseScreenX, releaseScreenY));
             }
         };
 

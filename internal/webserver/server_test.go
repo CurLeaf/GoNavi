@@ -2,9 +2,16 @@ package webserver
 
 import (
 	"encoding/json"
+	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+	"testing/fstest"
+
+	aiservice "GoNavi-Wails/internal/ai/service"
+	appcore "GoNavi-Wails/internal/app"
 )
 
 type webserverTestReceiver struct{}
@@ -15,6 +22,10 @@ func (webserverTestReceiver) Echo(value string) (map[string]any, error) {
 
 func (webserverTestReceiver) Sum(left int, right int) int {
 	return left + right
+}
+
+func (webserverTestReceiver) OpenSQLFile() string {
+	return "desktop-method-reached"
 }
 
 func TestInjectRuntimeBridgeAddsScriptOnce(t *testing.T) {
@@ -99,6 +110,22 @@ func TestMethodInvokerRejectsDesktopOnlyAppMethodsBeforeReflection(t *testing.T)
 	}
 }
 
+func TestSharedMethodInvokerAllowsDesktopMethods(t *testing.T) {
+	invoker := &methodInvoker{
+		targets: map[string]reflect.Value{
+			"app.app": reflect.ValueOf(webserverTestReceiver{}),
+		},
+		allowDesktopMethods: true,
+	}
+	result, err := invoker.Invoke(invokeRequest{Namespace: "app", Receiver: "app", Method: "OpenSQLFile"})
+	if err != nil {
+		t.Fatalf("shared desktop method was rejected: %v", err)
+	}
+	if result != "desktop-method-reached" {
+		t.Fatalf("unexpected shared desktop result: %#v", result)
+	}
+}
+
 func TestSQLAuditHeavyInvokeIncludesExportAndIntegrityVerification(t *testing.T) {
 	for _, method := range []string{"BuildSQLAuditExport", "VerifySQLAuditIntegrity"} {
 		if !isSQLAuditHeavyInvoke(invokeRequest{Namespace: "app", Receiver: "app", Method: method}) {
@@ -107,5 +134,43 @@ func TestSQLAuditHeavyInvokeIncludesExportAndIntegrityVerification(t *testing.T)
 	}
 	if isSQLAuditHeavyInvoke(invokeRequest{Namespace: "app", Receiver: "app", Method: "GetSQLAuditEvents"}) {
 		t.Fatal("ordinary paged audit reads must not use the heavy-operation semaphore")
+	}
+}
+
+func TestSharedRuntimeInjectsRequestedBridgeWithoutBrowserAuthentication(t *testing.T) {
+	assets := fstest.MapFS{
+		"frontend/dist/index.html": &fstest.MapFile{Data: []byte(`<html><head><script src="/wails/runtime.js"></script><title>GoNavi</title><script type="module" src="/assets/index.js"></script></head><body><div id="root"></div></body></html>`)},
+	}
+	shared, err := NewSharedRuntime(fs.FS(assets), appcore.NewWebApp(), aiservice.NewService(), SharedRuntimeOptions{
+		RuntimeBridgePath:   "/__gonavi/detached-runtime.js",
+		RuntimeBridgeScript: "window.detachedRuntime = true;",
+	})
+	if err != nil {
+		t.Fatalf("NewSharedRuntime returned error: %v", err)
+	}
+
+	indexRequest := httptest.NewRequest(http.MethodGet, "/", nil)
+	indexRecorder := httptest.NewRecorder()
+	shared.Handler().ServeHTTP(indexRecorder, indexRequest)
+	if indexRecorder.Code != http.StatusOK {
+		t.Fatalf("shared index status = %d", indexRecorder.Code)
+	}
+	if !strings.Contains(indexRecorder.Body.String(), "/__gonavi/detached-runtime.js") {
+		t.Fatalf("shared index is missing detached bridge: %s", indexRecorder.Body.String())
+	}
+	html := indexRecorder.Body.String()
+	bodyIndex := strings.Index(html, "<body>")
+	runtimeIndex := strings.Index(html, "/wails/runtime.js")
+	bridgeIndex := strings.Index(html, "/__gonavi/detached-runtime.js")
+	bodyCloseIndex := strings.Index(html, "</body>")
+	if runtimeIndex < 0 || bridgeIndex <= runtimeIndex || bodyIndex < 0 || bridgeIndex <= bodyIndex || bodyCloseIndex <= bridgeIndex {
+		t.Fatalf("detached bridge must run after Wails runtime as the final body script, got: %s", html)
+	}
+
+	bridgeRequest := httptest.NewRequest(http.MethodGet, "/__gonavi/detached-runtime.js", nil)
+	bridgeRecorder := httptest.NewRecorder()
+	shared.Handler().ServeHTTP(bridgeRecorder, bridgeRequest)
+	if bridgeRecorder.Code != http.StatusOK || !strings.Contains(bridgeRecorder.Body.String(), "detachedRuntime") {
+		t.Fatalf("unexpected bridge response: status=%d body=%s", bridgeRecorder.Code, bridgeRecorder.Body.String())
 	}
 }

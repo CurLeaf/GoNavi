@@ -4,8 +4,11 @@ import {
   DETACH_TAB_DRAG_Y_THRESHOLD,
   nextDetachedZIndex,
   resolveDetachedWindowTitle,
+  resolveNativeDetachPreferredBounds,
+  resolveNativeDetachReleasePoint,
   resolveResultDetachPreferredBounds,
   shouldDetachTabByDrag,
+  shouldDetachAtScreenPoint,
   toAIChatDetachedBoundsMemory,
 } from './detachedWindow';
 
@@ -43,6 +46,36 @@ describe('detachedWindow helpers', () => {
   it('maps pointer release position to floating window preferred bounds', () => {
     expect(resolveResultDetachPreferredBounds(200, 300)).toEqual({ x: 80, y: 276 });
     expect(resolveResultDetachPreferredBounds(10, 10)).toEqual({ x: 16, y: 16 });
+  });
+
+  it('keeps virtual-desktop coordinates when detaching to another display', () => {
+    expect(resolveNativeDetachPreferredBounds(-1600, 120)).toEqual({ x: -1720, y: 96 });
+    expect(resolveNativeDetachPreferredBounds(2200, 120)).toEqual({ x: 2080, y: 96 });
+    expect(resolveNativeDetachPreferredBounds(600, -500)).toEqual({ x: 480, y: -524 });
+  });
+
+  it('resolves drag release in screen coordinates instead of WebView coordinates', () => {
+    expect(resolveNativeDetachReleasePoint({
+      startScreenX: 1320,
+      startScreenY: 80,
+      deltaX: 1100,
+      deltaY: 60,
+    })).toEqual({ screenX: 2420, screenY: 140 });
+    expect(resolveNativeDetachReleasePoint({
+      startScreenX: 40,
+      startScreenY: 80,
+      deltaX: -900,
+      deltaY: -300,
+    })).toEqual({ screenX: -860, screenY: -220 });
+  });
+
+  it('detaches when the pointer leaves the host window in any screen direction', () => {
+    const host = { x: 100, y: 80, width: 1200, height: 800 };
+    expect(shouldDetachAtScreenPoint(80, 300, host)).toBe(true);
+    expect(shouldDetachAtScreenPoint(1500, 300, host)).toBe(true);
+    expect(shouldDetachAtScreenPoint(500, 40, host)).toBe(true);
+    expect(shouldDetachAtScreenPoint(500, 1000, host)).toBe(true);
+    expect(shouldDetachAtScreenPoint(600, 300, host)).toBe(false);
   });
 
   it('snapshots AI chat detached bounds for size memory', () => {

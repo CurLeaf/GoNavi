@@ -15,6 +15,7 @@ import {
   resolveDetachedWindowTitle,
 } from '../utils/detachedWindow';
 import WorkbenchTabContent from './WorkbenchTabContent';
+import { hasNativeDetachedWindowManager } from '../utils/nativeDetachedWindowHost';
 
 const getTabKindLabel = (type: string): string => {
   if (type === 'query') return t('tab_manager.kind_badge.query');
@@ -175,7 +176,7 @@ const FloatingWorkbenchWindows: React.FC = () => {
     window.addEventListener('pointercancel', stop);
   }, [focusDetachedWorkbenchTab, updateDetachedWorkbenchBounds]);
 
-  if (windowModels.length === 0) {
+  if (hasNativeDetachedWindowManager() || windowModels.length === 0) {
     return null;
   }
 

@@ -4,6 +4,7 @@ import { CloseOutlined, CompressOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { t } from '../i18n';
 import DataGrid from './DataGrid';
+import { hasNativeDetachedWindowManager } from '../utils/nativeDetachedWindowHost';
 import {
   clamp,
   DEFAULT_DETACHED_WINDOW_MIN_HEIGHT,
@@ -119,7 +120,7 @@ const FloatingQueryResultWindows: React.FC = () => {
 
   const windows = useMemo(() => detachedQueryResultWindows, [detachedQueryResultWindows]);
 
-  if (windows.length === 0) {
+  if (hasNativeDetachedWindowManager() || windows.length === 0) {
     return null;
   }
 

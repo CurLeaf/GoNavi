@@ -12,6 +12,7 @@ import (
 	"GoNavi-Wails/internal/app"
 	"GoNavi-Wails/internal/logger"
 	"GoNavi-Wails/internal/mcpserver"
+	"GoNavi-Wails/internal/nativewindow"
 	"GoNavi-Wails/internal/webserver"
 
 	"github.com/wailsapp/wails/v2"
@@ -40,6 +41,14 @@ func main() {
 	// Create an instance of the app structure
 	application := app.NewApp()
 	aiService := aiservice.NewService()
+	nativeWindowManager, nativeWindowErr := nativewindow.NewManager(assets, application, aiService)
+	if nativeWindowErr != nil {
+		logger.Warnf("初始化原生独立窗口管理器失败：%v", nativeWindowErr)
+	}
+	bindings := []interface{}{application, aiService}
+	if nativeWindowManager != nil {
+		bindings = append(bindings, nativeWindowManager)
+	}
 	lowMemoryMode := isLowMemoryMode()
 	backgroundColour, windowsOptions := resolveWindowVisualOptions(runtime.GOOS, lowMemoryMode)
 	windowsOptions.WebviewUserDataPath = resolveWindowsWebviewUserDataPath()
@@ -78,22 +87,28 @@ func main() {
 		Menu:             appMenu,
 		OnStartup: func(ctx context.Context) {
 			runtimeCtx = ctx
-			app.InitializeLifecycle(application, ctx)
-			aiservice.InitializeLifecycle(aiService, ctx)
+			lifecycleCtx := ctx
+			if nativeWindowManager != nil {
+				if err := nativewindow.InitializeLifecycle(nativeWindowManager, ctx); err != nil {
+					logger.Warnf("启动原生独立窗口服务失败：%v", err)
+				} else {
+					lifecycleCtx = nativewindow.WithLifecycleContext(nativeWindowManager, ctx)
+				}
+			}
+			app.InitializeLifecycle(application, lifecycleCtx)
+			aiservice.InitializeLifecycle(aiService, lifecycleCtx)
 			if err := aiservice.RepairInstalledLocalMCPClientConfigs(aiService); err != nil {
 				logger.Warnf("自动修复本地 MCP 客户端配置失败：%v", err)
 			}
 		},
 		OnShutdown: func(ctx context.Context) {
+			nativewindow.ShutdownLifecycle(nativeWindowManager)
 			aiService.Shutdown()
 			application.Shutdown()
 		},
 		OnBeforeClose: app.NewBeforeCloseHandler(application),
-		Bind: []interface{}{
-			application,
-			aiService,
-		},
-		Windows: windowsOptions,
+		Bind:          bindings,
+		Windows:       windowsOptions,
 		Mac: &mac.Options{
 			WebviewIsTransparent: true,
 			WindowIsTranslucent:  true,
@@ -137,6 +152,11 @@ func runSpecialMode(args []string) bool {
 	case "web-server", "--web-server":
 		if err := webserver.Run(context.Background(), assets, args[1:]); err != nil {
 			logger.Error(err, "GoNavi Web Server 退出")
+		}
+		return true
+	case "detached-window", nativewindow.DetachedWindowArgument:
+		if err := nativewindow.RunChild(context.Background(), assets, args[1:]); err != nil {
+			logger.Error(err, "GoNavi 原生独立窗口退出")
 		}
 		return true
 	default:

@@ -155,6 +155,42 @@ export const resolveResultDetachPreferredBounds = (
   y: Math.max(DETACHED_WINDOW_VIEWPORT_PADDING, Math.round(clientY - 24)),
 });
 
+export const resolveNativeDetachReleasePoint = (input: {
+  startScreenX: number;
+  startScreenY: number;
+  deltaX: number;
+  deltaY: number;
+}): { screenX: number; screenY: number } => ({
+  screenX: Math.round(Number(input.startScreenX) + Number(input.deltaX)),
+  screenY: Math.round(Number(input.startScreenY) + Number(input.deltaY)),
+});
+
+/** Native windows use virtual-desktop coordinates, which may be negative. */
+export const resolveNativeDetachPreferredBounds = (
+  screenX: number,
+  screenY: number,
+): Partial<Pick<DetachedWindowBounds, 'x' | 'y'>> => ({
+  x: Math.round(Number(screenX) - 120),
+  y: Math.round(Number(screenY) - 24),
+});
+
+export const shouldDetachAtScreenPoint = (
+  screenX: number,
+  screenY: number,
+  hostBounds: { x: number; y: number; width: number; height: number },
+): boolean => {
+  const x = Number(screenX);
+  const y = Number(screenY);
+  const left = Number(hostBounds.x);
+  const top = Number(hostBounds.y);
+  const width = Number(hostBounds.width);
+  const height = Number(hostBounds.height);
+  if (![x, y, left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
+    return false;
+  }
+  return x < left || x > left + width || y < top || y > top + height;
+};
+
 export const resolveDetachedWindowTitle = (params: {
   kindLabel: string;
   objectLabel?: string;

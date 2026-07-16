@@ -35,9 +35,12 @@ import DetachDragPreview, {
   type DetachDragPreviewState,
 } from './DetachDragPreview';
 import {
-  resolveResultDetachPreferredBounds,
+  resolveNativeDetachPreferredBounds,
+  resolveNativeDetachReleasePoint,
+  shouldDetachAtScreenPoint,
   shouldDetachTabByDrag,
 } from '../utils/detachedWindow';
+import { openNativeWorkbenchTabWindow } from '../utils/nativeDetachedWindowHost';
 
 const getTabKindLabel = (tab: TabData): string => {
   if (tab.type === 'query') return t('tab_manager.kind_badge.query');
@@ -503,12 +506,21 @@ const DraggableTabNode: React.FC<DraggableTabNodeProps> = ({ node }) => {
     touchAction: 'none',
     zIndex: isDragging ? 2 : node.props.style?.zIndex,
   };
+  const handlePointerDown = listeners?.onPointerDown as React.PointerEventHandler<HTMLElement> | undefined;
 
   return React.cloneElement(node, {
     ref: setNodeRef,
     style,
     ...attributes,
     ...listeners,
+    onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is not exposed by every embedded WebView build.
+      }
+      handlePointerDown?.(event);
+    },
     className: `${node.props.className || ''} tab-dnd-node${isDragging ? ' is-dragging' : ''}`,
   });
 };
@@ -534,7 +546,6 @@ const TabManager: React.FC = React.memo(() => {
   const closeTabsToRight = useStore(state => state.closeTabsToRight);
   const closeAllTabs = useStore(state => state.closeAllTabs);
   const moveTab = useStore(state => state.moveTab);
-  const detachWorkbenchTab = useStore(state => state.detachWorkbenchTab);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const detachedTabIdSet = useMemo(
     () => new Set(detachedWorkbenchWindows.map((windowState) => windowState.tabId)),
@@ -553,6 +564,8 @@ const TabManager: React.FC = React.memo(() => {
     title: string;
     startX: number;
     startY: number;
+    startScreenX: number;
+    startScreenY: number;
   } | null>(null);
   const suppressClickUntilRef = useRef<number>(0);
   const sensors = useSensors(
@@ -563,6 +576,11 @@ const TabManager: React.FC = React.memo(() => {
   const isV2Ui = appearance.uiVersion === 'v2';
   const hasTabs = tabs.length > 0;
   const hasDockedTabs = dockedTabs.length > 0;
+  const detachTabToWindow = useCallback((tabId: string, preferred?: { x?: number; y?: number; width?: number; height?: number }) => {
+    void openNativeWorkbenchTabWindow(tabId, preferred).catch((error) => {
+      message.error(error instanceof Error ? error.message : String(error));
+    });
+  }, []);
   const dockedActiveTabId = useMemo(() => {
     if (activeTabId && dockedTabs.some((tab) => tab.id === activeTabId)) {
       return activeTabId;
@@ -739,8 +757,14 @@ const TabManager: React.FC = React.memo(() => {
     const pointerEvent = event.activatorEvent as PointerEvent | MouseEvent | undefined;
     const startX = typeof pointerEvent?.clientX === 'number' ? pointerEvent.clientX : 0;
     const startY = typeof pointerEvent?.clientY === 'number' ? pointerEvent.clientY : 0;
+    const startScreenX = typeof pointerEvent?.screenX === 'number'
+      ? pointerEvent.screenX
+      : window.screenX + startX;
+    const startScreenY = typeof pointerEvent?.screenY === 'number'
+      ? pointerEvent.screenY
+      : window.screenY + startY;
     detachDragSessionRef.current = sourceId
-      ? { tabId: sourceId, title, startX, startY }
+      ? { tabId: sourceId, title, startX, startY, startScreenX, startScreenY }
       : null;
     document.documentElement.classList.add('gn-workbench-tab-detaching');
   };
@@ -769,12 +793,22 @@ const TabManager: React.FC = React.memo(() => {
     if (!sourceId) {
       return;
     }
-    if (shouldDetachTabByDrag(deltaY, targetId || null)) {
+    const release = resolveNativeDetachReleasePoint({
+      startScreenX: session?.startScreenX ?? window.screenX,
+      startScreenY: session?.startScreenY ?? window.screenY,
+      deltaX,
+      deltaY,
+    });
+    const releasedOutsideHost = shouldDetachAtScreenPoint(release.screenX, release.screenY, {
+      x: window.screenX,
+      y: window.screenY,
+      width: window.outerWidth || window.innerWidth,
+      height: window.outerHeight || window.innerHeight,
+    });
+    if (shouldDetachTabByDrag(deltaY, targetId || null) || releasedOutsideHost) {
       suppressClickUntilRef.current = Date.now() + 120;
-      const releaseX = (session?.startX ?? 0) + deltaX;
-      const releaseY = (session?.startY ?? 0) + deltaY;
-      const preferred = resolveResultDetachPreferredBounds(releaseX, releaseY);
-      detachWorkbenchTab(sourceId, preferred);
+      const preferred = resolveNativeDetachPreferredBounds(release.screenX, release.screenY);
+      detachTabToWindow(sourceId, preferred);
       return;
     }
     if (!targetId || sourceId === targetId) {
@@ -874,7 +908,7 @@ const TabManager: React.FC = React.memo(() => {
       {
         key: 'open-in-window',
         label: t('tab_manager.menu.open_in_window'),
-        onClick: () => detachWorkbenchTab(tab.id),
+        onClick: () => detachTabToWindow(tab.id),
       },
       { type: 'divider' },
       {
@@ -921,7 +955,7 @@ const TabManager: React.FC = React.memo(() => {
       closable: !isV2Ui,
       children: <WorkbenchTabContent tab={tab} isActive={tabIsActive} />,
     };
-  }), [dockedTabs, dockedActiveTabId, tabs, connections, appearance.tabDisplay, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs, closeTab, closeTabsWithSQLFilePrompt, detachWorkbenchTab, isV2Ui, languagePreference]);
+  }), [dockedTabs, dockedActiveTabId, tabs, connections, appearance.tabDisplay, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs, closeTab, closeTabsWithSQLFilePrompt, detachTabToWindow, isV2Ui, languagePreference]);
 
   const queryCapableConnections = useMemo(
     () => connections.filter((connection) => getDataSourceCapabilities(connection.config).supportsQueryEditor),

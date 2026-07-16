@@ -146,7 +146,8 @@ func (h *eventHub) unsubscribe(ch chan eventMessage) {
 }
 
 type methodInvoker struct {
-	targets map[string]reflect.Value
+	targets             map[string]reflect.Value
+	allowDesktopMethods bool
 }
 
 func newMethodInvoker(app *appcore.App, ai *aiservice.Service) *methodInvoker {
@@ -179,7 +180,7 @@ func (i *methodInvoker) Invoke(req invokeRequest) (any, error) {
 	if !ok {
 		return nil, fmt.Errorf("unsupported invoke target: %s.%s", namespace, receiver)
 	}
-	if (key == "app" || key == "app.app") && isDesktopOnlyAppMethod(methodName) {
+	if !i.allowDesktopMethods && (key == "app" || key == "app.app") && isDesktopOnlyAppMethod(methodName) {
 		return nil, fmt.Errorf("method %s is unavailable in web runtime", methodName)
 	}
 
@@ -261,6 +262,130 @@ type Server struct {
 	events        *eventHub
 	invoker       *methodInvoker
 	auditHeavySem chan struct{}
+}
+
+// SharedRuntimeOptions configures the authenticated loopback runtime used by
+// native child windows. Authentication is intentionally owned by the caller so
+// the same handler can be protected by a process-scoped token instead of the
+// browser server's password/session flow.
+type SharedRuntimeOptions struct {
+	RuntimeBridgePath   string
+	RuntimeBridgeScript string
+}
+
+// SharedRuntime exposes the existing frontend assets and reflective App/AI RPC
+// bridge without creating a second backend. It is safe to host this on a
+// loopback-only listener owned by the desktop process.
+type SharedRuntime struct {
+	server              *Server
+	runtimeBridgePath   string
+	runtimeBridgeScript string
+	handler             http.Handler
+}
+
+// NewSharedRuntime creates an HTTP runtime backed by the already-running
+// desktop App and AI service. The caller remains responsible for their
+// lifecycle.
+func NewSharedRuntime(assetFS fs.FS, app *appcore.App, ai *aiservice.Service, options SharedRuntimeOptions) (*SharedRuntime, error) {
+	if assetFS == nil {
+		return nil, fmt.Errorf("web assets are unavailable")
+	}
+	if app == nil || ai == nil {
+		return nil, fmt.Errorf("shared App and AI service are required")
+	}
+	frontendFS, err := fs.Sub(assetFS, "frontend/dist")
+	if err != nil {
+		return nil, fmt.Errorf("resolve frontend dist assets failed: %w", err)
+	}
+
+	bridgePath := strings.TrimSpace(options.RuntimeBridgePath)
+	if bridgePath == "" || !strings.HasPrefix(bridgePath, internalRoutePrefix+"/") {
+		return nil, fmt.Errorf("runtime bridge path must be under %s", internalRoutePrefix)
+	}
+
+	events := newEventHub()
+	shared := &SharedRuntime{
+		server: &Server{
+			assets: frontendFS,
+			app:    app,
+			ai:     ai,
+			events: events,
+			invoker: func() *methodInvoker {
+				invoker := newMethodInvoker(app, ai)
+				invoker.allowDesktopMethods = true
+				return invoker
+			}(),
+			auditHeavySem: make(chan struct{}, 1),
+		},
+		runtimeBridgePath:   bridgePath,
+		runtimeBridgeScript: options.RuntimeBridgeScript,
+	}
+	shared.handler = shared.routes()
+	return shared, nil
+}
+
+// Handler returns the shared runtime HTTP handler.
+func (s *SharedRuntime) Handler() http.Handler {
+	if s == nil {
+		return http.NotFoundHandler()
+	}
+	return s.handler
+}
+
+// Emit publishes a backend event to every native child window connected to the
+// shared runtime event stream.
+func (s *SharedRuntime) Emit(name string, args ...any) {
+	if s == nil || s.server == nil || s.server.events == nil {
+		return
+	}
+	s.server.events.Emit(name, args...)
+}
+
+func (s *SharedRuntime) routes() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc(internalRoutePrefix+"/api/invoke", s.server.handleInvoke)
+	mux.HandleFunc(internalRoutePrefix+"/events", s.server.handleEvents)
+	mux.HandleFunc(s.runtimeBridgePath, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		_, _ = w.Write([]byte(s.runtimeBridgeScript))
+	})
+	mux.HandleFunc(internalRoutePrefix+"/healthz", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	fileServer := http.FileServer(http.FS(s.server.assets))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, internalRoutePrefix+"/") {
+			http.NotFound(w, r)
+			return
+		}
+		if s.server.shouldServeIndex(r.URL.Path) {
+			payload, err := fs.ReadFile(s.server.assets, "index.html")
+			if err != nil {
+				http.Error(w, "frontend index is unavailable", http.StatusInternalServerError)
+				return
+			}
+			html := injectBodyScript(string(payload), s.runtimeBridgePath)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			http.ServeContent(w, r, "index.html", time.Time{}, strings.NewReader(html))
+			return
+		}
+		fileServer.ServeHTTP(w, r)
+	})
+	return withSecurityHeaders(mux)
 }
 
 func ParseOptions(args []string) (Options, error) {
@@ -451,14 +576,29 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func injectRuntimeBridge(indexHTML string) string {
-	if strings.Contains(indexHTML, internalRoutePrefix+"/web-runtime.js") {
+	return injectScript(indexHTML, internalRoutePrefix+"/web-runtime.js")
+}
+
+func injectScript(indexHTML string, scriptPath string) string {
+	if strings.Contains(indexHTML, scriptPath) {
 		return indexHTML
 	}
-	scriptTag := fmt.Sprintf(`<script src="%s/web-runtime.js"></script>`, internalRoutePrefix)
+	scriptTag := fmt.Sprintf(`<script src="%s"></script>`, scriptPath)
 	if strings.Contains(indexHTML, "</head>") {
 		return strings.Replace(indexHTML, "</head>", scriptTag+"\n</head>", 1)
 	}
 	return scriptTag + "\n" + indexHTML
+}
+
+func injectBodyScript(indexHTML string, scriptPath string) string {
+	if strings.Contains(indexHTML, scriptPath) {
+		return indexHTML
+	}
+	scriptTag := fmt.Sprintf(`<script src="%s"></script>`, scriptPath)
+	if strings.Contains(indexHTML, "</body>") {
+		return strings.Replace(indexHTML, "</body>", scriptTag+"\n</body>", 1)
+	}
+	return injectScript(indexHTML, scriptPath)
 }
 
 func (s *Server) handleInvoke(w http.ResponseWriter, r *http.Request) {

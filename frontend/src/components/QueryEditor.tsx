@@ -64,6 +64,8 @@ import {
     takeQueryEditorResultSession,
 } from '../utils/queryEditorResultSessionCache';
 import { buildEditableTriggerSql } from '../utils/triggerEditSql';
+import { openNativeQueryResultWindow } from '../utils/nativeDetachedWindowHost';
+import { isNativeDetachedWindow } from '../utils/nativeDetachedWindowClient';
 import {
     getColumnDefinitionComment,
     getColumnDefinitionKey,
@@ -1427,6 +1429,23 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   );
   const isResultPanelVisibleRef = useRef(isResultPanelVisible);
   isResultPanelVisibleRef.current = isResultPanelVisible;
+  const publishesDetachedResultSession = useMemo(() => isNativeDetachedWindow(), []);
+
+  useEffect(() => {
+      const captureSession = (event: Event) => {
+          const requestedTabId = String((event as CustomEvent).detail?.tabId || '').trim();
+          if (requestedTabId !== tab.id) return;
+          saveQueryEditorResultSession(tab.id, {
+              resultSets: resultSetsRef.current,
+              activeResultKey: activeResultKeyRef.current,
+              isResultPanelVisible: isResultPanelVisibleRef.current,
+          });
+      };
+      window.addEventListener('gonavi:capture-query-result-session', captureSession);
+      return () => {
+          window.removeEventListener('gonavi:capture-query-result-session', captureSession);
+      };
+  }, [tab.id]);
 
   useEffect(() => {
       // Keep result panel state across detach/attach remounts of the same tab.
@@ -1438,6 +1457,15 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           });
       };
   }, [tab.id]);
+
+  useEffect(() => {
+      if (!publishesDetachedResultSession) return;
+      saveQueryEditorResultSession(tab.id, {
+          resultSets,
+          activeResultKey,
+          isResultPanelVisible,
+      });
+  }, [activeResultKey, isResultPanelVisible, publishesDetachedResultSession, resultSets, tab.id]);
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
   const runQueryShortcutBinding = useMemo(
@@ -8470,7 +8498,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           ? translate('query_editor.results_panel.tab.message', { index: index + 1 })
           : translate('query_editor.results_panel.detached.title', { index: index + 1 });
       const windowId = `query-result:${tab.id}:${target.key}`;
-      useStore.getState().detachQueryResultWindow({
+      const detachedWindow = {
           id: windowId,
           sourceQueryTabId: tab.id,
           connectionId: currentConnectionId || tab.connectionId || '',
@@ -8500,8 +8528,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               showRowNumberColumn: target.showRowNumberColumn,
               truncated: target.truncated,
           },
-      });
-      handleCloseResult(key);
+      };
+      void openNativeQueryResultWindow(detachedWindow)
+          .then((opened) => {
+              if (opened) handleCloseResult(key);
+          })
+          .catch((error) => {
+              message.error(error instanceof Error ? error.message : String(error));
+          });
   };
 
   React.useEffect(() => {

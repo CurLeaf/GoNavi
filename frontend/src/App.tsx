@@ -11,6 +11,7 @@ import TabManager from './components/TabManager';
 import FloatingWorkbenchWindows from './components/FloatingWorkbenchWindows';
 import FloatingAIChatWindow from './components/FloatingAIChatWindow';
 import FloatingQueryResultWindows from './components/FloatingQueryResultWindows';
+import NativeDetachedWindowController from './components/NativeDetachedWindowController';
 import ConnectionModal from './components/ConnectionModal';
 import SnippetSettingsModal from './components/SnippetSettingsModal';
 import ConnectionPackagePasswordModal from './components/ConnectionPackagePasswordModal';
@@ -7052,6 +7053,7 @@ function App() {
                   <TabManager />
                   <FloatingWorkbenchWindows />
                   <FloatingQueryResultWindows />
+                  <NativeDetachedWindowController />
                </div>
                {!isV2Ui && !aiPanelVisible && (
                <>
