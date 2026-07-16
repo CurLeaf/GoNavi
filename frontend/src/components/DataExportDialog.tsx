@@ -4,12 +4,17 @@ import { Form, InputNumber, Select, message } from 'antd';
 import { ExportOutlined } from '@ant-design/icons';
 import { t } from '../i18n';
 
-export type DataExportFormat = 'csv' | 'xlsx' | 'json' | 'md' | 'html';
+export type DataExportFormat = 'csv' | 'xlsx' | 'json' | 'md' | 'html' | 'sql';
 export type DataExportScope = 'selected' | 'page' | 'all' | 'filteredAll';
 
 export type DataExportFileOptions = {
   format: DataExportFormat;
   xlsxMaxRowsPerSheet?: number;
+  insertSQLDialect?: string;
+  insertSQLTargetTable?: string;
+  insertSQLColumnTypes?: Record<string, string>;
+  insertSQLTargetColumns?: Record<string, string>;
+  insertSQLAllowEmptyTargetTable?: boolean;
 };
 
 export type DataExportDialogValues = DataExportFileOptions & {
@@ -27,6 +32,7 @@ export type ShowDataExportDialogOptions = {
   title: string;
   scopeOptions: DataExportScopeOption[];
   initialValues?: Partial<DataExportDialogValues>;
+  allowInsertSql?: boolean;
   okText?: string;
 };
 
@@ -42,6 +48,17 @@ export const DATA_EXPORT_FORMAT_OPTIONS: Array<{ value: DataExportFormat; label:
   { value: 'html', label: 'HTML' },
 ];
 
+export const INSERT_SQL_EXPORT_FORMAT_OPTION: { value: DataExportFormat; label: string } = {
+  value: 'sql',
+  label: 'INSERT SQL',
+};
+
+const resolveFormatOptions = (allowInsertSql: boolean): Array<{ value: DataExportFormat; label: string }> => (
+  allowInsertSql
+    ? [...DATA_EXPORT_FORMAT_OPTIONS, INSERT_SQL_EXPORT_FORMAT_OPTION]
+    : DATA_EXPORT_FORMAT_OPTIONS
+);
+
 const resolveDefaultScope = (scopeOptions: DataExportScopeOption[], initialScope?: string): string => {
   const matchedInitial = scopeOptions.find((item) => item.value === initialScope && !item.disabled);
   if (matchedInitial) return String(matchedInitial.value);
@@ -52,8 +69,12 @@ const resolveDefaultScope = (scopeOptions: DataExportScopeOption[], initialScope
 const normalizeDialogValues = (
   scopeOptions: DataExportScopeOption[],
   initialValues?: Partial<DataExportDialogValues>,
+  allowInsertSql = false,
 ): DataExportDialogValues => {
-  const format = (initialValues?.format || DEFAULT_DATA_EXPORT_FORMAT) as DataExportFormat;
+  const requestedFormat = (initialValues?.format || DEFAULT_DATA_EXPORT_FORMAT) as DataExportFormat;
+  const format = resolveFormatOptions(allowInsertSql).some((item) => item.value === requestedFormat)
+    ? requestedFormat
+    : DEFAULT_DATA_EXPORT_FORMAT;
   const scope = resolveDefaultScope(scopeOptions, initialValues?.scope ? String(initialValues.scope) : undefined);
   const xlsxMaxRowsPerSheet = Number(initialValues?.xlsxMaxRowsPerSheet) > 0
     ? Math.min(MAX_XLSX_ROWS_PER_SHEET, Math.trunc(Number(initialValues?.xlsxMaxRowsPerSheet)))
@@ -68,8 +89,9 @@ const normalizeDialogValues = (
 const validateDialogValues = (
   values: DataExportDialogValues,
   scopeOptions: DataExportScopeOption[],
+  allowInsertSql = false,
 ): string | null => {
-  if (!DATA_EXPORT_FORMAT_OPTIONS.some((item) => item.value === values.format)) {
+  if (!resolveFormatOptions(allowInsertSql).some((item) => item.value === values.format)) {
     return t('data_export.dialog.validation.format_required');
   }
   if (scopeOptions.length > 0) {
@@ -95,9 +117,11 @@ const validateDialogValues = (
 const DataExportDialogContent: React.FC<{
   scopeOptions: DataExportScopeOption[];
   initialValues?: Partial<DataExportDialogValues>;
+  allowInsertSql?: boolean;
   onChange: (values: DataExportDialogValues) => void;
-}> = ({ scopeOptions, initialValues, onChange }) => {
-  const [values, setValues] = useState<DataExportDialogValues>(() => normalizeDialogValues(scopeOptions, initialValues));
+}> = ({ scopeOptions, initialValues, allowInsertSql = false, onChange }) => {
+  const [values, setValues] = useState<DataExportDialogValues>(() => normalizeDialogValues(scopeOptions, initialValues, allowInsertSql));
+  const formatOptions = useMemo(() => resolveFormatOptions(allowInsertSql), [allowInsertSql]);
 
   useEffect(() => {
     onChange(values);
@@ -114,7 +138,7 @@ const DataExportDialogContent: React.FC<{
         <Form.Item label={t('data_export.dialog.field.format')} style={{ marginBottom: 16 }}>
           <Select
             value={values.format}
-            options={DATA_EXPORT_FORMAT_OPTIONS}
+            options={formatOptions}
             onChange={(format) => setValues((prev) => ({ ...prev, format: format as DataExportFormat }))}
           />
         </Form.Item>
@@ -170,7 +194,8 @@ export async function showDataExportDialog(
   modal: ReturnType<typeof Modal.useModal>[0],
   options: ShowDataExportDialogOptions,
 ): Promise<DataExportDialogValues | null> {
-  const initialValues = normalizeDialogValues(options.scopeOptions, options.initialValues);
+  const allowInsertSql = options.allowInsertSql === true;
+  const initialValues = normalizeDialogValues(options.scopeOptions, options.initialValues, allowInsertSql);
 
   return new Promise((resolve) => {
     let resolved = false;
@@ -194,13 +219,14 @@ export async function showDataExportDialog(
         <DataExportDialogContent
           scopeOptions={options.scopeOptions}
           initialValues={initialValues}
+          allowInsertSql={allowInsertSql}
           onChange={(values) => {
             latestValues = values;
           }}
         />
       ),
       onOk: async () => {
-        const errorMessage = validateDialogValues(latestValues, options.scopeOptions);
+        const errorMessage = validateDialogValues(latestValues, options.scopeOptions, allowInsertSql);
         if (errorMessage) {
           void message.error(errorMessage);
           throw new Error(errorMessage);

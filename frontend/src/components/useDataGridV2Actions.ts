@@ -31,6 +31,7 @@ export const useDataGridV2Actions = (ctx: DataGridV2ActionsContext) => {
     buildCopyUpdateSQL,
     buildDataGridSelectBaseSql,
     buildEffectiveFilterConditions,
+    buildBackendExportOptions,
     buildOrderBySQL,
     buildPaginatedSelectSQL,
     buildRpcConnectionConfig,
@@ -39,6 +40,7 @@ export const useDataGridV2Actions = (ctx: DataGridV2ActionsContext) => {
     buildWhereSQL,
     cellContextMenu,
     cellEditMode,
+    canExportInsertSQL,
     closeCellEditMode,
     columnMetaMap,
     columnMetaMapByLowerName,
@@ -539,14 +541,14 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
               sql,
               normalizedDefaultName || 'export',
               {
-                  ...options,
+                  ...buildBackendExportOptions(options),
                   jobId,
                   totalRowsHint: totalRowsKnown ? Number(totalRows) : 0,
                   totalRowsKnown,
               } as any,
           ),
       });
-  }, [buildConnConfig, dbName, resolveExportTitle, runExportWithProgress]);
+  }, [buildBackendExportOptions, buildConnConfig, dbName, resolveExportTitle, runExportWithProgress]);
 
   const buildPkWhereSql = useCallback((rows: any[], dbType: string) => {
       if (!tableName || pkColumns.length === 0) return '';
@@ -861,6 +863,7 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
           const values = await showDataExportDialog(modal, {
               title: translateDataGrid('file.backend.dialog.export_query_result'),
               scopeOptions,
+              allowInsertSql: canExportInsertSQL,
               initialValues: {
                   ...commonInitialValues,
                   scope: (resultExportAllSql || resultSql) ? 'all' : (selectedCount > 0 ? 'selected' : 'page'),
@@ -926,9 +929,11 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
   }, [
       addTab,
       buildAllRowsSql,
+      buildBackendExportOptions,
       buildConnConfig,
       buildCurrentPageSql,
       buildFilteredAllSql,
+      canExportInsertSQL,
       connectionId,
       dbName,
       displayData.length,

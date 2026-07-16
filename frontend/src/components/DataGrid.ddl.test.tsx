@@ -1732,7 +1732,7 @@ describe('DataGrid DDL interactions', () => {
     });
   });
 
-  it('exports query-result rows from in-memory data without rerunning ExportQuery', async () => {
+  it('exports query-result rows as INSERT SQL with an empty target table without rerunning ExportQuery', async () => {
     backendApp.ExportDataWithOptions.mockResolvedValue({ success: true });
     backendApp.ExportQueryWithOptions.mockResolvedValue({ success: true });
 
@@ -1761,7 +1761,7 @@ describe('DataGrid DDL interactions', () => {
     await waitForEffects();
 
     await act(async () => {
-      await renderer!.root.findByProps({ 'data-select-option': 'html' }).props.onClick();
+      await renderer!.root.findByProps({ 'data-select-option': 'sql' }).props.onClick();
     });
     await act(async () => {
       await renderer!.root.findByProps({ 'data-select-option': 'page' }).props.onClick();
@@ -1777,12 +1777,183 @@ describe('DataGrid DDL interactions', () => {
       ['owner'],
       'export',
       expect.objectContaining({
-        format: 'html',
+        format: 'sql',
+        insertSQLDialect: 'mysql',
+        insertSQLTargetTable: '',
+        insertSQLAllowEmptyTargetTable: true,
         totalRowsHint: 2,
         totalRowsKnown: true,
       }),
     );
     expect(backendApp.ExportQueryWithOptions).not.toHaveBeenCalled();
+  });
+
+  it('exports known-table query results as INSERT SQL', async () => {
+    backendApp.ExportDataWithOptions.mockResolvedValue({ success: true });
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [
+        { name: 'id', type: 'int' },
+        { name: 'name', type: 'varchar' },
+      ],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', id: 1, name: "O'Brien" },
+            { __gonavi_row_key__: 'row-2', id: 2, name: null },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          exportScope="queryResult"
+          resultSql="SELECT id, name FROM users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    act(() => {
+      findButton(renderer!, t('data_grid.toolbar.export')).props.onClick();
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      await renderer!.root.findByProps({ 'data-select-option': 'sql' }).props.onClick();
+    });
+    await act(async () => {
+      await renderer!.root.findByProps({ 'data-select-option': 'page' }).props.onClick();
+    });
+    await act(async () => {
+      await findButton(renderer!, '开始导出').props.onClick();
+    });
+    await waitForEffects();
+
+    expect(backendApp.ExportDataWithOptions).toHaveBeenCalledWith(
+      [
+        { id: 1, name: "O'Brien" },
+        { id: 2, name: null },
+      ],
+      ['id', 'name'],
+      'users',
+      expect.objectContaining({
+        format: 'sql',
+        insertSQLDialect: 'mysql',
+        insertSQLTargetTable: 'users',
+        totalRowsHint: 2,
+        totalRowsKnown: true,
+      }),
+    );
+  });
+
+  it('requeries all known-table rows when exporting INSERT SQL', async () => {
+    backendApp.ExportQueryWithOptions.mockResolvedValue({ success: true });
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'id', type: 'int' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="users"
+          exportScope="queryResult"
+          resultSql="SELECT id FROM users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    act(() => {
+      findButton(renderer!, t('data_grid.toolbar.export')).props.onClick();
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      await renderer!.root.findByProps({ 'data-select-option': 'sql' }).props.onClick();
+    });
+    await act(async () => {
+      await findButton(renderer!, '开始导出').props.onClick();
+    });
+    await waitForEffects();
+
+    expect(backendApp.ExportQueryWithOptions).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'mysql', database: 'main' }),
+      'main',
+      'SELECT id FROM users',
+      'users',
+      expect.objectContaining({
+        format: 'sql',
+        insertSQLDialect: 'mysql',
+        insertSQLTargetTable: 'users',
+        totalRowsHint: 0,
+        totalRowsKnown: false,
+      }),
+    );
+    expect(backendApp.ExportDataWithOptions).not.toHaveBeenCalled();
+  });
+
+  it('exports unmatched query-result columns with an empty INSERT target table', async () => {
+    backendApp.ExportDataWithOptions.mockResolvedValue({ success: true });
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'id', type: 'int' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', user_id: 1 }]}
+          columnNames={['user_id']}
+          loading={false}
+          tableName="users"
+          exportScope="queryResult"
+          resultSql="SELECT id AS user_id FROM users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    act(() => {
+      findButton(renderer!, t('data_grid.toolbar.export')).props.onClick();
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      await renderer!.root.findByProps({ 'data-select-option': 'sql' }).props.onClick();
+    });
+    await act(async () => {
+      await renderer!.root.findByProps({ 'data-select-option': 'page' }).props.onClick();
+    });
+    await act(async () => {
+      await findButton(renderer!, '开始导出').props.onClick();
+    });
+    await waitForEffects();
+
+    expect(backendApp.ExportDataWithOptions).toHaveBeenCalledWith(
+      [{ user_id: 1 }],
+      ['user_id'],
+      'users',
+      expect.objectContaining({
+        format: 'sql',
+        insertSQLTargetTable: '',
+        insertSQLAllowEmptyTargetTable: true,
+      }),
+    );
   });
 
   it('copies loaded column data from the v2 column header context menu', async () => {
