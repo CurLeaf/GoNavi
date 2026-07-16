@@ -753,10 +753,10 @@ describe("i18n catalog", () => {
 
   it("keeps App tools, data root, and about shell copy out of source literals", () => {
     const source = readAppSource();
-    const toolsModalSource = sliceBetween(
+    const settingsToolsSource = sliceBetween(
       source,
-      "{isToolsModalOpen && (",
-      "{isSettingsModalOpen && (",
+      "{isSettingsModalOpen && (() => {",
+      "{isDataRootModalOpen && (",
     );
     const dataRootModalSource = sliceBetween(
       source,
@@ -769,12 +769,12 @@ describe("i18n catalog", () => {
       "{isThemeModalOpen && (",
     );
 
-    expect(toolsModalSource).not.toContain("工具中心");
-    expect(toolsModalSource).not.toContain("导入连接配置");
-    expect(toolsModalSource).not.toContain("导出连接配置");
-    expect(toolsModalSource).not.toContain("数据同步");
-    expect(toolsModalSource).not.toContain("驱动管理");
-    expect(toolsModalSource).not.toContain("数据目录");
+    expect(settingsToolsSource).not.toContain("工具中心");
+    expect(settingsToolsSource).not.toContain("导入连接配置");
+    expect(settingsToolsSource).not.toContain("导出连接配置");
+    expect(settingsToolsSource).not.toContain("数据同步");
+    expect(settingsToolsSource).not.toContain("驱动管理");
+    expect(settingsToolsSource).not.toContain("数据目录");
 
     expect(dataRootModalSource).not.toContain("数据存储位置");
     expect(dataRootModalSource).not.toContain("数据目录");
@@ -815,10 +815,10 @@ describe("i18n catalog", () => {
       "<AIPanelErrorBoundary",
       "<AIChatPanel",
     );
-    const toolsModalSource = sliceBetween(
+    const settingsToolsSource = sliceBetween(
       source,
-      "{isToolsModalOpen && (",
-      "{isSettingsModalOpen && (",
+      "{isSettingsModalOpen && (() => {",
+      "{isDataRootModalOpen && (",
     );
 
     expect(securityInitialStageSource).toContain("app.security_update.stage.checking_saved_config");
@@ -857,7 +857,7 @@ describe("i18n catalog", () => {
     expect(dataRootFlowSource).not.toContain("数据目录已更新");
     expect(dataRootFlowSource).not.toContain("打开数据目录失败");
 
-    expect(sidebarUtilitySource).toContain("app.sidebar.tools");
+    expect(sidebarUtilitySource).not.toContain("app.sidebar.tools");
     expect(sidebarUtilitySource).toContain("app.sidebar.settings");
     expect(sidebarUtilitySource).toContain("app.sidebar.ai_assistant");
     expect(source).toContain("app.sidebar.resize_width");
@@ -890,16 +890,16 @@ describe("i18n catalog", () => {
     expect(aiPanelSource).not.toContain("关闭面板");
     expect(aiPanelSource).not.toContain("重新加载");
 
-    expect(toolsModalSource).toContain("app.tools.entry.snippets.title");
-    expect(toolsModalSource).toContain("app.tools.entry.snippets.description");
-    expect(toolsModalSource).toContain("app.tools.entry.security_update.title");
-    expect(toolsModalSource).toContain("app.tools.entry.security_update.status_description");
-    expect(toolsModalSource).toContain("app.tools.entry.security_update.description");
-    expect(toolsModalSource).not.toContain("代码片段管理");
-    expect(toolsModalSource).not.toContain("管理 SQL 代码片段和前缀补全。");
-    expect(toolsModalSource).not.toContain("安全更新");
-    expect(toolsModalSource).not.toContain("当前状态：");
-    expect(toolsModalSource).not.toContain("查看已保存配置的安全更新状态。");
+    expect(settingsToolsSource).toContain("app.tools.entry.snippets.title");
+    expect(settingsToolsSource).toContain("app.tools.entry.snippets.description");
+    expect(settingsToolsSource).toContain("app.tools.entry.security_update.title");
+    expect(settingsToolsSource).toContain("app.tools.entry.security_update.status_description");
+    expect(settingsToolsSource).toContain("app.tools.entry.security_update.description");
+    expect(settingsToolsSource).not.toContain("代码片段管理");
+    expect(settingsToolsSource).not.toContain("管理 SQL 代码片段和前缀补全。");
+    expect(settingsToolsSource).not.toContain("安全更新");
+    expect(settingsToolsSource).not.toContain("当前状态：");
+    expect(settingsToolsSource).not.toContain("查看已保存配置的安全更新状态。");
   });
 
   it("keeps App theme modal shell copy out of source literals", () => {
@@ -907,7 +907,7 @@ describe("i18n catalog", () => {
     const themeModalSource = sliceBetween(
       source,
       "{isThemeModalOpen && (",
-      "{isShortcutModalOpen && (",
+      "{isProxyModalOpen && (",
     );
 
     expect(themeModalSource).not.toContain("主题设置");
@@ -922,15 +922,15 @@ describe("i18n catalog", () => {
 
   it("keeps App shortcut modal shell copy out of source literals", () => {
     const source = readAppSource();
-    const toolsModalSource = sliceBetween(
+    const settingsToolsSource = sliceBetween(
       source,
-      "{isToolsModalOpen && (",
-      "{isSettingsModalOpen && (",
+      "{isSettingsModalOpen && (() => {",
+      "{isDataRootModalOpen && (",
     );
     const shortcutModalSource = sliceBetween(
       source,
-      "{isShortcutModalOpen && (",
-      "{isSnippetModalOpen && (",
+      "if (activeSettingsCenterPane.key === 'shortcut-settings') {",
+      "return null;\n            };",
     );
     const shortcutCaptureSource = sliceBetween(
       source,
@@ -938,7 +938,7 @@ describe("i18n catalog", () => {
       "window.addEventListener('keydown', handleShortcutCapture, true);",
     );
 
-    expect(toolsModalSource).not.toContain("查看并调整全局快捷键绑定。");
+    expect(settingsToolsSource).not.toContain("查看并调整全局快捷键绑定。");
     expect(shortcutModalSource).not.toContain("统一查看、录制与启停常用快捷键");
     expect(shortcutModalSource).not.toContain("已恢复默认快捷键");
     expect(shortcutModalSource).not.toContain("请按下快捷键...");
@@ -956,7 +956,7 @@ describe("i18n catalog", () => {
     const connectionPackageFlowSource = sliceBetween(
       source,
       "const importConnectionsPayload = useCallback(async (raw: string, password: string) => {",
-      "const [isToolsModalOpen, setIsToolsModalOpen] = useState(false);",
+      "const [toolCenterBackGroupKey, setToolCenterBackGroupKey]",
     );
     const connectionPackageModalPropsSource = sliceBetween(
       source,

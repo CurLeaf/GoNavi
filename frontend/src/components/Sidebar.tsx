@@ -103,7 +103,6 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Form, Popover, Radio
   WarningOutlined,
   AimOutlined,
   MoreOutlined,
-  ToolOutlined,
   SettingOutlined
 	} from '@ant-design/icons';
 import {
@@ -497,7 +496,6 @@ export const buildAllSavedQueriesTreeNode = (
 const Sidebar: React.FC<{
   onCreateConnection?: () => void;
   onEditConnection?: (conn: SavedConnection) => void;
-  onOpenTools?: () => void;
   onOpenSettings?: () => void;
   onToggleAI?: () => void;
   onToggleLogPanel?: () => void;
@@ -506,7 +504,6 @@ const Sidebar: React.FC<{
 }> = React.memo(({
   onCreateConnection,
   onEditConnection,
-  onOpenTools,
   onOpenSettings,
   onToggleAI,
   onToggleLogPanel,
@@ -2920,7 +2917,6 @@ const Sidebar: React.FC<{
   const v2LocateCurrentTableLabel = t('sidebar.action.locate_current_table');
   const v2LocateCurrentTableUnavailableLabel = t('sidebar.message.locate_current_table_unavailable');
   const v2AiAssistantLabel = t('app.sidebar.ai_assistant');
-  const v2ToolsLabel = t('app.sidebar.tools');
   const v2SettingsLabel = t('app.sidebar.settings');
   const v2ActiveConnectionHeaderLabel = t('sidebar.active_connection.current_host_database');
   const v2NoDatabaseSelectedLabel = t('sidebar.active_connection.no_database_selected');
@@ -2969,7 +2965,6 @@ const Sidebar: React.FC<{
       locateCurrentTable: v2LocateCurrentTableLabel,
       locateCurrentTableUnavailable: v2LocateCurrentTableUnavailableLabel,
       aiAssistant: v2AiAssistantLabel,
-      tools: v2ToolsLabel,
       settings: v2SettingsLabel,
     },
     handlers: {
@@ -2979,7 +2974,6 @@ const Sidebar: React.FC<{
       openExternalSqlFile: handleOpenSQLFileFromToolbar,
       locateActiveTab: handleLocateActiveTabInSidebar,
       toggleAI: onToggleAI ?? (() => {}),
-      openTools: onOpenTools ?? (() => {}),
       openSettings: onOpenSettings ?? (() => {}),
     },
     canLocateActiveTab,

@@ -13,9 +13,10 @@ const aiSettingsModalSource = readFileSync(
 );
 
 describe('settings center layout', () => {
-  it('uses the same split navigation shell as the tool center', () => {
-    expect(appSource).toContain("type SettingsCenterGroupKey = 'preferences' | 'services' | 'about';");
-    expect(appSource).toContain("type SettingsCenterPaneKey = 'language' | 'theme' | 'sidebar-metadata' | 'sidebar-objects' | 'proxy' | 'web-auth' | 'ai' | 'about-go-navi';");
+  it('hosts settings and tools in one split navigation shell', () => {
+    expect(appSource).toContain("type SettingsCenterGroupKey = 'preferences' | 'services' | ToolCenterGroupKey | 'about';");
+    expect(appSource).toContain('type SettingsCenterPaneKey =');
+    expect(appSource).toContain('| ToolCenterPaneKey');
     expect(appSource).toContain("const [activeSettingsCenterGroupKey, setActiveSettingsCenterGroupKey] = useState<SettingsCenterGroupKey>('preferences');");
     expect(appSource).toContain("const [activeSettingsCenterPane, setActiveSettingsCenterPane] = useState<SettingsCenterPaneState | null>(null);");
     expect(appSource).toContain('style={toolCenterModalWorkspaceStyle}');
@@ -24,11 +25,17 @@ describe('settings center layout', () => {
     expect(appSource).toContain('style={toolCenterNavScrollStyle}');
     expect(appSource).toContain('style={toolCenterContentPanelStyle}');
     expect(appSource).toContain('style={toolCenterDetailPanelStyle}');
-    expect(appSource).toContain('style={toolCenterDetailBodyStyle}');
+    expect(appSource).toContain('style={isActiveToolCenterPane ? toolCenterDetailBodyStyle : settingsCenterDetailBodyStyle}');
     expect(appSource).toContain('style={toolCenterScrollableListStyle}');
     expect(appSource).toContain("title: t('app.settings.group.preferences.title')");
     expect(appSource).toContain("title: t('app.settings.group.services.title')");
+    expect(appSource).toContain("title: t('app.tools.group.config.title')");
+    expect(appSource).toContain("title: t('app.tools.group.workflow.title')");
+    expect(appSource).toContain("title: t('app.tools.group.workspace.title')");
     expect(appSource).toContain("title: t('app.settings.group.about.title')");
+    expect(appSource).toContain('const combinedSettingsCenterGroups = [');
+    expect(appSource).not.toContain('const [isToolsModalOpen');
+    expect(appSource).not.toContain('{isToolsModalOpen &&');
   });
 
   it('moves sidebar table metadata configuration into the settings center', () => {
@@ -87,6 +94,43 @@ describe('settings center layout', () => {
     expect(appSource).toContain("t('common.back_to_previous')");
   });
 
+  it('clears embedded tool transient state before switching settings groups or panes', () => {
+    const cleanupStart = appSource.indexOf('const clearSettingsCenterTransientPaneState = useCallback(() => {');
+    const cleanupSource = appSource.slice(
+      cleanupStart,
+      appSource.indexOf('const handleOpenToolsModal', cleanupStart),
+    );
+
+    expect(cleanupStart).toBeGreaterThan(-1);
+    expect(cleanupSource).toContain('setCapturingShortcutAction(null);');
+    expect(cleanupSource).toContain("activeSettingsCenterPaneRef.current?.key === 'connection-package'");
+    expect(cleanupSource).toContain('closeConnectionPackageDialog();');
+    expect(cleanupSource).toContain("activeSettingsCenterPaneRef.current?.key === 'ai'");
+    expect(cleanupSource).toContain('setFocusedAIProviderId(undefined);');
+    expect(cleanupSource).toContain('setSecurityUpdateRepairSource(null);');
+    expect(appSource).toContain('const handleOpenSettingsModal = useCallback');
+    expect(appSource).toContain('const handleOpenToolCenterPane = useCallback');
+    expect(appSource.match(/clearSettingsCenterTransientPaneState\(\);/g)?.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('routes every security-update detail and repair return through settings center', () => {
+    const openDetailsStart = appSource.indexOf('const openSecurityUpdateSettings = useCallback(');
+    const openDetailsSource = appSource.slice(
+      openDetailsStart,
+      appSource.indexOf('const handleOpenSecurityUpdateSettings', openDetailsStart),
+    );
+
+    expect(openDetailsStart).toBeGreaterThan(-1);
+    expect(openDetailsSource).toContain("setActiveSettingsCenterGroupKey('config');");
+    expect(openDetailsSource).toContain("setActiveSettingsCenterPane({ key: 'security-update', group: 'config' });");
+    expect(openDetailsSource).toContain('setIsSettingsModalOpen(true);');
+    expect(appSource).toContain("const detailsWereOpen = isSettingsModalOpen && activeSettingsCenterPane?.key === 'security-update';");
+    expect(appSource.match(/<SecurityUpdateSettingsModal/g)?.length).toBe(1);
+    expect(appSource).toContain('<SecurityUpdateSettingsModal\n                    embedded');
+    expect(appSource).not.toContain('isSecurityUpdateSettingsOpen');
+    expect(appSource).not.toContain('setIsSecurityUpdateSettingsOpen');
+  });
+
   it('uses instant-apply footer actions only on v2 theme settings pane', () => {
     expect(appSource).toContain("isV2Ui && activeSettingsCenterPane.key === 'theme' ? (");
     expect(appSource).toContain("t('common.close')");
@@ -141,7 +185,7 @@ describe('settings center layout', () => {
     expect(appSource).toContain('const resolveSettingsCenterGroupInitialPane = (group: SettingsCenterGroupKey): SettingsCenterPaneState | null => (');
     expect(appSource).toContain("group === 'about' ? { key: 'about-go-navi', group: 'about' } : null");
     expect(appSource).toContain('setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(group));');
-    expect(appSource).toContain('setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(group.key));');
+    expect(appSource).toContain('handleOpenSettingsModal(group.key);');
   });
 
   it('routes silent update discovery to the settings center about pane via bridge', () => {
@@ -157,8 +201,10 @@ describe('settings center layout', () => {
     expect(appSource).toContain('const renderSettingsCenterAboutPane = () => {');
     expect(appSource).toContain('const renderSettingsCenterAboutProjectEntry = ({');
     expect(appSource).toContain("padding: '18px 22px'");
-    expect(appSource).toContain('width: 64');
-    expect(appSource).toContain('height: 64');
+    expect(appSource).toContain('width={108}');
+    expect(appSource).toContain('height={108}');
+    expect(appSource).toContain('width: 108');
+    expect(appSource).toContain('height: 108');
     expect(appSource).toContain('minWidth: 260');
     expect(appSource).toContain('const releaseTimeText = formatAboutReleaseTime(lastUpdateInfo?.releasePublishedAt);');
     expect(appSource).toContain("[t('app.about.version.release_time'), releaseTimeText]");
@@ -186,7 +232,7 @@ describe('settings center layout', () => {
     expect(appSource).toContain("activeSettingsCenterPane?.key === 'theme' || activeSettingsCenterPane?.key === 'ai'");
     expect(appSource).toContain('const settingsCenterDetailBodyStyle: React.CSSProperties = isSettingsCenterContainedScrollPane');
     expect(appSource).toContain("overflowY: 'hidden'");
-    expect(appSource).toContain('style={settingsCenterDetailBodyStyle}');
+    expect(appSource).toContain('style={isActiveToolCenterPane ? toolCenterDetailBodyStyle : settingsCenterDetailBodyStyle}');
     expect(appSource).toContain("boxSizing: 'border-box'");
     expect(appSource).toContain("overscrollBehavior: 'contain'");
     expect(aiSettingsModalSource).toContain("boxSizing: 'border-box'");

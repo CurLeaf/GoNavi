@@ -1,7 +1,7 @@
 ﻿import Modal from './components/common/ResizableDraggableModal';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip, Alert } from 'antd';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined, PoweroffOutlined, TagOutlined, UserOutlined, UpCircleOutlined, MessageOutlined, FileTextOutlined, SyncOutlined, SendOutlined, AuditOutlined } from '@ant-design/icons';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined, PoweroffOutlined, TagOutlined, UserOutlined, UpCircleOutlined, MessageOutlined, FileTextOutlined, SyncOutlined, SendOutlined, AuditOutlined } from '@ant-design/icons';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -471,17 +471,26 @@ type ToolCenterPaneKey =
   | 'snippet-settings'
   | 'shortcut-settings';
 
-type ToolCenterPaneState = {
-  key: ToolCenterPaneKey;
-  group: ToolCenterGroupKey;
-};
-
-type SettingsCenterGroupKey = 'preferences' | 'services' | 'about';
-type SettingsCenterPaneKey = 'language' | 'theme' | 'brand-icon' | 'sidebar-metadata' | 'sidebar-objects' | 'proxy' | 'web-auth' | 'ai' | 'about-go-navi';
+type SettingsCenterGroupKey = 'preferences' | 'services' | ToolCenterGroupKey | 'about';
+type SettingsCenterPaneKey =
+  | 'language'
+  | 'theme'
+  | 'brand-icon'
+  | 'sidebar-metadata'
+  | 'sidebar-objects'
+  | 'proxy'
+  | 'web-auth'
+  | 'ai'
+  | ToolCenterPaneKey
+  | 'about-go-navi';
 type SettingsCenterPaneState = {
   key: SettingsCenterPaneKey;
   group: SettingsCenterGroupKey;
 };
+
+const isToolCenterGroupKey = (group: SettingsCenterGroupKey): group is ToolCenterGroupKey => (
+  group === 'config' || group === 'workflow' || group === 'workspace'
+);
 
 const resolveSettingsCenterGroupInitialPane = (group: SettingsCenterGroupKey): SettingsCenterPaneState | null => (
   group === 'about' ? { key: 'about-go-navi', group: 'about' } : null
@@ -959,12 +968,16 @@ function App() {
   const [securityUpdateHasLegacySensitiveItems, setSecurityUpdateHasLegacySensitiveItems] = useState(false);
   const [isSecurityUpdateIntroOpen, setIsSecurityUpdateIntroOpen] = useState(false);
   const [isSecurityUpdateBannerDismissed, setIsSecurityUpdateBannerDismissed] = useState(false);
-  const [isSecurityUpdateSettingsOpen, setIsSecurityUpdateSettingsOpen] = useState(false);
   const [securityUpdateSettingsFocusTarget, setSecurityUpdateSettingsFocusTarget] = useState<SecurityUpdateSettingsFocusTarget | null>(null);
   const [securityUpdateSettingsFocusRequest, setSecurityUpdateSettingsFocusRequest] = useState(0);
   const [isSecurityUpdateProgressOpen, setIsSecurityUpdateProgressOpen] = useState(false);
   const [securityUpdateProgressStage, setSecurityUpdateProgressStage] = useState(() => t('app.security_update.stage.checking_saved_config'));
   const [securityUpdateRepairSource, setSecurityUpdateRepairSource] = useState<SecurityUpdateRepairSource | null>(null);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [activeSettingsCenterGroupKey, setActiveSettingsCenterGroupKey] = useState<SettingsCenterGroupKey>('preferences');
+  const [activeSettingsCenterPane, setActiveSettingsCenterPane] = useState<SettingsCenterPaneState | null>(null);
+  const activeSettingsCenterPaneRef = useRef<SettingsCenterPaneState | null>(null);
+  activeSettingsCenterPaneRef.current = activeSettingsCenterPane;
   const [focusedTabDisplayElementKey, setFocusedTabDisplayElementKey] = useState<TabDisplayElementKey | null>(null);
   const [focusedAIProviderId, setFocusedAIProviderId] = useState<string | undefined>(undefined);
   const [connectionPackageDialog, setConnectionPackageDialog] = useState<ConnectionPackageDialogState>(() => createClosedConnectionPackageDialogState());
@@ -1138,7 +1151,10 @@ function App() {
               setSecurityUpdateSettingsFocusTarget(resolveSecurityUpdateSettingsFocusTarget(nextStatus));
               setSecurityUpdateSettingsFocusRequest((current) => current + 1);
           }
-          setIsSecurityUpdateSettingsOpen(true);
+          setToolCenterBackGroupKey('config');
+          setActiveSettingsCenterGroupKey('config');
+          setActiveSettingsCenterPane({ key: 'security-update', group: 'config' });
+          setIsSettingsModalOpen(true);
       }
       return nextStatus;
   }, [normalizeSecurityUpdateStatus]);
@@ -1915,11 +1931,16 @@ function App() {
   const saveQuery = useStore(state => state.saveQuery);
   const applicationQuitConfirmRef = useRef<{ destroy: () => void } | null>(null);
   const applicationQuitHandlingRef = useRef(false);
-  const openSecurityUpdateSettings = useCallback((focusTarget: SecurityUpdateSettingsFocusTarget | null = null) => {
+  const openSecurityUpdateSettings = useCallback((focusTarget?: SecurityUpdateSettingsFocusTarget | null) => {
       setIsSecurityUpdateIntroOpen(false);
-      setSecurityUpdateSettingsFocusTarget(focusTarget);
-      setSecurityUpdateSettingsFocusRequest((current) => current + 1);
-      setIsSecurityUpdateSettingsOpen(true);
+      if (focusTarget !== undefined) {
+          setSecurityUpdateSettingsFocusTarget(focusTarget);
+          setSecurityUpdateSettingsFocusRequest((current) => current + 1);
+      }
+      setToolCenterBackGroupKey('config');
+      setActiveSettingsCenterGroupKey('config');
+      setActiveSettingsCenterPane({ key: 'security-update', group: 'config' });
+      setIsSettingsModalOpen(true);
   }, []);
   const handleOpenSecurityUpdateSettings = useCallback((focusTarget: SecurityUpdateSettingsFocusTarget | null = null) => {
       openSecurityUpdateSettings(focusTarget);
@@ -1931,11 +1952,10 @@ function App() {
           : (mode === 'retry'
               ? t('app.security_update.stage.verifying_result')
               : t('app.security_update.stage.updating_secure_storage'));
-      const detailsWereOpen = isSecurityUpdateSettingsOpen;
+      const detailsWereOpen = isSettingsModalOpen && activeSettingsCenterPane?.key === 'security-update';
       setSecurityUpdateProgressStage(stageText);
       setIsSecurityUpdateProgressOpen(true);
       setIsSecurityUpdateIntroOpen(false);
-      setIsSecurityUpdateSettingsOpen(false);
 
       let nextStatus: SecurityUpdateStatus | null = null;
       let shouldOpenSettings = false;
@@ -1992,7 +2012,10 @@ function App() {
           console.warn('Failed to execute security update round', err);
           setIsSecurityUpdateProgressOpen(false);
           if (detailsWereOpen) {
-              setIsSecurityUpdateSettingsOpen(true);
+              setToolCenterBackGroupKey('config');
+              setActiveSettingsCenterGroupKey('config');
+              setActiveSettingsCenterPane({ key: 'security-update', group: 'config' });
+              setIsSettingsModalOpen(true);
           }
           void message.error(err?.message || t('app.security_update.message.not_finished_retry_later'));
           return;
@@ -2011,7 +2034,6 @@ function App() {
       if (nextStatus.overallStatus === 'completed') {
           setSecurityUpdateHasLegacySensitiveItems(false);
           setSecurityUpdateRawPayload(null);
-          setIsSecurityUpdateSettingsOpen(false);
           void message.success(t('app.security_update.message.completed'));
       } else if (nextStatus.overallStatus === 'needs_attention') {
           void message.warning(t('app.security_update.message.needs_attention'));
@@ -2020,7 +2042,8 @@ function App() {
       }
   }, [
       applySecurityUpdateStatus,
-      isSecurityUpdateSettingsOpen,
+      activeSettingsCenterPane?.key,
+      isSettingsModalOpen,
       normalizeSecurityUpdateStatus,
       replaceConnections,
       replaceGlobalProxy,
@@ -2056,7 +2079,6 @@ function App() {
       if (nextStatus.overallStatus === 'completed') {
           setSecurityUpdateHasLegacySensitiveItems(false);
           setSecurityUpdateRawPayload(null);
-          setIsSecurityUpdateSettingsOpen(false);
           return;
       }
 
@@ -2120,20 +2142,17 @@ function App() {
           return;
       }
       if (repairEntry.type === 'connection') {
-          setIsSecurityUpdateSettingsOpen(false);
           setSecurityUpdateRepairSource(repairEntry.repairSource);
           setEditingConnection(repairEntry.connection);
           setIsModalOpen(true);
           return;
       }
       if (repairEntry.type === 'proxy') {
-          setIsSecurityUpdateSettingsOpen(false);
           setSecurityUpdateRepairSource(repairEntry.repairSource);
           setIsProxyModalOpen(true);
           return;
       }
       if (repairEntry.type === 'ai') {
-          setIsSecurityUpdateSettingsOpen(false);
           setSecurityUpdateRepairSource(repairEntry.repairSource);
           setFocusedAIProviderId(repairEntry.providerId);
           setActiveSettingsCenterGroupKey('services');
@@ -2539,7 +2558,7 @@ function App() {
       setConnectionPackageDialog(createClosedConnectionPackageDialogState());
       setPendingConnectionImportPayload(null);
       setToolCenterBackGroupKey(null);
-      setActiveToolCenterPane((current) => (current?.key === 'connection-package' ? null : current));
+      setActiveSettingsCenterPane((current) => (current?.key === 'connection-package' ? null : current));
   }, []);
 
   const refreshConnectionsAfterImport = useCallback(async (importedViews: SavedConnection[]) => {
@@ -2622,7 +2641,8 @@ function App() {
           if (isConnectionPackagePasswordRequiredError(e)) {
               if (sourceGroup) {
                   setToolCenterBackGroupKey(sourceGroup);
-                  setActiveToolCenterPane({ key: 'connection-package', group: sourceGroup });
+                  setActiveSettingsCenterGroupKey(sourceGroup);
+                  setActiveSettingsCenterPane({ key: 'connection-package', group: sourceGroup });
               }
               setPendingConnectionImportPayload(raw);
               setConnectionPackageDialog({
@@ -2691,7 +2711,8 @@ function App() {
 
       setToolCenterBackGroupKey(sourceGroup ?? null);
       if (sourceGroup) {
-          setActiveToolCenterPane({ key: 'connection-package', group: sourceGroup });
+          setActiveSettingsCenterGroupKey(sourceGroup);
+          setActiveSettingsCenterPane({ key: 'connection-package', group: sourceGroup });
       }
       setConnectionPackageDialog({
           open: true,
@@ -2807,13 +2828,7 @@ function App() {
       }
   };
 
-  const [isToolsModalOpen, setIsToolsModalOpen] = useState(false);
-  const [activeToolCenterGroupKey, setActiveToolCenterGroupKey] = useState<ToolCenterGroupKey>('config');
   const [toolCenterBackGroupKey, setToolCenterBackGroupKey] = useState<ToolCenterGroupKey | null>(null);
-  const [activeToolCenterPane, setActiveToolCenterPane] = useState<ToolCenterPaneState | null>(null);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [activeSettingsCenterGroupKey, setActiveSettingsCenterGroupKey] = useState<SettingsCenterGroupKey>('preferences');
-  const [activeSettingsCenterPane, setActiveSettingsCenterPane] = useState<SettingsCenterPaneState | null>(null);
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   type ThemeSettingsSection = 'theme' | 'appearance' | 'workspace';
   const THEME_SETTINGS_SECTION_STORAGE_KEY = 'gonavi.themeSettingsSection';
@@ -2840,8 +2855,6 @@ function App() {
   }, [themeModalSection]);
   const [isLinuxCJKFontBannerDismissed, setIsLinuxCJKFontBannerDismissed] = useState(false);
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
-  const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
-  const [isSnippetModalOpen, setIsSnippetModalOpen] = useState(false);
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
   const tabDisplaySettingsPanelRef = useRef<HTMLDivElement | null>(null);
   const [tabDisplaySettingsFocusRequest, setTabDisplaySettingsFocusRequest] = useState(0);
@@ -3177,30 +3190,43 @@ function App() {
           effectiveUiScale,
       })
   ), [aiPanelVisible, darkMode, effectiveUiScale]);
+  const clearSettingsCenterTransientPaneState = useCallback(() => {
+      setCapturingShortcutAction(null);
+      if (activeSettingsCenterPaneRef.current?.key === 'connection-package') {
+          closeConnectionPackageDialog();
+      }
+      if (activeSettingsCenterPaneRef.current?.key === 'ai') {
+          setFocusedAIProviderId(undefined);
+          setSecurityUpdateRepairSource(null);
+      }
+  }, [closeConnectionPackageDialog]);
   const handleOpenToolsModal = useCallback((group: ToolCenterGroupKey = 'config') => {
+      clearSettingsCenterTransientPaneState();
       setToolCenterBackGroupKey(null);
-      setActiveToolCenterPane(null);
-      setActiveToolCenterGroupKey(group);
-      setIsToolsModalOpen(true);
-  }, []);
+      setActiveSettingsCenterGroupKey(group);
+      setActiveSettingsCenterPane(null);
+      setIsSettingsModalOpen(true);
+  }, [clearSettingsCenterTransientPaneState]);
   const handleOpenSettingsModal = useCallback((group: SettingsCenterGroupKey = 'preferences') => {
+      clearSettingsCenterTransientPaneState();
       setActiveSettingsCenterGroupKey(group);
       setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(group));
       setIsSettingsModalOpen(true);
-  }, []);
+  }, [clearSettingsCenterTransientPaneState]);
   const handleOpenSettingsCenterPane = useCallback((group: SettingsCenterGroupKey, key: SettingsCenterPaneKey) => {
+      clearSettingsCenterTransientPaneState();
       setActiveSettingsCenterGroupKey(group);
       setActiveSettingsCenterPane({ key, group });
       setIsSettingsModalOpen(true);
-  }, []);
+  }, [clearSettingsCenterTransientPaneState]);
   const finalizeSecurityRepairReturnFromAISettings = useCallback(() => {
       const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
       setFocusedAIProviderId(undefined);
       setSecurityUpdateRepairSource(null);
       if (reopenSecurityUpdateDetails) {
-          setIsSecurityUpdateSettingsOpen(true);
+          openSecurityUpdateSettings();
       }
-  }, [securityUpdateRepairSource]);
+  }, [openSecurityUpdateSettings, securityUpdateRepairSource]);
   const handleBackFromSettingsCenterPane = useCallback(() => {
       const leavingAI = activeSettingsCenterPane?.key === 'ai';
       const returnGroup = activeSettingsCenterPane?.group ?? activeSettingsCenterGroupKey;
@@ -3217,12 +3243,17 @@ function App() {
   ]);
   const handleCancelSettingsCenterPane = useCallback(() => {
       const leavingAI = activeSettingsCenterPane?.key === 'ai';
+      if (activeSettingsCenterPane?.key === 'connection-package') {
+          closeConnectionPackageDialog();
+      }
+      setCapturingShortcutAction(null);
+      setToolCenterBackGroupKey(null);
       setActiveSettingsCenterPane(null);
       setIsSettingsModalOpen(false);
       if (leavingAI) {
           finalizeSecurityRepairReturnFromAISettings();
       }
-  }, [activeSettingsCenterPane?.key, finalizeSecurityRepairReturnFromAISettings]);
+  }, [activeSettingsCenterPane?.key, closeConnectionPackageDialog, finalizeSecurityRepairReturnFromAISettings]);
   const isSettingsAboutPaneOpen = isSettingsModalOpen && activeSettingsCenterPane?.key === 'about-go-navi';
   const isSettingsAboutPaneOpenRef = useRef(false);
   useEffect(() => {
@@ -3250,27 +3281,22 @@ function App() {
       prepareAboutSurface();
   }, [isSettingsAboutPaneOpen, prepareAboutSurface]);
   const handleOpenToolCenterPane = useCallback((group: ToolCenterGroupKey, key: ToolCenterPaneKey) => {
+      clearSettingsCenterTransientPaneState();
       setToolCenterBackGroupKey(group);
-      setActiveToolCenterGroupKey(group);
-      setActiveToolCenterPane({ key, group });
-      setIsToolsModalOpen(true);
-  }, []);
+      setActiveSettingsCenterGroupKey(group);
+      setActiveSettingsCenterPane({ key, group });
+      setIsSettingsModalOpen(true);
+  }, [clearSettingsCenterTransientPaneState]);
   const handleReturnToToolCenter = useCallback((closeChild?: () => void) => {
       const returnGroup = toolCenterBackGroupKey ?? 'config';
       closeChild?.();
       setToolCenterBackGroupKey(null);
-      setActiveToolCenterGroupKey(returnGroup);
-      setActiveToolCenterPane(null);
-      setIsToolsModalOpen(true);
+      setActiveSettingsCenterGroupKey(returnGroup);
+      setActiveSettingsCenterPane(null);
+      setIsSettingsModalOpen(true);
   }, [toolCenterBackGroupKey]);
   const sidebarUtilityItems = useMemo(() => {
       const itemMap = {
-          tools: {
-              key: 'tools',
-              title: t('app.sidebar.tools'),
-              icon: <ToolOutlined />,
-              onClick: () => handleOpenToolsModal(),
-          },
           settings: {
               key: 'settings',
               title: t('app.sidebar.settings'),
@@ -3280,7 +3306,7 @@ function App() {
       } as const;
 
       return SIDEBAR_UTILITY_ITEM_KEYS.map((key) => itemMap[key]);
-  }, [handleOpenSettingsModal, handleOpenToolsModal, t]);
+  }, [handleOpenSettingsModal, t]);
   const handleFocusSidebarSearch = useCallback(() => {
       window.dispatchEvent(new CustomEvent('gonavi:focus-sidebar-search'));
   }, []);
@@ -3317,11 +3343,11 @@ function App() {
   }, [t]);
 
   useEffect(() => {
-      if (!isDataRootModalOpen && activeToolCenterPane?.key !== 'data-root') {
+      if (!isDataRootModalOpen && activeSettingsCenterPane?.key !== 'data-root') {
           return;
       }
       void loadDataRootInfo();
-  }, [activeToolCenterPane?.key, isDataRootModalOpen, loadDataRootInfo]);
+  }, [activeSettingsCenterPane?.key, isDataRootModalOpen, loadDataRootInfo]);
 
   const handleSelectDataRoot = useCallback(async () => {
       try {
@@ -3532,7 +3558,7 @@ function App() {
       setEditingConnection(null);
       setSecurityUpdateRepairSource(null);
       if (reopenSecurityUpdateDetails) {
-          setIsSecurityUpdateSettingsOpen(true);
+          openSecurityUpdateSettings();
       }
   };
 
@@ -3549,9 +3575,9 @@ function App() {
       setToolCenterBackGroupKey(null);
       setSecurityUpdateRepairSource(null);
       if (reopenSecurityUpdateDetails) {
-          setIsSecurityUpdateSettingsOpen(true);
+          openSecurityUpdateSettings();
       }
-  }, [securityUpdateRepairSource]);
+  }, [openSecurityUpdateSettings, securityUpdateRepairSource]);
 
   const handleOpenGlobalProxySettings = useCallback(() => {
       setSecurityUpdateRepairSource(null);
@@ -3563,9 +3589,9 @@ function App() {
       setIsProxyModalOpen(false);
       setSecurityUpdateRepairSource(null);
       if (reopenSecurityUpdateDetails) {
-          setIsSecurityUpdateSettingsOpen(true);
+          openSecurityUpdateSettings();
       }
-  }, [securityUpdateRepairSource]);
+  }, [openSecurityUpdateSettings, securityUpdateRepairSource]);
 
   /** 从聊天面板等入口打开 AI 配置：走设置中心，不再弹独立 AISettingsModal */
   const handleOpenAISettings = useCallback((providerId?: string) => {
@@ -3757,17 +3783,16 @@ function App() {
 
   useEffect(() => {
       const handleOpenShortcutSettingsEvent = () => {
-          setIsShortcutModalOpen(true);
+          handleOpenToolCenterPane('workspace', 'shortcut-settings');
       };
       window.addEventListener('gonavi:open-shortcut-settings', handleOpenShortcutSettingsEvent as EventListener);
       return () => {
           window.removeEventListener('gonavi:open-shortcut-settings', handleOpenShortcutSettingsEvent as EventListener);
       };
-  }, []);
+  }, [handleOpenToolCenterPane]);
 
   useEffect(() => {
       const handleOpenSnippetSettingsEvent = () => {
-          setIsSnippetModalOpen(false);
           handleOpenToolCenterPane('workspace', 'snippet-settings');
       };
       window.addEventListener('gonavi:open-snippet-settings', handleOpenSnippetSettingsEvent as EventListener);
@@ -3877,7 +3902,7 @@ function App() {
                   selectPresetTheme(themeMode === 'dark' ? 'light' : 'dark');
                   break;
               case 'openShortcutManager':
-                  setIsShortcutModalOpen(true);
+                  handleOpenToolCenterPane('workspace', 'shortcut-settings');
                   break;
               case 'toggleMacFullscreen':
                   if (isMacRuntime && useNativeMacWindowControls) {
@@ -3894,7 +3919,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleGlobalShortcut, true);
       };
-  }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, selectPresetTheme, shortcutOptions, switchActiveTabByOffset, themeMode, toggleAIPanel, useNativeMacWindowControls]);
+  }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleOpenToolCenterPane, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, selectPresetTheme, shortcutOptions, switchActiveTabByOffset, themeMode, toggleAIPanel, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!capturingShortcutAction) {
@@ -6531,7 +6556,21 @@ function App() {
     isV2Ui ? renderThemeSettingsContentV2() : renderThemeSettingsContentLegacy()
   );
 
-  const settingsCenterGroups = [
+  type SettingsCenterNavigationGroup = {
+      key: SettingsCenterGroupKey;
+      icon: React.ReactNode;
+      title: string;
+      description: string;
+      items: ReadonlyArray<{
+          key: string;
+          icon: React.ReactNode;
+          title: string;
+          description: string;
+          onClick: () => void;
+      }>;
+  };
+
+  const settingsCenterGroups: SettingsCenterNavigationGroup[] = [
       {
           key: 'preferences' as const,
           icon: <SettingOutlined />,
@@ -6627,12 +6666,6 @@ function App() {
           ],
       },
   ];
-  const activeSettingsCenterGroup = settingsCenterGroups.find((group) => group.key === activeSettingsCenterGroupKey) ?? settingsCenterGroups[0];
-  const activeSettingsCenterPaneItem = activeSettingsCenterPane
-      ? settingsCenterGroups
-          .find((group) => group.key === activeSettingsCenterPane.group)
-          ?.items.find((item) => item.key === activeSettingsCenterPane.key)
-      : null;
   const isSettingsCenterContainedScrollPane =
       activeSettingsCenterPane?.key === 'theme' || activeSettingsCenterPane?.key === 'ai';
   const isV2ThemeSettingsPane = isV2Ui && activeSettingsCenterPane?.key === 'theme';
@@ -6892,7 +6925,6 @@ function App() {
                         <Sidebar
                             onCreateConnection={handleCreateConnection}
                             onEditConnection={handleEditConnection}
-                            onOpenTools={handleOpenToolsModal}
                             onOpenSettings={handleOpenSettingsModal}
                             onToggleAI={toggleAIPanel}
                             onToggleLogPanel={handleToggleLogPanel}
@@ -7179,8 +7211,8 @@ function App() {
             onSaved={handleConnectionSaved}
           />
           )}
-          {isToolsModalOpen && (() => {
-            const toolCenterGroups = [
+          {isSettingsModalOpen && (() => {
+            const toolCenterGroups: SettingsCenterNavigationGroup[] = [
               {
                 key: 'config',
                 icon: <SettingOutlined />,
@@ -7304,42 +7336,46 @@ function App() {
                     title: t('app.tools.entry.sql_audit.title'),
                     description: t('app.tools.entry.sql_audit.description'),
                     onClick: () => {
-                      setIsToolsModalOpen(false);
-                      setActiveToolCenterPane(null);
-                      setToolCenterBackGroupKey(null);
+                      handleCancelSettingsCenterPane();
                       addTab(buildSqlAuditWorkbenchTab());
                     },
                   },
                 ],
               },
-            ] as const;
-            const filteredToolCenterGroups = toolCenterGroups.map((group) => ({
-              ...group,
-              items: group.items,
-            })).filter((group) => group.items.length > 0);
-            const activeToolCenterGroup = filteredToolCenterGroups.find((group) => group.key === activeToolCenterGroupKey) ?? filteredToolCenterGroups[0];
-            const activeToolCenterPaneItem = activeToolCenterPane
-              ? filteredToolCenterGroups
-                  .find((group) => group.key === activeToolCenterPane.group)
-                  ?.items.find((item) => item.key === activeToolCenterPane.key)
+            ];
+            const combinedSettingsCenterGroups = [
+              ...settingsCenterGroups.filter((group) => group.key !== 'about'),
+              ...toolCenterGroups,
+              ...settingsCenterGroups.filter((group) => group.key === 'about'),
+            ];
+            const activeSettingsCenterGroup = combinedSettingsCenterGroups.find(
+              (group) => group.key === activeSettingsCenterGroupKey,
+            ) ?? combinedSettingsCenterGroups[0];
+            const activeSettingsCenterPaneItem = activeSettingsCenterPane
+              ? combinedSettingsCenterGroups
+                  .find((group) => group.key === activeSettingsCenterPane.group)
+                  ?.items.find((item) => item.key === activeSettingsCenterPane.key)
               : null;
-            if (!activeToolCenterGroup) {
+            const isActiveToolCenterPane = activeSettingsCenterPane
+              ? isToolCenterGroupKey(activeSettingsCenterPane.group)
+              : false;
+            if (!activeSettingsCenterGroup) {
               return null;
             }
             const closeToolCenterPane = () => {
-              if (activeToolCenterPane?.key === 'connection-package') {
+              if (activeSettingsCenterPane?.key === 'connection-package') {
                 closeConnectionPackageDialog();
                 return;
               }
               setToolCenterBackGroupKey(null);
-              setActiveToolCenterPane(null);
+              setActiveSettingsCenterPane(null);
             };
             const renderToolCenterPane = () => {
-              if (!activeToolCenterPane) {
+              if (!activeSettingsCenterPane || !isToolCenterGroupKey(activeSettingsCenterPane.group)) {
                 return null;
               }
 
-              if (activeToolCenterPane.key === 'connection-package') {
+              if (activeSettingsCenterPane.key === 'connection-package') {
                 return (
                   <ConnectionPackagePasswordModal
                     embedded
@@ -7390,7 +7426,7 @@ function App() {
                 );
               }
 
-              if (activeToolCenterPane.key === 'data-root') {
+              if (activeSettingsCenterPane.key === 'data-root') {
                 if (isWebRuntime) {
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
@@ -7497,7 +7533,7 @@ function App() {
                 );
               }
 
-              if (activeToolCenterPane.key === 'security-update') {
+              if (activeSettingsCenterPane.key === 'security-update') {
                 return (
                   <SecurityUpdateSettingsModal
                     embedded
@@ -7519,9 +7555,9 @@ function App() {
               }
 
               if (
-                activeToolCenterPane.key === 'schema-compare'
-                || activeToolCenterPane.key === 'data-compare'
-                || activeToolCenterPane.key === 'sync'
+                activeSettingsCenterPane.key === 'schema-compare'
+                || activeSettingsCenterPane.key === 'data-compare'
+                || activeSettingsCenterPane.key === 'sync'
               ) {
                 return (
                   <DataSyncModal
@@ -7534,7 +7570,7 @@ function App() {
                 );
               }
 
-              if (activeToolCenterPane.key === 'drivers') {
+              if (activeSettingsCenterPane.key === 'drivers') {
                 return (
                   <DriverManagerModal
                     embedded
@@ -7546,7 +7582,7 @@ function App() {
                 );
               }
 
-              if (activeToolCenterPane.key === 'snippet-settings') {
+              if (activeSettingsCenterPane.key === 'snippet-settings') {
                 return (
                   <SnippetSettingsModal
                     embedded
@@ -7559,7 +7595,7 @@ function App() {
                 );
               }
 
-              if (activeToolCenterPane.key === 'shortcut-settings') {
+              if (activeSettingsCenterPane.key === 'shortcut-settings') {
                 return (
                   <Modal
                     embedded
@@ -7678,16 +7714,9 @@ function App() {
 
             return (
               <Modal
-                title={renderUtilityModalTitle(<ToolOutlined />, t('app.tools.title'), t('app.tools.description'))}
-                open={isToolsModalOpen}
-                onCancel={() => {
-                  if (activeToolCenterPane?.key === 'connection-package') {
-                    closeConnectionPackageDialog();
-                  }
-                  setActiveToolCenterPane(null);
-                  setToolCenterBackGroupKey(null);
-                  setIsToolsModalOpen(false);
-                }}
+                title={renderUtilityModalTitle(<SettingOutlined />, t('app.settings.title'), t('app.settings.description'))}
+                open={isSettingsModalOpen}
+                onCancel={handleCancelSettingsCenterPane}
                 footer={null}
                 centered
                 width={1080}
@@ -7702,8 +7731,8 @@ function App() {
                   <div style={toolCenterModalSplitStyle}>
                     <div style={toolCenterNavPanelStyle}>
                       <div style={toolCenterNavScrollStyle} role="tablist" aria-orientation="vertical">
-                        {toolCenterGroups.map((group) => {
-                          const active = group.key === activeToolCenterGroup.key;
+                        {combinedSettingsCenterGroups.map((group) => {
+                          const active = group.key === activeSettingsCenterGroup.key;
                           return (
                             <button
                               key={group.key}
@@ -7712,8 +7741,11 @@ function App() {
                               aria-selected={active}
                               title={`${group.title} - ${group.description}`}
                               onClick={() => {
-                                setActiveToolCenterGroupKey(group.key);
-                                setActiveToolCenterPane(null);
+                                if (isToolCenterGroupKey(group.key)) {
+                                  handleOpenToolsModal(group.key);
+                                  return;
+                                }
+                                handleOpenSettingsModal(group.key);
                               }}
                               style={{
                                 position: 'relative',
@@ -7804,30 +7836,66 @@ function App() {
                       </div>
                     </div>
                     <div style={toolCenterContentPanelStyle}>
-                      {activeToolCenterPane ? (
+                      {activeSettingsCenterPane ? (
                         <div style={toolCenterDetailPanelStyle}>
                           <div style={{ paddingBottom: 10, borderBottom: `1px solid ${overlayTheme.divider}` }}>
                             <div style={{ minWidth: 0 }}>
                               <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>
-                                {activeToolCenterPaneItem?.title ?? activeToolCenterGroup.title}
+                                {activeSettingsCenterPaneItem?.title ?? activeSettingsCenterGroup.title}
                               </div>
                               <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
-                                {activeToolCenterPaneItem?.description ?? activeToolCenterGroup.description}
+                                {activeSettingsCenterPaneItem?.description ?? activeSettingsCenterGroup.description}
                               </div>
                             </div>
                           </div>
-                          <div style={toolCenterDetailBodyStyle}>
-                            {renderToolCenterPane()}
+                          <div style={isActiveToolCenterPane ? toolCenterDetailBodyStyle : settingsCenterDetailBodyStyle}>
+                            {isActiveToolCenterPane ? renderToolCenterPane() : renderSettingsCenterPane()}
                           </div>
+                          {!isActiveToolCenterPane && (
+                            <div
+                              style={{
+                                display: 'flex',
+                                justifyContent: activeSettingsCenterPane.key === 'about-go-navi' ? 'space-between' : 'flex-end',
+                                alignItems: 'center',
+                                gap: activeSettingsCenterPane.key === 'about-go-navi' ? 16 : 8,
+                                paddingTop: 10,
+                                marginTop: 10,
+                                borderTop: `1px solid ${overlayTheme.divider}`,
+                                flexShrink: 0,
+                              }}
+                            >
+                              {activeSettingsCenterPane.key === 'about-go-navi' ? (
+                                renderSettingsCenterAboutFooter()
+                              ) : isV2Ui && activeSettingsCenterPane.key === 'theme' ? (
+                                <>
+                                  <Button onClick={handleBackFromSettingsCenterPane}>
+                                    {t('common.back_to_previous')}
+                                  </Button>
+                                  <Button type="primary" onClick={handleCancelSettingsCenterPane}>
+                                    {t('common.close')}
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <Button onClick={handleCancelSettingsCenterPane}>
+                                    {t('common.cancel')}
+                                  </Button>
+                                  <Button type="primary" onClick={handleBackFromSettingsCenterPane}>
+                                    {t('common.back_to_previous')}
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <>
                           <div style={{ display: 'grid', gap: 4 }}>
-                            <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>{activeToolCenterGroup.title}</div>
-                            <div style={utilityMutedTextStyle}>{activeToolCenterGroup.description}</div>
+                            <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>{activeSettingsCenterGroup.title}</div>
+                            <div style={utilityMutedTextStyle}>{activeSettingsCenterGroup.description}</div>
                           </div>
                           <div style={toolCenterScrollableListStyle}>
-                  {activeToolCenterGroup.items.map((item, index) => (
+                            {activeSettingsCenterGroup.items.map((item, index) => (
                               <Button
                                 key={item.key}
                                 type="text"
@@ -7859,209 +7927,6 @@ function App() {
               </Modal>
             );
           })()}
-          {isSettingsModalOpen && (
-          <Modal
-            title={renderUtilityModalTitle(<SettingOutlined />, t('app.settings.title'), t('app.settings.description'))}
-            open={isSettingsModalOpen}
-            onCancel={handleCancelSettingsCenterPane}
-            footer={null}
-            centered
-            width={1080}
-            styles={{
-                content: toolCenterModalContentStyle,
-                header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
-                body: { paddingTop: 8, paddingBottom: 8, overflow: 'hidden', flex: 1, minHeight: 0 },
-                footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 },
-            }}
-          >
-            <div style={toolCenterModalWorkspaceStyle}>
-              <div style={toolCenterModalSplitStyle}>
-                <div style={toolCenterNavPanelStyle}>
-                  <div style={toolCenterNavScrollStyle} role="tablist" aria-orientation="vertical">
-                    {settingsCenterGroups.map((group) => {
-                      const active = group.key === activeSettingsCenterGroup.key;
-                      return (
-                        <button
-                          key={group.key}
-                          type="button"
-                          role="tab"
-                          aria-selected={active}
-                          title={`${group.title} - ${group.description}`}
-                          onClick={() => {
-                            setActiveSettingsCenterGroupKey(group.key);
-                            setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(group.key));
-                          }}
-                          style={{
-                            position: 'relative',
-                            textAlign: 'left',
-                            width: '100%',
-                            padding: '11px 10px 11px 14px',
-                            borderRadius: 8,
-                            border: 'none',
-                            background: active ? overlayTheme.selectedBg : 'transparent',
-                            color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <span
-                            aria-hidden="true"
-                            style={{
-                              position: 'absolute',
-                              left: 0,
-                              top: 10,
-                              bottom: 10,
-                              width: 3,
-                              borderRadius: 999,
-                              background: active ? overlayTheme.selectedText : 'transparent',
-                            }}
-                          />
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, minWidth: 0 }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                              <span
-                                style={{
-                                  width: 28,
-                                  height: 28,
-                                  borderRadius: 8,
-                                  display: 'grid',
-                                  placeItems: 'center',
-                                  fontSize: 15,
-                                  flexShrink: 0,
-                                  background: active
-                                    ? overlayTheme.iconBg
-                                    : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)'),
-                                  color: active ? overlayTheme.iconColor : overlayTheme.mutedText,
-                                }}
-                              >
-                                {group.icon}
-                              </span>
-                              <span
-                                style={{
-                                  fontSize: 13,
-                                  fontWeight: active ? 700 : 600,
-                                  minWidth: 0,
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                }}
-                              >
-                                {group.title}
-                              </span>
-                            </span>
-                            <span
-                              style={{
-                                minWidth: 20,
-                                height: 20,
-                                paddingInline: 6,
-                                borderRadius: 999,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                background: active
-                                  ? overlayTheme.selectedBg
-                                  : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)'),
-                                color: active ? (darkMode ? '#f8fafc' : '#0f172a') : overlayTheme.mutedText,
-                                fontSize: 10,
-                                fontWeight: 700,
-                                flexShrink: 0,
-                              }}
-                            >
-                              {group.items.length}
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div style={toolCenterContentPanelStyle}>
-                  {activeSettingsCenterPane ? (
-                    <div style={toolCenterDetailPanelStyle}>
-                      <div style={{ paddingBottom: 10, borderBottom: `1px solid ${overlayTheme.divider}` }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>
-                            {activeSettingsCenterPaneItem?.title ?? activeSettingsCenterGroup.title}
-                          </div>
-                          <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
-                            {activeSettingsCenterPaneItem?.description ?? activeSettingsCenterGroup.description}
-                          </div>
-                        </div>
-                      </div>
-                      <div style={settingsCenterDetailBodyStyle}>
-                        {renderSettingsCenterPane()}
-                      </div>
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: activeSettingsCenterPane.key === 'about-go-navi' ? 'space-between' : 'flex-end',
-                          alignItems: 'center',
-                          gap: activeSettingsCenterPane.key === 'about-go-navi' ? 16 : 8,
-                          paddingTop: 10,
-                          marginTop: 10,
-                          borderTop: `1px solid ${overlayTheme.divider}`,
-                          flexShrink: 0,
-                        }}
-                      >
-                        {activeSettingsCenterPane.key === 'about-go-navi' ? (
-                          renderSettingsCenterAboutFooter()
-                        ) : isV2Ui && activeSettingsCenterPane.key === 'theme' ? (
-                          <>
-                            <Button onClick={handleBackFromSettingsCenterPane}>
-                              {t('common.back_to_previous')}
-                            </Button>
-                            <Button type="primary" onClick={handleCancelSettingsCenterPane}>
-                              {t('common.close')}
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button onClick={handleCancelSettingsCenterPane}>
-                              {t('common.cancel')}
-                            </Button>
-                            <Button type="primary" onClick={handleBackFromSettingsCenterPane}>
-                              {t('common.back_to_previous')}
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div style={{ display: 'grid', gap: 4 }}>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>{activeSettingsCenterGroup.title}</div>
-                        <div style={utilityMutedTextStyle}>{activeSettingsCenterGroup.description}</div>
-                      </div>
-                      <div style={toolCenterScrollableListStyle}>
-                        {activeSettingsCenterGroup.items.map((item, index) => (
-                          <Button
-                            key={item.key}
-                            type="text"
-                            style={{
-                              ...toolCenterRowStyle,
-                              borderTop: index === 0 ? `1px solid ${overlayTheme.divider}` : 'none',
-                              borderBottom: `1px solid ${overlayTheme.divider}`,
-                            }}
-                            onClick={item.onClick}
-                          >
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                              <span style={{ width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
-                                {item.icon}
-                              </span>
-                              <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
-                                <span>{item.title}</span>
-                                <span style={toolCenterRowDescriptionStyle}>{item.description}</span>
-                              </span>
-                            </span>
-                            <RightOutlined style={{ color: overlayTheme.mutedText, fontSize: 12, flexShrink: 0 }} />
-                          </Button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          </Modal>
-          )}
           {isDataRootModalOpen && (
           <Modal
             title={renderUtilityModalTitle(
@@ -8186,24 +8051,6 @@ function App() {
             onPostpone={handlePostponeSecurityUpdate}
             onViewDetails={() => handleOpenSecurityUpdateSettings()}
           />
-          <SecurityUpdateSettingsModal
-            open={isSecurityUpdateSettingsOpen}
-            darkMode={darkMode}
-            overlayTheme={overlayTheme}
-            surfaceOpacity={effectiveOpacity}
-            status={securityUpdateStatus}
-            focusTarget={securityUpdateSettingsFocusTarget}
-            focusRequest={securityUpdateSettingsFocusRequest}
-            onClose={() => {
-              setIsSecurityUpdateSettingsOpen(false);
-              setToolCenterBackGroupKey(null);
-            }}
-            onBack={toolCenterBackGroupKey === 'config' ? () => handleReturnToToolCenter(() => setIsSecurityUpdateSettingsOpen(false)) : undefined}
-            onStart={handleStartSecurityUpdate}
-            onRetry={handleRetrySecurityUpdate}
-            onRestart={handleRestartSecurityUpdate}
-            onIssueAction={handleSecurityUpdateIssueAction}
-          />
           <SecurityUpdateProgressModal
             open={isSecurityUpdateProgressOpen}
             stageText={securityUpdateProgressStage}
@@ -8211,7 +8058,7 @@ function App() {
             surfaceOpacity={effectiveOpacity}
           />
           <ConnectionPackagePasswordModal
-            open={connectionPackageDialog.open && !(isToolsModalOpen && activeToolCenterPane?.key === 'connection-package')}
+            open={connectionPackageDialog.open && !(isSettingsModalOpen && activeSettingsCenterPane?.key === 'connection-package')}
             title={connectionPackageDialog.mode === 'export'
                 ? t('app.connection_package.dialog.export_title')
                 : t('app.connection_package.dialog.import_password_title')}
@@ -8295,143 +8142,6 @@ function App() {
           </Modal>
           )}
 
-          {isShortcutModalOpen && (
-          <Modal
-              title={renderUtilityModalTitle(
-                  <LinkOutlined />,
-                  t('app.shortcuts.title'),
-                  t('app.shortcuts.description'),
-              )}
-              open={isShortcutModalOpen}
-              onCancel={() => {
-                  setIsShortcutModalOpen(false);
-                  setCapturingShortcutAction(null);
-                  setToolCenterBackGroupKey(null);
-              }}
-              width={760}
-              centered
-              style={{ top: 0, maxHeight: 'calc(100vh - 80px)' }}
-              styles={{
-                  content: {
-                      ...utilityModalShellStyle,
-                      height: 'min(760px, calc(100vh - 80px))',
-                      display: 'flex',
-                      flexDirection: 'column',
-                  },
-                  header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
-                  body: { paddingTop: 8, overflow: 'hidden', flex: 1, minHeight: 0 },
-                  footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 }
-              }}
-              footer={[
-                  <Button
-                      key="reset"
-                      onClick={() => {
-                           resetShortcutOptions();
-                           setCapturingShortcutAction(null);
-                           void message.success(t('app.shortcuts.message.restored_defaults'));
-                       }}
-                   >
-                       {t('app.shortcuts.action.restore_defaults')}
-                   </Button>,
-                  <Button
-                      key="close"
-                      type="primary"
-                      onClick={() => {
-                          setIsShortcutModalOpen(false);
-                          setCapturingShortcutAction(null);
-                      }}
-                  >
-                       {t('common.close')}
-                  </Button>,
-                  toolCenterBackGroupKey === 'workspace' ? (
-                    <Button
-                        key="back"
-                        onClick={() => handleReturnToToolCenter(() => {
-                            setIsShortcutModalOpen(false);
-                            setCapturingShortcutAction(null);
-                        })}
-                    >
-                        {t('common.back_to_previous')}
-                    </Button>
-                  ) : null,
-              ]}
-          >
-              <div data-gonavi-shortcut-modal-scroll="true" style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8, paddingRight: 8 }}>
-                  <div style={utilityPanelStyle}>
-                      <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
-                           {t('app.shortcuts.capture_hint')}
-                      </div>
-                  </div>
-                  {SHORTCUT_ACTION_ORDER.map((action) => {
-                      const meta = SHORTCUT_ACTION_META[action];
-                      if (meta.platformOnly === 'mac' && !isMacRuntime) {
-                          return null;
-                      }
-                      const binding = resolveShortcutBinding(shortcutOptions, action, activeShortcutPlatform);
-                      const isCapturing = capturingShortcutAction === action;
-                      const conflicts = shortcutConflictMap[action];
-                      const conflictInfo = conflicts?.length ? splitConflictsByContext(conflicts) : null;
-                      return (
-                          <div
-                              key={action}
-                              style={{
-                                  ...utilityPanelStyle,
-                                  display: 'grid',
-                                  gridTemplateColumns: '1fr auto',
-                                  gap: 12,
-                                  alignItems: 'center',
-                                  padding: '10px 12px',
-                              }}
-                          >
-                              <div>
-                                  <div style={{ fontWeight: 500 }}>{meta.label}</div>
-                                  <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{meta.description}</div>
-                                  {conflictInfo && (
-                                      <div style={{ fontSize: 11, color: darkMode ? '#faad14' : '#d48806', marginTop: 2 }}>
-                                          {conflictInfo.hasMonaco && (
-                                              <>⚠ {t('app.shortcuts.message.reserved_conflict_info', { labels: conflictInfo.monacoLabels })}</>
-                                           )}
-                                           {conflictInfo.hasOther && (
-                                              <>⚠ {t('app.shortcuts.message.reserved_conflict_warning', { contexts: conflictInfo.otherContexts, labels: conflictInfo.otherLabels })}</>
-                                           )}
-                                      </div>
-                                  )}
-                              </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                  <Input
-                                      readOnly
-                                      value={isCapturing ? t('app.shortcuts.capture_waiting') : getShortcutDisplayLabel(binding.combo, activeShortcutPlatform)}
-                                      style={{ width: 180, fontFamily: resolvedMonoFontFamily }}
-                                  />
-                                  <Button
-                                      size="small"
-                                      onClick={() => setCapturingShortcutAction((prev) => (prev === action ? null : action))}
-                                  >
-                                      {isCapturing ? t('common.cancel') : t('app.shortcuts.action.record')}
-                                  </Button>
-                                  <Switch
-                                      checked={binding.enabled}
-                                      onChange={(checked) => updateShortcut(action, { enabled: checked }, activeShortcutPlatform)}
-                                  />
-                              </div>
-                          </div>
-                      );
-                  })}
-              </div>
-          </Modal>
-          )}
-          {isSnippetModalOpen && (
-          <SnippetSettingsModal
-              open={isSnippetModalOpen}
-              onClose={() => {
-                  setIsSnippetModalOpen(false);
-                  setToolCenterBackGroupKey(null);
-              }}
-              onBack={toolCenterBackGroupKey === 'workspace' ? () => handleReturnToToolCenter(() => setIsSnippetModalOpen(false)) : undefined}
-              darkMode={darkMode}
-              overlayTheme={overlayTheme}
-          />
-          )}
           {isProxyModalOpen && (
           <Modal
               title={renderUtilityModalTitle(<GlobalOutlined />, t('app.proxy.title'), t('app.proxy.description'))}

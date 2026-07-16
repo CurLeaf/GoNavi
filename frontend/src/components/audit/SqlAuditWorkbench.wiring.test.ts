@@ -15,7 +15,7 @@ describe('SQL audit workbench wiring', () => {
     expect(workbenchSource).toContain('<SqlAuditWorkbench tab={tab} isActive={isActive} />');
   });
 
-  it('provides both the V2 footer shortcut and the cross-version tool-center entry', () => {
+  it('provides both the V2 footer shortcut and the cross-version settings-center entry', () => {
     const sidebarSource = read('../Sidebar.tsx');
     const railSource = read('../sidebar/SqlAuditRailButton.tsx');
     const appSource = read('../../App.tsx');
@@ -24,7 +24,7 @@ describe('SQL audit workbench wiring', () => {
     expect(railSource).toContain('buildSqlAuditWorkbenchTab()');
     expect(appSource).toContain("key: 'sql-audit'");
     expect(appSource).toContain('addTab(buildSqlAuditWorkbenchTab())');
-    expect(appSource).toContain('setIsToolsModalOpen(false)');
+    expect(appSource).toContain('handleCancelSettingsCenterPane();');
   });
 
   it('registers audit labels for docked and detached tab presentations', () => {

@@ -7,7 +7,6 @@ import {
   FileAddOutlined,
   AimOutlined,
   RobotOutlined,
-  ToolOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
 
@@ -31,7 +30,6 @@ export interface SidebarConnectionRailProps {
     locateCurrentTable: string;
     locateCurrentTableUnavailable: string;
     aiAssistant: string;
-    tools: string;
     settings: string;
   };
   handlers: {
@@ -41,7 +39,6 @@ export interface SidebarConnectionRailProps {
     openExternalSqlFile: () => void;
     locateActiveTab: () => void;
     toggleAI: () => void;
-    openTools: () => void;
     openSettings: () => void;
   };
   canLocateActiveTab: boolean;
@@ -119,17 +116,6 @@ const SidebarConnectionRail: React.FC<SidebarConnectionRailProps> = ({ labels, h
           data-gonavi-ai-entry-action="true"
         >
           <RobotOutlined />
-        </button>
-      </Tooltip>
-      <Tooltip title={labels.tools} placement="right">
-        <button
-          type="button"
-          className="gn-v2-rail-tool"
-          onClick={handlers.openTools}
-          aria-label={labels.tools}
-          data-gonavi-open-tools-action="true"
-        >
-          <ToolOutlined />
         </button>
       </Tooltip>
       <Tooltip title={labels.settings} placement="right">

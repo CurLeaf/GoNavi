@@ -984,6 +984,17 @@ describe('Sidebar locate toolbar', () => {
     expect(source).not.toContain("justifyContent: 'space-between', borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`, borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`, background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.015)' }}>");
   });
 
+  it('keeps only the unified settings entry in sidebar utility areas', () => {
+    const sidebarSource = readSourceFile('./Sidebar.tsx');
+    const railSource = readSourceFile('./sidebar/SidebarConnectionRail.tsx');
+
+    expect(sidebarSource).not.toContain('onOpenTools');
+    expect(sidebarSource).not.toContain('openTools:');
+    expect(railSource).not.toContain('handlers.openTools');
+    expect(railSource).not.toContain('data-gonavi-open-tools-action');
+    expect(railSource).toContain('handlers.openSettings');
+  });
+
   it('renders the v2 sidebar rail, command search hint, filter tabs and slow-query footer', () => {
     const markup = renderSidebarMarkup({ uiVersion: 'v2', onCreateConnection: mocks.noop });
     const source = readSidebarSource();
@@ -1042,9 +1053,10 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('data-gonavi-create-connection-action="true"');
     expect(markup).toContain('aria-label="AI 助手"');
     expect(markup).toContain('data-gonavi-ai-entry-action="true"');
-    expect(markup).toContain('aria-label="工具"');
-    expect(markup).toContain('data-gonavi-open-tools-action="true"');
+    expect(markup).not.toContain('aria-label="工具"');
+    expect(markup).not.toContain('data-gonavi-open-tools-action="true"');
     expect(markup).toContain('aria-label="设置"');
+    expect(source).not.toContain('handlers.openTools');
     expect(source).toContain('export const buildV2RailConnectionGroups = (');
     expect(source).toContain("if (menu.kind === 'v2-connection-group') return renderV2ConnectionGroupContextMenu(menu.node);");
     expect(source).toContain('openV2ConnectionContextMenu(event, node);');

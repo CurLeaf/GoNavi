@@ -45,15 +45,14 @@ const getGlobalShortcutCaseBlock = (action: string) => {
   return afterCase.slice(0, endIndex);
 };
 
-describe('tool center menu entries', () => {
+describe('settings center tool entries', () => {
   it('exposes snippet management next to shortcut management', () => {
     expect(appSource).toContain("key: 'snippet-settings'");
     expect(appSource).toContain("title: t('app.tools.entry.snippets.title')");
     expect(appSource).toContain("description: t('app.tools.entry.snippets.description')");
     expect(appSource).toContain("handleOpenToolCenterPane('workspace', 'snippet-settings')");
     expect(appSource).toContain('gonavi:open-snippet-settings');
-    expect(appSource).toContain("setIsSnippetModalOpen(false);");
-    expect(appSource).not.toContain('setIsSnippetModalOpen(true)');
+    expect(appSource).not.toContain('isSnippetModalOpen');
 
     const snippetIndex = appSource.indexOf("key: 'snippet-settings'");
     const shortcutIndex = appSource.indexOf("key: 'shortcut-settings'", snippetIndex);
@@ -61,14 +60,15 @@ describe('tool center menu entries', () => {
     expect(shortcutIndex).toBeGreaterThan(snippetIndex);
   });
 
-  it('uses scalable side navigation for the tool center instead of horizontal segmented switching', () => {
+  it('uses the settings center side navigation for every tool group', () => {
     expect(appSource).toContain("type ToolCenterGroupKey = 'config' | 'workflow' | 'workspace';");
-    expect(appSource).toContain("const [activeToolCenterGroupKey, setActiveToolCenterGroupKey] = useState<ToolCenterGroupKey>('config');");
+    expect(appSource).toContain("type SettingsCenterGroupKey = 'preferences' | 'services' | ToolCenterGroupKey | 'about';");
     expect(appSource).toContain("const [toolCenterBackGroupKey, setToolCenterBackGroupKey] = useState<ToolCenterGroupKey | null>(null);");
     expect(appSource).toContain("title: t('app.tools.group.config.title')");
     expect(appSource).toContain("title: t('app.tools.group.workflow.title')");
     expect(appSource).toContain("title: t('app.tools.group.workspace.title')");
-    expect(appSource).toContain("filteredToolCenterGroups.find((group) => group.key === activeToolCenterGroupKey)");
+    expect(appSource).toContain('const combinedSettingsCenterGroups = [');
+    expect(appSource).toContain('(group) => group.key === activeSettingsCenterGroupKey');
     expect(appUtilityStylesSource).toContain("const toolCenterModalSplitStyle = useMemo<React.CSSProperties>(() => ({");
     expect(appUtilityStylesSource).toContain("gridTemplateColumns: '232px minmax(0, 1fr)'");
     expect(appUtilityStylesSource).toContain("const toolCenterNavPanelStyle = useMemo<React.CSSProperties>(() => ({");
@@ -81,17 +81,18 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('aria-selected={active}');
     expect(appSource).toContain('title={`${group.title} - ${group.description}`}');
     expect(appUtilityStylesSource).toContain("borderRight: `1px solid ${overlayTheme.divider}`");
-    expect(appSource).toContain('setActiveToolCenterPane(null);');
+    expect(appSource).toContain('setActiveSettingsCenterPane(null);');
     expect(appSource).toContain('group.items.length');
     expect(appSource).toContain("const handleOpenToolCenterPane = useCallback((group: ToolCenterGroupKey, key: ToolCenterPaneKey) => {");
-    expect(appSource).toContain("const [activeToolCenterPane, setActiveToolCenterPane] = useState<ToolCenterPaneState | null>(null);");
+    expect(appSource).toContain("const [activeSettingsCenterPane, setActiveSettingsCenterPane] = useState<SettingsCenterPaneState | null>(null);");
     expect(appSource).toContain("const handleReturnToToolCenter = useCallback((closeChild?: () => void) => {");
     expect(appSource).toContain("t('common.back_to_previous')");
     expect(appSource).toContain("width={1080}");
     expect(appSource).toContain('centered');
+    expect(appSource).not.toContain('const [isToolsModalOpen');
   });
 
-  it('keeps the tool center modal height fixed across group switches and scrolls the list area internally', () => {
+  it('keeps the unified settings modal height fixed across group switches and scrolls the list area internally', () => {
     expect(appUtilityStylesSource).toContain('const toolCenterModalContentStyle = useMemo<React.CSSProperties>(() => ({');
     expect(appUtilityStylesSource).toContain("height: 'min(820px, calc(100vh - 64px))'");
     expect(appUtilityStylesSource).toContain("const toolCenterModalWorkspaceStyle = useMemo<React.CSSProperties>(() => ({");
@@ -104,7 +105,7 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('style={toolCenterNavScrollStyle}');
     expect(appSource).toContain('style={toolCenterContentPanelStyle}');
     expect(appSource).toContain('style={toolCenterDetailPanelStyle}');
-    expect(appSource).toContain('style={toolCenterDetailBodyStyle}');
+    expect(appSource).toContain('style={isActiveToolCenterPane ? toolCenterDetailBodyStyle : settingsCenterDetailBodyStyle}');
     expect(appSource).toContain('style={toolCenterScrollableListStyle}');
     expect(appUtilityStylesSource).toContain("overflowY: 'auto'");
     expect(appSource).toContain("borderTop: index === 0 ? `1px solid ${overlayTheme.divider}` : 'none'");
@@ -112,12 +113,23 @@ describe('tool center menu entries', () => {
   });
 
   it('keeps browser-compatible connection transfer and mounted data-root entries available in the web runtime', () => {
+    const toolGroupsStart = appSource.indexOf('const toolCenterGroups: SettingsCenterNavigationGroup[] = [');
+    const configGroupStart = appSource.indexOf("key: 'config',", toolGroupsStart);
+    const configGroupSource = appSource.slice(
+      configGroupStart,
+      appSource.indexOf("key: 'workflow',", configGroupStart),
+    );
+
+    expect(toolGroupsStart).toBeGreaterThan(-1);
+    expect(configGroupStart).toBeGreaterThan(toolGroupsStart);
     expect(appSource).toContain("accept=\".gonavi-conn,.json,.xml,.ncx\"");
     expect(appSource).toContain('ExportConnectionsPayload');
     expect(appSource).toContain('downloadBrowserTextFile');
     expect(appSource).toContain("__GONAVI_WEB_RUNTIME__?.buildType === 'web'");
     expect(appSource).toContain('if (isWebRuntime) {\n                  return (');
-    expect(appSource).toContain('items: group.items,');
+    expect(configGroupSource).toContain("key: 'data-root'");
+    expect(configGroupSource).toContain("handleOpenToolCenterPane('config', 'data-root')");
+    expect(appSource).toContain('...toolCenterGroups,');
   });
 
   it('lets the tool center detail header own embedded tool titles', () => {
@@ -127,35 +139,35 @@ describe('tool center menu entries', () => {
       appSource.indexOf('};\n\n            return (', renderPaneStart),
     );
     const connectionPackageSource = renderPaneSource.slice(
-      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'connection-package')"),
-      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'data-root')"),
+      renderPaneSource.indexOf("if (activeSettingsCenterPane.key === 'connection-package')"),
+      renderPaneSource.indexOf("if (activeSettingsCenterPane.key === 'data-root')"),
     );
     const dataRootSource = renderPaneSource.slice(
-      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'data-root')"),
-      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'security-update')"),
+      renderPaneSource.indexOf("if (activeSettingsCenterPane.key === 'data-root')"),
+      renderPaneSource.indexOf("if (activeSettingsCenterPane.key === 'security-update')"),
     );
     const securityUpdateSource = renderPaneSource.slice(
-      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'security-update')"),
-      renderPaneSource.indexOf("activeToolCenterPane.key === 'schema-compare'"),
+      renderPaneSource.indexOf("if (activeSettingsCenterPane.key === 'security-update')"),
+      renderPaneSource.indexOf("activeSettingsCenterPane.key === 'schema-compare'"),
     );
     const dataSyncSource = renderPaneSource.slice(
-      renderPaneSource.indexOf("activeToolCenterPane.key === 'schema-compare'"),
-      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'drivers')"),
+      renderPaneSource.indexOf("activeSettingsCenterPane.key === 'schema-compare'"),
+      renderPaneSource.indexOf("if (activeSettingsCenterPane.key === 'drivers')"),
     );
     const driverSource = renderPaneSource.slice(
-      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'drivers')"),
-      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'snippet-settings')"),
+      renderPaneSource.indexOf("if (activeSettingsCenterPane.key === 'drivers')"),
+      renderPaneSource.indexOf("if (activeSettingsCenterPane.key === 'snippet-settings')"),
     );
     const snippetSource = renderPaneSource.slice(
-      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'snippet-settings')"),
-      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'shortcut-settings')"),
+      renderPaneSource.indexOf("if (activeSettingsCenterPane.key === 'snippet-settings')"),
+      renderPaneSource.indexOf("if (activeSettingsCenterPane.key === 'shortcut-settings')"),
     );
     const shortcutSource = renderPaneSource.slice(
-      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'shortcut-settings')"),
-      renderPaneSource.indexOf('return null;', renderPaneSource.indexOf("if (activeToolCenterPane.key === 'shortcut-settings')")),
+      renderPaneSource.indexOf("if (activeSettingsCenterPane.key === 'shortcut-settings')"),
+      renderPaneSource.indexOf('return null;', renderPaneSource.indexOf("if (activeSettingsCenterPane.key === 'shortcut-settings')")),
     );
 
-    expect(appSource).toContain('activeToolCenterPaneItem?.title ?? activeToolCenterGroup.title');
+    expect(appSource).toContain('activeSettingsCenterPaneItem?.title ?? activeSettingsCenterGroup.title');
     expect(connectionPackageSource).toContain('<ConnectionPackagePasswordModal');
     expect(connectionPackageSource).not.toContain('renderUtilityModalTitle');
     expect(dataRootSource).toContain('title={null}');
@@ -174,14 +186,15 @@ describe('tool center menu entries', () => {
     expect(shortcutSource).not.toContain('renderUtilityModalTitle');
   });
 
-  it('does not render an extra top back button in the tool center detail header', () => {
+  it('does not render an extra top back button in tool detail headers', () => {
+    const combinedGroupsIndex = appSource.indexOf('combinedSettingsCenterGroups.map');
     const detailHeaderSource = appSource.slice(
-      appSource.indexOf("{activeToolCenterPane ? ("),
-      appSource.indexOf('<div style={toolCenterDetailBodyStyle}>', appSource.indexOf("{activeToolCenterPane ? (")),
+      appSource.indexOf('{activeSettingsCenterPane ? (', combinedGroupsIndex),
+      appSource.indexOf('<div style={isActiveToolCenterPane ?', combinedGroupsIndex),
     );
 
-    expect(detailHeaderSource).toContain('activeToolCenterPaneItem?.title ?? activeToolCenterGroup.title');
-    expect(detailHeaderSource).toContain('activeToolCenterPaneItem?.description ?? activeToolCenterGroup.description');
+    expect(detailHeaderSource).toContain('activeSettingsCenterPaneItem?.title ?? activeSettingsCenterGroup.title');
+    expect(detailHeaderSource).toContain('activeSettingsCenterPaneItem?.description ?? activeSettingsCenterGroup.description');
     expect(detailHeaderSource).not.toContain('<Button onClick={closeToolCenterPane}>');
     expect(detailHeaderSource).not.toContain("{t('common.back_to_previous')}");
   });
@@ -207,11 +220,10 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('const handleFocusSidebarSearch = useCallback(');
     expect(appSource).toContain('const antdTheme = useMemo(() => ({');
     expect(appSource).toContain('theme={antdTheme}');
-    expect(appSource).toContain('onOpenTools={handleOpenToolsModal}');
     expect(appSource).toContain('onOpenSettings={handleOpenSettingsModal}');
     expect(appSource).toContain('onToggleLogPanel={handleToggleLogPanel}');
     expect(appSource).toContain('onFocusCommandSearch={handleFocusSidebarSearch}');
-    expect(appSource).not.toContain('onOpenTools={() => setIsToolsModalOpen(true)}');
+    expect(appSource).not.toContain('onOpenTools=');
     expect(appSource).not.toContain('onOpenSettings={() => setIsSettingsModalOpen(true)}');
     expect(appSource).not.toContain('onToggleLogPanel={() => setIsLogPanelOpen((prev) => !prev)}');
     expect(appSource).not.toContain('sqlLogCount={sqlLogCount}');
@@ -313,10 +325,10 @@ describe('tool center menu entries', () => {
   it('keeps connection modal warm-mounted while leaving the other heavyweight modals conditional', () => {
     expect(appSource).toContain('const [isConnectionModalMounted, setIsConnectionModalMounted] = useState(false);');
     expect(appSource).toContain('{isConnectionModalMounted && (');
-    expect(appSource).toContain('{isToolsModalOpen && (');
     expect(appSource).toContain('{isSettingsModalOpen && (');
     expect(appSource).toContain('{isThemeModalOpen && (');
-    expect(appSource).toContain('{isShortcutModalOpen && (');
+    expect(appSource).not.toContain('{isToolsModalOpen && (');
+    expect(appSource).not.toContain('{isShortcutModalOpen && (');
     expect(appSource).not.toContain('{isAISettingsOpen && (');
     expect(appSource).toContain('{isDriverModalOpen && (');
     expect(appSource).toContain('{isSyncModalOpen && (');
@@ -347,10 +359,10 @@ describe('tool center menu entries', () => {
     expect(appSource).not.toContain('setPrimaryPasswordVisible(String(config.password || "").trim() !== "")');
   });
 
-  it('keeps shortcut manager scrolling inside the modal body', () => {
+  it('keeps shortcut manager scrolling inside the embedded settings pane', () => {
     expect(appSource).toContain('centered');
-    expect(appSource).toContain("height: 'min(760px, calc(100vh - 80px))'");
-    expect(appSource).toContain("maxHeight: 'calc(100vh - 80px)'");
+    expect(appSource).toContain("if (activeSettingsCenterPane.key === 'shortcut-settings')");
+    expect(appSource).toContain('embedded');
     expect(appSource).toContain("body: { paddingTop: 8, overflow: 'hidden', flex: 1, minHeight: 0 }");
     expect(appSource).toContain('data-gonavi-shortcut-modal-scroll="true"');
     expect(appSource).toContain("height: '100%'");
@@ -373,7 +385,7 @@ describe('tool center menu entries', () => {
       ['toggleAIPanel', 'toggleAIPanel();'],
       ['toggleLogPanel', 'handleToggleLogPanel();'],
       ['toggleTheme', 'selectPresetTheme('],
-      ['openShortcutManager', 'setIsShortcutModalOpen(true);'],
+      ['openShortcutManager', "handleOpenToolCenterPane('workspace', 'shortcut-settings');"],
       ['toggleMacFullscreen', 'handleTitleBarWindowToggle({ allowMacNativeFullscreen: true });'],
       ['resetWindowZoom', 'handleManualResetWindowZoom();'],
     ]);
