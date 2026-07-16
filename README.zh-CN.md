@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.svg" width="128" alt="GoNavi Logo" />
+  <img src="assets/readme-logo.png" width="128" alt="GoNavi Logo" />
 </p>
 
 <h1 align="center">GoNavi</h1>
