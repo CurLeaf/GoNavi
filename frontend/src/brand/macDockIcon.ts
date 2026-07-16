@@ -1,10 +1,20 @@
 const DOCK_ICON_SIZE = 1024;
-const DOCK_ICON_INSET = 24;
-const DOCK_ICON_CORNER_RADIUS = 216;
+// Chrome and VS Code both keep their high-alpha artwork inside an 824px
+// square on a 1024px macOS icon canvas.
+const DOCK_ICON_INSET = 100;
+// Chrome's 824px tile uses a 184px outer corner radius.
+const DOCK_ICON_CORNER_RADIUS_RATIO = 184 / 824;
 
 export type DockIconRuntimeEnvironment = {
   platform?: unknown;
   buildType?: unknown;
+};
+
+export type MacOSDockImageRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 /**
@@ -32,37 +42,53 @@ function canvasToBase64Png(canvas: HTMLCanvasElement): string {
   return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
 }
 
-function addRoundedRectPath(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  radius: number,
-): void {
-  const clampedRadius = Math.min(radius, width / 2, height / 2);
+export function calculateMacOSDockImageRect(imageWidth: number, imageHeight: number): MacOSDockImageRect {
+  const tileSize = DOCK_ICON_SIZE - (DOCK_ICON_INSET * 2);
+  const sourceWidth = Math.max(1, Number(imageWidth) || tileSize);
+  const sourceHeight = Math.max(1, Number(imageHeight) || tileSize);
+  const scale = Math.min(tileSize / sourceWidth, tileSize / sourceHeight);
+  const width = Math.round(sourceWidth * scale);
+  const height = Math.round(sourceHeight * scale);
+
+  return {
+    x: Math.round((DOCK_ICON_SIZE - width) / 2),
+    y: Math.round((DOCK_ICON_SIZE - height) / 2),
+    width,
+    height,
+  };
+}
+
+export function calculateMacOSDockCornerRadius(rect: MacOSDockImageRect): number {
+  return Math.round(Math.min(rect.width, rect.height) * DOCK_ICON_CORNER_RADIUS_RATIO);
+}
+
+function clipMacOSDockImage(ctx: CanvasRenderingContext2D, rect: MacOSDockImageRect): void {
+  const radius = calculateMacOSDockCornerRadius(rect);
+  const right = rect.x + rect.width;
+  const bottom = rect.y + rect.height;
+
   ctx.beginPath();
-  ctx.moveTo(x + clampedRadius, y);
-  ctx.lineTo(x + width - clampedRadius, y);
-  ctx.arcTo(x + width, y, x + width, y + clampedRadius, clampedRadius);
-  ctx.lineTo(x + width, y + height - clampedRadius);
-  ctx.arcTo(x + width, y + height, x + width - clampedRadius, y + height, clampedRadius);
-  ctx.lineTo(x + clampedRadius, y + height);
-  ctx.arcTo(x, y + height, x, y + height - clampedRadius, clampedRadius);
-  ctx.lineTo(x, y + clampedRadius);
-  ctx.arcTo(x, y, x + clampedRadius, y, clampedRadius);
+  ctx.moveTo(rect.x + radius, rect.y);
+  ctx.lineTo(right - radius, rect.y);
+  ctx.arcTo(right, rect.y, right, rect.y + radius, radius);
+  ctx.lineTo(right, bottom - radius);
+  ctx.arcTo(right, bottom, right - radius, bottom, radius);
+  ctx.lineTo(rect.x + radius, bottom);
+  ctx.arcTo(rect.x, bottom, rect.x, bottom - radius, radius);
+  ctx.lineTo(rect.x, rect.y + radius);
+  ctx.arcTo(rect.x, rect.y, rect.x + radius, rect.y, radius);
   ctx.closePath();
+  ctx.clip();
 }
 
 /**
- * Compose the selected opaque brand tile into a rounded, transparent PNG.
- * The transparent outer pixels let macOS apply its native Dock treatment
- * instead of displaying the source image as a full square.
+ * Place the selected complete brand icon on a transparent macOS canvas.
+ * Keep the source artwork intact while normalising its outer tile to the
+ * standard macOS corner geometry.
  */
 export async function composeMacOSDockIconBase64(src: string): Promise<string> {
   const img = await loadImage(src);
   const size = DOCK_ICON_SIZE;
-  const tileSize = size - (DOCK_ICON_INSET * 2);
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -70,15 +96,10 @@ export async function composeMacOSDockIconBase64(src: string): Promise<string> {
   if (!ctx) {
     throw new Error('2d context unavailable');
   }
-  ctx.save();
-  addRoundedRectPath(ctx, DOCK_ICON_INSET, DOCK_ICON_INSET, tileSize, tileSize, DOCK_ICON_CORNER_RADIUS);
-  ctx.clip();
-  // Opaque soft-blue fallback under draw (matches the pre-baked dock tiles).
-  ctx.fillStyle = '#E8F4FF';
-  ctx.fillRect(DOCK_ICON_INSET, DOCK_ICON_INSET, tileSize, tileSize);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, DOCK_ICON_INSET, DOCK_ICON_INSET, tileSize, tileSize);
-  ctx.restore();
+  const rect = calculateMacOSDockImageRect(img.naturalWidth || img.width, img.naturalHeight || img.height);
+  clipMacOSDockImage(ctx, rect);
+  ctx.drawImage(img, rect.x, rect.y, rect.width, rect.height);
   return canvasToBase64Png(canvas);
 }

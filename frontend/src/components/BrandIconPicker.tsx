@@ -47,7 +47,7 @@ export default function BrandIconPicker({ value, onChange, darkMode = false }: B
               overflow: 'visible',
             }}
           >
-            {/* Use full lockup so the complete logo is visible in the picker */}
+            {/* Each picker card uses the same lossless source as every app surface. */}
             <div
               style={{
                 width: '100%',
@@ -61,7 +61,7 @@ export default function BrandIconPicker({ value, onChange, darkMode = false }: B
               }}
             >
               <img
-                src={item.fullPath}
+                src={item.iconPath}
                 alt={item.titleZh}
                 style={{
                   maxWidth: '100%',

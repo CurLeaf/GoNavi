@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -25,13 +25,18 @@ describe('about brand lockup', () => {
     expect(aboutLogoSnippet).toContain("boxShadow: 'none'");
   });
 
-  it('defines a transparent about asset for every selectable mascot', () => {
-    const aboutAssetPaths = brandIconsSource.match(/aboutPath: '\/brand-icons\/\d{2}-.+-about\.png'/g) || [];
-    expect(aboutAssetPaths).toHaveLength(10);
-    for (const declaration of aboutAssetPaths) {
+  it('keeps one shared lossless WebP asset for every selectable mascot', () => {
+    const iconAssetPaths = brandIconsSource.match(/iconPath: '\/brand-icons\/\d{2}-.+\.webp'/g) || [];
+    expect(iconAssetPaths).toHaveLength(10);
+    for (const declaration of iconAssetPaths) {
       const assetPath = declaration.match(/'([^']+)'/)?.[1];
       expect(assetPath).toBeTruthy();
       expect(readFileSync(`${brandIconsDirectory}${assetPath?.replace('/brand-icons/', '')}`, 'utf8')).not.toBe('');
     }
+
+    const webpFiles = readdirSync(brandIconsDirectory).filter((file) => file.endsWith('.webp'));
+    expect(webpFiles).toHaveLength(10);
+    const legacyPngFiles = readdirSync(brandIconsDirectory).filter((file) => file.endsWith('.png'));
+    expect(legacyPngFiles).toEqual([]);
   });
 });

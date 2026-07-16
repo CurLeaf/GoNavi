@@ -814,7 +814,7 @@ function App() {
           link.setAttribute('data-brand-icon', 'true');
           document.head.appendChild(link);
       }
-      link.type = 'image/png';
+      link.type = 'image/webp';
       link.href = href;
 
       let cancelled = false;
