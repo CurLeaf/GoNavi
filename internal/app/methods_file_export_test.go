@@ -581,6 +581,211 @@ func TestExportQueryResultToFile_UsesStreamQueryPath(t *testing.T) {
 	}
 }
 
+func TestExportQueryResultToFile_WritesInsertSQLForKnownTargetTable(t *testing.T) {
+	f, err := os.CreateTemp("", "gonavi-export-insert-*.sql")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	fake := &fakeValueStreamExportDB{
+		streamCols: []string{"id", "name"},
+		streamValues: [][]interface{}{
+			{1, "O'Brien"},
+			{2, nil},
+		},
+	}
+
+	rowCount, columns, err := exportQueryResultToFile(
+		f,
+		fake,
+		connection.ConnectionConfig{Type: "mysql", Timeout: 10},
+		"SELECT id, name FROM users",
+		ExportFileOptions{
+			Format:               "sql",
+			InsertSQLDialect:     "mysql",
+			InsertSQLTargetTable: "users",
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("exportQueryResultToFile 返回错误: %v", err)
+	}
+	if rowCount != 2 {
+		t.Fatalf("导出行数异常，want=2 got=%d", rowCount)
+	}
+	if len(columns) != 2 || columns[0] != "id" || columns[1] != "name" {
+		t.Fatalf("导出列异常，got=%v", columns)
+	}
+
+	contentBytes, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatalf("读取导出文件失败: %v", err)
+	}
+	content := string(contentBytes)
+	want := "INSERT INTO `users` (`id`, `name`) VALUES (1, 'O''Brien'),\n(2, NULL);\n"
+	if content != want {
+		t.Fatalf("INSERT SQL 导出内容异常，want=%q got=%q", want, content)
+	}
+}
+
+func TestExportQueryResultToFile_WritesInsertSQLWithEmptyTargetTable(t *testing.T) {
+	f, err := os.CreateTemp("", "gonavi-export-insert-empty-target-*.sql")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	fake := &fakeValueStreamExportDB{
+		streamCols: []string{"user_id", "role_name"},
+		streamValues: [][]interface{}{
+			{1, "admin"},
+		},
+	}
+
+	_, _, err = exportQueryResultToFile(
+		f,
+		fake,
+		connection.ConnectionConfig{Type: "mysql", Timeout: 10},
+		"SELECT u.id AS user_id, r.name AS role_name FROM users u JOIN roles r ON r.id = u.role_id",
+		ExportFileOptions{
+			Format:                         "sql",
+			InsertSQLDialect:               "mysql",
+			InsertSQLAllowEmptyTargetTable: true,
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("exportQueryResultToFile 返回错误: %v", err)
+	}
+
+	contentBytes, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatalf("读取导出文件失败: %v", err)
+	}
+	want := "INSERT INTO `<table_name>` (`user_id`, `role_name`) VALUES (1, 'admin');\n"
+	if string(contentBytes) != want {
+		t.Fatalf("空目标表 INSERT SQL 导出内容异常，want=%q got=%q", want, string(contentBytes))
+	}
+}
+
+func TestExportQueryResultToFile_WritesPostgresBooleanWithPlaceholderTable(t *testing.T) {
+	f, err := os.CreateTemp("", "gonavi-export-insert-postgres-placeholder-*.sql")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	fake := &fakeValueStreamExportDB{
+		streamCols:   []string{"active"},
+		streamValues: [][]interface{}{{true}},
+	}
+
+	_, _, err = exportQueryResultToFile(
+		f,
+		fake,
+		connection.ConnectionConfig{Type: "postgres", Timeout: 10},
+		"SELECT u.active FROM users u JOIN roles r ON r.id = u.role_id",
+		ExportFileOptions{
+			Format:                         "sql",
+			InsertSQLDialect:               "postgres",
+			InsertSQLAllowEmptyTargetTable: true,
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("exportQueryResultToFile 返回错误: %v", err)
+	}
+
+	contentBytes, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatalf("读取导出文件失败: %v", err)
+	}
+	want := "INSERT INTO \"<table_name>\" (\"active\") VALUES (true);\n"
+	if string(contentBytes) != want {
+		t.Fatalf("PostgreSQL 占位表布尔值导出异常，want=%q got=%q", want, string(contentBytes))
+	}
+}
+
+func TestExportQueryResultToFile_UsesColumnTypesForInsertSQLLiterals(t *testing.T) {
+	f, err := os.CreateTemp("", "gonavi-export-insert-types-*.sql")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	fake := &fakeValueStreamExportDB{
+		streamCols: []string{"active", "archived"},
+		streamValues: [][]interface{}{
+			{true, false},
+		},
+	}
+
+	_, _, err = exportQueryResultToFile(
+		f,
+		fake,
+		connection.ConnectionConfig{Type: "postgres", Timeout: 10},
+		"SELECT active, archived FROM public.users",
+		ExportFileOptions{
+			Format:               "sql",
+			InsertSQLDialect:     "postgres",
+			InsertSQLTargetTable: "public.users",
+			InsertSQLColumnTypes: map[string]string{
+				"active":   "boolean",
+				"archived": "bool",
+			},
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("exportQueryResultToFile 返回错误: %v", err)
+	}
+
+	contentBytes, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatalf("读取导出文件失败: %v", err)
+	}
+	want := "INSERT INTO \"public\".\"users\" (\"active\", \"archived\") VALUES (true, false);\n"
+	if string(contentBytes) != want {
+		t.Fatalf("布尔字段 INSERT SQL 导出内容异常，want=%q got=%q", want, string(contentBytes))
+	}
+}
+
+func TestExportQueryResultToFile_RejectsColumnsOutsideInsertTargetTable(t *testing.T) {
+	f, err := os.CreateTemp("", "gonavi-export-insert-mismatch-*.sql")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	fake := &fakeValueStreamExportDB{
+		streamCols:   []string{"user_id"},
+		streamValues: [][]interface{}{{1}},
+	}
+
+	_, _, err = exportQueryResultToFile(
+		f,
+		fake,
+		connection.ConnectionConfig{Type: "mysql", Timeout: 10},
+		"SELECT id AS user_id FROM users",
+		ExportFileOptions{
+			Format:                 "sql",
+			InsertSQLDialect:       "mysql",
+			InsertSQLTargetTable:   "users",
+			InsertSQLTargetColumns: map[string]string{"id": "id"},
+		},
+		nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), `query result column "user_id" does not match`) {
+		t.Fatalf("列别名不匹配时应拒绝 INSERT SQL 导出，err=%v", err)
+	}
+}
+
 func TestExportQueryResultToFile_UsesValueStreamPathWhenAvailable(t *testing.T) {
 	f, err := os.CreateTemp("", "gonavi-export-stream-values-*.csv")
 	if err != nil {

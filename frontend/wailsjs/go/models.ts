@@ -496,6 +496,11 @@ export namespace app {
 	    jobId?: string;
 	    totalRowsHint?: number;
 	    totalRowsKnown?: boolean;
+	    insertSQLDialect?: string;
+	    insertSQLTargetTable?: string;
+	    insertSQLColumnTypes?: Record<string, string>;
+	    insertSQLTargetColumns?: Record<string, string>;
+	    insertSQLAllowEmptyTargetTable?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ExportFileOptions(source);
@@ -508,6 +513,11 @@ export namespace app {
 	        this.jobId = source["jobId"];
 	        this.totalRowsHint = source["totalRowsHint"];
 	        this.totalRowsKnown = source["totalRowsKnown"];
+	        this.insertSQLDialect = source["insertSQLDialect"];
+	        this.insertSQLTargetTable = source["insertSQLTargetTable"];
+	        this.insertSQLColumnTypes = source["insertSQLColumnTypes"];
+	        this.insertSQLTargetColumns = source["insertSQLTargetColumns"];
+	        this.insertSQLAllowEmptyTargetTable = source["insertSQLAllowEmptyTargetTable"];
 	    }
 	}
 	export class RedisExportKeysOptions {

@@ -973,31 +973,6 @@ const DataGrid: React.FC<DataGridProps> = ({
     });
   }, [resolveContextMenuPosition]);
 
-  // Helper to export specific data
-  const exportData = async (rows: any[], options: DataExportFileOptions) => {
-      const cleanRows = pickDataGridOutputRows(rows, displayOutputColumnNames);
-      const exportTitle = String(tableName || '').trim()
-          ? translateDataGrid('file.backend.dialog.export_table', { table: tableName })
-          : translateDataGrid('file.backend.dialog.export_data');
-      await runExportWithProgress({
-          title: exportTitle,
-          targetName: tableName || 'export',
-          format: options.format,
-          totalRows: cleanRows.length,
-          run: (jobId) => ExportDataWithOptions(
-              cleanRows,
-              displayOutputColumnNames,
-              tableName || 'export',
-              {
-                  ...options,
-                  jobId,
-                  totalRowsHint: cleanRows.length,
-                  totalRowsKnown: true,
-              } as any,
-          ),
-      });
-  };
-  
   const [sortInfo, setSortInfo] = useState<Array<{ columnKey: string, order: string, enabled?: boolean }>>([]);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const mergedDisplayDataRef = useRef<Item[]>([]);
@@ -1045,6 +1020,82 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
       return next;
   }, [displayColumnNames, columnMetaMap, columnTypeMapByLowerName]);
+
+  const insertSQLColumnTypes = useMemo(() => {
+      const next: Record<string, string> = {};
+      displayOutputColumnNames.forEach((columnName) => {
+          const normalizedName = String(columnName || '').trim();
+          if (!normalizedName) return;
+          const columnType = columnMetaMap[normalizedName]?.type
+              || columnMetaMapByLowerName[normalizedName.toLowerCase()]?.type
+              || columnTypeMapByLowerName[normalizedName.toLowerCase()]
+              || '';
+          next[normalizedName.toLowerCase()] = columnType;
+      });
+      return next;
+  }, [columnMetaMap, columnMetaMapByLowerName, columnTypeMapByLowerName, displayOutputColumnNames]);
+
+  const insertSQLTargetColumns = useMemo(() => {
+      const actualNameByLower = new Map<string, string>();
+      Object.keys(columnMetaMap).forEach((columnName) => {
+          const normalizedName = String(columnName || '').trim();
+          if (normalizedName) actualNameByLower.set(normalizedName.toLowerCase(), normalizedName);
+      });
+      const next: Record<string, string> = {};
+      displayOutputColumnNames.forEach((columnName) => {
+          const normalizedName = String(columnName || '').trim();
+          const actualName = actualNameByLower.get(normalizedName.toLowerCase());
+          if (normalizedName && actualName) {
+              next[normalizedName.toLowerCase()] = actualName;
+          }
+      });
+      return next;
+  }, [columnMetaMap, displayOutputColumnNames]);
+
+  const hasResolvedInsertSQLTarget = !!tableName
+      && Object.keys(insertSQLTargetColumns).length === displayOutputColumnNames.length;
+  const canExportInsertSQL = isQueryResultExport
+      && supportsCopyInsert
+      && displayOutputColumnNames.length > 0;
+
+  const buildBackendExportOptions = useCallback((options: DataExportFileOptions): DataExportFileOptions => {
+      if (options.format !== 'sql') {
+          return options;
+      }
+      return {
+          ...options,
+          insertSQLDialect: dbType,
+          insertSQLTargetTable: hasResolvedInsertSQLTarget ? String(tableName || '').trim() : '',
+          insertSQLColumnTypes,
+          insertSQLTargetColumns: hasResolvedInsertSQLTarget ? insertSQLTargetColumns : {},
+          insertSQLAllowEmptyTargetTable: !hasResolvedInsertSQLTarget,
+      };
+  }, [dbType, hasResolvedInsertSQLTarget, insertSQLColumnTypes, insertSQLTargetColumns, tableName]);
+
+  // Helper to export specific data
+  const exportData = async (rows: any[], options: DataExportFileOptions) => {
+      const cleanRows = pickDataGridOutputRows(rows, displayOutputColumnNames);
+      const exportTitle = String(tableName || '').trim()
+          ? translateDataGrid('file.backend.dialog.export_table', { table: tableName })
+          : translateDataGrid('file.backend.dialog.export_data');
+      await runExportWithProgress({
+          title: exportTitle,
+          targetName: tableName || 'export',
+          format: options.format,
+          totalRows: cleanRows.length,
+          run: (jobId) => ExportDataWithOptions(
+              cleanRows,
+              displayOutputColumnNames,
+              tableName || 'export',
+              {
+                  ...buildBackendExportOptions(options),
+                  jobId,
+                  totalRowsHint: cleanRows.length,
+                  totalRowsKnown: true,
+              } as any,
+          ),
+      });
+  };
 
   const normalizeCommitCellValue = useCallback(
       (columnName: string, value: any, mode: 'insert' | 'update') => {
@@ -3265,6 +3316,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     buildCopyUpdateSQL,
     buildDataGridSelectBaseSql,
     buildEffectiveFilterConditions,
+    buildBackendExportOptions,
     buildOrderBySQL,
     buildPaginatedSelectSQL,
     buildRpcConnectionConfig,
@@ -3273,6 +3325,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     buildWhereSQL,
     cellContextMenu,
     cellEditMode,
+    canExportInsertSQL,
     closeCellEditMode,
     columnMetaMap,
     columnMetaMapByLowerName,

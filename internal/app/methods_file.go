@@ -3800,6 +3800,9 @@ func formatSQLValue(dbType string, v interface{}) string {
 
 	switch val := v.(type) {
 	case bool:
+		if isPgLikeBooleanDBType(dbType) {
+			return booleanSQLLiteral(val)
+		}
 		if val {
 			return "1"
 		}
@@ -4041,6 +4044,22 @@ func (a *App) ExportQueryWithOptions(config connection.ConnectionConfig, dbName 
 	if err != nil {
 		reporter.Error(0, err.Error())
 		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if format == "sql" {
+		options.InsertSQLDialect = resolveDDLDBType(runConfig)
+		options.InsertSQLTargetTable = resolveChangeTargetTableName(runConfig, dbName, options.InsertSQLTargetTable)
+		if options.InsertSQLTargetTable != "" {
+			schemaName, pureTableName := normalizeSchemaAndTable(runConfig, dbName, options.InsertSQLTargetTable)
+			if defs, colErr := dbInst.GetColumns(schemaName, pureTableName); colErr == nil {
+				options.InsertSQLColumnTypes = buildImportColumnTypeMap(defs)
+				options.InsertSQLTargetColumns = make(map[string]string, len(defs))
+				for _, def := range defs {
+					if key := normalizeColumnName(def.Name); key != "" {
+						options.InsertSQLTargetColumns[key] = strings.TrimSpace(def.Name)
+					}
+				}
+			}
+		}
 	}
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
@@ -4517,6 +4536,7 @@ type sqlInsertExportConsumer struct {
 	quotedCols    []string
 	columnList    string
 	columnTypes   []string
+	targetColumns map[string]string
 	valueBuf      []string
 	rowCount      int64
 	mode          sqlInsertExportMode
@@ -4549,7 +4569,15 @@ func (c *sqlInsertExportConsumer) SetColumns(columns []string) error {
 	c.columnTypes = make([]string, len(columns))
 	c.valueBuf = make([]string, len(columns))
 	for _, column := range columns {
-		c.quotedCols = append(c.quotedCols, quoteIdentByType(c.dbType, column))
+		targetColumn := column
+		if len(c.targetColumns) > 0 {
+			mappedColumn, ok := c.targetColumns[normalizeColumnName(column)]
+			if !ok || strings.TrimSpace(mappedColumn) == "" {
+				return fmt.Errorf("query result column %q does not match the INSERT target table", column)
+			}
+			targetColumn = mappedColumn
+		}
+		c.quotedCols = append(c.quotedCols, quoteIdentByType(c.dbType, targetColumn))
 	}
 	for i, column := range columns {
 		c.columnTypes[i] = c.columnTypeMap[normalizeColumnName(column)]
@@ -4663,6 +4691,62 @@ func (c *sqlInsertExportConsumer) Flush() error {
 	return nil
 }
 
+type sqlInsertExportFileWriter struct {
+	writer   *bufio.Writer
+	consumer *sqlInsertExportConsumer
+	closed   bool
+}
+
+func newSQLInsertExportFileWriter(f *os.File, options ExportFileOptions) (*sqlInsertExportFileWriter, error) {
+	dialect := strings.TrimSpace(options.InsertSQLDialect)
+	targetTable := strings.TrimSpace(options.InsertSQLTargetTable)
+	if dialect == "" {
+		return nil, fmt.Errorf("INSERT SQL export requires a database dialect")
+	}
+	if targetTable == "" && !options.InsertSQLAllowEmptyTargetTable {
+		return nil, fmt.Errorf("INSERT SQL export requires a target table")
+	}
+	quotedTable := quoteQualifiedIdentByType(dialect, "<table_name>")
+	if targetTable != "" {
+		quotedTable = quoteQualifiedIdentByType(dialect, targetTable)
+	}
+
+	writer := bufio.NewWriterSize(f, 1024*1024)
+	return &sqlInsertExportFileWriter{
+		writer: writer,
+		consumer: &sqlInsertExportConsumer{
+			w:             writer,
+			dbType:        dialect,
+			quotedTable:   quotedTable,
+			columnTypeMap: options.InsertSQLColumnTypes,
+			targetColumns: options.InsertSQLTargetColumns,
+		},
+	}, nil
+}
+
+func (w *sqlInsertExportFileWriter) SetColumns(columns []string) error {
+	return w.consumer.SetColumns(columns)
+}
+
+func (w *sqlInsertExportFileWriter) ConsumeRow(row map[string]interface{}) error {
+	return w.consumer.ConsumeRow(row)
+}
+
+func (w *sqlInsertExportFileWriter) ConsumeRowValues(values []interface{}) error {
+	return w.consumer.ConsumeRowValues(values)
+}
+
+func (w *sqlInsertExportFileWriter) Close() error {
+	if w == nil || w.closed {
+		return nil
+	}
+	w.closed = true
+	if err := w.consumer.Flush(); err != nil {
+		return err
+	}
+	return w.writer.Flush()
+}
+
 func resolveExportColumns(columns []string, data []map[string]interface{}) []string {
 	if len(columns) > 0 || len(data) == 0 {
 		return columns
@@ -4694,6 +4778,8 @@ func newExportFileWriter(f *os.File, options ExportFileOptions) (exportFileWrite
 		return newHTMLExportFileWriter(f), nil
 	case "xlsx":
 		return newXLSXExportFileWriter(f, options.XLSXMaxRowsPerSheet)
+	case "sql":
+		return newSQLInsertExportFileWriter(f, options)
 	default:
 		return nil, fmt.Errorf("unsupported format: %s", options.Format)
 	}
