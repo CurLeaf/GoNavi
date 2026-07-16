@@ -18,6 +18,8 @@ class GenerateUpdateLatestManifestTest(unittest.TestCase):
             msi = assets / "GoNavi-1.2.3-Windows-Amd64-Installer.msi"
             exe.write_bytes(b"fake-binary")
             msi.write_bytes(b"fake-installer")
+            (assets / "LICENSE").write_text("license text\n", encoding="utf-8")
+            (assets / "NOTICE").write_text("notice text\n", encoding="utf-8")
             (assets / "SHA256SUMS").write_text(
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  GoNavi-1.2.3-Windows-Amd64-Portable.exe\n"
                 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  GoNavi-1.2.3-Windows-Amd64-Installer.msi\n",
@@ -67,6 +69,8 @@ class GenerateUpdateLatestManifestTest(unittest.TestCase):
             )
             self.assertEqual(installer_asset["sha256"], "b" * 64)
             self.assertNotIn("SHA256SUMS", [a["name"] for a in data["assets"]])
+            self.assertNotIn("LICENSE", [a["name"] for a in data["assets"]])
+            self.assertNotIn("NOTICE", [a["name"] for a in data["assets"]])
 
 
 if __name__ == "__main__":

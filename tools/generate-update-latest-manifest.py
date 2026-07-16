@@ -34,6 +34,8 @@ REPO = "Syngnat/GoNavi"
 SCHEMA_VERSION = 1
 SKIP_NAMES = {
     "SHA256SUMS",
+    "LICENSE",
+    "NOTICE",
     "latest.json",
     "latest-dev.json",
     ".DS_Store",

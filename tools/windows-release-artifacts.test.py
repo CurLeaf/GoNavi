@@ -40,6 +40,10 @@ class WindowsReleaseArtifactsTest(unittest.TestCase):
                 self.assertIn(f'"{ARM64_COMPONENT_GUID}"', source)
                 self.assertIn('$installMarkerPath = Join-Path $env:RUNNER_TEMP ".gonavi-msi-install"', source)
                 self.assertIn('-d "InstallMarker=$installMarkerPath"', source)
+                self.assertIn('$licenseFile = (Resolve-Path -LiteralPath "..\\\\..\\\\LICENSE").Path', source)
+                self.assertIn('$noticeFile = (Resolve-Path -LiteralPath "..\\\\..\\\\NOTICE").Path', source)
+                self.assertIn('-d "LicenseFile=$licenseFile"', source)
+                self.assertIn('-d "NoticeFile=$noticeFile"', source)
                 self.assertNotIn('-d "ProductName=GoNavi Dev"', source)
                 self.assertNotIn('-d "InstallFolderName=GoNavi Dev"', source)
                 self.assertNotIn('-d "RegistryKeyName=GoNavi Dev"', source)
@@ -87,6 +91,16 @@ class WindowsReleaseArtifactsTest(unittest.TestCase):
         assert file_marker is not None
         self.assertEqual(file_marker.attrib["Source"], "$(var.InstallMarker)")
         self.assertEqual(file_marker.attrib["Name"], ".gonavi-msi-install")
+        license_file = package.find(".//wix:File[@Id='GoNaviLicense']", ns)
+        self.assertIsNotNone(license_file)
+        assert license_file is not None
+        self.assertEqual(license_file.attrib["Source"], "$(var.LicenseFile)")
+        self.assertEqual(license_file.attrib["Name"], "LICENSE.txt")
+        notice_file = package.find(".//wix:File[@Id='GoNaviNotice']", ns)
+        self.assertIsNotNone(notice_file)
+        assert notice_file is not None
+        self.assertEqual(notice_file.attrib["Source"], "$(var.NoticeFile)")
+        self.assertEqual(notice_file.attrib["Name"], "NOTICE.txt")
 
 
 if __name__ == "__main__":

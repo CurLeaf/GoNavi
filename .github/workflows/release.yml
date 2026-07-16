@@ -27,6 +27,8 @@ jobs:
           bash tools/generate-driver-agent-revisions.test.sh
           python3 tools/generate-driver-release-manifest.test.py
           python3 tools/generate-update-latest-manifest.test.py
+          python3 tools/package-driver-release-assets.test.py
+          python3 tools/legal-release-assets.test.py
           python3 tools/windows-release-artifacts.test.py
 
       - name: Setup Node
@@ -787,6 +789,9 @@ jobs:
             exit 1
           fi
           APP_NAME=$(basename "$APP_PATH")
+          mkdir -p "$APP_NAME/Contents/Resources"
+          cp ../../LICENSE "$APP_NAME/Contents/Resources/LICENSE"
+          cp ../../NOTICE "$APP_NAME/Contents/Resources/NOTICE"
 
           APP_BIN=$(find "$APP_PATH/Contents/MacOS" -maxdepth 1 -type f | head -n 1)
           if [ -z "$APP_BIN" ]; then
@@ -908,7 +913,9 @@ jobs:
               "0BCEE70B-9CF2-449C-9ADE-190188493234"
           }
 
-          $licenseText = Get-Content -LiteralPath "..\\..\\LICENSE" -Raw
+          $licenseFile = (Resolve-Path -LiteralPath "..\\..\\LICENSE").Path
+          $noticeFile = (Resolve-Path -LiteralPath "..\\..\\NOTICE").Path
+          $licenseText = Get-Content -LiteralPath $licenseFile -Raw
           $escapedLicense = $licenseText.Replace('\', '\\').Replace('{', '\{').Replace('}', '\}')
           $escapedLicense = $escapedLicense -replace "`r?`n", "\par`r`n"
           $licenseRtf = Join-Path $env:RUNNER_TEMP "GoNavi-License.rtf"
@@ -936,6 +943,8 @@ jobs:
               -d "InstallMarker=$installMarkerPath" `
               -d "IconPath=$iconPath" `
               -d "LicenseRtf=$licenseRtf" `
+              -d "LicenseFile=$licenseFile" `
+              -d "NoticeFile=$noticeFile" `
               -pdbtype none `
               -intermediatefolder $wixIntermediateDir `
               -out "..\\..\\$msiName"
@@ -974,7 +983,7 @@ jobs:
 
           # 1. Create tar.gz
           echo "📦 正在打包 $TAR_NAME..."
-          tar -czvf "$TAR_NAME" "$TARGET"
+          tar -czvf "$TAR_NAME" "$TARGET" -C ../.. LICENSE NOTICE
           mv "$TAR_NAME" ../../
 
           # 2. Create AppImage (skip for ARM64 or if tools unavailable)
@@ -988,9 +997,12 @@ jobs:
           # Create AppDir structure
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/doc/gonavi
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
 
           cp "$TARGET" AppDir/usr/bin/gonavi
+          cp ../../LICENSE AppDir/usr/share/doc/gonavi/LICENSE
+          cp ../../NOTICE AppDir/usr/share/doc/gonavi/NOTICE
 
           # Create desktop file
           printf '%s\n' \
@@ -1066,6 +1078,10 @@ jobs:
           path: release-assets
           pattern: build-artifacts-*
           merge-multiple: true
+
+      - name: Add legal documents
+        shell: bash
+        run: install -m 0644 LICENSE NOTICE release-assets/
 
       - name: List Assets
         run: ls -R release-assets

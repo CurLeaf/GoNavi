@@ -47,6 +47,12 @@
       <File Id="GoNaviMsiInstallMarker"
             Source="$(var.InstallMarker)"
             Name=".gonavi-msi-install" />
+      <File Id="GoNaviLicense"
+            Source="$(var.LicenseFile)"
+            Name="LICENSE.txt" />
+      <File Id="GoNaviNotice"
+            Source="$(var.NoticeFile)"
+            Name="NOTICE.txt" />
       <RegistryValue Root="HKLM"
                      Key="Software\Syngnat\$(var.RegistryKeyName)"
                      Name="InstallType"
