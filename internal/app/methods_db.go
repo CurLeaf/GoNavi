@@ -1496,7 +1496,7 @@ func (a *App) dbQueryMulti(
 			} else {
 				err = runStatementQuery()
 			}
-			if err == nil && usedMultiResult && nativeReadOnlyResultsMissingTabularPayload(isReadStmt, statementResults) {
+			if err == nil && usedMultiResult && shouldFallbackToPlainQueryAfterMultiResult(isReadStmt, statementResults, messages) {
 				logger.Warnf("DBQueryMulti 逐条多结果集返回空结果，将回退普通查询（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
 				usedMultiResult = false
 				statementResults = nil
@@ -1641,11 +1641,27 @@ func nativeReadOnlyResultsMissingTabularPayload(allReadOnly bool, results []conn
 		return true
 	}
 	for _, result := range results {
+		if isAffectedRowsResultSet(result) {
+			continue
+		}
 		if len(result.Columns) > 0 || len(result.Rows) > 0 {
 			return false
 		}
 	}
 	return true
+}
+
+func shouldFallbackToPlainQueryAfterMultiResult(readOnly bool, results []connection.ResultSetData, messages []string) bool {
+	if !readOnly {
+		return false
+	}
+	// Optional driver agents use nil results with no messages to signal that the
+	// native multi-result method is unsupported. Retrying is only safe for reads;
+	// query-first writes and stored procedures may already have side effects.
+	if results == nil && len(messages) == 0 {
+		return true
+	}
+	return nativeReadOnlyResultsMissingTabularPayload(true, results)
 }
 
 func shouldUseNativeMultiResultBatch(dbType string, statements []string, allReadOnly bool) bool {
@@ -1670,7 +1686,8 @@ func shouldUseNativeMultiResultBatch(dbType string, statements []string, allRead
 
 func shouldPreferPlainReadQueryResult(dbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
-	case "postgres", "postgresql",
+	case "sqlite",
+		"postgres", "postgresql",
 		"oracle",
 		"kingbase", "kingbase8", "kingbasees", "kingbasev8",
 		"highgo", "vastbase",

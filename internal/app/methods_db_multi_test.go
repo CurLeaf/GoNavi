@@ -2096,6 +2096,61 @@ func TestDBQueryMultiFallsBackWhenNativeReadOnlyBatchReturnsBlankResultSet(t *te
 	}
 }
 
+func TestDBQueryMultiFallsBackWhenSQLServerReadReturnsOnlyAffectedRowsStatus(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := "SELECT name FROM sys.databases"
+	statusOnlyResult := []connection.ResultSetData{{
+		Rows:    []map[string]interface{}{{"affectedRows": int64(1)}},
+		Columns: []string{"affectedRows"},
+	}}
+	baseDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {{"name": "master"}},
+		},
+		fieldMap: map[string][]string{
+			query: {"name"},
+		},
+		multiResult: map[string][]connection.ResultSetData{
+			query: statusOnlyResult,
+		},
+		queryErr: map[string]error{},
+	}
+	fakeDB := &fakeEmptyNativeMultiResultDB{
+		fakeBatchWriteDB: baseDB,
+		results:          statusOnlyResult,
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "custom", Driver: "mssql", Host: "127.0.0.1", Port: 1433, User: "sa"}
+	result := app.DBQueryMulti(config, "master", query, "sqlserver-affected-only-read-fallback-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.multiCalls != 1 {
+		t.Fatalf("expected one top-level native multi-result attempt, got %d", fakeDB.multiCalls)
+	}
+	if baseDB.session == nil || baseDB.session.queryCalls != 2 {
+		t.Fatalf("expected status-only result to retry session multi then plain query, session=%#v", baseDB.session)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok || len(resultSets) != 1 {
+		t.Fatalf("expected one fallback result set, got %#v", result.Data)
+	}
+	if got := resultSets[0].Rows[0]["name"]; got != "master" {
+		t.Fatalf("expected fallback SQL Server row name=master, got %#v", got)
+	}
+	if got := queryResultRowsReturned(result); got != 1 {
+		t.Fatalf("expected SQL audit rows returned = 1, got %d", got)
+	}
+}
+
 func TestDBQueryMultiFallsBackToPlainQueryWhenSequentialMultiStillReturnsBlankResultSet(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {
@@ -2851,6 +2906,49 @@ func TestExecuteManagedSQLTransactionStatementsPrefersPlainQueryForDamengReadRes
 	}
 	if got := results[0].Rows[0]["NAME"]; got != "timer_a" {
 		t.Fatalf("expected plain query SELECT result NAME=timer_a, got %#v", got)
+	}
+}
+
+func TestExecuteManagedSQLTransactionStatementsFallsBackWhenSQLServerReadReturnsOnlyAffectedRowsStatus(t *testing.T) {
+	query := "SELECT name FROM sys.databases"
+	baseDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {{"name": "master"}},
+		},
+		fieldMap: map[string][]string{
+			query: {"name"},
+		},
+		multiResult: map[string][]connection.ResultSetData{
+			query: {{
+				Rows:    []map[string]interface{}{{"affectedRows": int64(1)}},
+				Columns: []string{"affectedRows"},
+			}},
+		},
+		queryErr: map[string]error{},
+	}
+	session := &fakeBatchWriteSession{parent: baseDB}
+
+	results, err := executeManagedSQLTransactionStatements(
+		context.Background(),
+		session,
+		connection.ConnectionConfig{Type: "sqlserver"},
+		[]string{query},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("expected executeManagedSQLTransactionStatements success, got %v", err)
+	}
+	if session.queryCalls != 2 {
+		t.Fatalf("expected SQL Server status-only result plus plain query fallback, got %d calls", session.queryCalls)
+	}
+	if len(results) != 1 || len(results[0].Rows) != 1 {
+		t.Fatalf("expected one fallback result row, got %#v", results)
+	}
+	if got := results[0].Rows[0]["name"]; got != "master" {
+		t.Fatalf("expected fallback SQL Server row name=master, got %#v", got)
+	}
+	if got := queryResultRowsReturned(connection.QueryResult{Success: true, Data: results}); got != 1 {
+		t.Fatalf("expected SQL audit rows returned = 1, got %d", got)
 	}
 }
 

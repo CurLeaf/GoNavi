@@ -13,6 +13,7 @@ import (
 
 	"GoNavi-Wails/shared/i18n"
 
+	"github.com/golang-sql/sqlexp"
 	_ "modernc.org/sqlite"
 )
 
@@ -159,6 +160,55 @@ func TestScanSQLServerFallbackResultSetPreservesColumnsWhenResultHasNoRows(t *te
 	}
 	if !reflect.DeepEqual(resultSet.Columns, []string{"menuName"}) {
 		t.Fatalf("expected empty SELECT columns to be preserved, got %#v", resultSet.Columns)
+	}
+}
+
+func TestScanSQLServerRowsWithMessagesRecoversRowsWhenMessageLoopOmitsMsgNext(t *testing.T) {
+	dbConn, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = dbConn.Close()
+	})
+
+	rows, err := dbConn.Query("SELECT 'config:roomType:add' AS menuName")
+	if err != nil {
+		t.Fatalf("query rows: %v", err)
+	}
+	defer rows.Close()
+
+	ctx := context.Background()
+	retmsg := &sqlexp.ReturnMessage{}
+	sqlexp.ReturnMessageInit(retmsg)
+	for _, message := range []sqlexp.RawMessage{
+		sqlexp.MsgRowsAffected{Count: 1},
+		sqlexp.MsgNextResultSet{},
+	} {
+		if err := sqlexp.ReturnMessageEnqueue(ctx, retmsg, message); err != nil {
+			t.Fatalf("enqueue SQL Server message: %v", err)
+		}
+	}
+
+	resultSets, messages, err := scanSQLServerRowsWithMessages(ctx, rows, retmsg)
+	if err != nil {
+		t.Fatalf("scanSQLServerRowsWithMessages returned error: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("expected no SQL Server notices, got %#v", messages)
+	}
+	if len(resultSets) != 2 {
+		t.Fatalf("expected recovered SELECT rows plus affected-row status, got %#v", resultSets)
+	}
+	if !reflect.DeepEqual(resultSets[0].Columns, []string{"menuName"}) ||
+		len(resultSets[0].Rows) != 1 ||
+		resultSets[0].Rows[0]["menuName"] != "config:roomType:add" {
+		t.Fatalf("expected recovered SELECT rows first, got %#v", resultSets)
+	}
+	if !reflect.DeepEqual(resultSets[1].Columns, []string{"affectedRows"}) ||
+		len(resultSets[1].Rows) != 1 ||
+		resultSets[1].Rows[0]["affectedRows"] != int64(1) {
+		t.Fatalf("expected affected-row status after SELECT rows, got %#v", resultSets)
 	}
 }
 

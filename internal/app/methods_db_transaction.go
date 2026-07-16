@@ -511,6 +511,21 @@ func executeManagedSQLTransactionStatementsWithObserver(
 			} else {
 				err = buildTransactionQueryUnsupportedError()
 			}
+			if err == nil && usedMultiResult && shouldFallbackToPlainQueryAfterMultiResult(isReadStmt, statementResults, messages) {
+				logger.Warnf("托管事务多结果集返回空结果，将回退普通查询（第 %d/%d 条）：类型=%s SQL片段=%q", statementIndex, statementCount, resolvedDBType, sqlSnippet(stmt))
+				usedMultiResult = false
+				statementResults = nil
+				data = nil
+				columns = nil
+				messages = nil
+				if sessionQueryMessageTarget != nil {
+					data, columns, messages, err = sessionQueryMessageTarget.QueryContextWithMessages(ctx, stmt)
+				} else if sessionQueryTarget != nil {
+					data, columns, err = sessionQueryTarget.QueryContext(ctx, stmt)
+				} else {
+					err = buildTransactionQueryUnsupportedError()
+				}
+			}
 			if err == nil {
 				if usedMultiResult {
 					var rowsAffected, rowsReturned int64

@@ -9,7 +9,7 @@ func init() {
 		"diros":         "src-7d4fe439271d0c56",
 		"starrocks":     "src-ce9ee22641a32f46",
 		"sphinx":        "src-08f5ae54efb3d9df",
-		"sqlserver":     "src-33b3b2c6dad5b3e6",
+		"sqlserver":     "src-bd1323910fc119ac",
 		"sqlite":        "src-96dfa25b3042b2d5",
 		"duckdb":        "src-8804eb2cdbc89433",
 		"dameng":        "src-016e77082aea6718",

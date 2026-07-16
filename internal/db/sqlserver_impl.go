@@ -40,10 +40,33 @@ func scanSQLServerRowsWithMessages(ctx context.Context, rows *sql.Rows, retmsg *
 	}
 
 	var (
-		resultSets  []connection.ResultSetData
-		messages    []string
-		allMessages []string
+		resultSets           []connection.ResultSetData
+		messages             []string
+		allMessages          []string
+		currentResultScanned bool
+		currentResultStart   int
 	)
+	// go-mssqldb can emit a result-set boundary without MsgNext. Recover the
+	// unread rows before advancing and keep them before any affectedRows status.
+	scanCurrentResultIfNeeded := func() error {
+		if currentResultScanned {
+			return nil
+		}
+		result, err := scanSQLServerFallbackResultSet(rows)
+		if err != nil {
+			return err
+		}
+		currentResultScanned = true
+		if len(result.Columns) == 0 && len(result.Rows) == 0 {
+			return nil
+		}
+		result.Messages = append([]string(nil), messages...)
+		resultSets = append(resultSets, connection.ResultSetData{})
+		copy(resultSets[currentResultStart+1:], resultSets[currentResultStart:])
+		resultSets[currentResultStart] = result
+		messages = nil
+		return nil
+	}
 	active := true
 	for active {
 		raw := retmsg.Message(ctx)
@@ -70,6 +93,7 @@ func scanSQLServerRowsWithMessages(ctx context.Context, rows *sql.Rows, retmsg *
 				Columns:  cols,
 				Messages: append([]string(nil), messages...),
 			})
+			currentResultScanned = true
 			messages = nil
 		case sqlexp.MsgRowsAffected:
 			resultSets = append(resultSets, connection.ResultSetData{
@@ -79,12 +103,22 @@ func scanSQLServerRowsWithMessages(ctx context.Context, rows *sql.Rows, retmsg *
 			})
 			messages = nil
 		case sqlexp.MsgNextResultSet:
+			if err := scanCurrentResultIfNeeded(); err != nil {
+				return resultSets, messages, err
+			}
 			active = rows.NextResultSet()
+			if active {
+				currentResultScanned = false
+				currentResultStart = len(resultSets)
+			}
 		case sqlexp.MsgError:
 			return resultSets, messages, msg.Error
 		default:
 			active = false
 		}
+	}
+	if err := scanCurrentResultIfNeeded(); err != nil {
+		return resultSets, messages, err
 	}
 
 	if len(messages) > 0 {
@@ -95,11 +129,7 @@ func scanSQLServerRowsWithMessages(ctx context.Context, rows *sql.Rows, retmsg *
 		})
 	}
 	if len(resultSets) == 0 {
-		fallbackResult, err := scanSQLServerFallbackResultSet(rows)
-		if err != nil {
-			return resultSets, allMessages, err
-		}
-		resultSets = []connection.ResultSetData{fallbackResult}
+		resultSets = []connection.ResultSetData{emptySQLServerRowsResultSet()}
 	}
 	if err := rows.Err(); err != nil {
 		return resultSets, allMessages, err
