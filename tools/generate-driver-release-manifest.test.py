@@ -129,7 +129,7 @@ class GenerateDriverReleaseManifestTest(unittest.TestCase):
                 check=True,
             )
 
-            self.assertIn("asset count: 5", proc.stdout)
+            self.assertIn("asset count: 6", proc.stdout)
             manifest = json.loads(output.read_text(encoding="utf-8"))
             assets = manifest["assets"]
             darwin_revision_file = self._generate_revision_file("darwin/arm64")

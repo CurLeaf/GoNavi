@@ -23,6 +23,9 @@ jobs:
 
       - name: Test release asset contracts
         run: |
+          bash tools/detect-changed-driver-agents.test.sh
+          bash tools/generate-driver-agent-revisions.test.sh
+          python3 tools/generate-driver-release-manifest.test.py
           python3 tools/generate-update-latest-manifest.test.py
           python3 tools/windows-release-artifacts.test.py
 
@@ -587,7 +590,7 @@ jobs:
               open_gauss|open-gauss) echo "opengauss" ;;
               gaussdb|gauss_db|gauss-db) echo "gaussdb" ;;
               elastic|elasticsearch) echo "elasticsearch" ;;
-              mariadb|oceanbase|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|opengauss|gaussdb|iris|mongodb|tdengine|iotdb|clickhouse)
+              mariadb|oceanbase|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|opengauss|gaussdb|iris|mongodb|tdengine|iotdb|clickhouse|trino)
                 echo "$value"
                 ;;
               *)

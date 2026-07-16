@@ -613,7 +613,7 @@ func findExistingOptionalDriverAgentCandidate(definition driverDefinition, targe
 		if validateErr := validateOptionalDriverAgentExecutableFunc(driverType, absPath); validateErr != nil {
 			continue
 		}
-		if !isReusableOptionalDriverAgentCandidateRevisionAcceptable(driverType, absPath) {
+		if !isReusableOptionalDriverAgentRevisionCurrent(driverType, absPath) {
 			continue
 		}
 		return absPath, true
@@ -621,7 +621,7 @@ func findExistingOptionalDriverAgentCandidate(definition driverDefinition, targe
 	return "", false
 }
 
-func isReusableOptionalDriverAgentCandidateRevisionAcceptable(driverType string, executablePath string) bool {
+func isReusableOptionalDriverAgentRevisionCurrent(driverType string, executablePath string) bool {
 	expected := strings.TrimSpace(db.OptionalDriverAgentRevision(driverType))
 	if expected == "" {
 		return true
@@ -629,16 +629,12 @@ func isReusableOptionalDriverAgentCandidateRevisionAcceptable(driverType string,
 	actual, current, err := optionalDriverAgentRevisionCurrent(driverType, executablePath)
 	displayName := resolveDriverDisplayName(driverDefinition{Type: driverType})
 	if err != nil {
-		logger.Warnf("可复用 %s 驱动代理候选版本元数据不可用，仍允许安装：path=%s err=%v；建议在驱动管理中重装", displayName, executablePath, err)
-		return true
+		logger.Warnf("跳过可复用 %s 驱动代理候选：版本元数据不可用 path=%s err=%v", displayName, executablePath, err)
+		return false
 	}
 	if !current {
-		actualLabel := strings.TrimSpace(actual)
-		if actualLabel == "" {
-			actualLabel = "空"
-		}
-		logger.Warnf("可复用 %s 驱动代理候选 revision 不匹配，仍允许安装：path=%s actual=%s expected=%s；建议在驱动管理中重装", displayName, executablePath, actualLabel, expected)
-		return true
+		logger.Warnf("跳过可复用 %s 驱动代理候选：revision 不匹配 path=%s actual=%s expected=%s", displayName, executablePath, strings.TrimSpace(actual), expected)
+		return false
 	}
 	return true
 }
