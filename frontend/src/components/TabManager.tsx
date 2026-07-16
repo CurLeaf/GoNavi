@@ -361,6 +361,8 @@ type SortableTabLabelProps = {
   onClose?: () => void;
 };
 
+export const isMiddleMouseButton = (button: number): boolean => button === 1;
+
 const renderV2TabDisplayPart = (part: TabDisplayPart) => {
   if (part.key === 'kind') {
     return (
@@ -402,6 +404,19 @@ const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
     setIsTabMenuOpen(true);
   };
 
+  const handleTabLabelMouseDown = (event: React.MouseEvent<HTMLElement>) => {
+    if (!onClose || !isMiddleMouseButton(event.button)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleTabLabelAuxClick = (event: React.MouseEvent<HTMLElement>) => {
+    if (!onClose || !isMiddleMouseButton(event.button)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onClose();
+  };
+
   const handleTabMenuOpenChange = (open: boolean) => {
     setIsTabMenuOpen(open);
     setIsHoverInfoOpen(false);
@@ -417,6 +432,8 @@ const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
     <span
       className={`tab-dnd-label${isV2Ui ? ' gn-v2-tab-label' : ''}${showSecondaryLine ? ' gn-v2-tab-label-double' : ''}${tabDisplayPartCount >= 4 ? ' gn-v2-tab-label-rich' : ''}`}
       onContextMenu={handleTabLabelContextMenu}
+      onMouseDown={handleTabLabelMouseDown}
+      onAuxClick={handleTabLabelAuxClick}
       title={isV2Ui ? undefined : displayTitle}
     >
       {isV2Ui ? (

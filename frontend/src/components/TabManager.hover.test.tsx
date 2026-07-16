@@ -9,6 +9,7 @@ import {
   resolveTabHoverTitle,
   shouldShowV2ConnectionLabel,
   TabHoverInfo,
+  isMiddleMouseButton,
   stopTabHoverDragPropagation,
 } from './TabManager';
 import { setCurrentLanguage } from '../i18n';
@@ -53,6 +54,12 @@ afterEach(() => {
 });
 
 describe('TabManager hover info', () => {
+  it('recognizes only the auxiliary middle mouse button for tab closing', () => {
+    expect(isMiddleMouseButton(1)).toBe(true);
+    expect(isMiddleMouseButton(0)).toBe(false);
+    expect(isMiddleMouseButton(2)).toBe(false);
+  });
+
   it('memoizes the tab workbench so parent-only modal state does not repaint open tabs', () => {
     const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
 
@@ -320,6 +327,10 @@ describe('TabManager hover info', () => {
   it('wires hover card tab-switch and drag-blocking handlers with selectable text styles', () => {
     const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
 
+    expect(source).toContain('onMouseDown={handleTabLabelMouseDown}');
+    expect(source).toContain('onAuxClick={handleTabLabelAuxClick}');
+    expect(source).toContain('event.stopPropagation();');
+    expect(source).toContain('onClose();');
     expect(source).toContain('onPointerDown={stopTabHoverDragPropagation}');
     expect(source).toContain('onPointerUp={stopTabHoverDragPropagation}');
     expect(source).toContain('onPointerDownCapture={stopTabHoverDragPropagation}');
@@ -374,8 +385,8 @@ describe('TabManager hover info', () => {
     expect(source).toContain('clearSQLFileTabDraft(tab.id)');
     expect(source).toContain('closeTabsWithSQLFilePrompt([id], () => closeTab(id))');
     expect(source).toContain('closeTabsWithSQLFilePrompt(getCloseOtherTabIds(tabs, tab.id), () => closeOtherTabs(tab.id))');
-    expect(source).toContain('closeTabsWithSQLFilePrompt(getCloseTabsToLeftIds(tabs, tab.id), () => closeTabsToLeft(tab.id))');
-    expect(source).toContain('closeTabsWithSQLFilePrompt(getCloseTabsToRightIds(tabs, tab.id), () => closeTabsToRight(tab.id))');
+    expect(source).toContain('closeTabsWithSQLFilePrompt(getCloseTabsToLeftIds(dockedTabs, tab.id), () => closeTabsToLeft(tab.id))');
+    expect(source).toContain('closeTabsWithSQLFilePrompt(getCloseTabsToRightIds(dockedTabs, tab.id), () => closeTabsToRight(tab.id))');
     expect(source).toContain('closeTabsWithSQLFilePrompt(tabs.map((item) => item.id), () => closeAllTabs())');
   });
 
