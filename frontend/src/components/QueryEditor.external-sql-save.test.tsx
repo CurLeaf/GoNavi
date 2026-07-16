@@ -2573,7 +2573,7 @@ describe('QueryEditor external SQL save', () => {
     });
   });
 
-  it('suggests Oracle private synonyms directly and resolves their columns through the synonym owner', async () => {
+  it('keeps same-name Oracle synonyms scoped by owner and resolves qualified columns', async () => {
     let renderer!: ReactTestRenderer;
     autoFetchState.visible = true;
     storeState.connections[0].config.type = 'oracle';
@@ -2582,20 +2582,37 @@ describe('QueryEditor external SQL save', () => {
     backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'A' }] });
     backendApp.DBGetTables.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetAllColumns.mockResolvedValue({ success: true, data: [] });
-    backendApp.DBGetColumns.mockImplementation(async (_config: any, dbName: string, tableName: string) => ({
-      success: true,
-      data: dbName === 'B' && tableName === 'PERSON'
-        ? [
-          { name: 'ID', type: 'NUMBER' },
-          { name: 'NAME', type: 'VARCHAR2' },
-        ]
-        : [],
-    }));
+    backendApp.DBGetColumns.mockImplementation(async (_config: any, dbName: string, tableName: string) => {
+      if (dbName === 'B' && tableName === 'PERSON') {
+        return {
+          success: true,
+          data: [
+            { name: 'ID', type: 'NUMBER' },
+            { name: 'NAME', type: 'VARCHAR2' },
+          ],
+        };
+      }
+      if (dbName === 'IMP_BASICINFO' && tableName === 'PERSON') {
+        return {
+          success: true,
+          data: [
+            { name: 'AC01', type: 'VARCHAR2' },
+            { name: 'AC02', type: 'VARCHAR2' },
+          ],
+        };
+      }
+      return { success: true, data: [] };
+    });
     backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
       if (/ALL_SYNONYMS/i.test(sql)) {
         return {
           success: true,
-          data: [{ synonym_owner: 'B', synonym_name: 'PERSON', target_schema_name: 'A', target_name: 'PERSON' }],
+          data: [
+            { synonym_owner: 'IMP_BASICINFO', synonym_name: 'PERSON', target_schema_name: 'IMP_DATA', target_name: 'PERSON' },
+            { synonym_owner: 'IMP_BASICINFO', synonym_name: 'AC02', target_schema_name: 'IMP_DATA', target_name: 'AC02' },
+            { synonym_owner: 'PUBLIC', synonym_name: 'PERSON', target_schema_name: 'PUBLIC_DATA', target_name: 'PERSON' },
+            { synonym_owner: 'B', synonym_name: 'PERSON', target_schema_name: 'A', target_name: 'PERSON' },
+          ],
         };
       }
       return { success: true, data: [] };
@@ -2626,6 +2643,8 @@ describe('QueryEditor external SQL save', () => {
         detail: '同义词 (A.PERSON)',
       }),
     ]));
+    expect(synonymItems.suggestions.filter((item: any) => item.label === 'PERSON')).toHaveLength(1);
+    expect(synonymItems.suggestions.some((item: any) => item.label === 'AC02')).toBe(false);
     expect(backendApp.DBQuery).toHaveBeenCalledWith(expect.anything(), 'A', expect.stringMatching(/ALL_SYNONYMS/i));
 
     editorState.value = 'SELECT p. FROM PERSON p';
@@ -2636,6 +2655,32 @@ describe('QueryEditor external SQL save', () => {
     );
     expect(backendApp.DBGetColumns).toHaveBeenCalledWith(expect.anything(), 'B', 'PERSON');
     expect(columnItems.suggestions.map((item: any) => item.label)).toEqual(expect.arrayContaining(['ID', 'NAME']));
+
+    editorState.value = 'SELECT * FROM IMP_BASICINFO.';
+    editorState.latestOnChange?.(editorState.value);
+    const ownerItems = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: editorState.value.length + 1 },
+    );
+    expect(ownerItems.suggestions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: 'PERSON',
+        detail: '同义词 (IMP_DATA.PERSON)',
+      }),
+      expect.objectContaining({
+        label: 'AC02',
+        detail: '同义词 (IMP_DATA.AC02)',
+      }),
+    ]));
+
+    editorState.value = 'SELECT p. FROM IMP_BASICINFO.PERSON p';
+    editorState.latestOnChange?.(editorState.value);
+    const ownerColumnItems = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: 'SELECT p.'.length + 1 },
+    );
+    expect(backendApp.DBGetColumns).toHaveBeenCalledWith(expect.anything(), 'IMP_BASICINFO', 'PERSON');
+    expect(ownerColumnItems.suggestions.map((item: any) => item.label)).toEqual(expect.arrayContaining(['AC01', 'AC02']));
 
     await act(async () => {
       renderer.unmount();

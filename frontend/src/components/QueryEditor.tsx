@@ -163,6 +163,7 @@ import {
     resolveQueryEditorNavigationTarget,
     resolveQueryLocatorPlan,
     rewriteLeadingSelectTableReference,
+    selectUnqualifiedCompletionSynonyms,
     splitCompletionSchemaAndTable,
     splitQueryIdentifierPathSegments,
     stripCompletionIdentifierQuotes,
@@ -2944,7 +2945,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   if (!targetName) return;
 
                   const targetSchemaName = String(getCaseInsensitiveValue(row, ['target_schema_name', 'table_owner', 'target_owner']) || targetParts.schemaName || '').trim();
-                  const uniqueKey = synonymName.toLowerCase();
+                  const uniqueKey = [ownerName.toLowerCase(), synonymName.toLowerCase()].join('\u0000');
                   if (seenSynonyms.has(uniqueKey)) return;
                   seenSynonyms.add(uniqueKey);
                   allSynonyms.push({
@@ -4887,6 +4888,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   String(activeConnection?.config?.driver || ''),
                   { oceanBaseProtocol: activeConnection?.config?.oceanBaseProtocol },
               );
+              const oracleLoginOwner = isOracleLikeDialect(activeDialect)
+                  ? resolveOracleLikeDefaultSchemaName(activeConnection?.config)
+                  : '';
               const shouldQuoteCompletionIdentifiers = isPostgresSchemaDialect(activeDialect);
               const quoteCompletionPart = (ident: string) => {
                   const raw = String(ident || '').trim();
@@ -5023,7 +5027,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       sortText,
                   };
               };
-
               const buildConnConfig = () => {
                   const connId = sharedCurrentConnectionId;
                   const conn = sharedConnections.find(c => c.id === connId);
@@ -5138,7 +5141,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   }
               };
 
-              const findCompletionSynonym = (dbName: string, tableIdent: string): CompletionSynonymMeta | undefined => {
+              const findCompletionSynonym = (
+                  tableIdent: string,
+                  explicitOwnerName = '',
+              ): CompletionSynonymMeta | undefined => {
                   const parsed = splitSchemaAndTable(tableIdent);
                   const synonymName = String(parsed.table || tableIdent).trim().toLowerCase();
                   if (!synonymName) return undefined;
@@ -5147,23 +5153,27 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   ));
                   if (matches.length === 0) return undefined;
 
-                  const explicitOwner = String(parsed.schema || '').trim().toLowerCase();
+                  const explicitOwner = String(explicitOwnerName || parsed.schema || '').trim().toLowerCase();
                   if (explicitOwner) {
                       return matches.find((synonym) => String(synonym.ownerName || '').trim().toLowerCase() === explicitOwner);
                   }
 
-                  const currentOwner = String(dbName || '').trim().toLowerCase();
-                  return matches.find((synonym) => String(synonym.ownerName || '').trim().toLowerCase() === currentOwner)
-                      || matches[0];
+                  const loginOwner = oracleLoginOwner.trim().toLowerCase();
+                  return matches.find((synonym) => String(synonym.ownerName || '').trim().toLowerCase() === loginOwner)
+                      || matches.find((synonym) => String(synonym.ownerName || '').trim().toLowerCase() === 'public');
               };
 
-              const getCompletionColumnsByTable = async (dbName: string, tableIdent: string) => {
+              const getCompletionColumnsByTable = async (
+                  dbName: string,
+                  tableIdent: string,
+                  explicitOwnerName = '',
+              ) => {
                   const connId = sharedCurrentConnectionId;
                   const targetDb = String(dbName || '').trim();
                   const targetTable = String(tableIdent || '').trim();
                   if (!connId || !targetDb || !targetTable) return [] as CompletionColumnMeta[];
 
-                  const synonym = findCompletionSynonym(targetDb, targetTable);
+                  const synonym = findCompletionSynonym(targetTable, explicitOwnerName);
                   const lookupDbName = String(synonym?.ownerName || targetDb).trim();
                   const lookupTableName = String(synonym?.synonymName || targetTable).trim();
                   const preloaded = synonym ? [] : findPreloadedColumns(targetDb, targetTable);
@@ -5216,7 +5226,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   const tablePart = stripQuotes(threePartMatch[2]);
                   const colPrefix = (threePartMatch[3] || '').toLowerCase();
 
-                  const cols = await getCompletionColumnsByTable(dbPart, tablePart);
+                  const cols = await getCompletionColumnsByTable(dbPart, tablePart, dbPart);
                   if (isSqlCompletionRequestCancelled(token)) {
                       return createEmptySqlCompletionResult();
                   }
@@ -5396,7 +5406,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
                   const tableInfo = aliasMap[qualifier.toLowerCase()];
                   if (tableInfo) {
-                      const cols = await getCompletionColumnsByTable(tableInfo.dbName, tableInfo.tableName);
+                      const cols = await getCompletionColumnsByTable(
+                          tableInfo.dbName,
+                          tableInfo.tableName,
+                          tableInfo.explicitOwnerName,
+                      );
                       if (isSqlCompletionRequestCancelled(token)) {
                           return createEmptySqlCompletionResult();
                       }
@@ -5517,7 +5531,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       seenReferencedTables.add(key);
                       const preloaded = findPreloadedColumns(tableInfo.dbName, tableInfo.tableName);
                       if (preloaded.length > 0) continue;
-                      const cols = await getCompletionColumnsByTable(tableInfo.dbName, tableInfo.tableName);
+                      const cols = await getCompletionColumnsByTable(
+                          tableInfo.dbName,
+                          tableInfo.tableName,
+                          tableInfo.explicitOwnerName,
+                      );
                       if (isSqlCompletionRequestCancelled(token)) {
                           return createEmptySqlCompletionResult();
                       }
@@ -5653,7 +5671,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       };
                   });
 
-              const synonymSuggestions = sharedSynonymsData
+              const synonymSuggestions = selectUnqualifiedCompletionSynonyms(sharedSynonymsData, oracleLoginOwner)
                   .filter((synonym) => includesWordPrefix(synonym.synonymName || ''))
                   .map((synonym) => buildSynonymSuggestion(
                       synonym,

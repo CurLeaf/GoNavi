@@ -28,6 +28,26 @@ export type CompletionRoutineMeta = {dbName: string, routineName: string, routin
 export type CompletionSequenceMeta = {dbName: string, sequenceName: string, schemaName?: string};
 export type CompletionPackageMeta = {dbName: string, packageName: string, schemaName?: string};
 
+export const selectUnqualifiedCompletionSynonyms = (
+    synonyms: CompletionSynonymMeta[],
+    loginOwnerName: string,
+): CompletionSynonymMeta[] => {
+    const loginOwner = String(loginOwnerName || '').trim().toLowerCase();
+    const preferred = new Map<string, { synonym: CompletionSynonymMeta; rank: number }>();
+    synonyms.forEach((synonym) => {
+        const key = String(synonym.synonymName || '').trim().toLowerCase();
+        const owner = String(synonym.ownerName || '').trim().toLowerCase();
+        if (!key) return;
+        const rank = loginOwner && owner === loginOwner ? 0 : owner === 'public' ? 1 : 2;
+        if (rank > 1) return;
+        const current = preferred.get(key);
+        if (!current || rank < current.rank) {
+            preferred.set(key, { synonym, rank });
+        }
+    });
+    return Array.from(preferred.values(), ({ synonym }) => synonym);
+};
+
 export const QUERY_LOCATOR_ALIAS_PREFIX = '__gonavi_locator_';
 const QUERY_LOCATOR_METADATA_TIMEOUT_MS = 1500;
 const SQLSERVER_MESSAGE_PREFIX_RE = /^\s*mssql:/i;
@@ -1612,8 +1632,8 @@ export const buildQueryEditorHoverMarkdown = (target: QueryEditorHoverTarget): s
 export const buildQueryEditorAliasMap = (
     fullText: string,
     currentDb: string,
-): Record<string, { dbName: string; tableName: string }> => {
-    const aliasMap: Record<string, { dbName: string; tableName: string }> = {};
+): Record<string, { dbName: string; tableName: string; explicitOwnerName?: string }> => {
+    const aliasMap: Record<string, { dbName: string; tableName: string; explicitOwnerName?: string }> = {};
     const reserved = new Set([
         'where', 'on', 'group', 'order', 'limit', 'having',
         'left', 'right', 'inner', 'outer', 'full', 'cross', 'join',
@@ -1628,21 +1648,26 @@ export const buildQueryEditorAliasMap = (
         const parts = tableIdent.split('.');
         let dbName = currentDb || '';
         let tableName = tableIdent;
+        let explicitOwnerName = '';
         if (parts.length === 2) {
             dbName = parts[0];
             tableName = parts[1];
+            explicitOwnerName = parts[0];
         } else if (parts.length >= 3) {
             dbName = parts[0];
             tableName = parts.slice(1).join('.');
         }
         const shortTable = getCompletionQualifiedNameLastPart(tableIdent);
-        if (shortTable) aliasMap[shortTable.toLowerCase()] = { dbName, tableName };
+        const aliasTarget = explicitOwnerName
+            ? { dbName, tableName, explicitOwnerName }
+            : { dbName, tableName };
+        if (shortTable) aliasMap[shortTable.toLowerCase()] = aliasTarget;
 
         const alias = stripCompletionIdentifierQuotes(match[2] || '').trim();
         if (!alias) continue;
         const loweredAlias = alias.toLowerCase();
         if (reserved.has(loweredAlias)) continue;
-        aliasMap[loweredAlias] = { dbName, tableName };
+        aliasMap[loweredAlias] = aliasTarget;
     }
     return aliasMap;
 };

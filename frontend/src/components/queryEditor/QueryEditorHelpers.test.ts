@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    buildQueryEditorAliasMap,
     collectQueryEditorReferencedDatabaseNames,
     isOracleBaseTableReference,
     resolveOracleLikeDefaultSchemaName,
     resolveOracleLikeExecutionSchemaName,
     resolveOracleLikeLookupSchemaCandidates,
     resolveQueryEditorNavigationTarget,
+    selectUnqualifiedCompletionSynonyms,
     shouldHandleQueryEditorRunShortcutFallback,
 } from './QueryEditorHelpers';
 
@@ -70,9 +72,34 @@ describe('QueryEditorHelpers Oracle-like execution schema', () => {
         expect(isOracleBaseTableReference('SELECT * FROM person', 'B', baseTables)).toBe(false);
         expect(isOracleBaseTableReference('SELECT * FROM person_view', 'B', baseTables)).toBe(false);
     });
+
+    it('prefers login-owner synonyms, falls back to PUBLIC, and excludes other owners', () => {
+        const otherOwner = { ownerName: 'IMP_BASICINFO', synonymName: 'PERSON', targetName: 'OTHER_PERSON' };
+        const publicOwner = { ownerName: 'PUBLIC', synonymName: 'PERSON', targetName: 'PUBLIC_PERSON' };
+        const loginOwner = { ownerName: 'B', synonymName: 'PERSON', targetName: 'LOGIN_PERSON' };
+        const otherOnly = { ownerName: 'IMP_BASICINFO', synonymName: 'AC02', targetName: 'AC02' };
+
+        expect(selectUnqualifiedCompletionSynonyms(
+            [otherOwner, publicOwner, otherOnly, loginOwner],
+            'B',
+        )).toEqual([loginOwner]);
+        expect(selectUnqualifiedCompletionSynonyms([otherOwner, publicOwner, otherOnly], 'B')).toEqual([publicOwner]);
+    });
 });
 
 describe('QueryEditorHelpers qualified navigation (MySQL db.table + PG schema.table)', () => {
+    it('tracks an explicit two-part owner separately from the current database', () => {
+        const qualified = buildQueryEditorAliasMap('SELECT p.* FROM IMP_BASICINFO.PERSON p', 'A');
+        expect(qualified.p).toEqual({
+            dbName: 'IMP_BASICINFO',
+            tableName: 'PERSON',
+            explicitOwnerName: 'IMP_BASICINFO',
+        });
+
+        const unqualified = buildQueryEditorAliasMap('SELECT p.* FROM PERSON p', 'A');
+        expect(unqualified.p).toEqual({ dbName: 'A', tableName: 'PERSON' });
+    });
+
     it('collects cross-db names from SQL without requiring an empty visible list', () => {
         const sql = `
 SELECT * FROM uk_back_corp;
