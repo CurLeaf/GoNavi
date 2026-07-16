@@ -82,16 +82,16 @@
 每张均为 **完整 GoNavi 应用窗口**，再通过 README 宽度控件等比例缩小展示。
 
 <p align="center">
-  <img src="assets/screenshots/02-sql-and-results.png" alt="GoNavi 全窗口 — SQL 编辑器与查询结果" width="560" />
+  <img src="https://raw.githubusercontent.com/Syngnat/GoNavi/dev/assets/screenshots/01-home-workbench.png" alt="GoNavi 全窗口 — 连接、查询与工作台" width="560" />
   &nbsp;
-  <img src="assets/screenshots/01-sql-and-logs.png" alt="GoNavi 全窗口 — SQL 编辑器与执行日志" width="560" />
+  <img src="https://raw.githubusercontent.com/Syngnat/GoNavi/dev/assets/screenshots/04-ai-assistant.png" alt="GoNavi 全窗口 — 带表结构上下文的 AI 助手" width="560" />
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/03-sql-workspace.png" alt="GoNavi 全窗口 — 连接侧栏与 SQL 工作区" width="560" />
+  <img src="https://raw.githubusercontent.com/Syngnat/GoNavi/dev/assets/screenshots/06-new-connection.png" alt="GoNavi 全窗口 — 新建连接的数据源选择器" width="560" />
 </p>
 
-<p align="center"><sub>真实桌面全窗口截图 · 敏感结果单元格已脱敏</sub></p>
+<p align="center"><sub>真实桌面全窗口截图</sub></p>
 
 ---
 

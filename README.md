@@ -83,16 +83,16 @@ Most database GUIs are Electron shells with megabytes of tax. GoNavi takes a dif
 Each image is a **full GoNavi application window**, scaled proportionally for README display.
 
 <p align="center">
-  <img src="assets/screenshots/02-sql-and-results.png" alt="GoNavi full window — SQL editor and query results" width="560" />
+  <img src="https://raw.githubusercontent.com/Syngnat/GoNavi/dev/assets/screenshots/01-home-workbench.png" alt="GoNavi full window — connections, queries, and workbench" width="560" />
   &nbsp;
-  <img src="assets/screenshots/01-sql-and-logs.png" alt="GoNavi full window — SQL editor and execution logs" width="560" />
+  <img src="https://raw.githubusercontent.com/Syngnat/GoNavi/dev/assets/screenshots/04-ai-assistant.png" alt="GoNavi full window — AI assistant with schema context" width="560" />
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/03-sql-workspace.png" alt="GoNavi full window — connection sidebar and SQL workspace" width="560" />
+  <img src="https://raw.githubusercontent.com/Syngnat/GoNavi/dev/assets/screenshots/06-new-connection.png" alt="GoNavi full window — new connection data-source selector" width="560" />
 </p>
 
-<p align="center"><sub>Real desktop captures · full window · sensitive result cells redacted</sub></p>
+<p align="center"><sub>Real desktop captures · full window</sub></p>
 
 ---
 
