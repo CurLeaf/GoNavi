@@ -134,7 +134,12 @@ func TestDirectDBQueryCannotBypassWriteAuditWhenBatchStartsWithRead(t *testing.T
 
 func TestDirectDBQueryCannotBypassAuditWithNestedWriteSyntax(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
-	t.Cleanup(func() { newDatabaseFunc = originalNewDatabaseFunc })
+	originalVerifyDriverAgentRevisionFunc := verifyDriverAgentRevisionFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		verifyDriverAgentRevisionFunc = originalVerifyDriverAgentRevisionFunc
+	})
+	verifyDriverAgentRevisionFunc = func(connection.ConnectionConfig) error { return nil }
 	explainWrite := "EXPLAIN ANALYZE UPDATE users SET enabled = false WHERE id = 7"
 	pragmaWrite := "PRAGMA user_version = 7"
 	mongoWrite := `{"aggregate":"users","pipeline":[{"$merge":{"into":"users_archive"}}],"cursor":{}}`

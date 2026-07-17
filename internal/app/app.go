@@ -1135,20 +1135,11 @@ func verifyRuntimeOptionalDriverAgentRevision(config connection.ConnectionConfig
 		return nil
 	}
 	displayName := resolveDriverDisplayName(driverDefinition{Type: driverType})
-	agentRevision, current, err := optionalDriverAgentRevisionCurrent(driverType, executablePath)
+	agentRevision, err := verifyInstalledOptionalDriverAgentRevision(driverType, executablePath, selectedVersion)
 	if err != nil {
-		logger.Warnf("%s driver-agent revision 元数据不可用，继续使用已安装代理：version=%s path=%s err=%v；建议在驱动管理中重装",
-			displayName, selectedVersion, executablePath, err)
-		return nil
-	}
-	if !current {
-		actualLabel := strings.TrimSpace(agentRevision)
-		if actualLabel == "" {
-			actualLabel = "空"
-		}
-		logger.Warnf("%s driver-agent revision 不匹配，继续使用已安装代理：已安装=%s 当前需要=%s version=%s path=%s；建议在驱动管理中重装",
-			displayName, actualLabel, expectedRevision, selectedVersion, executablePath)
-		return nil
+		logger.Warnf("%s driver-agent revision 校验失败，已阻止使用不匹配代理：当前需要=%s version=%s path=%s err=%v",
+			displayName, expectedRevision, selectedVersion, executablePath, err)
+		return err
 	}
 	logger.Infof("%s driver-agent revision 校验通过：已安装=%s 当前需要=%s version=%s path=%s",
 		displayName, strings.TrimSpace(agentRevision), expectedRevision, selectedVersion, executablePath)
