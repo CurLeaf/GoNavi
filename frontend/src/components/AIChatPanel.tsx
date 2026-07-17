@@ -14,7 +14,10 @@ import { AIChatHeader } from './ai/AIChatHeader';
 import { AIChatInput } from './ai/AIChatInput';
 import { AIHistoryDrawer } from './ai/AIHistoryDrawer';
 import AIChatPanelConversationView from './ai/AIChatPanelConversationView';
-import { useAIChatStreamSubscription } from './ai/useAIChatStreamSubscription';
+import {
+    prepareAIChatStreamForTerminalAction,
+    useAIChatStreamSubscription,
+} from './ai/useAIChatStreamSubscription';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import type { AIComposerNoticeDescriptor } from '../utils/aiComposerNotice';
 import { buildAIComposerNotice } from '../utils/aiComposerNotice';
@@ -61,6 +64,8 @@ interface AIChatPanelProps {
     presentation?: 'dock' | 'detached';
     onDetach?: () => void;
     onAttach?: () => void;
+    onRegisterTerminalGuard?: (guard: (() => Promise<boolean>) | null) => void;
+    interactionDisabled?: boolean;
     /** 独立窗：从标题栏发起拖拽（按钮区域会 stopPropagation） */
     onWindowDragStart?: (event: React.PointerEvent) => void;
 }
@@ -69,7 +74,8 @@ const genId = () => `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}
 
 export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     width = 380, darkMode, bgColor, onClose, onOpenSettings, onWidthChange, overlayTheme,
-    presentation = 'dock', onDetach, onAttach, onWindowDragStart,
+    presentation = 'dock', onDetach, onAttach, onRegisterTerminalGuard,
+    interactionDisabled = false, onWindowDragStart,
 }) => {
     const { t } = useI18n();
     const [input, setInput] = useState('');
@@ -298,6 +304,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     });
 
     const handleRetryMessage = useCallback(async (msg: AIChatMessage) => {
+        if (sending || interactionDisabled) return;
         const historyLocal = useStore.getState().aiChatHistory[sid] || [];
         const aiIndex = historyLocal.findIndex(message => message.id === msg.id);
         if (aiIndex <= 0) return;
@@ -364,6 +371,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         }
     }, [
         sid,
+        sending,
+        interactionDisabled,
         availableTools,
         buildSystemContextMessages,
         truncateAIChatMessages,
@@ -394,7 +403,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
     const handleSend = useCallback(async () => {
         const text = input.trim();
-        if ((!text && draftAttachments.length === 0) || sending) return;
+        if ((!text && draftAttachments.length === 0) || sending || interactionDisabled) return;
 
         const connectionKey = activeContext?.connectionId ? `${activeContext.connectionId}:${activeContext.dbName || ''}` : 'default';
         const readiness = buildAIChatReadinessSnapshot({
@@ -515,6 +524,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         input,
         draftAttachments,
         sending,
+        interactionDisabled,
         messages,
         addAIChatMessage,
         sid,
@@ -541,14 +551,46 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const handleStop = useCallback(async () => {
         try {
             const Service = (window as any).go?.aiservice?.Service;
-            if (Service?.AIChatCancel) {
-                await Service.AIChatCancel(sid);
+            const stopped = await prepareAIChatStreamForTerminalAction({
+                sid,
+                service: Service,
+                setSending,
+            });
+            if (!stopped) {
+                console.warn('Chat stream did not stop before the cancellation timeout');
             }
         } catch (error) {
             console.warn('Failed to stop chat stream', error);
         }
-        setSending(false);
     }, [sid]);
+
+    const handleCreateSession = useCallback(() => {
+        if (sending || interactionDisabled) return;
+        createNewAISession();
+        setActivePanelMode('chat');
+    }, [createNewAISession, interactionDisabled, sending]);
+
+    const handleSelectSession = useCallback((sessionId: string) => {
+        if (sending || interactionDisabled) return;
+        setAIActiveSessionId(sessionId);
+        setActivePanelMode('chat');
+        setHistoryOpen(false);
+    }, [interactionDisabled, sending, setAIActiveSessionId]);
+
+    const prepareForTerminalAction = useCallback(async () => {
+        const Service = (window as any).go?.aiservice?.Service;
+        return prepareAIChatStreamForTerminalAction({
+            sid,
+            service: Service,
+            setSending,
+            allSessions: true,
+        });
+    }, [sid]);
+
+    useEffect(() => {
+        onRegisterTerminalGuard?.(prepareForTerminalAction);
+        return () => onRegisterTerminalGuard?.(null);
+    }, [onRegisterTerminalGuard, prepareForTerminalAction]);
 
     const { inferredConnectionId, inferredDbName } = useMemo(
         () => inferAIChatConnectionContext({
@@ -635,6 +677,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         <div
             ref={panelRef}
             className={`ai-chat-panel${isV2Ui ? ' gn-v2-ai-panel' : ''}${isDetachedPresentation ? ' is-detached' : ''}`}
+            aria-busy={interactionDisabled}
             style={{
                 width: isDetachedPresentation ? '100%' : panelWidth,
                 height: isDetachedPresentation ? '100%' : undefined,
@@ -642,6 +685,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 color: textColor,
                 borderLeft: isDetachedPresentation ? 'none' : overlayTheme.shellBorder,
                 position: 'relative',
+                pointerEvents: interactionDisabled ? 'none' : undefined,
             }}
         >
             {!isDetachedPresentation && (
@@ -680,8 +724,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     }
                 }}
                 onClear={() => {
-                    createNewAISession();
-                    setActivePanelMode('chat');
+                    handleCreateSession();
                 }}
                 onSettingsClick={handleOpenSettingsFromPanel}
                 onClose={onClose}
@@ -714,6 +757,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 insights={aiInsights}
                 sessions={panelHistorySessions}
                 activeSessionId={sid}
+                sessionActionsDisabled={sending || interactionDisabled}
                 activeConnectionId={inferredConnectionId}
                 activeConnectionConfig={activeConnectionConfig}
                 activeDbName={inferredDbName}
@@ -727,10 +771,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                         }, 50);
                     }
                 }}
-                onSelectSession={(sessionId) => {
-                    setAIActiveSessionId(sessionId);
-                    setActivePanelMode('chat');
-                }}
+                onSelectSession={handleSelectSession}
                 onEditMessage={handleEditMessage}
                 onRetryMessage={handleRetryMessage}
                 onDeleteMessage={handleDeleteMessage}
@@ -778,7 +819,9 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 textColor={textColor}
                 mutedColor={mutedColor}
                 borderColor={borderColor}
-                onCreateNew={createNewAISession}
+                onCreateNew={handleCreateSession}
+                onSelectSession={handleSelectSession}
+                disabled={sending || interactionDisabled}
                 sessionId={sid}
             />
         </div>

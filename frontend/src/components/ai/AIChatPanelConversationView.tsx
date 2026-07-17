@@ -28,6 +28,7 @@ interface AIChatPanelConversationViewProps {
   insights: AIChatInsightItem[];
   sessions: AIChatInlineHistorySession[];
   activeSessionId: string;
+  sessionActionsDisabled?: boolean;
   activeConnectionId?: string;
   activeConnectionConfig?: RpcConnectionConfig;
   activeDbName?: string;
@@ -57,6 +58,7 @@ const AIChatPanelConversationView: React.FC<AIChatPanelConversationViewProps> = 
   insights,
   sessions,
   activeSessionId,
+  sessionActionsDisabled = false,
   activeConnectionId,
   activeConnectionConfig,
   activeDbName,
@@ -117,6 +119,7 @@ const AIChatPanelConversationView: React.FC<AIChatPanelConversationViewProps> = 
         insights={insights}
         sessions={sessions}
         activeSessionId={activeSessionId}
+        sessionActionsDisabled={sessionActionsDisabled}
         onSelectSession={onSelectSession}
       />
 

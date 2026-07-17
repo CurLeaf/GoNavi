@@ -10,6 +10,14 @@ export function AIChatCancel(arg1) {
   return window['go']['aiservice']['Service']['AIChatCancel'](arg1);
 }
 
+export function AIChatCancelAllAndWait() {
+  return window['go']['aiservice']['Service']['AIChatCancelAllAndWait']();
+}
+
+export function AIChatCancelAndWait(arg1) {
+  return window['go']['aiservice']['Service']['AIChatCancelAndWait'](arg1);
+}
+
 export function AIChatSend(arg1, arg2) {
   return window['go']['aiservice']['Service']['AIChatSend'](arg1, arg2);
 }

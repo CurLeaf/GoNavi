@@ -44,7 +44,8 @@ type Service struct {
 	configDir          string // 配置存储目录
 	secretStore        secretstore.SecretStore
 	localizer          *i18n.Localizer
-	cancelFuncs        map[string]context.CancelFunc // 记录每个 session 的 context 取消函数
+	streamProducers    map[string]map[*aiStreamProducer]struct{}
+	streamHandoffCount int
 	sessionProviders   map[string]aiSessionProviderRuntime
 	mcpHTTPOpMu        sync.Mutex
 	mcpHTTPStartMu     sync.Mutex
@@ -58,6 +59,11 @@ type aiSessionProviderRuntime struct {
 	ProviderKey string
 	State       json.RawMessage
 	Messages    []ai.Message
+}
+
+type aiStreamProducer struct {
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 var miniMaxAnthropicModels = []string{
@@ -154,7 +160,7 @@ func NewServiceWithSecretStore(store secretstore.SecretStore) *Service {
 		guard:            safety.NewGuard(ai.PermissionReadOnly),
 		secretStore:      store,
 		localizer:        newServiceLocalizer(),
-		cancelFuncs:      make(map[string]context.CancelFunc),
+		streamProducers:  make(map[string]map[*aiStreamProducer]struct{}),
 		sessionProviders: make(map[string]aiSessionProviderRuntime),
 	}
 }
@@ -1382,15 +1388,14 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 func (s *Service) AIChatStreamWithOptions(sessionID string, messages []ai.Message, tools []ai.Tool, options ai.ChatSendOptions) {
 	options = normalizeChatSendOptions(options)
 	streamCtx, cancel := context.WithCancel(context.Background())
-	s.mu.Lock()
-	s.cancelFuncs[sessionID] = cancel
-	s.mu.Unlock()
+	producer := s.registerAIStreamProducer(sessionID, cancel)
+	if producer == nil {
+		return
+	}
 
 	go func() {
 		defer func() {
-			s.mu.Lock()
-			delete(s.cancelFuncs, sessionID)
-			s.mu.Unlock()
+			s.finishAIStreamProducer(sessionID, producer)
 			cancel() // 确保释放
 		}()
 
@@ -1527,13 +1532,147 @@ func (s *Service) AIChatStreamWithOptions(sessionID string, messages []ai.Messag
 	}()
 }
 
+func (s *Service) registerAIStreamProducer(sessionID string, cancel context.CancelFunc) *aiStreamProducer {
+	producer := &aiStreamProducer{cancel: cancel, done: make(chan struct{})}
+	s.mu.Lock()
+	if s.streamHandoffCount > 0 {
+		s.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		return nil
+	}
+	if s.streamProducers == nil {
+		s.streamProducers = make(map[string]map[*aiStreamProducer]struct{})
+	}
+	active := s.streamProducers[sessionID]
+	if active == nil {
+		active = make(map[*aiStreamProducer]struct{})
+		s.streamProducers[sessionID] = active
+	}
+	previous := make([]context.CancelFunc, 0, len(active))
+	for item := range active {
+		if item.cancel != nil {
+			previous = append(previous, item.cancel)
+		}
+	}
+	active[producer] = struct{}{}
+	s.mu.Unlock()
+
+	// A new send supersedes older sends for the session, but the cancelled
+	// producers remain registered until their goroutines have really stopped.
+	for _, previousCancel := range previous {
+		previousCancel()
+	}
+	return producer
+}
+
+func (s *Service) finishAIStreamProducer(sessionID string, producer *aiStreamProducer) {
+	if producer == nil {
+		return
+	}
+	s.mu.Lock()
+	if active := s.streamProducers[sessionID]; active != nil {
+		delete(active, producer)
+		if len(active) == 0 {
+			delete(s.streamProducers, sessionID)
+		}
+	}
+	close(producer.done)
+	s.mu.Unlock()
+}
+
+func (s *Service) snapshotAIStreamProducers(sessionID string) []*aiStreamProducer {
+	s.mu.RLock()
+	active := s.streamProducers[sessionID]
+	producers := make([]*aiStreamProducer, 0, len(active))
+	for producer := range active {
+		producers = append(producers, producer)
+	}
+	s.mu.RUnlock()
+	return producers
+}
+
+func (s *Service) snapshotAllAIStreamProducers() []*aiStreamProducer {
+	s.mu.RLock()
+	producers := make([]*aiStreamProducer, 0)
+	for _, active := range s.streamProducers {
+		for producer := range active {
+			producers = append(producers, producer)
+		}
+	}
+	s.mu.RUnlock()
+	return producers
+}
+
 // AIChatCancel 立即终止某个 Session 的流式对话请求
 func (s *Service) AIChatCancel(sessionID string) {
-	s.mu.RLock()
-	cancel, ok := s.cancelFuncs[sessionID]
-	s.mu.RUnlock()
-	if ok && cancel != nil {
-		cancel()
+	for _, producer := range s.snapshotAIStreamProducers(sessionID) {
+		if producer.cancel != nil {
+			producer.cancel()
+		}
+	}
+}
+
+// AIChatCancelAndWait stops every active producer for one session and waits
+// until all of them stop emitting events. Detached windows use this before
+// handing ownership back to another WebView so no final token falls into the
+// listener gap.
+func (s *Service) AIChatCancelAndWait(sessionID string) bool {
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for {
+		producers := s.snapshotAIStreamProducers(sessionID)
+		if len(producers) == 0 {
+			return true
+		}
+		for _, producer := range producers {
+			if producer.cancel != nil {
+				producer.cancel()
+			}
+		}
+		for _, producer := range producers {
+			select {
+			case <-producer.done:
+			case <-timer.C:
+				return false
+			}
+		}
+	}
+}
+
+// AIChatCancelAllAndWait stops active producers across every session and waits
+// until none of them can emit another event. Native window handoff uses this as
+// a final guard because a previous session may outlive the current UI session.
+func (s *Service) AIChatCancelAllAndWait() bool {
+	s.mu.Lock()
+	s.streamHandoffCount++
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.streamHandoffCount--
+		s.mu.Unlock()
+	}()
+
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for {
+		producers := s.snapshotAllAIStreamProducers()
+		if len(producers) == 0 {
+			return true
+		}
+		for _, producer := range producers {
+			if producer.cancel != nil {
+				producer.cancel()
+			}
+		}
+		for _, producer := range producers {
+			select {
+			case <-producer.done:
+			case <-timer.C:
+				return false
+			}
+		}
 	}
 }
 
