@@ -1314,7 +1314,7 @@ describe('Sidebar locate toolbar', () => {
     expect(css).not.toContain('.gn-v2-active-connection-trigger:hover');
   });
 
-  it('shows a prominent v2 new query action before connection creation without reusing the plus icon', () => {
+  it('opens the v2 header new-query action in the selected database before connection creation', () => {
     mocks.state.connections = [{
       id: 'conn-local',
       name: '开发240',
@@ -1349,8 +1349,11 @@ describe('Sidebar locate toolbar', () => {
     expect(markup.indexOf('data-gonavi-new-query-action="true"')).toBeLessThan(markup.indexOf('data-gonavi-create-connection-action="true"'));
     expect(newQueryActionSource).toContain('icon={<FileTextOutlined />}');
     expect(newQueryActionSource).not.toContain('icon={<PlusOutlined />}');
-    expect(newQueryActionSource).toContain("handleV2ConnectionContextMenuAction(getConnectionNodeForAction(activeConnection), 'new-query')");
-    expect(newQueryActionSource).not.toContain("handleV2ConnectionContextMenuAction(activeConnection, 'new-query')");
+    expect(newQueryActionSource).toContain('const selectedDatabase = resolveV2SelectedDatabaseName({');
+    expect(newQueryActionSource).toContain('activeConnectionId: activeConnection.id,');
+    expect(newQueryActionSource).toContain('activeContextConnectionId: activeContext?.connectionId,');
+    expect(newQueryActionSource).toContain("handleV2DatabaseContextMenuAction(getDatabaseNodeRef(activeConnection, selectedDatabase), 'new-query');");
+    expect(newQueryActionSource).toContain("handleV2ConnectionContextMenuAction(getConnectionNodeForAction(activeConnection), 'new-query');");
     expect(newQueryActionSource).toContain('disabled={!activeConnection}');
   });
 

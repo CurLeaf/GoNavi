@@ -189,6 +189,7 @@ import {
   resolveSidebarDatabaseTreePruneKeys,
   resolveSidebarNodeConnectionId,
   resolveV2ActiveConnectionId,
+  resolveV2SelectedDatabaseName,
   resolveV2CommandSearchPersistentFilter,
   shouldClearSidebarNodeChildrenOnCollapse,
   shouldSkipSidebarLoadOnExpandWhileDragging,
@@ -2031,6 +2032,7 @@ const Sidebar: React.FC<{
   const getDatabaseNodeRef = (connRef: any, dbName: string) => {
       const latestConn = connections.find(c => c.id === connRef.id);
       return {
+          title: dbName,
           key: `${connRef.id}-${dbName}`,
           dataRef: { ...(latestConn || connRef), dbName }
       };
@@ -3004,9 +3006,19 @@ const Sidebar: React.FC<{
                             data-gonavi-new-query-action="true"
                             disabled={!activeConnection}
                             onClick={() => {
-                                if (activeConnection) {
-                                    handleV2ConnectionContextMenuAction(getConnectionNodeForAction(activeConnection), 'new-query');
+                                if (!activeConnection) {
+                                    return;
                                 }
+                                const selectedDatabase = resolveV2SelectedDatabaseName({
+                                    activeConnectionId: activeConnection.id,
+                                    activeContextConnectionId: activeContext?.connectionId,
+                                    activeContextDbName: activeContext?.dbName,
+                                });
+                                if (selectedDatabase) {
+                                    handleV2DatabaseContextMenuAction(getDatabaseNodeRef(activeConnection, selectedDatabase), 'new-query');
+                                    return;
+                                }
+                                handleV2ConnectionContextMenuAction(getConnectionNodeForAction(activeConnection), 'new-query');
                             }}
                         >
                             {t('sidebar.menu.new_query')}

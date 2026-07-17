@@ -1056,6 +1056,23 @@ export const resolveV2ActiveConnectionId = ({
     || '';
 };
 
+export const resolveV2SelectedDatabaseName = ({
+  activeConnectionId,
+  activeContextConnectionId,
+  activeContextDbName,
+}: {
+  activeConnectionId?: unknown;
+  activeContextConnectionId?: unknown;
+  activeContextDbName?: unknown;
+}): string => {
+  const connectionId = String(activeConnectionId || '').trim();
+  const contextConnectionId = String(activeContextConnectionId || '').trim();
+  if (!connectionId || connectionId !== contextConnectionId) {
+    return '';
+  }
+  return String(activeContextDbName || '').trim();
+};
+
 export const resolveSidebarDatabaseTreePruneKeys = ({
   treeData,
   expandedKeys,
