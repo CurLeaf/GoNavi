@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const themeSource = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+const tabManagerSource = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
 
 const readRule = (selector: string): string => {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -23,5 +24,15 @@ describe('empty workbench layout', () => {
   it('removes the oversized quick-workflow side panel', () => {
     expect(themeSource).not.toContain('gn-v2-empty-panel');
     expect(themeSource).not.toContain('gn-v2-panel-heading');
+  });
+});
+
+describe('workbench tab native detach drag', () => {
+  it('treats a captured native pointercancel as a possible cross-window release', () => {
+    expect(tabManagerSource).toContain(
+      "window.addEventListener('pointercancel', recordTerminalPointer, true)",
+    );
+    expect(tabManagerSource).toContain('terminalPointer: session?.terminalPointer');
+    expect(tabManagerSource).toContain('shouldDetachAfterNativePointerCancel(release');
   });
 });

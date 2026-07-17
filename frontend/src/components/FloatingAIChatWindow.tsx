@@ -9,6 +9,7 @@ import {
   DETACHED_WINDOW_VIEWPORT_PADDING,
 } from '../utils/detachedWindow';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
+import { hasNativeDetachedWindowManager } from '../utils/nativeDetachedWindowHost';
 import AIChatPanel from './AIChatPanel';
 import AIPanelErrorBoundary from './ai/AIPanelErrorBoundary';
 
@@ -120,7 +121,7 @@ const FloatingAIChatWindow: React.FC<FloatingAIChatWindowProps> = ({
     window.addEventListener('pointercancel', stop);
   }, [focusDetachedAIChatPanel, updateDetachedAIChatBounds]);
 
-  if (!windowState) {
+  if (!windowState || hasNativeDetachedWindowManager()) {
     return null;
   }
 

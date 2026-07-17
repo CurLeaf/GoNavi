@@ -172,6 +172,10 @@ import {
 import { DEFAULT_AI_PANEL_WIDTH, resolveOverlayAIPanelWidth, shouldOverlayAIPanel } from './utils/aiPanelLayout';
 import { safeWindowRuntimeCall } from './utils/wailsRuntime';
 import {
+  hasNativeDetachedWindowManager,
+  openNativeAIChatWindow,
+} from './utils/nativeDetachedWindowHost';
+import {
   buildApplicationQuitUnsavedSQLLabel,
   collectApplicationQuitUnsavedSQLTargets,
   saveApplicationQuitUnsavedSQLTargets,
@@ -994,6 +998,20 @@ function App() {
   const aiChatDetached = Boolean(detachedAIChatWindow);
   const toggleAIPanel = useStore(state => state.toggleAIPanel);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
+  useEffect(() => {
+    if (!aiPanelVisible || !detachedAIChatWindow || !hasNativeDetachedWindowManager()) {
+      return undefined;
+    }
+    let active = true;
+    void openNativeAIChatWindow().catch((error) => {
+      if (!active) return;
+      useStore.getState().attachAIChatPanel();
+      void message.error(error instanceof Error ? error.message : String(error));
+    });
+    return () => {
+      active = false;
+    };
+  }, [aiPanelVisible, aiChatDetached]);
   const windowDiagSequenceRef = React.useRef(0);
   const windowDiagLastSignatureRef = React.useRef('');
   const windowDiagLastAtRef = React.useRef(0);
@@ -7053,7 +7071,7 @@ function App() {
                   <TabManager />
                   <FloatingWorkbenchWindows />
                   <FloatingQueryResultWindows />
-                  <NativeDetachedWindowController />
+                  <NativeDetachedWindowController onOpenAISettings={handleOpenAISettings} />
                </div>
                {!isV2Ui && !aiPanelVisible && (
                <>
@@ -7183,7 +7201,7 @@ function App() {
                       </div>
                   </div>
                )}
-               {aiPanelVisible && aiChatDetached && (
+               {aiPanelVisible && aiChatDetached && !hasNativeDetachedWindowManager() && (
                   <FloatingAIChatWindow
                     darkMode={darkMode}
                     bgColor={bgContent}

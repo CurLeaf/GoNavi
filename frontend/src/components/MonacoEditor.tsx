@@ -639,6 +639,16 @@ const MonacoEditor: React.FC<MonacoEditorProps> = ({
     onMount?.(editor, monaco);
   }, [onMount]);
 
+  const loadingFallback = (
+    <div
+      data-monaco-editor-loading="true"
+      aria-busy="true"
+      style={{ height: props.height || '100%', width: props.width || '100%' }}
+    >
+      {loading || null}
+    </div>
+  );
+
   const resolvedOptions = useMemo(() => {
     if (uiVersion !== 'v2') {
       return {
@@ -680,21 +690,14 @@ const MonacoEditor: React.FC<MonacoEditorProps> = ({
   ]);
 
   if (!ready) {
-    return (
-      <div
-        data-monaco-editor-loading="true"
-        style={{ height: props.height || '100%', width: props.width || '100%' }}
-      >
-        {loading || null}
-      </div>
-    );
+    return loadingFallback;
   }
 
   return (
     <Editor
       {...props}
       options={resolvedOptions}
-      loading={loading}
+      loading={loadingFallback}
       beforeMount={handleBeforeMount}
       onMount={handleMount}
     />

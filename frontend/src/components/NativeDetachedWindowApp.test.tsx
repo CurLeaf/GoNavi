@@ -3,7 +3,27 @@ import TestRenderer, { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TabData } from '../types';
-import type { NativeDetachedWindowBootstrap } from '../utils/nativeDetachedWindowClient';
+import type {
+  NativeDetachedWindowActionPayload,
+  NativeDetachedWindowBootstrap,
+} from '../utils/nativeDetachedWindowClient';
+
+const { aiTerminalGuard, detachedResultRows, flushAIChatSessionPersistence } = vi.hoisted(() => ({
+  aiTerminalGuard: vi.fn(async (): Promise<boolean> => true),
+  detachedResultRows: {
+    current: [{ id: 1, name: 'edited in detached result' }] as Array<Record<string, unknown>>,
+  },
+  flushAIChatSessionPersistence: vi.fn(async () => undefined),
+}));
+const runtimeEventListeners = new Map<string, (payload: any) => void>();
+
+vi.mock('../../wailsjs/runtime', () => ({
+  EventsOn: (name: string, callback: (payload: any) => void) => {
+    runtimeEventListeners.set(name, callback);
+    return () => runtimeEventListeners.delete(name);
+  },
+  WindowShow: vi.fn(),
+}));
 
 const queryTab: TabData = {
   id: 'query-native-1',
@@ -13,6 +33,31 @@ const queryTab: TabData = {
   dbName: 'main',
   query: 'select 1',
 };
+
+const workbenchTabTypes: TabData['type'][] = [
+  'query',
+  'table',
+  'design',
+  'sql-file-execution',
+  'sql-analysis',
+  'sql-audit',
+  'redis-keys',
+  'redis-command',
+  'redis-monitor',
+  'trigger',
+  'view-def',
+  'event-def',
+  'routine-def',
+  'sequence-def',
+  'package-def',
+  'table-overview',
+  'table-export',
+  'jvm-overview',
+  'jvm-resource',
+  'jvm-audit',
+  'jvm-diagnostic',
+  'jvm-monitoring',
+];
 
 let storeState: Record<string, any>;
 const storeListeners = new Set<() => void>();
@@ -32,7 +77,7 @@ vi.mock('../store', () => {
       },
     },
   );
-  return { useStore };
+  return { flushAIChatSessionPersistence, useStore };
 });
 
 vi.mock('../i18n/provider', () => ({
@@ -62,14 +107,66 @@ vi.mock('@ant-design/icons', () => ({
 }));
 
 vi.mock('./WorkbenchTabContent', () => ({
-  default: ({ tab }: { tab: TabData }) => <div data-workbench-tab={tab.id} />,
+  default: ({
+    tab,
+    onContentReady,
+  }: {
+    tab: TabData;
+    onContentReady?: () => void;
+  }) => {
+    React.useEffect(() => {
+      onContentReady?.();
+    }, [onContentReady]);
+    return <div data-workbench-tab={tab.id} />;
+  },
 }));
 
 vi.mock('./DataGrid', () => ({
-  default: () => <div data-component="data-grid" />,
+  default: ({ onDataChange }: { onDataChange?: (rows: Array<Record<string, unknown>>) => void }) => (
+    <button
+      data-component="data-grid"
+      type="button"
+      onClick={() => onDataChange?.(detachedResultRows.current)}
+    />
+  ),
 }));
 
-import NativeDetachedWindowApp from './NativeDetachedWindowApp';
+vi.mock('./AIChatPanel', () => ({
+  default: ({
+    presentation,
+    onAttach,
+    onClose,
+    onOpenSettings,
+    onRegisterTerminalGuard,
+    interactionDisabled,
+  }: {
+    presentation?: string;
+    onAttach?: () => void;
+    onClose?: () => void;
+    onOpenSettings?: () => void;
+    onRegisterTerminalGuard?: (guard: (() => Promise<boolean>) | null) => void;
+    interactionDisabled?: boolean;
+  }) => (
+    <div
+      data-ai-chat-presentation={presentation}
+      data-ai-chat-interaction-disabled={interactionDisabled ? 'true' : 'false'}
+      ref={() => onRegisterTerminalGuard?.(aiTerminalGuard)}
+    >
+      <button data-ai-chat-attach type="button" onClick={onAttach} />
+      <button data-ai-chat-close type="button" onClick={onClose} />
+      <button data-ai-chat-settings type="button" onClick={onOpenSettings} />
+    </div>
+  ),
+}));
+
+vi.mock('./NativeDetachedWindowController', () => ({
+  default: () => null,
+}));
+
+import NativeDetachedWindowApp, {
+  NATIVE_DETACHED_PAINT_FALLBACK_MS,
+  waitForNativeDetachedContentPaint,
+} from './NativeDetachedWindowApp';
 
 const flushEffects = async () => {
   await Promise.resolve();
@@ -79,13 +176,48 @@ const flushEffects = async () => {
 describe('NativeDetachedWindowApp', () => {
   beforeEach(() => {
     storeListeners.clear();
+    runtimeEventListeners.clear();
+    flushAIChatSessionPersistence.mockReset();
+    flushAIChatSessionPersistence.mockResolvedValue(undefined);
+    aiTerminalGuard.mockReset();
+    aiTerminalGuard.mockResolvedValue(true);
+    detachedResultRows.current = [{ id: 1, name: 'edited in detached result' }];
     storeState = {
       tabs: [],
+      activeTabId: null,
+      activeContext: null,
+      connections: [],
       theme: 'light',
       appearance: { uiVersion: 'v2' },
       fontSize: 14,
+      aiPanelVisible: false,
+      aiChatHistory: {},
+      aiChatSessions: [],
+      aiActiveSessionId: null,
+      aiContexts: {},
       updateQueryTabDraft: vi.fn(),
     };
+  });
+
+  it('falls back when a visible WebView temporarily throttles animation frames', async () => {
+    vi.useFakeTimers();
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { requestAnimationFrame: vi.fn(() => 1) },
+    });
+    try {
+      const painted = waitForNativeDetachedContentPaint();
+      await vi.advanceTimersByTimeAsync(NATIVE_DETACHED_PAINT_FALLBACK_MS);
+      await expect(painted).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
   });
 
   it('hydrates and attaches a workbench tab through the native action client', async () => {
@@ -110,10 +242,13 @@ describe('NativeDetachedWindowApp', () => {
     };
     const client = {
       load: vi.fn(async () => bootstrap),
+      present: vi.fn(async () => undefined),
       ready: vi.fn(async () => undefined),
       sync: vi.fn(async () => undefined),
       attach: vi.fn(async () => undefined),
       close: vi.fn(async () => undefined),
+      cancelCloseRequest: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
       closeCurrentWindow: vi.fn(async () => undefined),
     };
 
@@ -150,7 +285,794 @@ describe('NativeDetachedWindowApp', () => {
       kind: 'workbench',
       tab: queryTab,
     }));
+    const syncCalls = client.sync.mock.calls as unknown as Array<[NativeDetachedWindowActionPayload]>;
+    const attachCalls = client.attach.mock.calls as unknown as Array<[NativeDetachedWindowActionPayload]>;
+    const finalSyncPayload = syncCalls[syncCalls.length - 1]?.[0];
+    const attachPayload = attachCalls[attachCalls.length - 1]?.[0];
+    expect(finalSyncPayload?.revision).toEqual(expect.any(Number));
+    expect(attachPayload?.revision).toEqual(expect.any(Number));
+    expect(attachPayload!.revision!).toBeGreaterThan(finalSyncPayload!.revision!);
     expect(client.close).not.toHaveBeenCalled();
     expect(client.closeCurrentWindow).toHaveBeenCalledOnce();
+  });
+
+  it('signals ready only after committed native content crosses a paint frame', async () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const animationFrames: FrameRequestCallback[] = [];
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+          animationFrames.push(callback);
+          return animationFrames.length;
+        }),
+      },
+    });
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'native-paint-ready',
+      kind: 'workbench',
+      title: queryTab.title,
+      payload: {
+        storeState: {
+          tabs: [queryTab],
+          theme: 'light',
+          appearance: { uiVersion: 'v2' },
+        },
+        tab: queryTab,
+      },
+    };
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      present: vi.fn(async () => undefined),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+    };
+
+    let renderer: TestRenderer.ReactTestRenderer | undefined;
+    try {
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+
+      expect(renderer!.root.findByProps({ 'data-workbench-tab': queryTab.id })).toBeTruthy();
+      expect(client.present).toHaveBeenCalledOnce();
+      expect(client.ready).not.toHaveBeenCalled();
+      expect(animationFrames).toHaveLength(1);
+
+      await act(async () => {
+        animationFrames.shift()?.(16);
+        await flushEffects();
+      });
+      expect(client.ready).not.toHaveBeenCalled();
+      expect(animationFrames).toHaveLength(1);
+
+      await act(async () => {
+        animationFrames.shift()?.(32);
+        await flushEffects();
+      });
+      expect(client.ready).toHaveBeenCalledWith({
+        id: bootstrap.id,
+        kind: bootstrap.kind,
+      });
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it.each(workbenchTabTypes)('renders %s through the native workbench bootstrap', async (type) => {
+    const tab: TabData = {
+      id: `native-${type}`,
+      title: type,
+      type,
+      connectionId: 'connection-1',
+    };
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: `workbench:${tab.id}`,
+      kind: 'workbench',
+      title: tab.title,
+      payload: {
+        storeState: {
+          tabs: [tab],
+          activeTabId: tab.id,
+          theme: 'light',
+          appearance: { uiVersion: 'v2' },
+        },
+        tab,
+      },
+    };
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+    };
+
+    let renderer: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+      await flushEffects();
+    });
+
+    expect(renderer!.root.findByProps({ 'data-workbench-tab': tab.id })).toBeTruthy();
+    expect(client.ready).toHaveBeenCalledWith({ id: bootstrap.id, kind: 'workbench' });
+    await act(async () => {
+      renderer!.unmount();
+    });
+  });
+
+  it('hydrates and renders AI chat in a native detached window', async () => {
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      payload: {
+        storeState: {
+          tabs: [queryTab],
+          activeTabId: queryTab.id,
+          theme: 'dark',
+          appearance: { uiVersion: 'v2' },
+          fontSize: 15,
+          aiPanelVisible: true,
+          aiChatHistory: {
+            'session-1': [{ id: 'message-1', role: 'user', content: 'hello', timestamp: 1 }],
+          },
+          aiChatSessions: [{ id: 'session-1', title: 'Session 1', updatedAt: 1 }],
+          aiActiveSessionId: 'session-1',
+          aiContexts: {},
+        },
+      },
+    };
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+    };
+
+    let renderer: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+      await flushEffects();
+    });
+
+    expect(renderer!.root.findByProps({ 'data-ai-chat-presentation': 'detached' })).toBeTruthy();
+    expect(client.ready).toHaveBeenCalledWith({ id: 'ai-chat', kind: 'ai-chat' });
+
+    await act(async () => {
+      runtimeEventListeners.get('gonavi:native-detached-command')?.({
+        id: 'ai-chat',
+        action: 'sync-host-state',
+        payload: {
+          revision: 2,
+          storeState: {
+            activeContext: { connectionId: 'connection-2', dbName: 'analytics' },
+            activeTabId: 'query-native-2',
+            activeTab: { ...queryTab, id: 'query-native-2', connectionId: 'connection-2' },
+            activeConnection: { id: 'connection-2', name: 'Analytics' },
+          },
+        },
+      });
+      await flushEffects();
+    });
+    expect(storeState.activeContext).toEqual({ connectionId: 'connection-2', dbName: 'analytics' });
+    expect(storeState.tabs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'query-native-2', connectionId: 'connection-2' }),
+    ]));
+
+    await act(async () => {
+      renderer!.root.findByProps({ 'data-ai-chat-attach': true }).props.onClick();
+      await flushEffects();
+    });
+
+    expect(client.attach).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      storeState: expect.objectContaining({
+        aiActiveSessionId: 'session-1',
+        aiChatHistory: expect.objectContaining({
+          'session-1': [expect.objectContaining({ content: 'hello' })],
+        }),
+      }),
+    }));
+    expect(flushAIChatSessionPersistence).toHaveBeenCalledOnce();
+    expect(client.closeCurrentWindow).toHaveBeenCalledOnce();
+
+    expect(client.openAISettings).not.toHaveBeenCalled();
+  });
+
+  it('syncs edited query-result rows before the result window is restored', async () => {
+    vi.useFakeTimers();
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'query-result:query-native-1:r1',
+      kind: 'query-result',
+      title: 'Result 1',
+      payload: {
+        storeState: { appearance: { uiVersion: 'v2' }, theme: 'light', sqlLogs: [] },
+        resultWindow: {
+          id: 'query-result:query-native-1:r1',
+          sourceQueryTabId: queryTab.id,
+          connectionId: queryTab.connectionId,
+          dbName: queryTab.dbName,
+          title: 'Result 1',
+          x: 0,
+          y: 0,
+          width: 800,
+          height: 600,
+          zIndex: 1201,
+          result: {
+            key: 'r1',
+            sql: 'select * from users',
+            rows: [{ id: 1, name: 'before' }],
+            columns: ['id', 'name'],
+            pkColumns: ['id'],
+            readOnly: false,
+          },
+        },
+      },
+    };
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+    };
+
+    try {
+      let renderer: TestRenderer.ReactTestRenderer;
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+      await act(async () => {
+        renderer!.root.findByProps({ 'data-component': 'data-grid' }).props.onClick();
+        await vi.advanceTimersByTimeAsync(200);
+      });
+
+      expect(client.sync).toHaveBeenCalledWith(expect.objectContaining({
+        resultWindow: expect.objectContaining({
+          result: expect.objectContaining({
+            rows: [{ id: 1, name: 'edited in detached result' }],
+          }),
+        }),
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('syncs a newer query-result edit after an older sync completes', async () => {
+    vi.useFakeTimers();
+    let resolveFirstSync: (() => void) | undefined;
+    const firstSyncPending = new Promise<void>((resolve) => {
+      resolveFirstSync = resolve;
+    });
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'query-result:query-native-1:r1',
+      kind: 'query-result',
+      title: 'Result 1',
+      payload: {
+        storeState: { appearance: { uiVersion: 'v2' }, theme: 'light', sqlLogs: [] },
+        resultWindow: {
+          id: 'query-result:query-native-1:r1',
+          sourceQueryTabId: queryTab.id,
+          connectionId: queryTab.connectionId,
+          dbName: queryTab.dbName,
+          title: 'Result 1',
+          x: 0,
+          y: 0,
+          width: 800,
+          height: 600,
+          zIndex: 1201,
+          result: {
+            key: 'r1',
+            sql: 'select * from users',
+            rows: [{ id: 1, name: 'before' }],
+            columns: ['id', 'name'],
+            pkColumns: ['id'],
+            readOnly: false,
+          },
+        },
+      },
+    };
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn()
+        .mockImplementationOnce(() => firstSyncPending)
+        .mockResolvedValue(undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+    };
+
+    try {
+      let renderer: TestRenderer.ReactTestRenderer;
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+      const dataGrid = renderer!.root.findByProps({ 'data-component': 'data-grid' });
+
+      detachedResultRows.current = [{ id: 1, name: 'edit-v1' }];
+      await act(async () => {
+        dataGrid.props.onClick();
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(client.sync).toHaveBeenCalledOnce();
+
+      detachedResultRows.current = [{ id: 1, name: 'edit-v2' }];
+      await act(async () => {
+        dataGrid.props.onClick();
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(client.sync).toHaveBeenCalledOnce();
+
+      await act(async () => {
+        resolveFirstSync?.();
+        await firstSyncPending;
+        await flushEffects();
+        await flushEffects();
+      });
+
+      expect(client.sync).toHaveBeenCalledTimes(2);
+      const syncCalls = client.sync.mock.calls as unknown as Array<[NativeDetachedWindowActionPayload]>;
+      expect(syncCalls[0]?.[0].resultWindow?.result.rows).toEqual([{ id: 1, name: 'edit-v1' }]);
+      expect(syncCalls[1]?.[0].resultWindow?.result.rows).toEqual([{ id: 1, name: 'edit-v2' }]);
+      expect(syncCalls[1]?.[0].revision).toBeGreaterThan(syncCalls[0]?.[0].revision || 0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('opens AI settings in the main window without docking or closing the native AI window', async () => {
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      payload: { storeState: { appearance: { uiVersion: 'v2' }, theme: 'light' } },
+    };
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+    };
+
+    let renderer: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+      await flushEffects();
+    });
+
+    await act(async () => {
+      renderer!.root.findByProps({ 'data-ai-chat-settings': true }).props.onClick();
+      await flushEffects();
+    });
+
+    expect(client.openAISettings).toHaveBeenCalledWith({ id: 'ai-chat', kind: 'ai-chat' });
+    expect(client.attach).not.toHaveBeenCalled();
+    expect(client.close).not.toHaveBeenCalled();
+    expect(client.closeCurrentWindow).not.toHaveBeenCalled();
+  });
+
+  it('forwards AI child SQL actions to the main process', async () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const eventTarget = new EventTarget();
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: Object.assign(eventTarget, {
+        clearTimeout: globalThis.clearTimeout,
+        innerWidth: 440,
+        outerHeight: 720,
+        outerWidth: 440,
+        screenX: -1200,
+        screenY: 80,
+        setTimeout: globalThis.setTimeout,
+      }),
+    });
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      payload: { storeState: { appearance: { uiVersion: 'v2' }, theme: 'light' } },
+    };
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      hostEvent: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+    };
+
+    try {
+      let renderer: TestRenderer.ReactTestRenderer;
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+      const event = new Event('gonavi:insert-sql');
+      Object.defineProperty(event, 'detail', { value: { sql: 'select 42' } });
+      await act(async () => {
+        eventTarget.dispatchEvent(event);
+        await flushEffects();
+      });
+
+      expect(client.hostEvent).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'ai-chat',
+        kind: 'ai-chat',
+        hostEvent: expect.objectContaining({
+          name: 'gonavi:insert-sql',
+          detail: { sql: 'select 42' },
+        }),
+      }));
+      await act(async () => {
+        renderer!.unmount();
+      });
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('flushes the latest AI session before a graceful native close request', async () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const eventTarget = new EventTarget();
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: Object.assign(eventTarget, {
+        clearTimeout: globalThis.clearTimeout,
+        innerWidth: 440,
+        outerHeight: 720,
+        outerWidth: 440,
+        screenX: -1200,
+        screenY: 80,
+        setTimeout: globalThis.setTimeout,
+      }),
+    });
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      payload: { storeState: { appearance: { uiVersion: 'v2' }, theme: 'light' } },
+    };
+    const callOrder: string[] = [];
+    aiTerminalGuard.mockImplementationOnce(async () => {
+      callOrder.push('guard');
+      return true;
+    });
+    flushAIChatSessionPersistence.mockImplementationOnce(async () => {
+      callOrder.push('flush');
+    });
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => {
+        callOrder.push('close');
+      }),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => {
+        callOrder.push('close-window');
+      }),
+    };
+
+    try {
+      let renderer: TestRenderer.ReactTestRenderer;
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+
+      await act(async () => {
+        eventTarget.dispatchEvent(new Event('gonavi:native-detached-request-close'));
+        await flushEffects();
+      });
+
+      expect(callOrder).toEqual(['guard', 'flush', 'close', 'close-window']);
+      expect(client.close).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'ai-chat',
+        kind: 'ai-chat',
+        bounds: { x: -1200, y: 80, width: 440, height: 720 },
+      }));
+      await act(async () => {
+        renderer!.unmount();
+      });
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('locks AI interactions while a native terminal handoff is waiting', async () => {
+    let releaseGuard: (() => void) | undefined;
+    aiTerminalGuard.mockImplementationOnce(() => new Promise<boolean>((resolve) => {
+      releaseGuard = () => resolve(true);
+    }));
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      payload: { storeState: { appearance: { uiVersion: 'v2' }, theme: 'light' } },
+    };
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+    };
+
+    let renderer: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+      await flushEffects();
+    });
+    await act(async () => {
+      renderer!.root.findByProps({ 'data-ai-chat-attach': true }).props.onClick();
+      await flushEffects();
+    });
+
+    expect(renderer!.root.findByProps({
+      'data-ai-chat-presentation': 'detached',
+    }).props['data-ai-chat-interaction-disabled']).toBe('true');
+    expect(client.attach).not.toHaveBeenCalled();
+
+    await act(async () => {
+      releaseGuard?.();
+      await flushEffects();
+      await flushEffects();
+    });
+    expect(client.attach).toHaveBeenCalledOnce();
+  });
+
+  it('gates simultaneous attach and OS-close requests and hands off the final guarded token', async () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const eventTarget = new EventTarget();
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: Object.assign(eventTarget, {
+        clearTimeout: globalThis.clearTimeout,
+        innerWidth: 440,
+        outerHeight: 720,
+        outerWidth: 440,
+        screenX: 10,
+        screenY: 20,
+        setTimeout: globalThis.setTimeout,
+      }),
+    });
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      payload: {
+        storeState: {
+          appearance: { uiVersion: 'v2' },
+          theme: 'light',
+          aiActiveSessionId: 'session-handoff',
+          aiChatHistory: {
+            'session-handoff': [{ id: 'assistant-1', role: 'assistant', content: 'partial' }],
+          },
+          aiChatSessions: [],
+          aiContexts: {},
+        },
+      },
+    };
+    aiTerminalGuard.mockImplementationOnce(async () => {
+      storeState.aiChatHistory['session-handoff'][0].content = 'partial final-token';
+      return true;
+    });
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+    };
+
+    try {
+      let renderer: TestRenderer.ReactTestRenderer;
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+      await act(async () => {
+        renderer!.root.findByProps({ 'data-ai-chat-attach': true }).props.onClick();
+        eventTarget.dispatchEvent(new Event('gonavi:native-detached-request-close'));
+        await flushEffects();
+      });
+
+      expect(client.attach).toHaveBeenCalledOnce();
+      expect(client.close).not.toHaveBeenCalled();
+      expect(client.attach).toHaveBeenCalledWith(expect.objectContaining({
+        storeState: expect.objectContaining({
+          aiChatHistory: expect.objectContaining({
+            'session-handoff': [expect.objectContaining({ content: 'partial final-token' })],
+          }),
+        }),
+      }));
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('cancels the native close fallback when AI session persistence fails', async () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const eventTarget = new EventTarget();
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: Object.assign(eventTarget, {
+        clearTimeout: globalThis.clearTimeout,
+        innerWidth: 440,
+        setTimeout: globalThis.setTimeout,
+      }),
+    });
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      payload: { storeState: { appearance: { uiVersion: 'v2' }, theme: 'light' } },
+    };
+    flushAIChatSessionPersistence.mockRejectedValueOnce(new Error('disk full'));
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      cancelCloseRequest: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+      cancelClose: vi.fn(async () => undefined),
+    };
+
+    try {
+      let renderer: TestRenderer.ReactTestRenderer;
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+      await act(async () => {
+        eventTarget.dispatchEvent(new Event('gonavi:native-detached-request-close'));
+        await flushEffects();
+        await flushEffects();
+      });
+
+      expect(client.cancelCloseRequest).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'ai-chat',
+        kind: 'ai-chat',
+        revision: expect.any(Number),
+      }));
+      expect(client.cancelClose).toHaveBeenCalledOnce();
+      expect(client.close).not.toHaveBeenCalled();
+      expect(client.closeCurrentWindow).not.toHaveBeenCalled();
+      expect(renderer!.root.findByProps({ 'data-ai-chat-presentation': 'detached' })).toBeTruthy();
+      await act(async () => {
+        renderer!.unmount();
+      });
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('keeps the AI child open when its terminal guard rejects attach and close', async () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const eventTarget = new EventTarget();
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: Object.assign(eventTarget, {
+        clearTimeout: globalThis.clearTimeout,
+        innerWidth: 440,
+        outerHeight: 720,
+        outerWidth: 440,
+        screenX: 10,
+        screenY: 20,
+        setTimeout: globalThis.setTimeout,
+      }),
+    });
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      payload: { storeState: { appearance: { uiVersion: 'v2' }, theme: 'light' } },
+    };
+    aiTerminalGuard.mockResolvedValue(false);
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      cancelCloseRequest: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+      cancelClose: vi.fn(async () => undefined),
+    };
+
+    try {
+      let renderer: TestRenderer.ReactTestRenderer;
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+
+      await act(async () => {
+        renderer!.root.findByProps({ 'data-ai-chat-attach': true }).props.onClick();
+        await flushEffects();
+        await flushEffects();
+      });
+      expect(client.attach).not.toHaveBeenCalled();
+      expect(client.closeCurrentWindow).not.toHaveBeenCalled();
+
+      await act(async () => {
+        eventTarget.dispatchEvent(new Event('gonavi:native-detached-request-close'));
+        await flushEffects();
+        await flushEffects();
+      });
+
+      expect(aiTerminalGuard).toHaveBeenCalledTimes(2);
+      expect(client.close).not.toHaveBeenCalled();
+      expect(client.closeCurrentWindow).not.toHaveBeenCalled();
+      expect(client.cancelCloseRequest).toHaveBeenCalledTimes(2);
+      expect(client.cancelClose).toHaveBeenCalledTimes(2);
+      expect(renderer!.root.findByProps({ 'data-ai-chat-presentation': 'detached' })).toBeTruthy();
+      await act(async () => {
+        renderer!.unmount();
+      });
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
   });
 });

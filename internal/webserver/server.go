@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -23,8 +24,11 @@ import (
 )
 
 const (
-	defaultWebServerAddr = "127.0.0.1:34116"
-	internalRoutePrefix  = "/__gonavi"
+	defaultWebServerAddr      = "127.0.0.1:34116"
+	internalRoutePrefix       = "/__gonavi"
+	detachedWindowIDHeader    = "X-GoNavi-Detached-Window-ID"
+	eventSubscriberQueueLimit = 128
+	eventStreamDataChunkBytes = 256 << 10
 )
 
 var errorType = reflect.TypeOf((*error)(nil)).Elem()
@@ -103,11 +107,193 @@ type eventMessage struct {
 
 type eventHub struct {
 	mu          sync.RWMutex
-	subscribers map[chan eventMessage]struct{}
+	subscribers map[*eventSubscriber]struct{}
 }
 
 func newEventHub() *eventHub {
-	return &eventHub{subscribers: make(map[chan eventMessage]struct{})}
+	return &eventHub{subscribers: make(map[*eventSubscriber]struct{})}
+}
+
+type eventSubscriber struct {
+	targetID string
+
+	mu     sync.Mutex
+	queue  []eventMessage
+	head   int
+	wake   chan struct{}
+	done   chan struct{}
+	closed bool
+}
+
+func newEventSubscriber(targetID string) *eventSubscriber {
+	return &eventSubscriber{
+		targetID: strings.TrimSpace(targetID),
+		wake:     make(chan struct{}, 1),
+		done:     make(chan struct{}),
+	}
+}
+
+func (s *eventSubscriber) enqueue(msg eventMessage, reliable bool) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.coalesceQueuedEventLocked(msg) {
+		s.mu.Unlock()
+		select {
+		case s.wake <- struct{}{}:
+		default:
+		}
+		return
+	}
+	// AI stream deltas are loss-sensitive. Once one delta is queued, later
+	// deltas for that session coalesce into it; the first delta and terminal
+	// events may therefore exceed the soft broadcast limit by a small amount.
+	if s.closed || (!reliable && !strings.HasPrefix(msg.Name, "ai:stream:") && len(s.queue)-s.head >= eventSubscriberQueueLimit) {
+		s.mu.Unlock()
+		return
+	}
+	s.queue = append(s.queue, msg)
+	s.mu.Unlock()
+
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *eventSubscriber) coalesceQueuedEventLocked(incoming eventMessage) bool {
+	if s == nil || s.closed {
+		return false
+	}
+	if strings.HasPrefix(incoming.Name, "ai:stream:") {
+		for index := len(s.queue) - 1; index >= s.head; index-- {
+			if s.queue[index].Name == incoming.Name {
+				return mergeQueuedAIStreamEvent(&s.queue[index], incoming)
+			}
+		}
+		return false
+	}
+	key := detachedSyncEventKey(incoming)
+	if key == "" {
+		return false
+	}
+	for index := len(s.queue) - 1; index >= s.head; index-- {
+		if detachedSyncEventKey(s.queue[index]) == key {
+			s.queue[index] = incoming
+			return true
+		}
+	}
+	return false
+}
+
+func mergeQueuedAIStreamEvent(existing *eventMessage, incoming eventMessage) bool {
+	if existing == nil || existing.Name != incoming.Name || len(existing.Args) != 1 || len(incoming.Args) != 1 {
+		return false
+	}
+	current, currentOK := existing.Args[0].(map[string]any)
+	next, nextOK := incoming.Args[0].(map[string]any)
+	if !currentOK || !nextOK || aiStreamPayloadIsTerminal(current) || aiStreamPayloadIsTerminal(next) {
+		return false
+	}
+	merged := make(map[string]any, len(current)+len(next))
+	for key, value := range current {
+		merged[key] = value
+	}
+	for key, value := range next {
+		merged[key] = value
+	}
+	for _, key := range []string{"content", "thinking", "reasoning_content"} {
+		merged[key] = stringValue(current[key]) + stringValue(next[key])
+	}
+	existing.Args = []any{merged}
+	return true
+}
+
+func aiStreamPayloadIsTerminal(payload map[string]any) bool {
+	if payload == nil {
+		return true
+	}
+	if done, _ := payload["done"].(bool); done {
+		return true
+	}
+	if strings.TrimSpace(stringValue(payload["error"])) != "" {
+		return true
+	}
+	toolCalls := reflect.ValueOf(payload["tool_calls"])
+	return toolCalls.IsValid() && (toolCalls.Kind() == reflect.Array || toolCalls.Kind() == reflect.Slice) && toolCalls.Len() > 0
+}
+
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return text
+}
+
+func detachedSyncEventKey(msg eventMessage) string {
+	if msg.Name != "gonavi:native-detached-event" || len(msg.Args) != 1 {
+		return ""
+	}
+	value := reflect.ValueOf(msg.Args[0])
+	for value.IsValid() && (value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer) {
+		if value.IsNil() {
+			return ""
+		}
+		value = value.Elem()
+	}
+	if !value.IsValid() || value.Kind() != reflect.Struct {
+		return ""
+	}
+	idField := value.FieldByName("ID")
+	actionField := value.FieldByName("Action")
+	if !idField.IsValid() ||
+		idField.Kind() != reflect.String ||
+		!actionField.IsValid() ||
+		actionField.Kind() != reflect.String ||
+		actionField.String() != "sync" {
+		return ""
+	}
+	id := strings.TrimSpace(idField.String())
+	if id == "" {
+		return ""
+	}
+	return "detached-sync:" + id
+}
+
+func (s *eventSubscriber) dequeue() (eventMessage, bool) {
+	if s == nil {
+		return eventMessage{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.head >= len(s.queue) {
+		return eventMessage{}, false
+	}
+	msg := s.queue[s.head]
+	s.queue[s.head] = eventMessage{}
+	s.head++
+	if s.head == len(s.queue) {
+		s.queue = nil
+		s.head = 0
+	} else if s.head >= eventSubscriberQueueLimit && s.head*2 >= len(s.queue) {
+		remaining := append([]eventMessage(nil), s.queue[s.head:]...)
+		s.queue = remaining
+		s.head = 0
+	}
+	return msg, true
+}
+
+func (s *eventSubscriber) close() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.closed = true
+	close(s.done)
+	s.mu.Unlock()
 }
 
 func (h *eventHub) Emit(name string, args ...any) {
@@ -117,30 +303,50 @@ func (h *eventHub) Emit(name string, args ...any) {
 	msg := eventMessage{Name: name, Args: args}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for ch := range h.subscribers {
-		select {
-		case ch <- msg:
-		default:
+	for subscriber := range h.subscribers {
+		subscriber.enqueue(msg, false)
+	}
+}
+
+func (h *eventHub) EmitTo(targetID string, name string, args ...any) {
+	h.emitTo(targetID, name, true, args...)
+}
+
+func (h *eventHub) EmitToBestEffort(targetID string, name string, args ...any) {
+	h.emitTo(targetID, name, false, args...)
+}
+
+func (h *eventHub) emitTo(targetID string, name string, reliable bool, args ...any) {
+	if h == nil || strings.TrimSpace(targetID) == "" || strings.TrimSpace(name) == "" {
+		return
+	}
+	msg := eventMessage{Name: name, Args: args}
+	targetID = strings.TrimSpace(targetID)
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for subscriber := range h.subscribers {
+		if subscriber.targetID == targetID {
+			subscriber.enqueue(msg, reliable)
 		}
 	}
 }
 
-func (h *eventHub) subscribe() chan eventMessage {
-	ch := make(chan eventMessage, 128)
+func (h *eventHub) subscribe(targetID string) *eventSubscriber {
+	subscriber := newEventSubscriber(targetID)
 	h.mu.Lock()
-	h.subscribers[ch] = struct{}{}
+	h.subscribers[subscriber] = struct{}{}
 	h.mu.Unlock()
-	return ch
+	return subscriber
 }
 
-func (h *eventHub) unsubscribe(ch chan eventMessage) {
-	if ch == nil {
+func (h *eventHub) unsubscribe(subscriber *eventSubscriber) {
+	if h == nil || subscriber == nil {
 		return
 	}
 	h.mu.Lock()
-	if _, ok := h.subscribers[ch]; ok {
-		delete(h.subscribers, ch)
-		close(ch)
+	if _, ok := h.subscribers[subscriber]; ok {
+		delete(h.subscribers, subscriber)
+		subscriber.close()
 	}
 	h.mu.Unlock()
 }
@@ -339,6 +545,25 @@ func (s *SharedRuntime) Emit(name string, args ...any) {
 		return
 	}
 	s.server.events.Emit(name, args...)
+}
+
+// EmitTo publishes a backend event only to the native child window whose SSE
+// stream is identified by targetID. Targeted events use a reliable per-stream
+// queue so control commands are not discarded when the broadcast queue is full.
+func (s *SharedRuntime) EmitTo(targetID string, name string, args ...any) {
+	if s == nil || s.server == nil || s.server.events == nil {
+		return
+	}
+	s.server.events.EmitTo(targetID, name, args...)
+}
+
+// EmitToBestEffort publishes a high-frequency event to one child without
+// allowing a slow SSE consumer to grow its queue without bound.
+func (s *SharedRuntime) EmitToBestEffort(targetID string, name string, args ...any) {
+	if s == nil || s.server == nil || s.server.events == nil {
+		return
+	}
+	s.server.events.EmitToBestEffort(targetID, name, args...)
 }
 
 func (s *SharedRuntime) routes() http.Handler {
@@ -661,8 +886,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	ch := s.events.subscribe()
-	defer s.events.unsubscribe(ch)
+	subscriber := s.events.subscribe(r.Header.Get(detachedWindowIDHeader))
+	defer s.events.unsubscribe(subscriber)
 
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
@@ -671,24 +896,52 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	for {
+		if msg, ok := subscriber.dequeue(); ok {
+			if err := writeEventStreamMessage(w, msg, subscriber.targetID != ""); err != nil {
+				return
+			}
+			flusher.Flush()
+			continue
+		}
 		select {
 		case <-r.Context().Done():
 			return
+		case <-subscriber.done:
+			return
+		case <-subscriber.wake:
+			continue
 		case <-ticker.C:
-			_, _ = w.Write([]byte(": ping\n\n"))
-			flusher.Flush()
-		case msg, ok := <-ch:
-			if !ok {
+			if _, err := w.Write([]byte(": ping\n\n")); err != nil {
 				return
 			}
-			payload, err := json.Marshal(msg)
-			if err != nil {
-				continue
-			}
-			_, _ = fmt.Fprintf(w, "event: gonavi\ndata: %s\n\n", payload)
 			flusher.Flush()
 		}
 	}
+}
+
+func writeEventStreamMessage(writer io.Writer, msg eventMessage, fragmented bool) error {
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	if _, err := io.WriteString(writer, "event: gonavi\n"); err != nil {
+		return err
+	}
+	chunkSize := len(payload)
+	if fragmented {
+		chunkSize = eventStreamDataChunkBytes
+	}
+	for offset := 0; offset < len(payload); offset += chunkSize {
+		end := offset + chunkSize
+		if end > len(payload) {
+			end = len(payload)
+		}
+		if _, err := fmt.Fprintf(writer, "data: %s\n", payload[offset:end]); err != nil {
+			return err
+		}
+	}
+	_, err = io.WriteString(writer, "\n")
+	return err
 }
 
 func (s *Server) handleRuntimeBridge(w http.ResponseWriter, _ *http.Request) {

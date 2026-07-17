@@ -5,6 +5,7 @@ import {
   type PersistStorage,
   type StateStorage,
 } from "zustand/middleware";
+import { isNativeDetachedWindowRoute } from "./utils/nativeDetachedWindowRoute";
 import {
   ConnectionConfig,
   ProxyConfig,
@@ -2084,7 +2085,10 @@ interface AppState {
   ) => void;
   attachAIChatPanel: () => void;
   updateDetachedAIChatBounds: (
-    bounds: Partial<Pick<DetachedWindowBounds, "x" | "y" | "width" | "height">>,
+    bounds: Partial<Pick<
+      DetachedAIChatWindow,
+      "x" | "y" | "width" | "height" | "coordinateSpace"
+    >>,
   ) => void;
   focusDetachedAIChatPanel: () => void;
   isAIChatDetached: () => boolean;
@@ -3087,6 +3091,9 @@ const sanitizeAIChatDetachedBoundsMemory = (
     height,
     x: Number.isFinite(x) ? x : 0,
     y: Number.isFinite(y) ? y : 0,
+    ...(raw.coordinateSpace === "screen" || raw.coordinateSpace === "viewport"
+      ? { coordinateSpace: raw.coordinateSpace }
+      : {}),
   };
 };
 
@@ -3096,8 +3103,11 @@ const resolveAIChatDetachPreferred = (
   preferred?: Partial<Pick<DetachedWindowBounds, "x" | "y" | "width" | "height">>,
 ): Partial<Pick<DetachedWindowBounds, "x" | "y" | "width" | "height">> | undefined => {
   if (!memory && !preferred) return preferred;
+  const memoryBounds = memory?.coordinateSpace === "screen"
+    ? { width: memory.width, height: memory.height }
+    : memory;
   return {
-    ...(memory ?? {}),
+    ...(memoryBounds ?? {}),
     ...(preferred ?? {}),
   };
 };
@@ -3199,26 +3209,82 @@ export const buildSidebarTablePinKey = (
 
 /** 每个 session 独立防抖定时器（2秒） */
 const _persistTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+const _persistGenerations: Record<string, number> = {};
+const _persistDirtySessions = new Set<string>();
+const _persistInFlight: Partial<Record<string, Promise<void>>> = {};
+
+const _persistSessionNow = async (sessionId: string): Promise<void> => {
+  const state = useStore.getState();
+  const messages = state.aiChatHistory[sessionId];
+  const sessionMeta = state.aiChatSessions.find((s) => s.id === sessionId);
+  if (!messages && !sessionMeta) return;
+  const title = sessionMeta?.title || translate("ai_chat.panel.session.default_title");
+  const updatedAt = sessionMeta?.updatedAt || Date.now();
+  const Service = typeof window === "undefined"
+    ? undefined
+    : (window as any).go?.aiservice?.Service;
+  if (typeof Service?.AISaveSession !== "function") return;
+  await Service.AISaveSession(sessionId, title, updatedAt, JSON.stringify(messages || []));
+};
 
 function _debouncedPersistSession(sessionId: string) {
   if (_persistTimers[sessionId]) clearTimeout(_persistTimers[sessionId]);
+  const generation = (_persistGenerations[sessionId] || 0) + 1;
+  _persistGenerations[sessionId] = generation;
+  _persistDirtySessions.add(sessionId);
   _persistTimers[sessionId] = setTimeout(() => {
     delete _persistTimers[sessionId];
-    const state = useStore.getState();
-    const messages = state.aiChatHistory[sessionId];
-    const sessionMeta = state.aiChatSessions.find((s) => s.id === sessionId);
-    if (!messages && !sessionMeta) return; // session 已被删除，跳过
-    const title =
-      sessionMeta?.title || translate("ai_chat.panel.session.default_title");
-    const updatedAt = sessionMeta?.updatedAt || Date.now();
-    const messagesJSON = JSON.stringify(messages || []);
-    const Service = (window as any).go?.aiservice?.Service;
-    Service?.AISaveSession?.(sessionId, title, updatedAt, messagesJSON).catch(
-      (e: any) => {
-        console.error("[AI Session Persist] 持久化失败:", sessionId, e);
-      },
-    );
+    const inFlight = _persistSessionNow(sessionId);
+    _persistInFlight[sessionId] = inFlight;
+    void inFlight.then(() => {
+      if (_persistGenerations[sessionId] === generation) {
+        _persistDirtySessions.delete(sessionId);
+      }
+    }).catch((e: unknown) => {
+      console.error("[AI Session Persist] 持久化失败:", sessionId, e);
+    }).finally(() => {
+      if (_persistInFlight[sessionId] === inFlight) {
+        delete _persistInFlight[sessionId];
+      }
+    });
   }, 2000);
+}
+
+/** Flush pending AI session writes before a native child process exits. */
+export async function flushAIChatSessionPersistence(
+  sessionIds?: string[],
+): Promise<void> {
+  const ids = Array.from(new Set(
+    (sessionIds ?? Array.from(_persistDirtySessions))
+      .map((id) => String(id || "").trim())
+      .filter(Boolean),
+  ));
+  for (let index = 0; index < ids.length; index += 1) {
+    try {
+      const id = ids[index];
+      for (;;) {
+        if (_persistTimers[id]) {
+          clearTimeout(_persistTimers[id]);
+          delete _persistTimers[id];
+        }
+        const inFlight = _persistInFlight[id];
+        if (inFlight) {
+          await inFlight.catch(() => undefined);
+        }
+        const generation = _persistGenerations[id] || 0;
+        await _persistSessionNow(id);
+        if (_persistGenerations[id] === generation) {
+          _persistDirtySessions.delete(id);
+          break;
+        }
+      }
+    } catch (error) {
+      for (const id of ids.slice(index)) {
+        _debouncedPersistSession(id);
+      }
+      throw error;
+    }
+  }
 }
 
 /** 从后端加载会话列表（仅元数据，不含消息体） */
@@ -5066,7 +5132,9 @@ export const useStore = create<AppState>()(
             return {
               aiPanelVisible: true,
               detachedAIChatWindow: nextBounds,
-              aiChatDetachedBoundsMemory: toAIChatDetachedBoundsMemory(nextBounds),
+              aiChatDetachedBoundsMemory: state.aiChatDetachedBoundsMemory?.coordinateSpace === "screen"
+                ? state.aiChatDetachedBoundsMemory
+                : toAIChatDetachedBoundsMemory(nextBounds),
             };
           }
           // 侧栏打开：若仍挂着独立窗则先记下尺寸再收拢
@@ -5116,7 +5184,9 @@ export const useStore = create<AppState>()(
             return {
               aiPanelVisible: true,
               detachedAIChatWindow: nextBounds,
-              aiChatDetachedBoundsMemory: toAIChatDetachedBoundsMemory(nextBounds),
+              aiChatDetachedBoundsMemory: state.aiChatDetachedBoundsMemory?.coordinateSpace === "screen"
+                ? state.aiChatDetachedBoundsMemory
+                : toAIChatDetachedBoundsMemory(nextBounds),
             };
           }
           // 默认侧栏：打开时若之前是独立窗则收拢回侧栏，并记下尺寸
@@ -5157,7 +5227,9 @@ export const useStore = create<AppState>()(
           return {
             aiPanelVisible: true,
             detachedAIChatWindow: nextBounds,
-            aiChatDetachedBoundsMemory: toAIChatDetachedBoundsMemory(nextBounds),
+            aiChatDetachedBoundsMemory: state.aiChatDetachedBoundsMemory?.coordinateSpace === "screen"
+              ? state.aiChatDetachedBoundsMemory
+              : toAIChatDetachedBoundsMemory(nextBounds),
           };
         }),
       attachAIChatPanel: () =>
@@ -5417,6 +5489,7 @@ export const useStore = create<AppState>()(
     {
       name: PERSIST_STORAGE_KEY, // name of the item in the storage (must be unique)
       storage: createDebouncedPersistStorage(() => localStorage),
+      skipHydration: isNativeDetachedWindowRoute(),
       version: PERSIST_VERSION,
       migrate: (persistedState: unknown, version: number) => {
         const state = unwrapPersistedAppState(

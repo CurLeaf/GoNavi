@@ -133,12 +133,14 @@ func RunChild(parentCtx context.Context, assetFS fs.FS, args []string) error {
 
 	bridge := newBridge(childOptions)
 	control := newControl(bridge)
+	bridge.setReadyHandler(control.markFrontendReady)
+	minWidth, minHeight := detachedWindowMinimumSize(childOptions.Kind)
 	err = wails.Run(&options.App{
 		Title:       childOptions.Title,
 		Width:       childOptions.Width,
 		Height:      childOptions.Height,
-		MinWidth:    420,
-		MinHeight:   280,
+		MinWidth:    minWidth,
+		MinHeight:   minHeight,
 		StartHidden: true,
 		Frameless:   true,
 		AssetServer: &assetserver.Options{Handler: proxy},
@@ -171,11 +173,10 @@ func RunChild(parentCtx context.Context, assetFS fs.FS, args []string) error {
 				childOptions.Height,
 			)
 			wailsRuntime.WindowSetTitle(ctx, childOptions.Title)
-			wailsRuntime.WindowShow(ctx)
+			control.markDOMReady(ctx)
 		},
-		OnBeforeClose: func(context.Context) bool {
-			bridge.notifyClosing()
-			return false
+		OnBeforeClose: func(ctx context.Context) bool {
+			return control.handleBeforeClose(ctx)
 		},
 		OnShutdown: func(context.Context) {
 			bridge.notifyClosing()
@@ -184,6 +185,13 @@ func RunChild(parentCtx context.Context, assetFS fs.FS, args []string) error {
 		Bind: []interface{}{control, bridge},
 	})
 	return err
+}
+
+func detachedWindowMinimumSize(kind string) (width int, height int) {
+	if strings.TrimSpace(kind) == "ai-chat" {
+		return 360, 420
+	}
+	return 480, 320
 }
 
 type discardWriter struct{}

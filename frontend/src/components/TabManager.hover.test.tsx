@@ -5,11 +5,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   TAB_WORKBENCH_CLASS_NAME,
+  handleTabDragPointerDown,
   resolveTabHoverOpen,
   resolveTabHoverTitle,
   shouldShowV2ConnectionLabel,
   TabHoverInfo,
   isMiddleMouseButton,
+  shouldActivateTabDragPointer,
   stopTabHoverDragPropagation,
 } from './TabManager';
 import { setCurrentLanguage } from '../i18n';
@@ -54,6 +56,58 @@ afterEach(() => {
 });
 
 describe('TabManager hover info', () => {
+  it('starts tab dragging only from a primary pointer on non-interactive tab content', () => {
+    const tabContent = {
+      closest: vi.fn(() => null),
+    } as unknown as EventTarget;
+    const closeIcon = {
+      closest: vi.fn((selector: string) =>
+        selector.includes('.gn-v2-tab-close') ? { className: 'gn-v2-tab-close' } : null),
+    } as unknown as EventTarget;
+    const legacyCloseIcon = {
+      closest: vi.fn((selector: string) =>
+        selector.includes('.ant-tabs-tab-remove') ? { className: 'ant-tabs-tab-remove' } : null),
+    } as unknown as EventTarget;
+
+    expect(shouldActivateTabDragPointer({ button: 0, target: tabContent })).toBe(true);
+    expect(shouldActivateTabDragPointer({ button: 0, target: closeIcon })).toBe(false);
+    expect(shouldActivateTabDragPointer({ button: 0, target: legacyCloseIcon })).toBe(false);
+    expect(shouldActivateTabDragPointer({ button: 1, target: tabContent })).toBe(false);
+    expect(shouldActivateTabDragPointer({ button: 2, target: tabContent })).toBe(false);
+    expect(shouldActivateTabDragPointer({ button: 0, ctrlKey: true, target: tabContent })).toBe(false);
+    expect(shouldActivateTabDragPointer({ button: 0, isPrimary: false, target: tabContent })).toBe(false);
+  });
+
+  it('does not capture or notify dnd-kit for close and context-menu pointers', () => {
+    const setPointerCapture = vi.fn();
+    const listener = vi.fn();
+    const tabContent = { closest: vi.fn(() => null) } as unknown as EventTarget;
+    const closeIcon = {
+      closest: vi.fn(() => ({ className: 'gn-v2-tab-close' })),
+    } as unknown as EventTarget;
+    const buildEvent = (overrides: Record<string, unknown> = {}) => ({
+      button: 0,
+      ctrlKey: false,
+      isPrimary: true,
+      pointerId: 7,
+      target: tabContent,
+      currentTarget: { setPointerCapture },
+      ...overrides,
+    }) as unknown as React.PointerEvent<HTMLElement>;
+
+    handleTabDragPointerDown(buildEvent(), listener);
+    expect(setPointerCapture).toHaveBeenCalledOnce();
+    expect(listener).toHaveBeenCalledOnce();
+
+    setPointerCapture.mockClear();
+    listener.mockClear();
+    handleTabDragPointerDown(buildEvent({ target: closeIcon }), listener);
+    handleTabDragPointerDown(buildEvent({ button: 2 }), listener);
+    handleTabDragPointerDown(buildEvent({ ctrlKey: true }), listener);
+    expect(setPointerCapture).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it('recognizes only the auxiliary middle mouse button for tab closing', () => {
     expect(isMiddleMouseButton(1)).toBe(true);
     expect(isMiddleMouseButton(0)).toBe(false);

@@ -25,6 +25,12 @@ describe('NativeDetachedWindowController', () => {
         { tabId: 'query-b', x: 30, y: 30, width: 800, height: 600, zIndex: 1202 },
       ],
       detachedQueryResultWindows: [],
+      detachedAIChatWindow: null,
+      aiPanelVisible: false,
+      aiChatHistory: {},
+      aiChatSessions: [],
+      aiActiveSessionId: null,
+      aiContexts: {},
       sqlLogs: [],
     });
   });
@@ -55,6 +61,17 @@ describe('NativeDetachedWindowController', () => {
     expect(useStore.getState().tabs.find((tab) => tab.id === 'query-b')?.query).toBe('select 2');
     expect((useStore.getState().sqlEditorPendingTransactions['query-a'] as any)?.transactionId).toBe('tx-1');
     expect(peekQueryEditorResultSession('query-a')?.resultSets[0]?.rows).toEqual([{ value: 42 }]);
+  });
+
+  it('ignores sync events echoed back to the child that originated them', () => {
+    applyNativeDetachedWindowEvent({
+      id: 'workbench:query-a',
+      kind: 'workbench',
+      action: 'sync',
+      payload: { tab: buildQueryTab('query-a', 'select echoed') },
+    }, 'workbench:query-a');
+
+    expect(useStore.getState().tabs.find((tab) => tab.id === 'query-a')?.query).toBe('select 1');
   });
 
   it('merges new child SQL logs by id without duplicating existing entries', () => {
@@ -98,6 +115,298 @@ describe('NativeDetachedWindowController', () => {
     ]);
   });
 
+  it('applies a query-result DataGrid setting delta even when no SQL log was added', () => {
+    const workbenchStateSources = new Map<string, Record<string, unknown>>([
+      ['query-result:query-a:r1', { queryOptions: { maxRows: 500 } }],
+    ]);
+    useStore.setState({ queryOptions: { ...useStore.getState().queryOptions, maxRows: 500 } });
+
+    applyNativeDetachedWindowEvent({
+      id: 'query-result:query-a:r1',
+      kind: 'query-result',
+      action: 'sync',
+      payload: {
+        workbenchState: { queryOptions: { ...useStore.getState().queryOptions, maxRows: 2000 } },
+      },
+    }, undefined, { workbenchStateSources });
+
+    expect(useStore.getState().queryOptions.maxRows).toBe(2000);
+  });
+
+  it('preserves peer window record changes while advancing the child source snapshot', () => {
+    const workbenchStateSources = new Map<string, Record<string, unknown>>([
+      ['workbench:query-a', { tableHiddenColumns: { users: ['password'] } }],
+    ]);
+    useStore.setState({
+      tableHiddenColumns: {
+        users: ['password'],
+        orders: ['internal_note'],
+      },
+    });
+
+    applyNativeDetachedWindowEvent({
+      id: 'workbench:query-a',
+      kind: 'workbench',
+      action: 'sync',
+      payload: {
+        workbenchState: {
+          tableHiddenColumns: { users: ['password', 'email'] },
+        },
+      },
+    }, undefined, { workbenchStateSources });
+
+    expect(useStore.getState().tableHiddenColumns).toEqual({
+      users: ['password', 'email'],
+      orders: ['internal_note'],
+    });
+    expect(workbenchStateSources.get('workbench:query-a')).toEqual({
+      tableHiddenColumns: { users: ['password', 'email'] },
+    });
+  });
+
+  it('opens a tab created inside a detached workbench only once', () => {
+    const openedTab = buildQueryTab('query-child', 'select 3');
+    const event: NativeDetachedWindowEvent = {
+      id: 'workbench:query-a',
+      kind: 'workbench',
+      action: 'sync',
+      payload: { openedTabs: [openedTab] },
+    };
+
+    applyNativeDetachedWindowEvent(event);
+    applyNativeDetachedWindowEvent(event);
+
+    expect(useStore.getState().tabs.filter((tab) => tab.id === openedTab.id)).toHaveLength(1);
+    expect(useStore.getState().activeTabId).toBe(openedTab.id);
+  });
+
+  it('uses the child bootstrap baseline when host state changes while the window opens', () => {
+    useStore.setState({
+      savedQueries: [
+        { id: 'saved-base', name: 'Base', sql: 'select 1', connectionId: 'connection-1', dbName: 'main', createdAt: 1 },
+        { id: 'saved-host', name: 'Host', sql: 'select 2', connectionId: 'connection-1', dbName: 'main', createdAt: 2 },
+      ],
+    });
+
+    applyNativeDetachedWindowEvent({
+      id: 'workbench:query-a',
+      kind: 'workbench',
+      action: 'sync',
+      payload: {
+        workbenchStateBase: {
+          savedQueries: [
+            { id: 'saved-base', name: 'Base', sql: 'select 1', connectionId: 'connection-1', dbName: 'main', createdAt: 1 },
+          ],
+        },
+        workbenchState: {
+          savedQueries: [
+            { id: 'saved-base', name: 'Base', sql: 'select 1', connectionId: 'connection-1', dbName: 'main', createdAt: 1 },
+            { id: 'saved-child', name: 'Child', sql: 'select 3', connectionId: 'connection-1', dbName: 'main', createdAt: 3 },
+          ],
+        },
+      },
+    });
+
+    expect(useStore.getState().savedQueries.map((query) => query.id)).toEqual([
+      'saved-base',
+      'saved-child',
+      'saved-host',
+    ]);
+  });
+
+  it('clears main-window SQL logs when a detached child clears its log panel', () => {
+    useStore.getState().addSqlLog({
+      id: 'log-to-clear',
+      timestamp: 1,
+      sql: 'select 1',
+      status: 'success',
+      duration: 1,
+    });
+
+    applyNativeDetachedWindowEvent({
+      id: 'workbench:query-a',
+      kind: 'workbench',
+      action: 'sync',
+      payload: { clearSqlLogs: true },
+    });
+
+    expect(useStore.getState().sqlLogs).toEqual([]);
+  });
+
+  it('syncs AI conversation state from the native AI window', () => {
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'sync',
+      payload: {
+        storeState: {
+          aiChatHistory: {
+            'session-1': [{ id: 'message-1', role: 'assistant', content: 'done', timestamp: 1 }],
+          },
+          aiChatSessions: [{ id: 'session-1', title: 'Session 1', updatedAt: 1 }],
+          aiActiveSessionId: 'session-1',
+          aiContexts: { 'conn-1:main': [{ dbName: 'main', tableName: 'users', ddl: 'create table users(id int)' }] },
+        },
+      },
+    });
+
+    expect(useStore.getState().aiChatHistory['session-1']?.[0]?.content).toBe('done');
+    expect(useStore.getState().aiChatSessions).toEqual([expect.objectContaining({ id: 'session-1' })]);
+    expect(useStore.getState().aiActiveSessionId).toBe('session-1');
+    expect(useStore.getState().aiContexts['conn-1:main']).toHaveLength(1);
+  });
+
+  it('applies only the AI context delta from the child and preserves host additions', () => {
+    const users = { dbName: 'main', tableName: 'users', ddl: 'create table users(id int)' };
+    const orders = { dbName: 'main', tableName: 'orders', ddl: 'create table orders(id int)' };
+    useStore.setState({ aiContexts: { 'conn-1:main': [users, orders] } });
+    const aiContextSourceRef = { current: { 'conn-1:main': [users] } };
+
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'sync',
+      payload: { storeState: { aiContexts: {} } },
+    }, undefined, { aiContextSourceRef });
+
+    expect(useStore.getState().aiContexts).toEqual({ 'conn-1:main': [orders] });
+    expect(aiContextSourceRef.current).toEqual({});
+  });
+
+  it('routes child host events only through the main-window callback', () => {
+    const onHostEvent = vi.fn();
+    const event: NativeDetachedWindowEvent = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'host-event',
+      payload: {
+        hostEvent: {
+          id: 'ai-chat:1',
+          name: 'gonavi:insert-sql',
+          detail: { sql: 'select 1' },
+        },
+      },
+    };
+
+    applyNativeDetachedWindowEvent(event, undefined, { onHostEvent });
+    applyNativeDetachedWindowEvent(event, 'ai-chat', { onHostEvent });
+    expect(onHostEvent).toHaveBeenCalledOnce();
+    expect(onHostEvent).toHaveBeenCalledWith(event.payload?.hostEvent);
+  });
+
+  it('routes AI settings requests to the main window without docking the child', () => {
+    const onOpenAISettings = vi.fn();
+    useStore.setState({
+      aiPanelVisible: true,
+      detachedAIChatWindow: { x: 10, y: 10, width: 500, height: 720, zIndex: 1201 },
+    });
+
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'open-ai-settings',
+    }, undefined, { onOpenAISettings });
+
+    expect(onOpenAISettings).toHaveBeenCalledOnce();
+    expect(useStore.getState().detachedAIChatWindow).not.toBeNull();
+
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'open-ai-settings',
+    }, 'ai-chat', { onOpenAISettings });
+    expect(onOpenAISettings).toHaveBeenCalledOnce();
+  });
+
+  it('reattaches, closes, and crash-recovers the native AI window', () => {
+    useStore.setState({
+      aiPanelVisible: true,
+      detachedAIChatWindow: { x: 10, y: 10, width: 500, height: 720, zIndex: 1201 },
+    });
+    applyNativeDetachedWindowEvent({ id: 'ai-chat', kind: 'ai-chat', action: 'attach' });
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    expect(useStore.getState().detachedAIChatWindow).toBeNull();
+
+    useStore.getState().detachAIChatPanel();
+    applyNativeDetachedWindowEvent({ id: 'ai-chat', kind: 'ai-chat', action: 'close' });
+    expect(useStore.getState().aiPanelVisible).toBe(false);
+    expect(useStore.getState().detachedAIChatWindow).toBeNull();
+
+    useStore.getState().detachAIChatPanel();
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'close',
+      payload: { reason: 'process-error', exited: true },
+    });
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    expect(useStore.getState().detachedAIChatWindow).toBeNull();
+  });
+
+  it('keeps the docked AI panel visible when a child closes before detach state commits', () => {
+    useStore.setState({ aiPanelVisible: true, detachedAIChatWindow: null });
+
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'close',
+    });
+
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    expect(useStore.getState().detachedAIChatWindow).toBeNull();
+  });
+
+  it('restores detached state when the child cancels a failed close', () => {
+    useStore.setState({ aiPanelVisible: false, detachedAIChatWindow: null });
+
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'cancel-close',
+      payload: {
+        storeState: {
+          aiChatHistory: {
+            'session-1': [{ id: 'message-1', role: 'user', content: 'keep me', timestamp: 1 }],
+          },
+        },
+      },
+    });
+
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    expect(useStore.getState().detachedAIChatWindow).not.toBeNull();
+    expect(useStore.getState().aiChatHistory['session-1']?.[0]?.content).toBe('keep me');
+  });
+
+  it('restores a workbench tab removed by close-other when the child cancels close', () => {
+    const detachedTab = buildQueryTab('query-a', 'select unsaved_work');
+    const dockedTab = buildQueryTab('query-b', 'select 2');
+    useStore.setState({
+      tabs: [detachedTab, dockedTab],
+      activeTabId: dockedTab.id,
+      detachedWorkbenchWindows: [
+        { tabId: detachedTab.id, x: 10, y: 10, width: 800, height: 600, zIndex: 1201 },
+      ],
+    });
+
+    useStore.getState().closeOtherTabs(dockedTab.id);
+    expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual([dockedTab.id]);
+    expect(useStore.getState().detachedWorkbenchWindows).toEqual([]);
+
+    applyNativeDetachedWindowEvent({
+      id: `workbench:${detachedTab.id}`,
+      kind: 'workbench',
+      action: 'cancel-close',
+      payload: { tab: detachedTab },
+    });
+
+    expect(useStore.getState().tabs.find((tab) => tab.id === detachedTab.id)).toEqual(
+      expect.objectContaining({ query: 'select unsaved_work' }),
+    );
+    expect(useStore.getState().detachedWorkbenchWindows).toEqual([
+      expect.objectContaining({ tabId: detachedTab.id }),
+    ]);
+  });
+
   it('merges audit logs produced by an editable detached result window', () => {
     applyNativeDetachedWindowEvent({
       id: 'query-result:query-a:r-edit',
@@ -118,6 +427,48 @@ describe('NativeDetachedWindowController', () => {
     });
 
     expect(useStore.getState().sqlLogs.map((log) => log.id)).toEqual(['log-result-edit']);
+  });
+
+  it('retains the latest edited rows sent by a detached result window', () => {
+    const resultWindow = {
+      id: 'query-result:query-a:r-edited',
+      sourceQueryTabId: 'query-a',
+      connectionId: 'conn-1',
+      title: 'Edited result',
+      x: 10,
+      y: 10,
+      width: 800,
+      height: 600,
+      zIndex: 1201,
+      result: {
+        key: 'r-edited',
+        sql: 'select * from users',
+        rows: [{ id: 1, name: 'before' }],
+        columns: ['id', 'name'],
+        pkColumns: ['id'],
+        readOnly: false,
+      },
+    };
+    useStore.setState({ detachedQueryResultWindows: [resultWindow] });
+
+    applyNativeDetachedWindowEvent({
+      id: resultWindow.id,
+      kind: 'query-result',
+      action: 'sync',
+      payload: {
+        resultWindow: {
+          ...resultWindow,
+          result: {
+            ...resultWindow.result,
+            rows: [{ id: 1, name: 'edited' }],
+          },
+        },
+      },
+    });
+
+    expect(useStore.getState().detachedQueryResultWindows[0].result.rows).toEqual([
+      { id: 1, name: 'edited' },
+    ]);
   });
 
   it('tracks a result window opened by its owning detached SQL window', () => {
@@ -248,6 +599,23 @@ describe('NativeDetachedWindowController', () => {
     });
 
     expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual(['query-a', 'query-b']);
+  });
+
+  it('keeps a docked tab when a child closes before detach state commits', () => {
+    useStore.setState({
+      detachedWorkbenchWindows: useStore.getState().detachedWorkbenchWindows.filter(
+        (item) => item.tabId !== 'query-a',
+      ),
+    });
+
+    applyNativeDetachedWindowEvent({
+      id: 'workbench:query-a',
+      kind: 'workbench',
+      action: 'close',
+    });
+
+    expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual(['query-a', 'query-b']);
+    expect(useStore.getState().detachedWorkbenchWindows.map((item) => item.tabId)).toEqual(['query-b']);
   });
 
   it('restores a result snapshot without closing its source query tab', () => {

@@ -5,12 +5,22 @@ import {
   DEFAULT_DETACHED_WINDOW_MIN_HEIGHT,
   DEFAULT_DETACHED_WINDOW_MIN_WIDTH,
   DEFAULT_DETACHED_WINDOW_WIDTH,
+  DEFAULT_DETACHED_AI_CHAT_HEIGHT,
+  DEFAULT_DETACHED_AI_CHAT_MIN_HEIGHT,
+  DEFAULT_DETACHED_AI_CHAT_MIN_WIDTH,
+  DEFAULT_DETACHED_AI_CHAT_WIDTH,
   type DetachedQueryResultWindow,
   type DetachedWindowBounds,
 } from './detachedWindow';
 import {
   buildNativeDetachedQueryResultPayload,
+  buildNativeDetachedAIChatPayload,
+  buildNativeDetachedAIHostStoreSnapshot,
+  buildNativeDetachedStoreSnapshot,
   buildNativeDetachedWorkbenchPayload,
+  NATIVE_DETACHED_HOST_EVENTS_KEY,
+  type NativeDetachedHostEvent,
+  type NativeDetachedHostEventName,
   type NativeDetachedWindowKind,
   type NativeDetachedWindowPayload,
 } from './nativeDetachedWindowClient';
@@ -38,6 +48,13 @@ export type NativeDetachedWindowManager = {
   Focus: (id: string) => Promise<NativeDetachedWindowOperationResult>;
   Close: (id: string) => Promise<NativeDetachedWindowOperationResult>;
   CloseAll: () => Promise<NativeDetachedWindowOperationResult>;
+  SyncHostState?: (request: NativeDetachedHostStateRequest) => Promise<NativeDetachedWindowOperationResult>;
+};
+
+export type NativeDetachedHostStateRequest = {
+  id: string;
+  revision: number;
+  storeState: Record<string, unknown>;
 };
 
 export type NativeQueryResultWindowInput = Omit<
@@ -46,6 +63,89 @@ export type NativeQueryResultWindowInput = Omit<
 > & Partial<DetachedWindowBounds>;
 
 const openingWindows = new Map<string, Promise<boolean>>();
+const nativeHostStateRevisions = new Map<string, number>();
+const nativeHostStateQueues = new Map<string, Promise<boolean>>();
+const retainedNativeHostEvents = new Map<string, NativeDetachedHostEvent[]>();
+let nativeHostEventSequence = 0;
+const NATIVE_HOST_EVENT_RETENTION_LIMIT = 64;
+
+const nextNativeHostStateRevision = (id: string): number => {
+  const previous = nativeHostStateRevisions.get(id) || Date.now();
+  const next = Math.max(Date.now(), previous + 1);
+  nativeHostStateRevisions.set(id, next);
+  return next;
+};
+
+const createNativeHostEvent = (
+  sourceWindowId: string,
+  name: NativeDetachedHostEventName,
+  detail?: unknown,
+): NativeDetachedHostEvent => {
+  nativeHostEventSequence += 1;
+  return {
+    id: `${String(sourceWindowId || 'main')}:${Date.now()}:${nativeHostEventSequence}`,
+    name,
+    ...(detail === undefined ? {} : { detail }),
+  };
+};
+
+const retainNativeHostEvent = (
+  targetWindowId: string,
+  event: NativeDetachedHostEvent,
+): NativeDetachedHostEvent[] => {
+  const previous = retainedNativeHostEvents.get(targetWindowId) || [];
+  const next = [...previous, event].slice(-NATIVE_HOST_EVENT_RETENTION_LIMIT);
+  retainedNativeHostEvents.set(targetWindowId, next);
+  return next;
+};
+
+export const clearNativeDetachedHostEvents = (windowId: string): void => {
+  const id = String(windowId || '').trim();
+  if (!id) return;
+  retainedNativeHostEvents.delete(id);
+};
+
+const syncNativeDetachedHostState = (
+  id: string,
+  storeState: Record<string, unknown>,
+  manager: NativeDetachedWindowManager,
+): Promise<boolean> => {
+  if (typeof manager.SyncHostState !== 'function') return Promise.resolve(false);
+  const previous = nativeHostStateQueues.get(id) || Promise.resolve(true);
+  const operation = previous.catch(() => false).then(async () => {
+    const result = await manager.SyncHostState!({
+      id,
+      revision: nextNativeHostStateRevision(id),
+      storeState,
+    });
+    if (!result?.success) {
+      throw new Error(String(result?.message || 'Failed to sync native host context'));
+    }
+    return true;
+  });
+  nativeHostStateQueues.set(id, operation);
+  void operation.finally(() => {
+    if (nativeHostStateQueues.get(id) === operation) nativeHostStateQueues.delete(id);
+  }).catch(() => undefined);
+  return operation;
+};
+
+export const forwardNativeDetachedHostEvent = async (
+  targetWindowId: string,
+  name: NativeDetachedHostEventName,
+  detail?: unknown,
+  managerOverride?: NativeDetachedWindowManager,
+): Promise<boolean> => {
+  const id = String(targetWindowId || '').trim();
+  if (!id) return false;
+  const events = retainNativeHostEvent(id, createNativeHostEvent('main', name, detail));
+  const manager = managerOverride ?? resolveNativeDetachedWindowManager();
+  if (!manager || typeof manager.SyncHostState !== 'function') return false;
+  const storeState = id === 'ai-chat'
+    ? buildNativeDetachedAIHostStoreSnapshot(useStore.getState(), events)
+    : buildNativeDetachedStoreSnapshot({ [NATIVE_DETACHED_HOST_EVENTS_KEY]: events });
+  return syncNativeDetachedHostState(id, storeState, manager);
+};
 
 export const resolveNativeDetachedWindowManager = (): NativeDetachedWindowManager | null => {
   if (typeof window === 'undefined') return null;
@@ -65,16 +165,29 @@ export const hasNativeDetachedWindowManager = (): boolean =>
 
 const getNativeWindowBounds = (
   preferred?: Partial<Pick<DetachedWindowBounds, 'x' | 'y' | 'width' | 'height'>>,
+  sizePreset: 'workbench' | 'ai-chat' = 'workbench',
 ): Pick<DetachedWindowBounds, 'x' | 'y' | 'width' | 'height'> => {
-  const viewportWidth = typeof window === 'undefined' ? DEFAULT_DETACHED_WINDOW_WIDTH : window.innerWidth;
-  const viewportHeight = typeof window === 'undefined' ? DEFAULT_DETACHED_WINDOW_HEIGHT : window.innerHeight;
+  const defaultWidth = sizePreset === 'ai-chat'
+    ? DEFAULT_DETACHED_AI_CHAT_WIDTH
+    : DEFAULT_DETACHED_WINDOW_WIDTH;
+  const defaultHeight = sizePreset === 'ai-chat'
+    ? DEFAULT_DETACHED_AI_CHAT_HEIGHT
+    : DEFAULT_DETACHED_WINDOW_HEIGHT;
+  const minWidth = sizePreset === 'ai-chat'
+    ? DEFAULT_DETACHED_AI_CHAT_MIN_WIDTH
+    : DEFAULT_DETACHED_WINDOW_MIN_WIDTH;
+  const minHeight = sizePreset === 'ai-chat'
+    ? DEFAULT_DETACHED_AI_CHAT_MIN_HEIGHT
+    : DEFAULT_DETACHED_WINDOW_MIN_HEIGHT;
+  const viewportWidth = typeof window === 'undefined' ? defaultWidth : window.innerWidth;
+  const viewportHeight = typeof window === 'undefined' ? defaultHeight : window.innerHeight;
   const width = Math.max(
-    DEFAULT_DETACHED_WINDOW_MIN_WIDTH,
-    Math.round(Number(preferred?.width) || Math.min(DEFAULT_DETACHED_WINDOW_WIDTH, viewportWidth * 0.9)),
+    minWidth,
+    Math.round(Number(preferred?.width) || Math.min(defaultWidth, viewportWidth * 0.9)),
   );
   const height = Math.max(
-    DEFAULT_DETACHED_WINDOW_MIN_HEIGHT,
-    Math.round(Number(preferred?.height) || Math.min(DEFAULT_DETACHED_WINDOW_HEIGHT, viewportHeight * 0.86)),
+    minHeight,
+    Math.round(Number(preferred?.height) || Math.min(defaultHeight, viewportHeight * 0.86)),
   );
   const baseX = typeof window === 'undefined' ? 80 : window.screenX + Math.max(32, Math.round((window.innerWidth - width) / 2));
   const baseY = typeof window === 'undefined' ? 80 : window.screenY + Math.max(32, Math.round((window.innerHeight - height) / 2));
@@ -181,7 +294,7 @@ export const openNativeWorkbenchTabWindow = async (
       tab.type === 'query' ? peekQueryEditorResultSession(tab.id) : null,
     ),
   };
-  return openOnce(manager, request, () => {
+  const opened = await openOnce(manager, request, () => {
     const latest = useStore.getState();
     if (!latest.tabs.some((item) => item.id === id)) {
       void manager.Close(windowId);
@@ -192,6 +305,15 @@ export const openNativeWorkbenchTabWindow = async (
   }, () => {
     useStore.getState().attachWorkbenchTab(id);
   });
+  const retainedEvents = retainedNativeHostEvents.get(windowId) || [];
+  if (opened && retainedEvents.length > 0 && typeof manager.SyncHostState === 'function') {
+    await syncNativeDetachedHostState(
+      windowId,
+      buildNativeDetachedStoreSnapshot({ [NATIVE_DETACHED_HOST_EVENTS_KEY]: retainedEvents }),
+      manager,
+    );
+  }
+  return opened;
 };
 
 export const openNativeQueryResultWindow = async (
@@ -221,11 +343,87 @@ export const openNativeQueryResultWindow = async (
       zIndex: Number(windowState.zIndex) || 1201,
     }),
   }, () => {
-    useStore.getState().detachQueryResultWindow({ ...windowState, ...bounds });
+    const latest = useStore.getState();
+    if (!latest.tabs.some((tab) => tab.id === windowState.sourceQueryTabId)) {
+      void manager.Close(id);
+      return false;
+    }
+    latest.detachQueryResultWindow({ ...windowState, ...bounds });
     return true;
   }, () => {
     useStore.getState().closeDetachedQueryResultWindow(id);
   });
+};
+
+export const openNativeAIChatWindow = async (
+  preferred?: Partial<Pick<DetachedWindowBounds, 'x' | 'y' | 'width' | 'height'>>,
+  managerOverride?: NativeDetachedWindowManager,
+): Promise<boolean> => {
+  const state = useStore.getState();
+  const manager = managerOverride ?? resolveNativeDetachedWindowManager();
+  if (!manager) {
+    state.detachAIChatPanel(preferred);
+    return true;
+  }
+
+  const windowId = 'ai-chat';
+  const hadDetachedIntent = Boolean(state.detachedAIChatWindow);
+  const remembered = state.aiChatDetachedBoundsMemory;
+  const rememberedBounds = {
+    ...(remembered?.coordinateSpace === 'screen'
+      ? remembered
+      : remembered
+        ? { width: remembered.width, height: remembered.height }
+        : {}),
+    ...(preferred || {}),
+  };
+  const bounds = getNativeWindowBounds(rememberedBounds, 'ai-chat');
+  const opened = await openOnce(manager, {
+    id: windowId,
+    kind: 'ai-chat',
+    title: 'GoNavi AI',
+    ...bounds,
+    payload: buildNativeDetachedAIChatPayload(state),
+  }, () => {
+    const latest = useStore.getState();
+    if (!latest.aiPanelVisible || (hadDetachedIntent && !latest.detachedAIChatWindow)) {
+      void manager.Close(windowId);
+      return false;
+    }
+    if (!latest.detachedAIChatWindow) {
+      latest.detachAIChatPanel();
+    }
+    latest.updateDetachedAIChatBounds({ ...bounds, coordinateSpace: 'screen' });
+    return true;
+  }, () => {
+    const latest = useStore.getState();
+    if (latest.detachedAIChatWindow) {
+      latest.attachAIChatPanel();
+    }
+  });
+  if (opened && typeof manager.SyncHostState === 'function') {
+    try {
+      await syncNativeAIChatHostState(manager);
+    } catch (error) {
+      console.warn('[Native Detached Window] Failed to send initial AI host context', error);
+    }
+  }
+  return opened;
+};
+
+export const syncNativeAIChatHostState = async (
+  managerOverride?: NativeDetachedWindowManager,
+): Promise<boolean> => {
+  const manager = managerOverride ?? resolveNativeDetachedWindowManager();
+  if (!manager || typeof manager.SyncHostState !== 'function') return false;
+  return syncNativeDetachedHostState(
+    'ai-chat',
+    buildNativeDetachedAIHostStoreSnapshot(
+      useStore.getState(),
+      retainedNativeHostEvents.get('ai-chat') || [],
+    ),
+    manager,
+  );
 };
 
 export const closeNativeDetachedWindowById = async (id: string): Promise<void> => {

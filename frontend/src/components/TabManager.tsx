@@ -35,8 +35,10 @@ import DetachDragPreview, {
   type DetachDragPreviewState,
 } from './DetachDragPreview';
 import {
+  type NativeDetachTerminalPointer,
+  resolveNativeDetachDragRelease,
   resolveNativeDetachPreferredBounds,
-  resolveNativeDetachReleasePoint,
+  shouldDetachAfterNativePointerCancel,
   shouldDetachAtScreenPoint,
   shouldDetachTabByDrag,
 } from '../utils/detachedWindow';
@@ -511,9 +513,47 @@ type DraggableTabNodeProps = {
   node: React.ReactElement;
 };
 
+const TAB_DRAG_INTERACTIVE_SELECTOR = [
+  'button',
+  'a',
+  'input',
+  'textarea',
+  'select',
+  '[contenteditable="true"]',
+  '[role="button"]',
+  '[data-tab-drag-ignore="true"]',
+  '.ant-tabs-tab-remove',
+  '.gn-v2-tab-close',
+].join(', ');
+
+export const shouldActivateTabDragPointer = (event: {
+  button: number;
+  ctrlKey?: boolean;
+  isPrimary?: boolean;
+  target: EventTarget | null;
+}): boolean => {
+  if (event.button !== 0 || event.ctrlKey || event.isPrimary === false) return false;
+  const target = event.target as { closest?: (selector: string) => Element | null } | null;
+  return typeof target?.closest !== 'function'
+    || target.closest(TAB_DRAG_INTERACTIVE_SELECTOR) === null;
+};
+
+export const handleTabDragPointerDown = (
+  event: React.PointerEvent<HTMLElement>,
+  handlePointerDown?: React.PointerEventHandler<HTMLElement>,
+): void => {
+  if (!shouldActivateTabDragPointer(event)) return;
+  try {
+    event.currentTarget.setPointerCapture(event.pointerId);
+  } catch {
+    // Pointer capture is not exposed by every embedded WebView build.
+  }
+  handlePointerDown?.(event);
+};
+
 const DraggableTabNode: React.FC<DraggableTabNodeProps> = ({ node }) => {
   const tabId = String(node.key || '').trim();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tabId });
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tabId });
   const style: React.CSSProperties = {
     ...(node.props.style || {}),
     transform: CSS.Transform.toString(transform),
@@ -528,16 +568,9 @@ const DraggableTabNode: React.FC<DraggableTabNodeProps> = ({ node }) => {
   return React.cloneElement(node, {
     ref: setNodeRef,
     style,
-    ...attributes,
     ...listeners,
-    onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
-      try {
-        event.currentTarget.setPointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture is not exposed by every embedded WebView build.
-      }
-      handlePointerDown?.(event);
-    },
+    onPointerDown: (event: React.PointerEvent<HTMLElement>) =>
+      handleTabDragPointerDown(event, handlePointerDown),
     className: `${node.props.className || ''} tab-dnd-node${isDragging ? ' is-dragging' : ''}`,
   });
 };
@@ -583,6 +616,10 @@ const TabManager: React.FC = React.memo(() => {
     startY: number;
     startScreenX: number;
     startScreenY: number;
+    pointerId: number | null;
+    captureTarget: HTMLElement | null;
+    terminalPointer: NativeDetachTerminalPointer | null;
+    removeTerminalListeners: (() => void) | null;
   } | null>(null);
   const suppressClickUntilRef = useRef<number>(0);
   const sensors = useSensors(
@@ -757,6 +794,19 @@ const TabManager: React.FC = React.memo(() => {
   };
 
   const clearDetachDragSession = useCallback(() => {
+    const session = detachDragSessionRef.current;
+    session?.removeTerminalListeners?.();
+    if (
+      session?.captureTarget
+      && session.pointerId !== null
+      && session.captureTarget.hasPointerCapture?.(session.pointerId)
+    ) {
+      try {
+        session.captureTarget.releasePointerCapture(session.pointerId);
+      } catch {
+        // Pointer capture may already have been released by the native WebView.
+      }
+    }
     detachDragSessionRef.current = null;
     setDetachDragPreview(null);
     document.documentElement.classList.remove('gn-workbench-tab-detaching');
@@ -780,9 +830,50 @@ const TabManager: React.FC = React.memo(() => {
     const startScreenY = typeof pointerEvent?.screenY === 'number'
       ? pointerEvent.screenY
       : window.screenY + startY;
-    detachDragSessionRef.current = sourceId
-      ? { tabId: sourceId, title, startX, startY, startScreenX, startScreenY }
+    const pointerId = typeof (pointerEvent as PointerEvent | undefined)?.pointerId === 'number'
+      ? (pointerEvent as PointerEvent).pointerId
       : null;
+    const activatorTarget = pointerEvent?.target;
+    const captureTarget = typeof Element !== 'undefined' && activatorTarget instanceof Element
+      ? activatorTarget.closest<HTMLElement>('.tab-dnd-node')
+      : null;
+    const session = sourceId
+      ? {
+          tabId: sourceId,
+          title,
+          startX,
+          startY,
+          startScreenX,
+          startScreenY,
+          pointerId,
+          captureTarget,
+          terminalPointer: null as NativeDetachTerminalPointer | null,
+          removeTerminalListeners: null as (() => void) | null,
+        }
+      : null;
+    detachDragSessionRef.current = session;
+    if (session) {
+      const recordTerminalPointer = (nativeEvent: PointerEvent) => {
+        if (
+          detachDragSessionRef.current !== session
+          || (session.pointerId !== null && nativeEvent.pointerId !== session.pointerId)
+        ) return;
+        session.terminalPointer = {
+          type: nativeEvent.type === 'pointercancel' ? 'pointercancel' : 'pointerup',
+          clientX: nativeEvent.clientX,
+          clientY: nativeEvent.clientY,
+          screenX: nativeEvent.screenX,
+          screenY: nativeEvent.screenY,
+        };
+      };
+      const removeTerminalListeners = () => {
+        window.removeEventListener('pointerup', recordTerminalPointer, true);
+        window.removeEventListener('pointercancel', recordTerminalPointer, true);
+      };
+      session.removeTerminalListeners = removeTerminalListeners;
+      window.addEventListener('pointerup', recordTerminalPointer, true);
+      window.addEventListener('pointercancel', recordTerminalPointer, true);
+    }
     document.documentElement.classList.add('gn-workbench-tab-detaching');
   };
 
@@ -805,24 +896,27 @@ const TabManager: React.FC = React.memo(() => {
     const deltaX = Number(event.delta?.x || 0);
     const deltaY = Number(event.delta?.y || 0);
     const session = detachDragSessionRef.current;
+    const release = resolveNativeDetachDragRelease({
+      startClientX: session?.startX ?? 0,
+      startClientY: session?.startY ?? 0,
+      startScreenX: session?.startScreenX ?? window.screenX,
+      startScreenY: session?.startScreenY ?? window.screenY,
+      fallbackDeltaX: deltaX,
+      fallbackDeltaY: deltaY,
+      terminalPointer: session?.terminalPointer,
+    });
     setDraggingTabId(null);
     clearDetachDragSession();
     if (!sourceId) {
       return;
     }
-    const release = resolveNativeDetachReleasePoint({
-      startScreenX: session?.startScreenX ?? window.screenX,
-      startScreenY: session?.startScreenY ?? window.screenY,
-      deltaX,
-      deltaY,
-    });
     const releasedOutsideHost = shouldDetachAtScreenPoint(release.screenX, release.screenY, {
       x: window.screenX,
       y: window.screenY,
       width: window.outerWidth || window.innerWidth,
       height: window.outerHeight || window.innerHeight,
     });
-    if (shouldDetachTabByDrag(deltaY, targetId || null) || releasedOutsideHost) {
+    if (shouldDetachTabByDrag(release.deltaY, targetId || null) || releasedOutsideHost) {
       suppressClickUntilRef.current = Date.now() + 120;
       const preferred = resolveNativeDetachPreferredBounds(release.screenX, release.screenY);
       detachTabToWindow(sourceId, preferred);
@@ -836,8 +930,31 @@ const TabManager: React.FC = React.memo(() => {
   };
 
   const handleDragCancel = () => {
+    const session = detachDragSessionRef.current;
+    const release = resolveNativeDetachDragRelease({
+      startClientX: session?.startX ?? 0,
+      startClientY: session?.startY ?? 0,
+      startScreenX: session?.startScreenX ?? window.screenX,
+      startScreenY: session?.startScreenY ?? window.screenY,
+      fallbackDeltaX: 0,
+      fallbackDeltaY: 0,
+      terminalPointer: session?.terminalPointer,
+    });
+    const shouldDetach = Boolean(session) && shouldDetachAfterNativePointerCancel(release, {
+      x: window.screenX,
+      y: window.screenY,
+      width: window.outerWidth || window.innerWidth,
+      height: window.outerHeight || window.innerHeight,
+    });
     setDraggingTabId(null);
     clearDetachDragSession();
+    if (shouldDetach && session) {
+      suppressClickUntilRef.current = Date.now() + 120;
+      detachTabToWindow(
+        session.tabId,
+        resolveNativeDetachPreferredBounds(release.screenX, release.screenY),
+      );
+    }
   };
 
   React.useEffect(() => {

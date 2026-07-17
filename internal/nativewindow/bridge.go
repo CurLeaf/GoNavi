@@ -43,11 +43,14 @@ type Bridge struct {
 	kind      string
 	client    *http.Client
 
-	mu        sync.Mutex
-	ctx       context.Context
-	cancel    context.CancelFunc
-	terminal  string
-	closeOnce sync.Once
+	mu          sync.Mutex
+	ctx         context.Context
+	cancel      context.CancelFunc
+	ready       bool
+	onReady     func() OperationResult
+	terminal    string
+	closeOnce   sync.Once
+	emitToWails func(context.Context, string, ...any)
 }
 
 func newBridge(options ChildOptions) *Bridge {
@@ -65,6 +68,9 @@ func newBridge(options ChildOptions) *Bridge {
 		windowID:  options.ID,
 		kind:      options.Kind,
 		client:    &http.Client{Transport: transport},
+		emitToWails: func(ctx context.Context, name string, args ...any) {
+			wailsRuntime.EventsEmit(ctx, name, args...)
+		},
 	}
 }
 
@@ -168,6 +174,13 @@ func (b *Bridge) control(request controlRequest) OperationResult {
 // Action acknowledges child readiness or forwards sync, attach, or close state
 // to the main window.
 func (b *Bridge) Action(action string, payload any) OperationResult {
+	normalizedAction := strings.ToLower(strings.TrimSpace(action))
+	if normalizedAction == "ready" {
+		if result := b.presentFrontendReady(); !result.Success {
+			return result
+		}
+	}
+
 	var result OperationResult
 	status, err := b.doJSON(context.Background(), http.MethodPost, ActionPath, actionRequest{Action: action, Payload: payload}, &result)
 	if err != nil {
@@ -176,13 +189,56 @@ func (b *Bridge) Action(action string, payload any) OperationResult {
 	if status != http.StatusOK {
 		return operationFailure(fmt.Sprintf("detached action failed with status %d", status))
 	}
-	normalizedAction := strings.ToLower(strings.TrimSpace(action))
-	if result.Success && (normalizedAction == "attach" || normalizedAction == "close") {
+	if result.Success {
 		b.mu.Lock()
-		b.terminal = normalizedAction
+		if normalizedAction == "attach" || normalizedAction == "close" {
+			b.terminal = normalizedAction
+		}
 		b.mu.Unlock()
 	}
 	return result
+}
+
+func (b *Bridge) setReadyHandler(handler func() OperationResult) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	b.onReady = handler
+	b.mu.Unlock()
+}
+
+func (b *Bridge) presentFrontendReady() OperationResult {
+	if b == nil {
+		return operationFailure("detached bridge is unavailable")
+	}
+	b.mu.Lock()
+	if b.ready {
+		b.mu.Unlock()
+		return OperationResult{Success: true, ID: b.windowID}
+	}
+	onReady := b.onReady
+	b.mu.Unlock()
+	if onReady == nil {
+		return operationFailure("native window ready handler is unavailable")
+	}
+	result := onReady()
+	if !result.Success {
+		return result
+	}
+	b.mu.Lock()
+	b.ready = true
+	b.mu.Unlock()
+	return OperationResult{Success: true, ID: b.windowID}
+}
+
+func (b *Bridge) frontendReady() bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.ready
 }
 
 func (b *Bridge) notifyClosing() {
@@ -304,6 +360,15 @@ func (b *Bridge) consumeEventStream(ctx context.Context) error {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4<<10))
 		return fmt.Errorf("detached event stream failed with status %d", response.StatusCode)
 	}
+	if err := b.replayPendingCommand(ctx); err != nil {
+		return err
+	}
+	// The SSE subscription exists before this GET starts, so a concurrent host
+	// update is either present in the retained response, queued on SSE, or both.
+	// Frontend revision checks make the possible duplicate harmless.
+	if err := b.replayHostState(ctx); err != nil {
+		return err
+	}
 
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 64<<10), 4<<20)
@@ -312,44 +377,147 @@ func (b *Bridge) consumeEventStream(ctx context.Context) error {
 		line := scanner.Text()
 		if line == "" {
 			if data.Len() > 0 {
-				b.dispatchEvent(data.String())
+				if err := b.dispatchEvent(ctx, data.String()); err != nil {
+					return err
+				}
 				data.Reset()
 			}
 			continue
 		}
 		if strings.HasPrefix(line, "data:") {
-			if data.Len() > 0 {
-				data.WriteByte('\n')
+			chunk := strings.TrimPrefix(line, "data:")
+			if strings.HasPrefix(chunk, " ") {
+				chunk = chunk[1:]
 			}
-			data.WriteString(strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+			if int64(data.Len()+len(chunk)) > maxDetachedSSEEventBytes {
+				return fmt.Errorf("detached event exceeds the maximum payload size")
+			}
+			data.WriteString(chunk)
 		}
 	}
 	return scanner.Err()
 }
 
-func (b *Bridge) dispatchEvent(payload string) {
+func (b *Bridge) replayPendingCommand(ctx context.Context) error {
+	var command childCommand
+	status, err := b.doJSON(ctx, http.MethodGet, CommandStatePath, nil, &command)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusNoContent {
+		return nil
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("detached command-state replay failed with status %d", status)
+	}
+	if strings.TrimSpace(command.ID) != b.windowID || command.Action != "close" {
+		return fmt.Errorf("detached command-state replay is invalid")
+	}
+	b.emitRuntimeEvent(CommandEventName, command)
+	return nil
+}
+
+func (b *Bridge) replayHostState(ctx context.Context) error {
+	var snapshot HostStateRequest
+	status, err := b.doJSON(ctx, http.MethodGet, HostStatePath, nil, &snapshot)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusNoContent {
+		return nil
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("detached host-state replay failed with status %d", status)
+	}
+	if strings.TrimSpace(snapshot.ID) != b.windowID || snapshot.Revision <= 0 || snapshot.StoreState == nil {
+		return fmt.Errorf("detached host-state replay is invalid")
+	}
+	b.emitRuntimeEvent(CommandEventName, childCommand{
+		ID:     snapshot.ID,
+		Action: "sync-host-state",
+		Payload: hostStatePayload{
+			Revision:   snapshot.Revision,
+			StoreState: snapshot.StoreState,
+		},
+	})
+	return nil
+}
+
+func (b *Bridge) dispatchEvent(ctx context.Context, payload string) error {
 	var event bridgeEvent
 	if err := json.Unmarshal([]byte(payload), &event); err != nil || strings.TrimSpace(event.Name) == "" {
-		return
+		return nil
 	}
+	if b.isHostStateInvalidation(event) {
+		return b.replayHostState(ctx)
+	}
+	b.emitRuntimeEvent(event.Name, event.Args...)
+	return nil
+}
+
+func (b *Bridge) isHostStateInvalidation(event bridgeEvent) bool {
+	if b == nil || event.Name != CommandEventName || len(event.Args) != 1 {
+		return false
+	}
+	command, ok := event.Args[0].(map[string]any)
+	if !ok || strings.TrimSpace(fmt.Sprint(command["id"])) != b.windowID || command["action"] != "sync-host-state" {
+		return false
+	}
+	payload, ok := command["payload"].(map[string]any)
+	if !ok {
+		return true
+	}
+	_, carriesStoreState := payload["storeState"]
+	return !carriesStoreState
+}
+
+func (b *Bridge) emitRuntimeEvent(name string, args ...any) {
 	b.mu.Lock()
 	ctx := b.ctx
+	emitToWails := b.emitToWails
 	b.mu.Unlock()
-	if ctx != nil {
-		wailsRuntime.EventsEmit(ctx, event.Name, event.Args...)
+	if ctx != nil && emitToWails != nil {
+		emitToWails(ctx, name, args...)
 	}
 }
 
 // Control is bound only in a child and always targets that process's native
 // Wails window.
 type Control struct {
-	mu     sync.RWMutex
-	ctx    context.Context
-	bridge *Bridge
+	mu                      sync.RWMutex
+	ctx                     context.Context
+	bridge                  *Bridge
+	closeGate               closeGate
+	closeFallback           *time.Timer
+	closeFallbackGeneration uint64
+	closeFallbackDelay      time.Duration
+	closeCommitted          bool
+	domReady                bool
+	frontendReady           bool
+	focusPending            bool
+	visible                 bool
+	emitCommand             func(context.Context, childCommand)
+	showWindow              func(context.Context)
+	focusWindow             func(context.Context)
+	quit                    func(context.Context)
 }
 
 func newControl(bridge *Bridge) *Control {
-	return &Control{bridge: bridge}
+	return &Control{
+		bridge:             bridge,
+		closeFallbackDelay: defaultGracefulCloseTimeout,
+		emitCommand: func(ctx context.Context, command childCommand) {
+			wailsRuntime.EventsEmit(ctx, CommandEventName, command)
+		},
+		showWindow: func(ctx context.Context) {
+			wailsRuntime.WindowShow(ctx)
+		},
+		focusWindow: func(ctx context.Context) {
+			wailsRuntime.WindowUnminimise(ctx)
+			wailsRuntime.Show(ctx)
+		},
+		quit: wailsRuntime.Quit,
+	}
 }
 
 func InitializeControl(control *Control, ctx context.Context) {
@@ -361,35 +529,234 @@ func InitializeControl(control *Control, ctx context.Context) {
 	control.mu.Unlock()
 }
 
+// markDOMReady records that the WebView exists without exposing its still-empty
+// surface. The frontend ready handshake releases the first presentation only
+// after its own post-paint barrier.
+func (c *Control) markDOMReady(ctx context.Context) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.ctx == nil {
+		c.ctx = ctx
+	}
+	c.domReady = true
+	presentation := c.takeInitialPresentationLocked()
+	c.mu.Unlock()
+	presentation.run()
+}
+
+func (c *Control) markFrontendReady() OperationResult {
+	if c == nil {
+		return operationFailure("native window control is unavailable")
+	}
+	c.mu.Lock()
+	if !c.domReady || c.ctx == nil || c.showWindow == nil {
+		c.mu.Unlock()
+		return operationFailure("native window DOM is not ready")
+	}
+	c.frontendReady = true
+	presentation := c.takeInitialPresentationLocked()
+	c.mu.Unlock()
+	presentation.run()
+	return OperationResult{Success: true}
+}
+
+// Present exposes the already-mounted child without acknowledging readiness to
+// the parent. The visible WebView can then cross a real paint frame before the
+// frontend sends its final ready action.
+func (c *Control) Present() OperationResult {
+	if c == nil {
+		return operationFailure("native window control is unavailable")
+	}
+	c.mu.Lock()
+	if !c.domReady || c.ctx == nil || c.showWindow == nil {
+		c.mu.Unlock()
+		return operationFailure("native window DOM is not ready")
+	}
+	if c.visible {
+		c.mu.Unlock()
+		return OperationResult{Success: true}
+	}
+	c.visible = true
+	presentation := childWindowPresentation{ctx: c.ctx, show: c.showWindow}
+	if c.focusPending && c.focusWindow != nil {
+		c.focusPending = false
+		presentation.focus = c.focusWindow
+	}
+	c.mu.Unlock()
+	presentation.run()
+	return OperationResult{Success: true}
+}
+
+type childWindowPresentation struct {
+	ctx   context.Context
+	show  func(context.Context)
+	focus func(context.Context)
+}
+
+func (p childWindowPresentation) run() {
+	if p.show != nil {
+		p.show(p.ctx)
+	}
+	if p.focus != nil {
+		p.focus(p.ctx)
+	}
+}
+
+func (c *Control) takeInitialPresentationLocked() childWindowPresentation {
+	if c.visible || !c.domReady || !c.frontendReady || c.ctx == nil || c.showWindow == nil {
+		return childWindowPresentation{}
+	}
+	c.visible = true
+	presentation := childWindowPresentation{ctx: c.ctx, show: c.showWindow}
+	if c.focusPending && c.focusWindow != nil {
+		c.focusPending = false
+		presentation.focus = c.focusWindow
+	}
+	return presentation
+}
+
 func (c *Control) Close() OperationResult {
 	if c == nil {
 		return operationFailure("native window control is unavailable")
 	}
+	c.mu.Lock()
+	ctx := c.ctx
+	quit := c.quit
+	if ctx == nil || quit == nil {
+		c.mu.Unlock()
+		return operationFailure("native window is not ready")
+	}
+	c.closeCommitted = true
+	c.invalidateCloseFallbackLocked()
+	c.mu.Unlock()
+	c.closeGate.allow()
 	if c.bridge != nil {
 		c.bridge.notifyClosing()
 	}
-	c.mu.RLock()
-	ctx := c.ctx
-	c.mu.RUnlock()
-	if ctx == nil {
-		return operationFailure("native window is not ready")
-	}
-	wailsRuntime.Quit(ctx)
+	quit(ctx)
 	return OperationResult{Success: true}
+}
+
+// CancelClose keeps the child alive after a failed final frontend flush. It
+// also invalidates any native-close fallback so a retry starts a fresh grace
+// period instead of inheriting the old timeout.
+func (c *Control) CancelClose() OperationResult {
+	if c == nil {
+		return operationFailure("native window control is unavailable")
+	}
+	c.mu.Lock()
+	if c.closeCommitted {
+		c.mu.Unlock()
+		return operationFailure("native window close is already committed")
+	}
+	c.invalidateCloseFallbackLocked()
+	c.mu.Unlock()
+	c.closeGate.cancel()
+	return OperationResult{Success: true}
+}
+
+// handleBeforeClose gives a mounted frontend one opportunity to submit its
+// terminal payload. A child that has not acknowledged ready has no state worth
+// gating, so its existing notifyClosing fallback remains in force.
+func (c *Control) handleBeforeClose(ctx context.Context) bool {
+	if c == nil {
+		return false
+	}
+	if c.bridge == nil || !c.bridge.frontendReady() {
+		if c.bridge != nil {
+			c.bridge.notifyClosing()
+		}
+		return false
+	}
+	veto, requestFrontendClose := c.closeGate.intercept()
+	if requestFrontendClose {
+		c.mu.RLock()
+		emitCommand := c.emitCommand
+		c.mu.RUnlock()
+		if emitCommand != nil {
+			emitCommand(ctx, childCommand{
+				ID:     c.bridge.WindowID(),
+				Action: "close",
+				Reason: ExitReasonWindowClosed,
+			})
+		}
+	}
+	if veto {
+		c.scheduleCloseFallback(ctx)
+	}
+	return veto
+}
+
+func (c *Control) scheduleCloseFallback(fallbackCtx context.Context) {
+	c.mu.Lock()
+	if c.closeCommitted || c.closeFallback != nil {
+		c.mu.Unlock()
+		return
+	}
+	delay := c.closeFallbackDelay
+	if delay <= 0 {
+		delay = defaultGracefulCloseTimeout
+	}
+	c.closeFallbackGeneration++
+	generation := c.closeFallbackGeneration
+	c.closeFallback = time.AfterFunc(delay, func() {
+		c.mu.Lock()
+		if c.closeCommitted ||
+			c.closeFallbackGeneration != generation ||
+			c.closeGate.isAllowed() {
+			c.closeFallback = nil
+			c.mu.Unlock()
+			return
+		}
+		c.closeFallback = nil
+		c.closeCommitted = true
+		ctx := c.ctx
+		quit := c.quit
+		c.mu.Unlock()
+
+		c.closeGate.allow()
+		if c.bridge != nil {
+			c.bridge.notifyClosing()
+		}
+		if ctx == nil {
+			ctx = fallbackCtx
+		}
+		if ctx != nil && quit != nil {
+			quit(ctx)
+		}
+	})
+	c.mu.Unlock()
+}
+
+func (c *Control) invalidateCloseFallbackLocked() {
+	c.closeFallbackGeneration++
+	if c.closeFallback != nil {
+		c.closeFallback.Stop()
+		c.closeFallback = nil
+	}
 }
 
 func (c *Control) Focus() OperationResult {
 	if c == nil {
 		return operationFailure("native window control is unavailable")
 	}
-	c.mu.RLock()
+	c.mu.Lock()
 	ctx := c.ctx
-	c.mu.RUnlock()
-	if ctx == nil {
+	focus := c.focusWindow
+	if ctx == nil || focus == nil {
+		c.mu.Unlock()
 		return operationFailure("native window is not ready")
 	}
-	wailsRuntime.WindowUnminimise(ctx)
-	wailsRuntime.WindowShow(ctx)
-	wailsRuntime.Show(ctx)
+	if !c.visible {
+		c.focusPending = true
+		presentation := c.takeInitialPresentationLocked()
+		c.mu.Unlock()
+		presentation.run()
+		return OperationResult{Success: true}
+	}
+	c.mu.Unlock()
+	focus(ctx)
 	return OperationResult{Success: true}
 }

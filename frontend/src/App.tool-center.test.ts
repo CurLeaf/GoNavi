@@ -223,6 +223,7 @@ describe('settings center tool entries', () => {
     expect(appSource).toContain('onOpenSettings={handleOpenSettingsModal}');
     expect(appSource).toContain('onToggleLogPanel={handleToggleLogPanel}');
     expect(appSource).toContain('onFocusCommandSearch={handleFocusSidebarSearch}');
+    expect(appSource).toContain('onOpenAISettings={handleOpenAISettings}');
     expect(appSource).not.toContain('onOpenTools=');
     expect(appSource).not.toContain('onOpenSettings={() => setIsSettingsModalOpen(true)}');
     expect(appSource).not.toContain('onToggleLogPanel={() => setIsLogPanelOpen((prev) => !prev)}');

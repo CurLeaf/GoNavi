@@ -4,9 +4,11 @@ import {
   DETACH_TAB_DRAG_Y_THRESHOLD,
   nextDetachedZIndex,
   resolveDetachedWindowTitle,
+  resolveNativeDetachDragRelease,
   resolveNativeDetachPreferredBounds,
   resolveNativeDetachReleasePoint,
   resolveResultDetachPreferredBounds,
+  shouldDetachAfterNativePointerCancel,
   shouldDetachTabByDrag,
   shouldDetachAtScreenPoint,
   toAIChatDetachedBoundsMemory,
@@ -69,6 +71,30 @@ describe('detachedWindow helpers', () => {
     })).toEqual({ screenX: -860, screenY: -220 });
   });
 
+  it('prefers the real terminal pointer on a negative-coordinate display', () => {
+    expect(resolveNativeDetachDragRelease({
+      startClientX: 800,
+      startClientY: 40,
+      startScreenX: 1800,
+      startScreenY: 80,
+      fallbackDeltaX: -300,
+      fallbackDeltaY: 10,
+      terminalPointer: {
+        type: 'pointercancel',
+        clientX: -120,
+        clientY: 160,
+        screenX: -1480,
+        screenY: 220,
+      },
+    })).toEqual({
+      deltaX: -920,
+      deltaY: 120,
+      screenX: -1480,
+      screenY: 220,
+      terminalType: 'pointercancel',
+    });
+  });
+
   it('detaches when the pointer leaves the host window in any screen direction', () => {
     const host = { x: 100, y: 80, width: 1200, height: 800 };
     expect(shouldDetachAtScreenPoint(80, 300, host)).toBe(true);
@@ -76,6 +102,22 @@ describe('detachedWindow helpers', () => {
     expect(shouldDetachAtScreenPoint(500, 40, host)).toBe(true);
     expect(shouldDetachAtScreenPoint(500, 1000, host)).toBe(true);
     expect(shouldDetachAtScreenPoint(600, 300, host)).toBe(false);
+  });
+
+  it('treats a native pointercancel outside the host as a completed detach drag', () => {
+    const host = { x: 100, y: 80, width: 1200, height: 800 };
+    expect(shouldDetachAfterNativePointerCancel({
+      terminalType: 'pointercancel',
+      deltaY: 12,
+      screenX: -1480,
+      screenY: 220,
+    }, host)).toBe(true);
+    expect(shouldDetachAfterNativePointerCancel({
+      terminalType: 'pointerup',
+      deltaY: 120,
+      screenX: -1480,
+      screenY: 220,
+    }, host)).toBe(false);
   });
 
   it('snapshots AI chat detached bounds for size memory', () => {

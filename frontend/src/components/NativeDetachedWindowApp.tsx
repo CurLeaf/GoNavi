@@ -1,24 +1,41 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, ConfigProvider, Spin, Tooltip, theme as antdTheme } from 'antd';
 import { CloseOutlined, CompressOutlined } from '@ant-design/icons';
+import { EventsOn } from '../../wailsjs/runtime';
 
 import { t as defaultTranslate } from '../i18n';
 import { getAntdLocale } from '../i18n/frameworkLocale';
 import { useOptionalI18n } from '../i18n/provider';
-import { type SqlLog, useStore } from '../store';
+import { flushAIChatSessionPersistence, type SqlLog, useStore } from '../store';
 import type { TabData } from '../types';
 import type { DetachedQueryResultWindow } from '../utils/detachedWindow';
 import {
   attachNativeDetachedWindow,
+  advanceNativeDetachedStoreSource,
+  applyNativeDetachedHostStateCommand,
+  buildNativeDetachedAIChatSyncStoreSnapshot,
+  buildNativeDetachedChangedWorkbenchStoreSnapshot,
+  buildNativeDetachedStoreSnapshot,
   buildNativeDetachedSyncStoreSnapshot,
+  buildNativeDetachedWorkbenchMutableStoreSnapshot,
+  cancelNativeDetachedWindowClose,
+  cancelCurrentNativeDetachedWindowClose,
   closeCurrentNativeDetachedWindow,
   closeNativeDetachedWindow,
   fetchNativeDetachedWindowBootstrap,
   hydrateNativeDetachedStore,
+  openNativeDetachedAISettings,
+  presentCurrentNativeDetachedWindow,
   readyNativeDetachedWindow,
+  sendNativeDetachedHostEvent,
   syncNativeDetachedWindow,
+  type NativeDetachedHostEvent,
+  type NativeDetachedHostEventName,
+  type NativeDetachedStoreSnapshot,
   type NativeDetachedWindowActionPayload,
   type NativeDetachedWindowBootstrap,
+  NATIVE_DETACHED_WINDOW_COMMAND_EVENT,
+  type NativeDetachedHostStateCommand,
 } from '../utils/nativeDetachedWindowClient';
 import {
   peekQueryEditorResultSession,
@@ -26,28 +43,64 @@ import {
   subscribeQueryEditorResultSession,
   type QueryEditorResultSessionSnapshot,
 } from '../utils/queryEditorResultSessionCache';
-import DataGrid from './DataGrid';
+import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import WorkbenchTabContent from './WorkbenchTabContent';
-import NativeDetachedWindowController from './NativeDetachedWindowController';
+
+const AIChatPanel = React.lazy(() => import('./AIChatPanel'));
+const DataGrid = React.lazy(() => import('./DataGrid'));
+const NativeDetachedWindowController = React.lazy(
+  () => import('./NativeDetachedWindowController'),
+);
 
 export const NATIVE_DETACHED_SYNC_DEBOUNCE_MS = 180;
+export const NATIVE_DETACHED_PAINT_FALLBACK_MS = 250;
+
+export const waitForNativeDetachedContentPaint = (): Promise<void> => {
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (fallbackTimer !== undefined) clearTimeout(fallbackTimer);
+      resolve();
+    };
+    fallbackTimer = setTimeout(finish, NATIVE_DETACHED_PAINT_FALLBACK_MS);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(finish);
+    });
+  });
+};
 
 type NativeDetachedWindowClient = {
   load: () => Promise<NativeDetachedWindowBootstrap>;
+  present?: () => Promise<void>;
   ready: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
   sync: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
   attach: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
   close: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
+  cancelCloseRequest?: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
+  openAISettings: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
+  hostEvent?: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
   closeCurrentWindow: () => Promise<void>;
+  cancelClose?: () => Promise<void>;
 };
 
 const defaultClient: NativeDetachedWindowClient = {
   load: fetchNativeDetachedWindowBootstrap,
+  present: presentCurrentNativeDetachedWindow,
   ready: readyNativeDetachedWindow,
   sync: syncNativeDetachedWindow,
   attach: attachNativeDetachedWindow,
   close: closeNativeDetachedWindow,
+  cancelCloseRequest: cancelNativeDetachedWindowClose,
+  openAISettings: openNativeDetachedAISettings,
+  hostEvent: sendNativeDetachedHostEvent,
   closeCurrentWindow: closeCurrentNativeDetachedWindow,
+  cancelClose: cancelCurrentNativeDetachedWindowClose,
 };
 
 export interface NativeDetachedWindowAppProps {
@@ -63,19 +116,54 @@ const buildActionPayload = (
   resultSession?: QueryEditorResultSessionSnapshot | null,
   includeResultSession = false,
   newSqlLogs: SqlLog[] = [],
+  revision?: number,
+  workbenchState?: NativeDetachedStoreSnapshot,
+  workbenchStateBase?: NativeDetachedStoreSnapshot,
+  openedTabs: TabData[] = [],
+  clearSqlLogs = false,
+  resultWindow?: DetachedQueryResultWindow | null,
 ): NativeDetachedWindowActionPayload => {
-  const storeState = buildNativeDetachedSyncStoreSnapshot(
-    useStore.getState(),
-    bootstrap.kind === 'workbench' ? bootstrap.payload.tab?.id || '' : '',
-    newSqlLogs,
-  );
+  const storeState = bootstrap.kind === 'ai-chat'
+    ? buildNativeDetachedAIChatSyncStoreSnapshot(useStore.getState(), newSqlLogs)
+    : buildNativeDetachedSyncStoreSnapshot(
+        useStore.getState(),
+        bootstrap.kind === 'workbench' ? bootstrap.payload.tab?.id || '' : '',
+        newSqlLogs,
+      );
+  const screenX = typeof window === 'undefined' ? Number.NaN : Number(window.screenX);
+  const screenY = typeof window === 'undefined' ? Number.NaN : Number(window.screenY);
+  const width = typeof window === 'undefined'
+    ? Number.NaN
+    : Number(window.outerWidth || window.innerWidth);
+  const height = typeof window === 'undefined'
+    ? Number.NaN
+    : Number(window.outerHeight || window.innerHeight);
+  const bounds = [screenX, screenY, width, height].every(Number.isFinite)
+    && width > 0
+    && height > 0
+    ? {
+        x: Math.round(screenX),
+        y: Math.round(screenY),
+        width: Math.round(width),
+        height: Math.round(height),
+      }
+    : undefined;
   return {
     id: bootstrap.id,
     kind: bootstrap.kind,
+    ...(revision && revision > 0 ? { revision } : {}),
+    ...(bounds ? { bounds } : {}),
+    ...(workbenchState && Object.keys(workbenchState).length > 0 ? { workbenchState } : {}),
+    ...(workbenchState && Object.keys(workbenchState).length > 0
+      ? { workbenchStateBase: workbenchStateBase ?? {} }
+      : {}),
+    ...(openedTabs.length > 0 ? { openedTabs } : {}),
+    ...(clearSqlLogs ? { clearSqlLogs: true } : {}),
     ...(bootstrap.kind === 'workbench' || Object.keys(storeState).length > 0
       ? { storeState }
       : {}),
     ...(tab ? { tab } : {}),
+    ...(bootstrap.kind === 'query-result' && resultWindow ? { resultWindow } : {}),
     ...(bootstrap.kind === 'workbench' && includeResultSession
       ? { resultSession: resultSession ?? null }
       : {}),
@@ -84,7 +172,8 @@ const buildActionPayload = (
 
 const NativeDetachedQueryResult: React.FC<{
   windowState: DetachedQueryResultWindow;
-}> = ({ windowState }) => {
+  onDataChange: (rows: Array<Record<string, unknown>>) => void;
+}> = ({ windowState, onDataChange }) => {
   const result = windowState.result;
   const isMessage = result.resultType === 'message' || isAffectedRowsResult(result.columns || []);
   const messageText = (result.messages || []).join('\n')
@@ -116,6 +205,7 @@ const NativeDetachedQueryResult: React.FC<{
       resultSql={result.exportSql || result.sql}
       exportScope="queryResult"
       showRowNumberColumn={result.showRowNumberColumn}
+      onDataChange={onDataChange}
       isActive
     />
   );
@@ -123,18 +213,76 @@ const NativeDetachedQueryResult: React.FC<{
 
 const NativeDetachedWindowContent: React.FC<{
   bootstrap: NativeDetachedWindowBootstrap;
-}> = ({ bootstrap }) => {
+  onContentReady: () => void;
+  onAttach: () => void;
+  onClose: () => void;
+  onOpenSettings: () => void;
+  onRegisterAITerminalGuard: (guard: (() => Promise<boolean>) | null) => void;
+  onQueryResultDataChange: (rows: Array<Record<string, unknown>>) => void;
+  interactionDisabled?: boolean;
+}> = ({
+  bootstrap,
+  onContentReady,
+  onAttach,
+  onClose,
+  onOpenSettings,
+  onRegisterAITerminalGuard,
+  onQueryResultDataChange,
+  interactionDisabled = false,
+}) => {
   const tabFromStore = useStore((state) => bootstrap.payload.tab
     ? state.tabs.find((item) => item.id === bootstrap.payload.tab?.id)
     : undefined);
   const tab = tabFromStore || bootstrap.payload.tab;
+  const themeMode = useStore((state) => state.theme);
+  const uiVersion = useStore((state) => state.appearance.uiVersion);
 
   if (bootstrap.kind === 'workbench') {
-    return tab ? <WorkbenchTabContent tab={tab} isActive /> : null;
+    return tab
+      ? <WorkbenchTabContent tab={tab} isActive onContentReady={onContentReady} />
+      : null;
   }
-  return bootstrap.payload.resultWindow
-    ? <NativeDetachedQueryResult windowState={bootstrap.payload.resultWindow} />
-    : null;
+  if (bootstrap.kind === 'query-result') {
+    return bootstrap.payload.resultWindow
+      ? (
+          <>
+            <NativeDetachedQueryResult
+              windowState={bootstrap.payload.resultWindow}
+              onDataChange={onQueryResultDataChange}
+            />
+            <NativeDetachedContentReady onReady={onContentReady} />
+          </>
+        )
+      : null;
+  }
+  const isDark = themeMode === 'dark';
+  return (
+    <div className="gn-native-detached-ai-chat">
+      <AIChatPanel
+        width={typeof window === 'undefined' ? 440 : window.innerWidth}
+        darkMode={isDark}
+        bgColor={isDark ? '#161a21' : '#ffffff'}
+        overlayTheme={buildOverlayWorkbenchTheme(isDark, {
+          disableBackdropFilter: true,
+          uiVersion,
+        })}
+        presentation="detached"
+        onClose={onClose}
+        onAttach={onAttach}
+        onOpenSettings={onOpenSettings}
+        onRegisterTerminalGuard={onRegisterAITerminalGuard}
+        interactionDisabled={interactionDisabled}
+      />
+      <NativeDetachedContentReady onReady={onContentReady} />
+    </div>
+  );
+};
+
+const NativeDetachedContentReady: React.FC<{ onReady: () => void }> = ({ onReady }) => {
+  useEffect(() => {
+    onReady();
+  }, [onReady]);
+  return null;
 };
 
 const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
@@ -145,12 +293,29 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
   const [bootstrap, setBootstrap] = useState<NativeDetachedWindowBootstrap | null>(null);
   const [loadError, setLoadError] = useState('');
   const [contentMounted, setContentMounted] = useState(true);
+  const [contentReady, setContentReady] = useState(false);
+  const [controllerEnabled, setControllerEnabled] = useState(false);
+  const markContentReady = useCallback(() => setContentReady(true), []);
   const [terminalAction, setTerminalAction] = useState<'attach' | 'close' | null>(null);
   const terminalActionStartedRef = useRef(false);
+  const terminalActionRequestedRef = useRef(false);
+  const aiTerminalGuardRef = useRef<(() => Promise<boolean>) | null>(null);
   const resultSessionRef = useRef<QueryEditorResultSessionSnapshot | null>(null);
+  const queryResultWindowRef = useRef<DetachedQueryResultWindow | null>(null);
+  const queryResultDirtyGenerationRef = useRef(0);
+  const scheduleSyncRef = useRef<(includeResultSession?: boolean) => void>(() => undefined);
   const syncedSqlLogIdsRef = useRef<Set<string>>(new Set());
-  const syncTimerRef = useRef<number | null>(null);
+  const sqlLogsClearPendingRef = useRef(false);
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncIncludesResultSessionRef = useRef(false);
+  const hostStateRevisionRef = useRef(0);
+  const actionRevisionRef = useRef(0);
+  const actionQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const processedHostEventIdsRef = useRef<Set<string>>(new Set());
+  const previousHostAIContextsRef = useRef<unknown>({});
+  const hostEventSequenceRef = useRef(0);
+  const workbenchStateSourceRef = useRef<NativeDetachedStoreSnapshot>({});
+  const syncedWorkbenchTabIdsRef = useRef<Set<string>>(new Set());
 
   const themeMode = useStore((state) => state.theme);
   const uiVersion = useStore((state) => state.appearance.uiVersion);
@@ -174,7 +339,17 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
     void client.load()
       .then((nextBootstrap) => {
         if (!active) return;
+        setContentReady(false);
+        setControllerEnabled(false);
         hydrateNativeDetachedStore(useStore, nextBootstrap.payload.storeState);
+        queryResultWindowRef.current = nextBootstrap.payload.resultWindow ?? null;
+        previousHostAIContextsRef.current = useStore.getState().aiContexts;
+        workbenchStateSourceRef.current = buildNativeDetachedWorkbenchMutableStoreSnapshot(
+          useStore.getState(),
+        );
+        syncedWorkbenchTabIdsRef.current = new Set(
+          (useStore.getState().tabs || []).map((tab) => String(tab.id || '').trim()).filter(Boolean),
+        );
         syncedSqlLogIdsRef.current = new Set(
           (useStore.getState().sqlLogs || [])
             .map((log) => String(log.id || '').trim())
@@ -201,11 +376,79 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
   }, [client]);
 
   useEffect(() => {
-    if (!bootstrap || !contentMounted) return;
-    void client.ready({ id: bootstrap.id, kind: bootstrap.kind }).catch((error) => {
-      setLoadError(error instanceof Error ? error.message : String(error));
-    });
-  }, [bootstrap, client, contentMounted]);
+    if (!bootstrap) return undefined;
+    return EventsOn(
+      NATIVE_DETACHED_WINDOW_COMMAND_EVENT,
+      (command: NativeDetachedHostStateCommand) => {
+        hostStateRevisionRef.current = applyNativeDetachedHostStateCommand(
+          useStore,
+          bootstrap.id,
+          hostStateRevisionRef.current,
+          command,
+          {
+            processedEventIds: processedHostEventIdsRef.current,
+            previousHostAIContextsRef,
+            dispatchHostEvent: (hostEvent) => {
+              if (typeof window === 'undefined') return;
+              window.dispatchEvent(new CustomEvent(hostEvent.name, {
+                detail: hostEvent.detail,
+              }));
+            },
+          },
+        );
+      },
+    );
+  }, [bootstrap]);
+
+  useEffect(() => {
+    if (!bootstrap || typeof window === 'undefined' || !client.hostEvent) return undefined;
+    const eventNames: NativeDetachedHostEventName[] = bootstrap.kind === 'ai-chat'
+      ? [
+          'gonavi:insert-sql',
+          'gonavi:jvm-apply-ai-plan',
+          'gonavi:jvm-apply-diagnostic-plan',
+        ]
+      : ['gonavi:ai:inject-prompt'];
+    const forwardToHost = (event: Event) => {
+      hostEventSequenceRef.current += 1;
+      const hostEvent: NativeDetachedHostEvent = {
+        id: `${bootstrap.id}:${Date.now()}:${hostEventSequenceRef.current}`,
+        name: event.type as NativeDetachedHostEventName,
+        detail: (event as CustomEvent<unknown>).detail,
+      };
+      void client.hostEvent?.({
+        id: bootstrap.id,
+        kind: bootstrap.kind,
+        hostEvent,
+      }).catch((error) => {
+        console.warn('[Native Detached Window] Failed to forward event to host', error);
+      });
+    };
+    eventNames.forEach((eventName) => window.addEventListener(eventName, forwardToHost));
+    return () => {
+      eventNames.forEach((eventName) => window.removeEventListener(eventName, forwardToHost));
+    };
+  }, [bootstrap, client]);
+
+  useEffect(() => {
+    if (!bootstrap || !contentMounted || !contentReady) return undefined;
+    let active = true;
+    void Promise.resolve(client.present?.())
+      .then(() => waitForNativeDetachedContentPaint())
+      .then(() => {
+        if (!active) return undefined;
+        return client.ready({ id: bootstrap.id, kind: bootstrap.kind }).then(() => {
+          if (active) setControllerEnabled(true);
+        });
+      })
+      .catch((error) => {
+        if (!active) return;
+        setLoadError(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      active = false;
+    };
+  }, [bootstrap, client, contentMounted, contentReady]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -238,37 +481,137 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
     }
   }, []);
 
+  const readWorkbenchSyncData = useCallback(() => {
+    if (bootstrap?.kind !== 'workbench' && bootstrap?.kind !== 'query-result') {
+      return {
+        workbenchState: {},
+        workbenchStateBase: {},
+        openedTabs: [] as TabData[],
+      };
+    }
+    const state = useStore.getState();
+    const workbenchState = buildNativeDetachedChangedWorkbenchStoreSnapshot(
+      state,
+      workbenchStateSourceRef.current,
+    );
+    const workbenchStateBase = buildNativeDetachedStoreSnapshot(Object.fromEntries(
+      Object.keys(workbenchState).map((key) => [key, workbenchStateSourceRef.current[key]]),
+    ));
+    return {
+      workbenchState,
+      workbenchStateBase,
+      openedTabs: bootstrap.kind === 'workbench'
+        ? state.tabs.filter(
+            (tab) => !syncedWorkbenchTabIdsRef.current.has(String(tab.id || '').trim()),
+          )
+        : [],
+    };
+  }, [bootstrap?.kind]);
+
+  const markWorkbenchStateSynced = useCallback((
+    workbenchState: NativeDetachedStoreSnapshot,
+    openedTabs: TabData[],
+  ): void => {
+    workbenchStateSourceRef.current = advanceNativeDetachedStoreSource(
+      workbenchStateSourceRef.current,
+      workbenchState,
+    );
+    for (const tab of openedTabs) {
+      const id = String(tab.id || '').trim();
+      if (id) syncedWorkbenchTabIdsRef.current.add(id);
+    }
+  }, []);
+
+  const nextActionRevision = useCallback((): number => {
+    actionRevisionRef.current += 1;
+    return actionRevisionRef.current;
+  }, []);
+
+  const enqueueAction = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
+    const result = actionQueueRef.current.catch(() => undefined).then(operation);
+    actionQueueRef.current = result.then(() => undefined, () => undefined);
+    return result;
+  }, []);
+
   const scheduleSync = useCallback((includeResultSession = false) => {
     if (!bootstrap || terminalAction) return;
     syncIncludesResultSessionRef.current = syncIncludesResultSessionRef.current || includeResultSession;
     if (syncTimerRef.current !== null) {
-      window.clearTimeout(syncTimerRef.current);
+      clearTimeout(syncTimerRef.current);
     }
-    syncTimerRef.current = window.setTimeout(() => {
+    syncTimerRef.current = setTimeout(() => {
       syncTimerRef.current = null;
-      const shouldIncludeResultSession = syncIncludesResultSessionRef.current;
-      syncIncludesResultSessionRef.current = false;
-      const newSqlLogs = readUnsyncedSqlLogs();
-      if (bootstrap.kind === 'query-result' && newSqlLogs.length === 0) return;
-      void client.sync(buildActionPayload(
-        bootstrap,
-        readCurrentTab(),
-        resultSessionRef.current,
-        shouldIncludeResultSession,
-        newSqlLogs,
-      )).then(() => {
+      void enqueueAction(async () => {
+        const shouldIncludeResultSession = syncIncludesResultSessionRef.current;
+        syncIncludesResultSessionRef.current = false;
+        const newSqlLogs = readUnsyncedSqlLogs();
+        const clearSqlLogs = sqlLogsClearPendingRef.current;
+        const queryResultDirtyGeneration = queryResultDirtyGenerationRef.current;
+        const queryResultChanged = queryResultDirtyGeneration > 0;
+        const { workbenchState, workbenchStateBase, openedTabs } = readWorkbenchSyncData();
+        if (
+          bootstrap.kind === 'query-result'
+          && newSqlLogs.length === 0
+          && !clearSqlLogs
+          && !queryResultChanged
+          && Object.keys(workbenchState).length === 0
+        ) return;
+        await client.sync(buildActionPayload(
+          bootstrap,
+          readCurrentTab(),
+          resultSessionRef.current,
+          shouldIncludeResultSession,
+          newSqlLogs,
+          nextActionRevision(),
+          workbenchState,
+          workbenchStateBase,
+          openedTabs,
+          clearSqlLogs,
+          queryResultWindowRef.current,
+        ));
+        if (
+          queryResultChanged
+          && queryResultDirtyGenerationRef.current === queryResultDirtyGeneration
+        ) {
+          queryResultDirtyGenerationRef.current = 0;
+        }
+        if (clearSqlLogs) {
+          syncedSqlLogIdsRef.current.clear();
+          sqlLogsClearPendingRef.current = false;
+        }
         markSqlLogsSynced(newSqlLogs);
+        markWorkbenchStateSynced(workbenchState, openedTabs);
       }).catch((error) => {
         console.warn('[Native Detached Window] Failed to sync tab state', error);
       });
     }, NATIVE_DETACHED_SYNC_DEBOUNCE_MS);
-  }, [bootstrap, client, markSqlLogsSynced, readCurrentTab, readUnsyncedSqlLogs, terminalAction]);
+  }, [
+    bootstrap,
+    client,
+    enqueueAction,
+    markSqlLogsSynced,
+    markWorkbenchStateSynced,
+    nextActionRevision,
+    readCurrentTab,
+    readUnsyncedSqlLogs,
+    readWorkbenchSyncData,
+    terminalAction,
+  ]);
+  scheduleSyncRef.current = scheduleSync;
 
   useEffect(() => {
     if (!bootstrap) {
       return undefined;
     }
-    const unsubscribeStore = useStore.subscribe(() => scheduleSync(false));
+    const unsubscribeStore = useStore.subscribe((state, previousState) => {
+      if (
+        (previousState?.sqlLogs?.length || 0) > 0
+        && (state.sqlLogs?.length || 0) === 0
+      ) {
+        sqlLogsClearPendingRef.current = true;
+      }
+      scheduleSync(false);
+    });
     const unsubscribeResultSession = bootstrap.kind === 'workbench' && bootstrap.payload.tab
       ? subscribeQueryEditorResultSession(
           bootstrap.payload.tab.id,
@@ -286,24 +629,52 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
       unsubscribeStore();
       unsubscribeResultSession();
       if (syncTimerRef.current !== null) {
-        window.clearTimeout(syncTimerRef.current);
+        clearTimeout(syncTimerRef.current);
         syncTimerRef.current = null;
       }
     };
   }, [bootstrap, scheduleSync]);
 
   const requestTerminalAction = useCallback((action: 'attach' | 'close') => {
-    if (!bootstrap || terminalAction) return;
+    if (!bootstrap || terminalActionRequestedRef.current) return;
+    terminalActionRequestedRef.current = true;
     if (syncTimerRef.current !== null) {
-      window.clearTimeout(syncTimerRef.current);
+      clearTimeout(syncTimerRef.current);
       syncTimerRef.current = null;
     }
-    setContentMounted(false);
+    if (bootstrap.kind !== 'ai-chat') setContentMounted(false);
     setTerminalAction(action);
-  }, [bootstrap, terminalAction]);
+  }, [bootstrap]);
+
+  const requestOpenAISettings = useCallback(() => {
+    if (!bootstrap || bootstrap.kind !== 'ai-chat') return;
+    void client.openAISettings({ id: bootstrap.id, kind: bootstrap.kind }).catch((error) => {
+      console.error('[Native Detached Window] Failed to open AI settings', error);
+    });
+  }, [bootstrap, client]);
 
   useEffect(() => {
-    if (!bootstrap || !terminalAction || contentMounted || terminalActionStartedRef.current) {
+    if (typeof window === 'undefined') return undefined;
+    const handleGracefulCloseRequest = () => requestTerminalAction('close');
+    window.addEventListener(
+      'gonavi:native-detached-request-close',
+      handleGracefulCloseRequest as EventListener,
+    );
+    return () => {
+      window.removeEventListener(
+        'gonavi:native-detached-request-close',
+        handleGracefulCloseRequest as EventListener,
+      );
+    };
+  }, [requestTerminalAction]);
+
+  useEffect(() => {
+    if (
+      !bootstrap
+      || !terminalAction
+      || terminalActionStartedRef.current
+      || (bootstrap.kind !== 'ai-chat' && contentMounted)
+    ) {
       return;
     }
     terminalActionStartedRef.current = true;
@@ -313,24 +684,63 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
     const currentSession = bootstrap.payload.tab
       ? peekQueryEditorResultSession(bootstrap.payload.tab.id) || resultSessionRef.current
       : null;
-    const payload = buildActionPayload(
-      bootstrap,
-      readCurrentTab(),
-      currentSession,
-      terminalAction === 'attach',
-      readUnsyncedSqlLogs(),
-    );
     void (async () => {
       try {
+        await actionQueueRef.current;
+        if (bootstrap.kind === 'ai-chat') {
+          const canTerminate = await aiTerminalGuardRef.current?.();
+          if (canTerminate === false) {
+            throw new Error('AI stream did not stop before the detached window handoff');
+          }
+          await flushAIChatSessionPersistence();
+        }
         if (terminalAction === 'attach' && bootstrap.kind === 'workbench') {
+          const finalSqlLogs = readUnsyncedSqlLogs();
+          const clearSqlLogs = sqlLogsClearPendingRef.current;
+          const finalWorkbench = readWorkbenchSyncData();
           try {
-            await client.sync(payload);
+            await client.sync(buildActionPayload(
+              bootstrap,
+              readCurrentTab(),
+              currentSession,
+              true,
+              finalSqlLogs,
+              nextActionRevision(),
+              finalWorkbench.workbenchState,
+              finalWorkbench.workbenchStateBase,
+              finalWorkbench.openedTabs,
+              clearSqlLogs,
+              queryResultWindowRef.current,
+            ));
+            if (clearSqlLogs) {
+              syncedSqlLogIdsRef.current.clear();
+              sqlLogsClearPendingRef.current = false;
+            }
+            markSqlLogsSynced(finalSqlLogs);
+            markWorkbenchStateSynced(
+              finalWorkbench.workbenchState,
+              finalWorkbench.openedTabs,
+            );
           } catch (error) {
             // The attach request carries the same final tab/session payload, so
             // a failed best-effort sync must not prevent the user from restoring.
             console.warn('[Native Detached Window] Final sync before attach failed', error);
           }
         }
+        const terminalWorkbench = readWorkbenchSyncData();
+        const payload = buildActionPayload(
+          bootstrap,
+          readCurrentTab(),
+          currentSession,
+          terminalAction === 'attach',
+          readUnsyncedSqlLogs(),
+          nextActionRevision(),
+          terminalWorkbench.workbenchState,
+          terminalWorkbench.workbenchStateBase,
+          terminalWorkbench.openedTabs,
+          sqlLogsClearPendingRef.current,
+          queryResultWindowRef.current,
+        );
         if (terminalAction === 'attach') {
           await client.attach(payload);
         } else {
@@ -338,7 +748,38 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
         }
       } catch (error) {
         console.error(`[Native Detached Window] Failed to ${terminalAction}`, error);
+        const cancelWorkbench = readWorkbenchSyncData();
+        const cancelPayload = buildActionPayload(
+          bootstrap,
+          readCurrentTab(),
+          currentSession,
+          false,
+          readUnsyncedSqlLogs(),
+          nextActionRevision(),
+          cancelWorkbench.workbenchState,
+          cancelWorkbench.workbenchStateBase,
+          cancelWorkbench.openedTabs,
+          sqlLogsClearPendingRef.current,
+          queryResultWindowRef.current,
+        );
+        try {
+          await client.cancelCloseRequest?.(cancelPayload);
+        } catch (parentCancelError) {
+          console.error(
+            '[Native Detached Window] Failed to cancel parent close fallback',
+            parentCancelError,
+          );
+        }
+        try {
+          await client.cancelClose?.();
+        } catch (localCancelError) {
+          console.error(
+            '[Native Detached Window] Failed to cancel local close fallback',
+            localCancelError,
+          );
+        }
         terminalActionStartedRef.current = false;
+        terminalActionRequestedRef.current = false;
         setTerminalAction(null);
         setContentMounted(true);
         return;
@@ -349,15 +790,30 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
         console.error('[Native Detached Window] Failed to close native window', error);
       }
     })();
-  }, [bootstrap, client, contentMounted, readCurrentTab, readUnsyncedSqlLogs, terminalAction]);
+  }, [
+    bootstrap,
+    client,
+    contentMounted,
+    markSqlLogsSynced,
+    markWorkbenchStateSynced,
+    nextActionRevision,
+    readCurrentTab,
+    readUnsyncedSqlLogs,
+    readWorkbenchSyncData,
+    terminalAction,
+  ]);
 
   const chromeLabels = useMemo(() => ({
     attach: bootstrap?.kind === 'workbench'
       ? translate('tab_manager.detached.restore')
-      : translate('query_editor.results_panel.detached.restore'),
+      : bootstrap?.kind === 'ai-chat'
+        ? translate('ai_chat.detached.action.dock')
+        : translate('query_editor.results_panel.detached.restore'),
     close: bootstrap?.kind === 'workbench'
       ? translate('tab_manager.detached.close')
-      : translate('query_editor.results_panel.detached.close'),
+      : bootstrap?.kind === 'ai-chat'
+        ? translate('ai_chat.header.tooltip.close')
+        : translate('query_editor.results_panel.detached.close'),
   }), [bootstrap?.kind, translate]);
 
   const isDark = themeMode === 'dark';
@@ -376,8 +832,10 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
         },
       }}
     >
-      {bootstrap ? (
-        <NativeDetachedWindowController currentWindowId={bootstrap.id} />
+      {bootstrap && controllerEnabled ? (
+        <React.Suspense fallback={null}>
+          <NativeDetachedWindowController currentWindowId={bootstrap.id} />
+        </React.Suspense>
       ) : null}
       <div
         className="gn-native-detached-window"
@@ -463,8 +921,37 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
           font-size: 12px;
           line-height: 1.5;
         }
+        .gn-native-detached-ai-chat {
+          flex: 1 1 auto;
+          min-width: 0;
+          min-height: 0;
+          display: flex;
+          overflow: hidden;
+        }
+        .gn-native-detached-ai-chat .ai-chat-panel {
+          width: 100% !important;
+          height: 100%;
+          min-width: 0;
+          border-left: 0 !important;
+        }
+        .gn-native-detached-ai-chat .ai-resize-handle {
+          display: none !important;
+        }
+        .gn-native-detached-ai-chat .ai-chat-header {
+          cursor: move;
+          user-select: none;
+          --wails-draggable: drag;
+        }
+        .gn-native-detached-ai-chat .ai-chat-header button,
+        .gn-native-detached-ai-chat .ai-chat-header a,
+        .gn-native-detached-ai-chat .ai-chat-header input,
+        .gn-native-detached-ai-chat .ai-chat-header textarea,
+        .gn-native-detached-ai-chat .ai-chat-header-right,
+        .gn-native-detached-ai-chat .gn-v2-ai-mode-tabs {
+          --wails-draggable: no-drag;
+        }
         `}</style>
-        <div className="gn-native-detached-chrome">
+        {bootstrap?.kind !== 'ai-chat' ? <div className="gn-native-detached-chrome">
           <div className="gn-native-detached-title" title={bootstrap?.title || ''}>
             {bootstrap?.title || ''}
           </div>
@@ -490,14 +977,38 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
               />
             </Tooltip>
           </div>
-        </div>
+        </div> : null}
         <div className="gn-native-detached-body">
           {loadError ? (
             <div className="gn-native-detached-error" role="alert">{loadError}</div>
           ) : !bootstrap ? (
             <div className="gn-native-detached-loading"><Spin /></div>
           ) : contentMounted ? (
-            <NativeDetachedWindowContent bootstrap={bootstrap} />
+            <React.Suspense
+              fallback={<div className="gn-native-detached-loading"><Spin /></div>}
+            >
+              <NativeDetachedWindowContent
+                bootstrap={bootstrap}
+                onContentReady={markContentReady}
+                onAttach={() => requestTerminalAction('attach')}
+                onClose={() => requestTerminalAction('close')}
+                onOpenSettings={requestOpenAISettings}
+                onRegisterAITerminalGuard={(guard) => {
+                  aiTerminalGuardRef.current = guard;
+                }}
+                interactionDisabled={Boolean(terminalAction)}
+                onQueryResultDataChange={(rows) => {
+                  const resultWindow = queryResultWindowRef.current;
+                  if (!resultWindow) return;
+                  queryResultWindowRef.current = {
+                    ...resultWindow,
+                    result: { ...resultWindow.result, rows },
+                  };
+                  queryResultDirtyGenerationRef.current += 1;
+                  scheduleSyncRef.current(false);
+                }}
+              />
+            </React.Suspense>
           ) : null}
         </div>
       </div>

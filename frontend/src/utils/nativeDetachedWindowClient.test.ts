@@ -4,12 +4,24 @@ import type { TabData } from '../types';
 import type { DetachedQueryResultWindow } from './detachedWindow';
 import {
   attachNativeDetachedWindow,
+  applyNativeDetachedHostStateSync,
+  applyNativeDetachedHostStateCommand,
+  buildNativeDetachedAIChatPayload,
+  buildNativeDetachedAIHostStoreSnapshot,
+  buildNativeDetachedAIChatSyncStoreSnapshot,
+  buildNativeDetachedChangedWorkbenchStoreSnapshot,
   buildNativeDetachedQueryResultPayload,
   buildNativeDetachedStoreSnapshot,
   buildNativeDetachedSyncStoreSnapshot,
+  buildNativeDetachedWorkbenchMutableStoreSnapshot,
   buildNativeDetachedWorkbenchPayload,
+  fetchNativeDetachedWindowBootstrap,
   hydrateNativeDetachedStore,
   isNativeDetachedWindow,
+  mergeNativeDetachedAIContextsDelta,
+  mergeNativeDetachedStoreDelta,
+  openNativeDetachedAISettings,
+  presentCurrentNativeDetachedWindow,
 } from './nativeDetachedWindowClient';
 
 const queryTab: TabData = {
@@ -49,6 +61,9 @@ describe('nativeDetachedWindowClient', () => {
       detachedAIChatWindow: null,
       theme: 'dark',
       nested: { value: 42 },
+      aiContexts: {},
+      jvmDiagnosticDrafts: {},
+      jvmDiagnosticOutputs: {},
       sqlLogs: [{ id: 'log-1', sql: 'select 1' }],
       sqlEditorPendingTransactions: {},
     });
@@ -61,7 +76,7 @@ describe('nativeDetachedWindowClient', () => {
       tabs: [queryTab],
       theme: 'dark',
     };
-    for (const key of ['aiChatHistory', 'aiContexts', 'jvmDiagnosticOutputs']) {
+    for (const key of ['aiChatHistory']) {
       Object.defineProperty(state, key, {
         enumerable: true,
         get: () => {
@@ -74,8 +89,8 @@ describe('nativeDetachedWindowClient', () => {
 
     expect(payload.storeState.theme).toBe('dark');
     expect(payload.storeState).not.toHaveProperty('aiChatHistory');
-    expect(payload.storeState).not.toHaveProperty('aiContexts');
-    expect(payload.storeState).not.toHaveProperty('jvmDiagnosticOutputs');
+    expect(payload.storeState.aiContexts).toEqual({});
+    expect(payload.storeState.jvmDiagnosticOutputs).toEqual({});
   });
 
   it('hydrates snapshot data while retaining the current store actions', () => {
@@ -122,6 +137,266 @@ describe('nativeDetachedWindowClient', () => {
       sqlEditorPendingTransactions: { [queryTab.id]: null },
       sqlLogs: [{ id: 'log-new', sql: 'select 2' }],
     });
+  });
+
+  it('builds a scoped workbench delta for every persisted setting changed in a child', () => {
+    const previous = buildNativeDetachedWorkbenchMutableStoreSnapshot({
+      queryOptions: { maxRows: 500 },
+      sqlFormatOptions: { keywordCase: 'upper' },
+      sqlEditorTransactionOptions: { mode: 'manual' },
+      tableHiddenColumns: { users: ['password'] },
+      savedQueries: [{ id: 'saved-1', name: 'Old' }],
+    });
+
+    expect(buildNativeDetachedChangedWorkbenchStoreSnapshot({
+      queryOptions: { maxRows: 1000 },
+      sqlFormatOptions: { keywordCase: 'lower' },
+      sqlEditorTransactionOptions: { mode: 'auto' },
+      tableHiddenColumns: { users: ['password'] },
+      savedQueries: [{ id: 'saved-1', name: 'New' }],
+    }, previous)).toEqual({
+      queryOptions: { maxRows: 1000 },
+      sqlFormatOptions: { keywordCase: 'lower' },
+      sqlEditorTransactionOptions: { mode: 'auto' },
+      savedQueries: [{ id: 'saved-1', name: 'New' }],
+    });
+  });
+
+  it('merges one child record delta without deleting concurrent changes from another window', () => {
+    expect(mergeNativeDetachedStoreDelta(
+      {
+        tableHiddenColumns: {
+          users: ['password'],
+          orders: ['internal_note'],
+        },
+      },
+      { tableHiddenColumns: { users: ['password'] } },
+      { tableHiddenColumns: { users: ['password', 'email'] } },
+    )).toEqual({
+      tableHiddenColumns: {
+        users: ['password', 'email'],
+        orders: ['internal_note'],
+      },
+    });
+  });
+
+  it('merges identity-based array deltas without deleting concurrent peer additions', () => {
+    expect(mergeNativeDetachedStoreDelta(
+      {
+        savedQueries: [
+          { id: 'saved-base', name: 'Base' },
+          { id: 'saved-peer', name: 'Peer' },
+        ],
+        pinnedSidebarTables: ['users', 'orders'],
+      },
+      {
+        savedQueries: [{ id: 'saved-base', name: 'Base' }],
+        pinnedSidebarTables: ['users'],
+      },
+      {
+        savedQueries: [
+          { id: 'saved-base', name: 'Base updated' },
+          { id: 'saved-child', name: 'Child' },
+        ],
+        pinnedSidebarTables: ['users', 'payments'],
+      },
+    )).toEqual({
+      savedQueries: [
+        { id: 'saved-base', name: 'Base updated' },
+        { id: 'saved-child', name: 'Child' },
+        { id: 'saved-peer', name: 'Peer' },
+      ],
+      pinnedSidebarTables: ['users', 'payments', 'orders'],
+    });
+  });
+
+  it('includes existing AI context and only the active JVM diagnostic state in workbench bootstrap', () => {
+    const payload = buildNativeDetachedWorkbenchPayload({
+      tabs: [queryTab],
+      aiContexts: { 'connection-1:main': [{ dbName: 'main', tableName: 'users' }] },
+      jvmDiagnosticDrafts: {
+        [queryTab.id]: { command: 'thread' },
+        'query-2': { command: 'heap' },
+      },
+      jvmDiagnosticOutputs: {
+        [queryTab.id]: [{ type: 'stdout', content: 'ok' }],
+        'query-2': [{ type: 'stdout', content: 'other' }],
+      },
+    }, queryTab);
+
+    expect(payload.storeState.aiContexts).toEqual({
+      'connection-1:main': [{ dbName: 'main', tableName: 'users' }],
+    });
+    expect(payload.storeState.jvmDiagnosticDrafts).toEqual({
+      [queryTab.id]: { command: 'thread' },
+    });
+    expect(payload.storeState.jvmDiagnosticOutputs).toEqual({
+      [queryTab.id]: [{ type: 'stdout', content: 'ok' }],
+    });
+  });
+
+  it('builds AI chat bootstrap and sync snapshots without unrelated detached state', () => {
+    const state = {
+      tabs: [queryTab],
+      activeTabId: queryTab.id,
+      aiPanelVisible: true,
+      aiChatHistory: {
+        'session-1': [{ id: 'message-1', role: 'user', content: 'hello', timestamp: 1 }],
+      },
+      aiChatSessions: [{ id: 'session-1', title: 'Session 1', updatedAt: 1 }],
+      aiActiveSessionId: 'session-1',
+      aiContexts: { 'connection-1:main': [{ dbName: 'main', tableName: 'users', ddl: 'create table users(id int)' }] },
+      detachedWorkbenchWindows: [{ tabId: queryTab.id }],
+      detachedQueryResultWindows: [{ id: 'result-1' }],
+      detachedAIChatWindow: { x: -1200, y: 20, width: 500, height: 720, zIndex: 1201 },
+      addAIChatMessage: () => undefined,
+    };
+
+    const payload = buildNativeDetachedAIChatPayload(state);
+
+    expect(payload.storeState).toEqual(expect.objectContaining({
+      tabs: [queryTab],
+      activeTabId: queryTab.id,
+      aiPanelVisible: true,
+      aiChatHistory: state.aiChatHistory,
+      aiChatSessions: state.aiChatSessions,
+      aiActiveSessionId: 'session-1',
+      aiContexts: state.aiContexts,
+      detachedWorkbenchWindows: [],
+      detachedQueryResultWindows: [],
+      detachedAIChatWindow: null,
+    }));
+    expect(JSON.stringify(payload)).not.toContain('addAIChatMessage');
+    expect(buildNativeDetachedAIChatSyncStoreSnapshot(state)).toEqual({
+      aiChatHistory: state.aiChatHistory,
+      aiChatSessions: state.aiChatSessions,
+      aiActiveSessionId: 'session-1',
+      aiContexts: state.aiContexts,
+    });
+  });
+
+  it('keeps main-window AI context sync separate from child-owned conversation state', () => {
+    const state = {
+      activeContext: { connectionId: 'connection-2', dbName: 'analytics' },
+      activeTabId: 'query-2',
+      tabs: [queryTab, { ...queryTab, id: 'query-2', connectionId: 'connection-2' }],
+      connections: [{ id: 'connection-2', name: 'Analytics' }],
+      sqlLogs: [{ id: 'log-2', sql: 'select * from events' }],
+      aiChatHistory: { 'session-1': [{ content: 'must stay child-owned' }] },
+    };
+
+    const snapshot = buildNativeDetachedAIHostStoreSnapshot(state);
+    expect(snapshot).toEqual({
+      activeContext: state.activeContext,
+      activeTabId: 'query-2',
+      activeTab: state.tabs[1],
+      activeConnection: state.connections[0],
+    });
+    expect(snapshot).not.toHaveProperty('aiChatHistory');
+
+    const current = {
+      ...state,
+      activeTabId: queryTab.id,
+      aiChatHistory: { 'session-1': [{ content: 'current child history' }] },
+      closeTab: vi.fn(),
+    };
+    const next = applyNativeDetachedHostStateSync(current, snapshot);
+    expect(next.activeTabId).toBe('query-2');
+    expect(next.tabs.find((tab) => tab.id === 'query-2')).toEqual(state.tabs[1]);
+    expect(next.connections).toEqual(state.connections);
+    expect(next.aiChatHistory).toEqual(current.aiChatHistory);
+    expect(next.closeTab).toBe(current.closeTab);
+
+    let childState = current;
+    const childStore = {
+      getState: () => childState,
+      setState: (nextState: typeof childState) => {
+        childState = nextState;
+      },
+    };
+    const revision = applyNativeDetachedHostStateCommand(childStore, 'ai-chat', 4, {
+      id: 'ai-chat',
+      action: 'sync-host-state',
+      payload: { revision: 5, storeState: snapshot },
+    });
+    expect(revision).toBe(5);
+    expect(childState.activeTabId).toBe('query-2');
+    expect(applyNativeDetachedHostStateCommand(childStore, 'ai-chat', revision, {
+      id: 'ai-chat',
+      action: 'sync-host-state',
+      payload: { revision: 3, storeState: { activeTabId: queryTab.id } },
+    })).toBe(5);
+    expect(childState.activeTabId).toBe('query-2');
+  });
+
+  it('bounds oversized active SQL before sending it over the native event stream', () => {
+    const snapshot = buildNativeDetachedAIHostStoreSnapshot({
+      activeTabId: queryTab.id,
+      tabs: [{ ...queryTab, query: 'x'.repeat(700_000) }],
+      connections: [],
+      activeContext: null,
+    });
+
+    expect(String((snapshot.activeTab as TabData).query)).toContain('SQL truncated');
+    expect(JSON.stringify(snapshot).length).toBeLessThan(600_000);
+  });
+
+  it('merges AI context changes from one process without deleting concurrent peer additions', () => {
+    const users = { dbName: 'main', tableName: 'users', ddl: 'create table users(id int)' };
+    const orders = { dbName: 'main', tableName: 'orders', ddl: 'create table orders(id int)' };
+    expect(mergeNativeDetachedAIContextsDelta(
+      { 'connection-1:main': [users, orders] },
+      { 'connection-1:main': [users] },
+      {},
+    )).toEqual({ 'connection-1:main': [orders] });
+  });
+
+  it('replays retained host events once while accepting newer host state revisions', () => {
+    let childState = {
+      activeTabId: queryTab.id,
+      aiContexts: {},
+    };
+    const childStore = {
+      getState: () => childState,
+      setState: (nextState: typeof childState) => {
+        childState = nextState;
+      },
+    };
+    const processedEventIds = new Set<string>();
+    const dispatchHostEvent = vi.fn();
+    const command = {
+      id: 'ai-chat',
+      action: 'sync-host-state' as const,
+      payload: {
+        revision: 10,
+        storeState: {
+          __gonaviNativeHostEvents: [{
+            id: 'main:1',
+            name: 'gonavi:ai:inject-prompt',
+            detail: { prompt: 'explain this query' },
+          }],
+        },
+      },
+    };
+
+    const revision = applyNativeDetachedHostStateCommand(
+      childStore,
+      'ai-chat',
+      0,
+      command,
+      { processedEventIds, dispatchHostEvent },
+    );
+    expect(revision).toBe(10);
+    expect(dispatchHostEvent).toHaveBeenCalledOnce();
+
+    expect(applyNativeDetachedHostStateCommand(
+      childStore,
+      'ai-chat',
+      revision,
+      { ...command, payload: { ...command.payload, revision: 11 } },
+      { processedEventIds, dispatchHostEvent },
+    )).toBe(11);
+    expect(dispatchHostEvent).toHaveBeenCalledOnce();
   });
 
   it('builds an isolated JSON-safe query result snapshot', () => {
@@ -198,6 +473,72 @@ describe('nativeDetachedWindowClient', () => {
         id: 'window-1',
         kind: 'workbench',
         tab: queryTab,
+      });
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('reuses the child runtime bootstrap cache instead of fetching the payload twice', async () => {
+    const bootstrap = {
+      id: 'workbench:query-1',
+      kind: 'workbench' as const,
+      title: queryTab.title,
+      payload: { storeState: { tabs: [queryTab] }, tab: queryTab },
+    };
+    const loadBootstrap = vi.fn(async () => bootstrap);
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { __GONAVI_DETACHED__: { loadBootstrap } },
+    });
+    try {
+      await expect(fetchNativeDetachedWindowBootstrap()).resolves.toEqual(bootstrap);
+      expect(loadBootstrap).toHaveBeenCalledOnce();
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('presents the child through the local runtime without acknowledging parent ready', async () => {
+    const present = vi.fn(async () => ({ success: true }));
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { __GONAVI_DETACHED__: { present } },
+    });
+    try {
+      await presentCurrentNativeDetachedWindow();
+      expect(present).toHaveBeenCalledOnce();
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('routes the non-terminal AI settings command through the child bridge', async () => {
+    const action = vi.fn(async () => ({ success: true }));
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { __GONAVI_DETACHED__: { action } },
+    });
+    try {
+      await openNativeDetachedAISettings({ id: 'ai-chat', kind: 'ai-chat' });
+      expect(action).toHaveBeenCalledWith('open-ai-settings', {
+        id: 'ai-chat',
+        kind: 'ai-chat',
       });
     } finally {
       if (previousWindowDescriptor) {

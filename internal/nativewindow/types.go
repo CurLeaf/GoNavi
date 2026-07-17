@@ -14,12 +14,17 @@ const (
 	BootstrapPath = "/__gonavi/detached/bootstrap"
 	ActionPath    = "/__gonavi/detached/action"
 	ControlPath   = "/__gonavi/detached/control"
+	HostStatePath = "/__gonavi/detached/host-state"
+	CommandStatePath = "/__gonavi/detached/command-state"
 	RuntimePath   = "/__gonavi/detached-runtime.js"
 	InvokePath    = "/__gonavi/api/invoke"
 	EventsPath    = "/__gonavi/events"
 
 	MainEventName    = "gonavi:native-detached-event"
 	CommandEventName = "gonavi:native-detached-command"
+	// GracefulCloseRequestEventName is dispatched inside a detached WebView so
+	// React can flush state before the native child process exits.
+	GracefulCloseRequestEventName = "gonavi:native-detached-request-close"
 
 	ExitReasonRequested      = "requested"
 	ExitReasonWindowClosed   = "window-closed"
@@ -34,6 +39,7 @@ const (
 	// Detached query results can be substantially larger than ordinary RPC
 	// payloads. Keep one shared ceiling for child actions and parent responses.
 	maxDetachedJSONBytes int64 = 512 << 20
+	maxDetachedSSEEventBytes   = maxDetachedJSONBytes + (1 << 20)
 )
 
 // OpenRequest describes one independently movable native window. X and Y use
@@ -80,6 +86,19 @@ type OperationResult struct {
 	ID      string `json:"id,omitempty"`
 }
 
+// HostStateRequest carries main-window state that an active detached child
+// needs to follow. Revision is strictly monotonic per child window ID.
+type HostStateRequest struct {
+	ID         string         `json:"id"`
+	Revision   int64          `json:"revision"`
+	StoreState map[string]any `json:"storeState"`
+}
+
+type hostStatePayload struct {
+	Revision   int64          `json:"revision"`
+	StoreState map[string]any `json:"storeState"`
+}
+
 // Event is emitted to the main Wails window. Action mirrors the detached HTTP
 // action protocol so the frontend can use one reducer for child messages and
 // process-exit notifications.
@@ -102,8 +121,10 @@ type controlRequest struct {
 }
 
 type childCommand struct {
-	ID     string `json:"id"`
-	Action string `json:"action"`
+	ID      string `json:"id"`
+	Action  string `json:"action"`
+	Reason  string `json:"reason,omitempty"`
+	Payload any    `json:"payload,omitempty"`
 }
 
 func normalizeOpenRequest(request OpenRequest) OpenRequest {

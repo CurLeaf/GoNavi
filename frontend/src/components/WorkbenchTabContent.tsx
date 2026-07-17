@@ -1,80 +1,141 @@
 import React from 'react';
+import { Spin } from 'antd';
 import type { TabData } from '../types';
-import DataViewer from './DataViewer';
-import QueryEditor from './QueryEditor';
-import TableDesigner from './TableDesigner';
-import RedisViewer from './RedisViewer';
-import RedisCommandEditor from './RedisCommandEditor';
-import RedisMonitor from './RedisMonitor';
-import TriggerViewer from './TriggerViewer';
-import DefinitionViewer from './DefinitionViewer';
-import TableOverview from './TableOverview';
-import TableExportWorkbench from './TableExportWorkbench';
-import SQLFileExecutionWorkbench from './SQLFileExecutionWorkbench';
-import JVMOverview from './JVMOverview';
-import JVMResourceBrowser from './JVMResourceBrowser';
-import JVMAuditViewer from './JVMAuditViewer';
-import JVMDiagnosticConsole from './JVMDiagnosticConsole';
-import JVMMonitoringDashboard from './JVMMonitoringDashboard';
-import SqlAnalysisWorkbench from './explain/SqlAnalysisWorkbench';
-import SqlAuditWorkbench from './audit/SqlAuditWorkbench';
+const DataViewer = React.lazy(() => import('./DataViewer'));
+const QueryEditor = React.lazy(() => import('./QueryEditor'));
+const TableDesigner = React.lazy(() => import('./TableDesigner'));
+const RedisViewer = React.lazy(() => import('./RedisViewer'));
+const RedisCommandEditor = React.lazy(() => import('./RedisCommandEditor'));
+const RedisMonitor = React.lazy(() => import('./RedisMonitor'));
+const TriggerViewer = React.lazy(() => import('./TriggerViewer'));
+const DefinitionViewer = React.lazy(() => import('./DefinitionViewer'));
+const TableOverview = React.lazy(() => import('./TableOverview'));
+const TableExportWorkbench = React.lazy(() => import('./TableExportWorkbench'));
+const SQLFileExecutionWorkbench = React.lazy(() => import('./SQLFileExecutionWorkbench'));
+const JVMOverview = React.lazy(() => import('./JVMOverview'));
+const JVMResourceBrowser = React.lazy(() => import('./JVMResourceBrowser'));
+const JVMAuditViewer = React.lazy(() => import('./JVMAuditViewer'));
+const JVMDiagnosticConsole = React.lazy(() => import('./JVMDiagnosticConsole'));
+const JVMMonitoringDashboard = React.lazy(() => import('./JVMMonitoringDashboard'));
+const SqlAnalysisWorkbench = React.lazy(() => import('./explain/SqlAnalysisWorkbench'));
+const SqlAuditWorkbench = React.lazy(() => import('./audit/SqlAuditWorkbench'));
 
-export const WorkbenchTabContent: React.FC<{ tab: TabData; isActive: boolean }> = React.memo(({ tab, isActive }) => {
-  if (tab.type === 'query') {
-    return <QueryEditor tab={tab} isActive={isActive} />;
+export const WORKBENCH_CONTENT_READY_FALLBACK_MS = 4_000;
+const WORKBENCH_PENDING_CONTENT_SELECTOR = '[data-monaco-editor-loading="true"]';
+
+export const waitForWorkbenchContentReady = (
+  onReady: () => void,
+  root: Pick<Document, 'querySelector'> = document,
+): (() => void) => {
+  let settled = false;
+  let observer: MutationObserver | null = null;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    observer?.disconnect();
+    clearTimeout(fallbackTimer);
+    onReady();
+  };
+  const check = () => {
+    if (!root.querySelector(WORKBENCH_PENDING_CONTENT_SELECTOR)) finish();
+  };
+  const fallbackTimer = setTimeout(finish, WORKBENCH_CONTENT_READY_FALLBACK_MS);
+  check();
+  if (!settled && typeof MutationObserver !== 'undefined') {
+    observer = new MutationObserver(check);
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    check();
   }
-  if (tab.type === 'table') {
-    return <DataViewer tab={tab} isActive={isActive} />;
-  }
-  if (tab.type === 'design') {
-    return <TableDesigner tab={tab} />;
-  }
-  if (tab.type === 'redis-keys') {
-    return <RedisViewer connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
-  }
-  if (tab.type === 'redis-command') {
-    return <RedisCommandEditor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
-  }
-  if (tab.type === 'redis-monitor') {
-    return <RedisMonitor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
-  }
-  if (tab.type === 'trigger') {
-    return <TriggerViewer tab={tab} />;
-  }
-  if (tab.type === 'view-def' || tab.type === 'event-def' || tab.type === 'routine-def' || tab.type === 'sequence-def' || tab.type === 'package-def') {
-    return <DefinitionViewer tab={tab} />;
-  }
-  if (tab.type === 'table-overview') {
-    return <TableOverview tab={tab} />;
-  }
-  if (tab.type === 'table-export') {
-    return <TableExportWorkbench tab={tab} />;
-  }
-  if (tab.type === 'sql-file-execution') {
-    return <SQLFileExecutionWorkbench tab={tab} />;
-  }
-  if (tab.type === 'sql-analysis') {
-    return <SqlAnalysisWorkbench tab={tab} />;
-  }
-  if (tab.type === 'sql-audit') {
-    return <SqlAuditWorkbench tab={tab} isActive={isActive} />;
-  }
-  if (tab.type === 'jvm-overview') {
-    return <JVMOverview tab={tab} />;
-  }
-  if (tab.type === 'jvm-resource') {
-    return <JVMResourceBrowser tab={tab} />;
-  }
-  if (tab.type === 'jvm-audit') {
-    return <JVMAuditViewer tab={tab} />;
-  }
-  if (tab.type === 'jvm-diagnostic') {
-    return <JVMDiagnosticConsole tab={tab} />;
-  }
-  if (tab.type === 'jvm-monitoring') {
-    return <JVMMonitoringDashboard tab={tab} />;
-  }
+  return () => {
+    settled = true;
+    observer?.disconnect();
+    clearTimeout(fallbackTimer);
+  };
+};
+
+const WorkbenchContentReady: React.FC<{
+  marker: string;
+  onReady?: () => void;
+}> = ({ onReady }) => {
+  React.useEffect(() => {
+    if (!onReady) return undefined;
+    return waitForWorkbenchContentReady(onReady);
+  }, [onReady]);
   return null;
+};
+
+export interface WorkbenchTabContentProps {
+  tab: TabData;
+  isActive: boolean;
+  onContentReady?: () => void;
+}
+
+export const WorkbenchTabContent: React.FC<WorkbenchTabContentProps> = React.memo(({
+  tab,
+  isActive,
+  onContentReady,
+}) => {
+  let content: React.ReactNode;
+  if (tab.type === 'query') {
+    content = <QueryEditor tab={tab} isActive={isActive} />;
+  } else if (tab.type === 'table') {
+    content = <DataViewer tab={tab} isActive={isActive} />;
+  } else if (tab.type === 'design') {
+    content = <TableDesigner tab={tab} />;
+  } else if (tab.type === 'redis-keys') {
+    content = <RedisViewer connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
+  } else if (tab.type === 'redis-command') {
+    content = <RedisCommandEditor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
+  } else if (tab.type === 'redis-monitor') {
+    content = <RedisMonitor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
+  } else if (tab.type === 'trigger') {
+    content = <TriggerViewer tab={tab} />;
+  } else if (tab.type === 'view-def' || tab.type === 'event-def' || tab.type === 'routine-def' || tab.type === 'sequence-def' || tab.type === 'package-def') {
+    content = <DefinitionViewer tab={tab} />;
+  } else if (tab.type === 'table-overview') {
+    content = <TableOverview tab={tab} />;
+  } else if (tab.type === 'table-export') {
+    content = <TableExportWorkbench tab={tab} />;
+  } else if (tab.type === 'sql-file-execution') {
+    content = <SQLFileExecutionWorkbench tab={tab} />;
+  } else if (tab.type === 'sql-analysis') {
+    content = <SqlAnalysisWorkbench tab={tab} />;
+  } else if (tab.type === 'sql-audit') {
+    content = <SqlAuditWorkbench tab={tab} isActive={isActive} />;
+  } else if (tab.type === 'jvm-overview') {
+    content = <JVMOverview tab={tab} />;
+  } else if (tab.type === 'jvm-resource') {
+    content = <JVMResourceBrowser tab={tab} />;
+  } else if (tab.type === 'jvm-audit') {
+    content = <JVMAuditViewer tab={tab} />;
+  } else if (tab.type === 'jvm-diagnostic') {
+    content = <JVMDiagnosticConsole tab={tab} />;
+  } else if (tab.type === 'jvm-monitoring') {
+    content = <JVMMonitoringDashboard tab={tab} />;
+  } else {
+    const exhaustiveType: never = tab.type;
+    return exhaustiveType;
+  }
+
+  return (
+    <React.Suspense
+      fallback={(
+        <div
+          aria-busy="true"
+          style={{ flex: '1 1 auto', minWidth: 0, minHeight: 0, display: 'grid', placeItems: 'center' }}
+        >
+          <Spin size="small" />
+        </div>
+      )}
+    >
+      {content}
+      <WorkbenchContentReady
+        key={`${tab.id}:${tab.type}`}
+        marker={`${tab.id}:${tab.type}`}
+        onReady={onContentReady}
+      />
+    </React.Suspense>
+  );
 });
 
 WorkbenchTabContent.displayName = 'WorkbenchTabContent';

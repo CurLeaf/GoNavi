@@ -35,3 +35,32 @@ func TestRuntimeExposesParentWindowManagerInsideDetachedChildren(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeRoutesParentCloseThroughGracefulFrontendEvent(t *testing.T) {
+	script := detachedRuntimeBridgeScript()
+	for _, expected := range []string{
+		GracefulCloseRequestEventName,
+		"requestGracefulClose(command.reason)",
+		"window.dispatchEvent(new CustomEvent",
+	} {
+		if !strings.Contains(script, expected) {
+			t.Fatalf("runtime bridge is missing graceful close marker %q", expected)
+		}
+	}
+	if strings.Contains(script, "control.Close();") {
+		t.Fatal("parent close command still quits before the frontend can flush state")
+	}
+}
+
+func TestRuntimeExposesTwoPhaseChildPresentation(t *testing.T) {
+	script := detachedRuntimeBridgeScript()
+	for _, expected := range []string{
+		"present: function ()",
+		"control.Present()",
+		"native window present control is unavailable",
+	} {
+		if !strings.Contains(script, expected) {
+			t.Fatalf("runtime bridge is missing presentation marker %q", expected)
+		}
+	}
+}

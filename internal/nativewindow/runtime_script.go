@@ -79,6 +79,12 @@ func detachedRuntimeBridgeScript() string {
       }
       return detached.bootstrapPromise;
     },
+    present: function () {
+      if (!control || typeof control.Present !== 'function') {
+        return Promise.reject(new Error('native window present control is unavailable'));
+      }
+      return control.Present();
+    },
     action: function (action, payload) {
       return bridge.Action(String(action || ''), payload || {});
     }
@@ -92,14 +98,19 @@ func detachedRuntimeBridgeScript() string {
   var detachedWindowIDPromise = Promise.resolve(bridge.WindowID()).then(function (windowID) {
     return String(windowID || '');
   });
+  var requestGracefulClose = function (reason) {
+    window.dispatchEvent(new CustomEvent('` + GracefulCloseRequestEventName + `', {
+      detail: { reason: String(reason || '') }
+    }));
+  };
 
   var runtime = window.runtime || {};
   if (typeof runtime.EventsOnMultiple === 'function') {
     runtime.EventsOnMultiple('` + CommandEventName + `', function (command) {
       detachedWindowIDPromise.then(function (windowID) {
         if (!command || String(command.id || '') !== windowID) return;
-        if (command.action === 'close' && control && typeof control.Close === 'function') {
-          control.Close();
+        if (command.action === 'close') {
+          requestGracefulClose(command.reason);
         } else if (command.action === 'focus' && control && typeof control.Focus === 'function') {
           control.Focus();
         }

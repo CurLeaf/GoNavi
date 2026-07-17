@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"math"
 	"net"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -37,8 +39,8 @@ const (
 )
 
 const (
-	forceCloseDelay         = 3 * time.Second
-	defaultOpenReadyTimeout = 10 * time.Second
+	defaultGracefulCloseTimeout = 10 * time.Second
+	defaultOpenReadyTimeout     = 10 * time.Second
 )
 
 type processExit struct {
@@ -46,16 +48,19 @@ type processExit struct {
 }
 
 type windowEntry struct {
-	info         WindowInfo
-	payload      any
-	ownerID      string
-	process      childProcess
-	exitReason   string
-	ready        chan struct{}
-	done         chan processExit
-	readyOnce    sync.Once
-	doneOnce     sync.Once
-	acknowledged bool
+	info            WindowInfo
+	payload         any
+	hostState       HostStateRequest
+	ownerID         string
+	process         childProcess
+	exitReason      string
+	closeGeneration uint64
+	actionRevision  int64
+	ready           chan struct{}
+	done            chan processExit
+	readyOnce       sync.Once
+	doneOnce        sync.Once
+	acknowledged    bool
 }
 
 // Manager owns the loopback bridge and the registry of detached Wails child
@@ -73,10 +78,15 @@ type Manager struct {
 	closing    bool
 	windows    map[string]*windowEntry
 
-	starter     processStarter
-	executable  string
-	openTimeout time.Duration
-	emitToWails func(context.Context, string, ...any)
+	starter               processStarter
+	executable            string
+	openTimeout           time.Duration
+	closeFallbackDelay    time.Duration
+	shutdownGracePeriod   time.Duration
+	emitToWails           func(context.Context, string, ...any)
+	emitToChildren        func(string, ...any)
+	emitToChild           func(string, string, ...any)
+	emitToChildBestEffort func(string, string, ...any)
 }
 
 // NewManager prepares a detached-window manager around the already-created
@@ -99,15 +109,20 @@ func NewManager(assetFS fs.FS, app *appcore.App, ai *aiservice.Service) (*Manage
 		return nil, fmt.Errorf("resolve executable failed: %w", err)
 	}
 	return &Manager{
-		shared:      shared,
-		token:       token,
-		windows:     make(map[string]*windowEntry),
-		starter:     execProcessStarter{},
-		executable:  executable,
-		openTimeout: defaultOpenReadyTimeout,
+		shared:              shared,
+		token:               token,
+		windows:             make(map[string]*windowEntry),
+		starter:             execProcessStarter{},
+		executable:          executable,
+		openTimeout:         defaultOpenReadyTimeout,
+		closeFallbackDelay:  defaultGracefulCloseTimeout,
+		shutdownGracePeriod: defaultGracefulCloseTimeout,
 		emitToWails: func(ctx context.Context, name string, args ...any) {
 			wailsRuntime.EventsEmit(ctx, name, args...)
 		},
+		emitToChildren:        shared.Emit,
+		emitToChild:           shared.EmitTo,
+		emitToChildBestEffort: shared.EmitToBestEffort,
 	}, nil
 }
 
@@ -190,14 +205,53 @@ func (m *Manager) emit(name string, args ...any) {
 	m.mu.RLock()
 	ctx := m.runtimeCtx
 	emitToWails := m.emitToWails
+	emitToChildren := m.emitToChildren
+	emitToChild := m.emitToChild
+	emitToChildBestEffort := m.emitToChildBestEffort
 	shared := m.shared
 	m.mu.RUnlock()
 	if ctx != nil && emitToWails != nil {
 		emitToWails(ctx, name, args...)
 	}
-	if shared != nil {
+	if strings.HasPrefix(name, "ai:stream:") {
+		if aiStreamEventRequiresReliableDelivery(args) {
+			if emitToChild != nil {
+				emitToChild("ai-chat", name, args...)
+			} else if shared != nil {
+				shared.EmitTo("ai-chat", name, args...)
+			}
+		} else if emitToChildBestEffort != nil {
+			emitToChildBestEffort("ai-chat", name, args...)
+		} else if shared != nil {
+			shared.EmitToBestEffort("ai-chat", name, args...)
+		}
+		return
+	}
+	if emitToChildren != nil {
+		emitToChildren(name, args...)
+	} else if shared != nil {
 		shared.Emit(name, args...)
 	}
+}
+
+func aiStreamEventRequiresReliableDelivery(args []any) bool {
+	if len(args) != 1 {
+		return true
+	}
+	payload, ok := args[0].(map[string]any)
+	if !ok {
+		return true
+	}
+	if done, _ := payload["done"].(bool); done {
+		return true
+	}
+	if errorText, _ := payload["error"].(string); strings.TrimSpace(errorText) != "" {
+		return true
+	}
+	toolCalls := reflect.ValueOf(payload["tool_calls"])
+	return toolCalls.IsValid() &&
+		(toolCalls.Kind() == reflect.Array || toolCalls.Kind() == reflect.Slice) &&
+		toolCalls.Len() > 0
 }
 
 // Open launches one native Wails child process. Existing IDs are focused
@@ -298,11 +352,17 @@ func (m *Manager) open(request OpenRequest, ownerID string) OperationResult {
 	case <-timer.C:
 		m.mu.Lock()
 		current, active := m.windows[request.ID]
-		if active && current == entry {
+		if active && current == entry && entry.info.Ready {
+			entry.acknowledged = true
+			m.mu.Unlock()
+			return OperationResult{Success: true, ID: request.ID}
+		}
+		registered := active && current == entry
+		if registered {
 			delete(m.windows, request.ID)
 		}
 		m.mu.Unlock()
-		if active {
+		if registered {
 			_ = process.Kill()
 		}
 		return operationFailure("native window did not become ready in time")
@@ -326,12 +386,18 @@ func (m *Manager) Focus(id string) OperationResult {
 	id = strings.TrimSpace(id)
 	m.mu.RLock()
 	_, exists := m.windows[id]
+	emitToChild := m.emitToChild
 	shared := m.shared
 	m.mu.RUnlock()
 	if !exists {
 		return operationFailure("native window was not found")
 	}
-	shared.Emit(CommandEventName, childCommand{ID: id, Action: "focus"})
+	command := childCommand{ID: id, Action: "focus"}
+	if emitToChild != nil {
+		emitToChild(id, CommandEventName, command)
+	} else if shared != nil {
+		shared.EmitTo(id, CommandEventName, command)
+	}
 	return OperationResult{Success: true, ID: id}
 }
 
@@ -351,32 +417,78 @@ func (m *Manager) requestClose(id string, reason string) OperationResult {
 		m.mu.Unlock()
 		return operationFailure("native window was not found")
 	}
+	if entry.info.CloseSent {
+		m.mu.Unlock()
+		return OperationResult{Success: true, ID: id}
+	}
 	childAlreadyClosing := entry.exitReason == ExitReasonAttached || entry.exitReason == ExitReasonWindowClosed
 	if entry.exitReason == "" {
 		entry.exitReason = reason
 	}
 	entry.info.CloseSent = true
+	entry.closeGeneration++
+	closeGeneration := entry.closeGeneration
 	process := entry.process
 	shared := m.shared
+	emitToChild := m.emitToChild
+	delay := m.closeFallbackDelay
+	if delay <= 0 {
+		delay = defaultGracefulCloseTimeout
+	}
 	m.mu.Unlock()
 
 	// attach/close actions are emitted before their HTTP response is written.
 	// Do not race that response with a second close command: the child will quit
 	// itself after receiving the successful terminal-action response.
 	if !childAlreadyClosing {
-		shared.Emit(CommandEventName, childCommand{ID: id, Action: "close"})
+		command := childCommand{ID: id, Action: "close", Reason: reason}
+		if emitToChild != nil {
+			emitToChild(id, CommandEventName, command)
+		} else if shared != nil {
+			shared.EmitTo(id, CommandEventName, command)
+		}
 	}
 	if process != nil {
-		time.AfterFunc(forceCloseDelay, func() {
-			m.mu.RLock()
+		time.AfterFunc(delay, func() {
+			m.mu.Lock()
+			defer m.mu.Unlock()
 			current, active := m.windows[id]
-			m.mu.RUnlock()
-			if active && current.process == process {
+			if active &&
+				current.process == process &&
+				current.info.CloseSent &&
+				current.closeGeneration == closeGeneration {
 				_ = process.Kill()
 			}
 		})
 	}
 	return OperationResult{Success: true, ID: id}
+}
+
+// CancelClose clears a pending graceful-close request. Incrementing the close
+// generation makes an already queued force-kill callback harmless.
+func (m *Manager) CancelClose(id string) OperationResult {
+	if m == nil {
+		return operationFailure("native window manager is unavailable")
+	}
+	id = strings.TrimSpace(id)
+	m.mu.Lock()
+	entry, exists := m.windows[id]
+	if !exists {
+		m.mu.Unlock()
+		return operationFailure("native window was not found")
+	}
+	m.cancelCloseLocked(entry)
+	m.mu.Unlock()
+	return OperationResult{Success: true, ID: id}
+}
+
+func (m *Manager) cancelCloseLocked(entry *windowEntry) {
+	entry.closeGeneration++
+	entry.info.CloseSent = false
+	switch entry.exitReason {
+	case ExitReasonRequested, ExitReasonParentShutdown, ExitReasonAttached, ExitReasonWindowClosed:
+		entry.exitReason = ""
+	}
 }
 
 // CloseAll requests graceful shutdown of every detached child.
@@ -410,8 +522,78 @@ func (m *Manager) List() []WindowInfo {
 	return result
 }
 
+// SyncHostState retains and invalidates the newest main-window snapshot for one
+// active child. It deliberately bypasses the main Wails event bus so host state
+// cannot echo back into the window that produced it.
+func (m *Manager) SyncHostState(request HostStateRequest) OperationResult {
+	if m == nil {
+		return operationFailure("native window manager is unavailable")
+	}
+	request.ID = strings.TrimSpace(request.ID)
+	if request.ID == "" {
+		return operationFailure("native host-state window id is required")
+	}
+	if request.Revision <= 0 {
+		return operationFailure("native host-state revision must be positive")
+	}
+	storeState, err := cloneHostStoreState(request.StoreState)
+	if err != nil {
+		return operationFailure(err.Error())
+	}
+	request.StoreState = storeState
+
+	m.mu.Lock()
+	entry, exists := m.windows[request.ID]
+	if !exists {
+		m.mu.Unlock()
+		return operationFailure("native window was not found")
+	}
+	if request.Revision <= entry.hostState.Revision {
+		m.mu.Unlock()
+		return OperationResult{Success: true, ID: request.ID, Message: "stale host state ignored"}
+	}
+	entry.hostState = request
+	emitToChild := m.emitToChild
+	shared := m.shared
+	m.mu.Unlock()
+
+	command := childCommand{
+		ID:      request.ID,
+		Action:  "sync-host-state",
+		Payload: hostStateInvalidationPayload{Revision: request.Revision},
+	}
+	if emitToChild != nil {
+		emitToChild(request.ID, CommandEventName, command)
+	} else if shared != nil {
+		shared.EmitTo(request.ID, CommandEventName, command)
+	}
+	return OperationResult{Success: true, ID: request.ID}
+}
+
+type hostStateInvalidationPayload struct {
+	Revision int64 `json:"revision"`
+}
+
+func cloneHostStoreState(storeState map[string]any) (map[string]any, error) {
+	if storeState == nil {
+		return nil, fmt.Errorf("native host-state storeState is required")
+	}
+	payload, err := json.Marshal(storeState)
+	if err != nil {
+		return nil, fmt.Errorf("encode native host state failed: %w", err)
+	}
+	if int64(len(payload)) > maxDetachedJSONBytes {
+		return nil, fmt.Errorf("native host state exceeds the maximum payload size")
+	}
+	cloned := make(map[string]any)
+	if err := json.Unmarshal(payload, &cloned); err != nil {
+		return nil, fmt.Errorf("clone native host state failed: %w", err)
+	}
+	return cloned, nil
+}
+
 func (m *Manager) processSpecLocked(request OpenRequest) processSpec {
-	env := append([]string(nil), os.Environ()...)
+	env := filterDetachedChildEnvironment(os.Environ())
 	values := map[string]string{
 		envParentURL: m.endpoint,
 		envToken:     m.token,
@@ -487,7 +669,42 @@ func (m *Manager) watchProcess(id string, process childProcess) {
 }
 
 func (m *Manager) emitDetached(event Event) {
-	m.emit(MainEventName, event)
+	if m == nil {
+		return
+	}
+	m.mu.RLock()
+	ctx := m.runtimeCtx
+	emitToWails := m.emitToWails
+	emitToChild := m.emitToChild
+	shared := m.shared
+	m.mu.RUnlock()
+	if ctx != nil && emitToWails != nil {
+		emitToWails(ctx, MainEventName, event)
+	}
+	// Only child-owned window lifecycle must cross back into a child process.
+	// Top-level child sync can contain large result/history snapshots and must
+	// never be broadcast to every detached SSE subscriber.
+	ownerID := ownerWindowIDFromPayload(event.Payload)
+	if ownerID == "" {
+		return
+	}
+	if emitToChild != nil {
+		emitToChild(ownerID, MainEventName, event)
+	} else if shared != nil {
+		shared.EmitTo(ownerID, MainEventName, event)
+	}
+}
+
+func ownerWindowIDFromPayload(payload any) string {
+	record, ok := payload.(map[string]any)
+	if !ok {
+		return ""
+	}
+	ownerID, ok := record["ownerWindowId"].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(ownerID)
 }
 
 func operationFailure(message string) OperationResult {
@@ -501,7 +718,7 @@ func validateOpenRequest(request OpenRequest) error {
 	if strings.ContainsRune(request.Kind, '\x00') || strings.ContainsRune(request.Title, '\x00') {
 		return fmt.Errorf("native window kind or title is invalid")
 	}
-	if request.Kind != "workbench" && request.Kind != "query-result" {
+	if request.Kind != "workbench" && request.Kind != "query-result" && request.Kind != "ai-chat" {
 		return fmt.Errorf("native window kind is unsupported")
 	}
 	return nil
@@ -514,16 +731,40 @@ func (m *Manager) shutdown() {
 		return
 	}
 	m.closing = true
+	ids := make([]string, 0, len(m.windows))
+	for id, entry := range m.windows {
+		ids = append(ids, id)
+		entry.exitReason = ExitReasonParentShutdown
+		entry.info.CloseSent = true
+		entry.closeGeneration++
+	}
+	httpServer := m.httpServer
+	shared := m.shared
+	emitToChild := m.emitToChild
+	gracePeriod := m.shutdownGracePeriod
+	if gracePeriod <= 0 {
+		gracePeriod = defaultGracefulCloseTimeout
+	}
+	m.mu.Unlock()
+
+	for _, id := range ids {
+		command := childCommand{ID: id, Action: "close", Reason: ExitReasonParentShutdown}
+		if emitToChild != nil {
+			emitToChild(id, CommandEventName, command)
+		} else if shared != nil {
+			shared.EmitTo(id, CommandEventName, command)
+		}
+	}
+	m.waitForChildren(gracePeriod)
+
+	m.mu.RLock()
 	processes := make([]childProcess, 0, len(m.windows))
 	for _, entry := range m.windows {
-		entry.exitReason = ExitReasonParentShutdown
 		if entry.process != nil {
 			processes = append(processes, entry.process)
 		}
 	}
-	httpServer := m.httpServer
-	m.mu.Unlock()
-
+	m.mu.RUnlock()
 	for _, process := range processes {
 		_ = process.Kill()
 	}
@@ -532,6 +773,42 @@ func (m *Manager) shutdown() {
 		_ = httpServer.Shutdown(ctx)
 		cancel()
 	}
+	m.mu.Lock()
+	m.started = false
+	m.httpServer = nil
+	m.listener = nil
+	m.endpoint = ""
+	m.mu.Unlock()
+}
+
+func (m *Manager) waitForChildren(timeout time.Duration) {
+	if timeout <= 0 {
+		return
+	}
+	pollInterval := 10 * time.Millisecond
+	if timeout < pollInterval {
+		pollInterval = timeout / 4
+		if pollInterval <= 0 {
+			pollInterval = time.Millisecond
+		}
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		m.mu.RLock()
+		remaining := len(m.windows)
+		m.mu.RUnlock()
+		if remaining == 0 {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-timer.C:
+			return
+		}
+	}
 }
 
 func (m *Manager) authenticatedHandler() http.Handler {
@@ -539,6 +816,8 @@ func (m *Manager) authenticatedHandler() http.Handler {
 	mux.HandleFunc(BootstrapPath, m.handleBootstrap)
 	mux.HandleFunc(ActionPath, m.handleAction)
 	mux.HandleFunc(ControlPath, m.handleControl)
+	mux.HandleFunc(HostStatePath, m.handleHostState)
+	mux.HandleFunc(CommandStatePath, m.handleCommandState)
 	mux.Handle("/", m.shared.Handler())
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isLoopbackRemote(r.RemoteAddr) {
@@ -591,6 +870,60 @@ func (m *Manager) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(bootstrap)
 }
 
+func (m *Manager) handleHostState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimSpace(r.Header.Get(HeaderWindowID))
+	m.mu.RLock()
+	entry, exists := m.windows[id]
+	if !exists {
+		m.mu.RUnlock()
+		http.Error(w, "unknown detached window", http.StatusNotFound)
+		return
+	}
+	hostState := entry.hostState
+	m.mu.RUnlock()
+	if hostState.Revision <= 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(hostState)
+}
+
+func (m *Manager) handleCommandState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimSpace(r.Header.Get(HeaderWindowID))
+	m.mu.RLock()
+	entry, exists := m.windows[id]
+	if !exists {
+		m.mu.RUnlock()
+		http.Error(w, "unknown detached window", http.StatusNotFound)
+		return
+	}
+	closeSent := entry.info.CloseSent
+	reason := entry.exitReason
+	m.mu.RUnlock()
+	if !closeSent {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if strings.TrimSpace(reason) == "" {
+		reason = ExitReasonRequested
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(childCommand{
+		ID:     id,
+		Action: "close",
+		Reason: reason,
+	})
+}
+
 func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -605,19 +938,33 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	request.Action = strings.ToLower(strings.TrimSpace(request.Action))
 	switch request.Action {
-	case "ready", "sync", "attach", "close":
+	case "ready", "sync", "attach", "close", "cancel-close", "host-event", "open-ai-settings":
 	default:
 		http.Error(w, "unsupported detached action", http.StatusBadRequest)
 		return
 	}
 
 	id := strings.TrimSpace(r.Header.Get(HeaderWindowID))
+	revision := positiveActionRevision(request.Payload)
 	m.mu.Lock()
 	entry, exists := m.windows[id]
 	if !exists {
 		m.mu.Unlock()
 		http.Error(w, "unknown detached window", http.StatusNotFound)
 		return
+	}
+	if actionUsesRevision(request.Action) && revision > 0 {
+		if revision <= entry.actionRevision {
+			m.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(OperationResult{
+				Success: true,
+				ID:      id,
+				Message: "stale detached action ignored",
+			})
+			return
+		}
+		entry.actionRevision = revision
 	}
 	if request.Action == "ready" {
 		entry.info.Ready = true
@@ -630,6 +977,8 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 		entry.exitReason = ExitReasonAttached
 	} else if request.Action == "close" && entry.exitReason == "" {
 		entry.exitReason = ExitReasonWindowClosed
+	} else if request.Action == "cancel-close" {
+		m.cancelCloseLocked(entry)
 	}
 	info := entry.info
 	ownerID := entry.ownerID
@@ -645,6 +994,38 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(OperationResult{Success: true, ID: id})
+}
+
+func actionUsesRevision(action string) bool {
+	return action == "sync" || action == "attach" || action == "close"
+}
+
+func positiveActionRevision(payload any) int64 {
+	record, ok := payload.(map[string]any)
+	if !ok {
+		return 0
+	}
+	switch value := record["revision"].(type) {
+	case float64:
+		if value <= 0 || value > 9_007_199_254_740_991 || math.Trunc(value) != value {
+			return 0
+		}
+		return int64(value)
+	case json.Number:
+		revision, err := value.Int64()
+		if err == nil && revision > 0 {
+			return revision
+		}
+	case int64:
+		if value > 0 {
+			return value
+		}
+	case int:
+		if value > 0 {
+			return int64(value)
+		}
+	}
+	return 0
 }
 
 func (m *Manager) handleControl(w http.ResponseWriter, r *http.Request) {

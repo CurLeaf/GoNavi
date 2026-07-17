@@ -1,7 +1,6 @@
 import React, { useSyncExternalStore } from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
-import NativeDetachedWindowApp from './components/NativeDetachedWindowApp'
 // import './index.css' // Optional global styles
 
 import { setCurrentLanguage, t } from './i18n'
@@ -9,7 +8,6 @@ import { I18nProvider } from './i18n/provider'
 import { applyDayjsLocale } from './i18n/runtime'
 import { useStore } from './store'
 import { cloneBrowserMockValue, duplicateBrowserMockConnection, resolveBrowserMockSecretFlag } from './utils/browserMockConnections'
-import { isNativeDetachedWindow } from './utils/nativeDetachedWindowClient'
 
 const resolveDevHarnessMode = (): string => {
     if (typeof window === 'undefined') {
@@ -937,9 +935,7 @@ const Root = ({ rootComponent }: { rootComponent: React.ReactNode }) => {
 };
 
 const renderRoot = async () => {
-    let rootComponent: React.ReactNode = isNativeDetachedWindow()
-        ? <NativeDetachedWindowApp />
-        : <App />;
+    let rootComponent: React.ReactNode = <App />;
     if (devHarnessMode === 'datagrid-perf') {
         const { default: PerfDataGridHarness } = await import('./dev/PerfDataGridHarness');
         rootComponent = <PerfDataGridHarness />;
