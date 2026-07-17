@@ -832,6 +832,11 @@ jobs:
             --platform "$TARGET_PLATFORM" \
             --drivers "$NORMALIZED_CHANGED_DRIVER_AGENTS"
 
+          mkdir -p driver-provenance
+          python3 ./tools/generate-driver-release-manifest.py \
+            --assets-dir drivers \
+            --provenance-output "driver-provenance/${GOOS}-${GOARCH}.json"
+
       # macOS Packaging
       - name: Package macOS DMG
         if: contains(matrix.platform, 'darwin')
@@ -1094,6 +1099,7 @@ jobs:
             GoNavi-*.tar.gz
             GoNavi-*.AppImage
             drivers/**
+            driver-provenance/**
           retention-days: 7
 
   # 汇总所有产物并发布为 Pre-release
@@ -1120,6 +1126,22 @@ jobs:
 
       - name: List Assets
         run: ls -R release-assets
+
+      - name: Download Previous Driver Manifest
+        if: needs.driver_agents.outputs.has_changes == 'true' && needs.driver_agents.outputs.release_source != 'all'
+        env:
+          DRIVER_RELEASE_SOURCE: ${{ needs.driver_agents.outputs.release_source }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_path="$RUNNER_TEMP/previous-driver-manifest.json"
+          manifest_url="https://github.com/Syngnat/GoNavi-DriverAgents/releases/download/${DRIVER_RELEASE_SOURCE}/GoNavi-DriverAgents-Manifest.json"
+          if curl --retry 3 --retry-delay 2 --retry-all-errors -fsSL "$manifest_url" -o "$manifest_path"; then
+            echo "🧭 已下载上一版 driver manifest 作为复用资产 provenance"
+          else
+            rm -f "$manifest_path"
+            echo "⚠️ 上一版 driver manifest 不可用；未重建资产将由 manifest 生成阶段拒绝"
+          fi
 
       - name: Complete Driver Agent Assets
         if: needs.driver_agents.outputs.has_changes == 'true'
@@ -1154,11 +1176,19 @@ jobs:
             drivers \
             ../driver-release-assets
 
-          python3 ../tools/generate-driver-release-manifest.py \
-            --assets-dir drivers \
+          MANIFEST_ARGS=(
+            --assets-dir drivers
             --output ../driver-release-assets/GoNavi-DriverAgents-Manifest.json
+          )
+          if [ -d driver-provenance ]; then
+            MANIFEST_ARGS+=(--provenance driver-provenance)
+          fi
+          if [ -s "$RUNNER_TEMP/previous-driver-manifest.json" ]; then
+            MANIFEST_ARGS+=(--provenance "$RUNNER_TEMP/previous-driver-manifest.json")
+          fi
+          python3 ../tools/generate-driver-release-manifest.py "${MANIFEST_ARGS[@]}"
 
-          rm -rf drivers
+          rm -rf drivers driver-provenance
           echo "has_driver_assets=true" >> "$GITHUB_OUTPUT"
 
       - name: Generate SHA256SUMS
