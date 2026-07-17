@@ -298,6 +298,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     initialViewMode,
     initialViewModeRequestId,
     onDataViewActivate,
+    onDataChange,
 }) => {
   const connections = useStore(state => state.connections);
   const addTab = useStore(state => state.addTab);
@@ -524,6 +525,10 @@ const DataGrid: React.FC<DataGridProps> = ({
           GONAVI_ROW_KEY,
       ),
       [displayColumnNames, allOrderedColumnNames, visibleColumnNames]
+  );
+  const dataChangeOutputColumnNames = useMemo(
+      () => resolveDataGridOutputColumnNames(columnNames, GONAVI_ROW_KEY),
+      [columnNames],
   );
 
   // Handle Dragging
@@ -2069,6 +2074,21 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
   }, [displayData, modifiedRows, deletedRowKeys]);
   mergedDisplayDataRef.current = mergedDisplayData;
+  const lastReportedDataFingerprintRef = useRef('');
+  useEffect(() => {
+      if (!onDataChange) return;
+      const currentRows = mergedDisplayData.filter((row) => {
+          const rowKey = row?.[GONAVI_ROW_KEY];
+          return rowKey === undefined || !deletedRowKeys.has(rowKeyStr(rowKey));
+      });
+      // A hidden column is still part of the result snapshot. Only presentation
+      // uses displayOutputColumnNames; detach/attach state must keep full rows.
+      const outputRows = pickDataGridOutputRows(currentRows, dataChangeOutputColumnNames);
+      const fingerprint = JSON.stringify(outputRows);
+      if (fingerprint === lastReportedDataFingerprintRef.current) return;
+      lastReportedDataFingerprintRef.current = fingerprint;
+      onDataChange(outputRows);
+  }, [dataChangeOutputColumnNames, deletedRowKeys, mergedDisplayData, onDataChange, rowKeyStr]);
 
   const dataSourceContextKey = useMemo(
       () => `${connectionId || ''}\u0001${dbName || ''}\u0001${tableName || ''}`,

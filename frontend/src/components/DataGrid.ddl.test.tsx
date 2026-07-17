@@ -796,6 +796,16 @@ describe('DataGrid commit change set', () => {
     expect(dataGridSource).toContain('data_grid.message.locator_column_value_empty');
   });
 
+  it('keeps hidden result columns in detached-window data snapshots', () => {
+    const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    expect(dataGridSource).toContain(
+      'pickDataGridOutputRows(currentRows, dataChangeOutputColumnNames)',
+    );
+    expect(dataGridSource).not.toContain(
+      'pickDataGridOutputRows(currentRows, displayOutputColumnNames)',
+    );
+  });
+
   it('keeps DataGrid column quick-find warning messages localized', () => {
     const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
 

@@ -1359,6 +1359,7 @@ interface DataGridProps {
     initialViewMode?: GridViewMode;
     initialViewModeRequestId?: string;
     onDataViewActivate?: () => void;
+    onDataChange?: (rows: any[]) => void;
 }
 
 type GridFilterCondition = FilterCondition & {
