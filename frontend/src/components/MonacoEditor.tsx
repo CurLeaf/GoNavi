@@ -51,6 +51,13 @@ const sameEditorPosition = (left: any, right: any): boolean => (
   && Number(left?.column) === Number(right?.column)
 );
 
+const sameEditorRange = (left: any, right: any): boolean => (
+  Number(left?.startLineNumber) === Number(right?.startLineNumber)
+  && Number(left?.startColumn) === Number(right?.startColumn)
+  && Number(left?.endLineNumber) === Number(right?.endLineNumber)
+  && Number(left?.endColumn) === Number(right?.endColumn)
+);
+
 const isSelectionEmpty = (selection: any): boolean => (
   !selection
   || (
@@ -278,6 +285,19 @@ export const installPrintableInputFallback = (editor: any, monaco: any) => {
     text: string;
     timer: number | null;
   } | null = null;
+  let pendingSelectionInput: {
+    valueBefore: string;
+    rangeBefore: {
+      startLineNumber: number;
+      startColumn: number;
+      endLineNumber: number;
+      endColumn: number;
+    };
+    startOffset: number;
+    endOffset: number;
+    text: string;
+    timer: number | null;
+  } | null = null;
 
   const clearPendingInput = () => {
     if (!pendingInput) {
@@ -287,6 +307,16 @@ export const installPrintableInputFallback = (editor: any, monaco: any) => {
       clearTimeout(pendingInput.timer);
     }
     pendingInput = null;
+  };
+
+  const clearPendingSelectionInput = () => {
+    if (!pendingSelectionInput) {
+      return;
+    }
+    if (pendingSelectionInput.timer !== null) {
+      clearTimeout(pendingSelectionInput.timer);
+    }
+    pendingSelectionInput = null;
   };
 
   const getPendingNativeInputDelta = (pending: NonNullable<typeof pendingInput>) => {
@@ -408,6 +438,98 @@ export const installPrintableInputFallback = (editor: any, monaco: any) => {
     return true;
   };
 
+  const getSelectionReplacementValue = (
+    pending: NonNullable<typeof pendingSelectionInput>,
+    text: string,
+  ): string => (
+    pending.valueBefore.slice(0, pending.startOffset)
+    + text
+    + pending.valueBefore.slice(pending.endOffset)
+  );
+
+  const hasSelectionInputValueApplied = (
+    pending: NonNullable<typeof pendingSelectionInput>,
+  ): boolean => (
+    String(editor.getValue?.() ?? '') === getSelectionReplacementValue(pending, pending.text)
+  );
+
+  const hasNativeSelectionInputApplied = (
+    pending: NonNullable<typeof pendingSelectionInput>,
+  ): boolean => {
+    if (!hasSelectionInputValueApplied(pending)) {
+      return false;
+    }
+    const expectedPosition = editor.getModel?.()?.getPositionAt?.(
+      pending.startOffset + pending.text.length,
+    );
+    return isSelectionEmpty(editor.getSelection?.())
+      && sameEditorPosition(editor.getPosition?.(), expectedPosition);
+  };
+
+  const recoverPendingSelectionInput = (
+    pending: NonNullable<typeof pendingSelectionInput>,
+  ): boolean => {
+    const afterValue = String(editor.getValue?.() ?? '');
+    const expectedValue = getSelectionReplacementValue(pending, pending.text);
+    const model = editor.getModel?.();
+    if (afterValue === expectedValue) {
+      const expectedPosition = model?.getPositionAt?.(
+        pending.startOffset + pending.text.length,
+      );
+      if (expectedPosition) {
+        editor.setPosition?.(expectedPosition);
+      }
+      return true;
+    }
+    const valueAfterDeletion = getSelectionReplacementValue(pending, '');
+    if (
+      (afterValue !== pending.valueBefore && afterValue !== valueAfterDeletion)
+      || typeof editor.executeEdits !== 'function'
+    ) {
+      return false;
+    }
+
+    const range = afterValue === pending.valueBefore
+      ? pending.rangeBefore
+      : (() => {
+          const startPosition = model?.getPositionAt?.(pending.startOffset);
+          if (!startPosition) {
+            return null;
+          }
+          return {
+            startLineNumber: startPosition.lineNumber,
+            startColumn: startPosition.column,
+            endLineNumber: startPosition.lineNumber,
+            endColumn: startPosition.column,
+          };
+        })();
+    if (!range) {
+      return false;
+    }
+
+    editor.executeEdits('gonavi-printable-selection-fallback', [{
+      range,
+      text: pending.text,
+      forceMoveMarkers: true,
+    }]);
+    const nextPosition = model?.getPositionAt?.(pending.startOffset + pending.text.length);
+    if (nextPosition) {
+      editor.setPosition?.(nextPosition);
+    }
+    return true;
+  };
+
+  const settlePendingSelectionInput = () => {
+    const pending = pendingSelectionInput;
+    if (!pending) {
+      return;
+    }
+    clearPendingSelectionInput();
+    if (!hasNativeSelectionInputApplied(pending)) {
+      recoverPendingSelectionInput(pending);
+    }
+  };
+
   const isReadOnly = (): boolean => {
     try {
       const optionId = monaco?.editor?.EditorOption?.readOnly;
@@ -429,8 +551,66 @@ export const installPrintableInputFallback = (editor: any, monaco: any) => {
       return;
     }
 
-    const selectionBefore = editor.getSelection?.();
+    let selectionBefore = editor.getSelection?.();
+    if (pendingSelectionInput) {
+      if (
+        isSelectionEmpty(selectionBefore)
+        || sameEditorRange(selectionBefore, pendingSelectionInput.rangeBefore)
+      ) {
+        settlePendingSelectionInput();
+        selectionBefore = editor.getSelection?.();
+      } else {
+        clearPendingSelectionInput();
+      }
+    }
     if (!isSelectionEmpty(selectionBefore)) {
+      if (pendingInput) {
+        clearPendingInput();
+      }
+
+      const model = editor.getModel?.();
+      const startOffset = Number(model?.getOffsetAt?.({
+        lineNumber: selectionBefore.startLineNumber,
+        column: selectionBefore.startColumn,
+      }));
+      const endOffset = Number(model?.getOffsetAt?.({
+        lineNumber: selectionBefore.endLineNumber,
+        column: selectionBefore.endColumn,
+      }));
+      if (!Number.isFinite(startOffset) || !Number.isFinite(endOffset) || startOffset >= endOffset) {
+        return;
+      }
+
+      const pending = {
+        valueBefore: String(editor.getValue?.() ?? ''),
+        rangeBefore: {
+          startLineNumber: selectionBefore.startLineNumber,
+          startColumn: selectionBefore.startColumn,
+          endLineNumber: selectionBefore.endLineNumber,
+          endColumn: selectionBefore.endColumn,
+        },
+        startOffset,
+        endOffset,
+        text,
+        timer: null as number | null,
+      };
+      pendingSelectionInput = pending;
+      pending.timer = window.setTimeout(() => {
+        if (pendingSelectionInput !== pending) {
+          return;
+        }
+        pendingSelectionInput = null;
+        const domNode = editor.getDomNode?.();
+        if (!(domNode instanceof HTMLElement) || !domNode.isConnected || isReadOnly()) {
+          return;
+        }
+        if (document.activeElement && !domNode.contains(document.activeElement)) {
+          return;
+        }
+        if (!hasNativeSelectionInputApplied(pending)) {
+          recoverPendingSelectionInput(pending);
+        }
+      }, PRINTABLE_INPUT_FALLBACK_DELAY_MS);
       return;
     }
     let beforeValue = String(editor.getValue?.() ?? '');
@@ -504,9 +684,13 @@ export const installPrintableInputFallback = (editor: any, monaco: any) => {
     if (pendingInput && hasNativeInputApplied(pendingInput)) {
       clearPendingInput();
     }
+    if (pendingSelectionInput && hasSelectionInputValueApplied(pendingSelectionInput)) {
+      clearPendingSelectionInput();
+    }
   });
   editor.onDidDispose?.(() => {
     clearPendingInput();
+    clearPendingSelectionInput();
     modelContentDisposable?.dispose?.();
     input.removeEventListener('beforeinput', handleBeforeInput);
   });
