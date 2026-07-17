@@ -1343,6 +1343,28 @@ func TestDumpTableSQL_OracleBackupBatchesRowsIntoInsertAll(t *testing.T) {
 	}
 }
 
+func TestWriteSQLDatabaseBackupHeaderCreatesMySQLDatabaseBeforeSelectingIt(t *testing.T) {
+	var output bytes.Buffer
+	writer := bufio.NewWriter(&output)
+
+	if err := writeSQLDatabaseBackupHeader(writer, connection.ConnectionConfig{Type: "mysql"}, "restore_target"); err != nil {
+		t.Fatalf("writeSQLDatabaseBackupHeader returned error: %v", err)
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatalf("flush header: %v", err)
+	}
+
+	content := output.String()
+	createIndex := strings.Index(content, "CREATE DATABASE IF NOT EXISTS `restore_target`;")
+	useIndex := strings.Index(content, "USE `restore_target`;")
+	if createIndex < 0 {
+		t.Fatalf("database backup header must create the source database, content=%q", content)
+	}
+	if useIndex < 0 || createIndex > useIndex {
+		t.Fatalf("database backup header must create the database before USE, content=%q", content)
+	}
+}
+
 func TestFilterExportObjectsBySchema_PostgresQualifiedObjectsOnly(t *testing.T) {
 	got := filterExportObjectsBySchema(
 		connection.ConnectionConfig{Type: "postgres"},

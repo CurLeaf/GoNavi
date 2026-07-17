@@ -1550,6 +1550,74 @@ func executeSQLFileStream(ctx context.Context, dbInst db.Database, reader io.Rea
 
 // ExecuteSQLFile 在后端流式读取并执行大 SQL 文件，通过事件推送进度。
 // 前端通过 EventsOn("sqlfile:progress", ...) 监听进度。
+const sqlFileExecutionPreambleBytes = 64 * 1024
+
+func readSQLFileExecutionPreamble(reader io.ReadSeeker) ([]byte, error) {
+	buffer := make([]byte, sqlFileExecutionPreambleBytes)
+	read, err := io.ReadFull(reader, buffer)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, err
+	}
+	if _, err := reader.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	return buffer[:read], nil
+}
+
+type goNaviMySQLDatabaseBackupPreamble struct {
+	databaseName           string
+	includesCreateDatabase bool
+}
+
+func parseGoNaviMySQLDatabaseBackupPreamble(preamble []byte) (goNaviMySQLDatabaseBackupPreamble, bool) {
+	text := strings.TrimPrefix(string(preamble), "\ufeff")
+	if !strings.HasPrefix(strings.TrimSpace(text), "-- GoNavi SQL Export") {
+		return goNaviMySQLDatabaseBackupPreamble{}, false
+	}
+
+	databaseName := ""
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "-- Database:") {
+			databaseName = strings.TrimSpace(strings.TrimPrefix(trimmed, "-- Database:"))
+			break
+		}
+	}
+	if databaseName == "" {
+		return goNaviMySQLDatabaseBackupPreamble{}, false
+	}
+
+	quotedDatabase := quoteIdentByType("mysql", databaseName)
+	if !strings.Contains(text, "USE "+quotedDatabase+";") {
+		return goNaviMySQLDatabaseBackupPreamble{}, false
+	}
+	return goNaviMySQLDatabaseBackupPreamble{
+		databaseName:           databaseName,
+		includesCreateDatabase: strings.Contains(text, "CREATE DATABASE IF NOT EXISTS "+quotedDatabase+";"),
+	}, true
+}
+
+func buildGoNaviMySQLDatabaseBackupBootstrapSQL(backup goNaviMySQLDatabaseBackupPreamble) string {
+	if backup.includesCreateDatabase || strings.TrimSpace(backup.databaseName) == "" {
+		return ""
+	}
+	return fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", quoteIdentByType("mysql", backup.databaseName))
+}
+
+func resolveSQLFileExecutionRunConfig(config connection.ConnectionConfig, dbName string, preamble []byte) connection.ConnectionConfig {
+	runConfig := normalizeRunConfig(config, dbName)
+	if strings.EqualFold(strings.TrimSpace(runConfig.Type), "mysql") {
+		_, isGoNaviDatabaseBackup := parseGoNaviMySQLDatabaseBackupPreamble(preamble)
+		if !isGoNaviDatabaseBackup {
+			return runConfig
+		}
+		// A GoNavi database backup creates and selects its source database itself.
+		// Connect at server level so restoring into a deleted database can start.
+		runConfig.Database = ""
+	}
+	return runConfig
+}
+
 func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, filePath string, jobID string) (result connection.QueryResult) {
 	auditSQL := "EXECUTE SQL FILE"
 	auditStatementCount := 0
@@ -1567,20 +1635,29 @@ func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, 
 
 	logger.Warnf("ExecuteSQLFile 开始：file=%s db=%s jobID=%s", filePath, dbName, jobID)
 
-	// 获取数据库连接
-	runConfig := normalizeRunConfig(config, dbName)
-	dbInst, err := a.getDatabase(runConfig)
-	if err != nil {
-		logger.Error(err, "ExecuteSQLFile 获取连接失败：%s", formatConnSummary(runConfig))
-		return connection.QueryResult{Success: false, Message: err.Error()}
-	}
-
 	// 打开文件
 	f, err := os.Open(filePath)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.open_file_failed", map[string]any{"detail": err.Error()})}
 	}
 	defer f.Close()
+	preamble, err := readSQLFileExecutionPreamble(f)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.open_file_failed", map[string]any{"detail": err.Error()})}
+	}
+	backupPreamble := goNaviMySQLDatabaseBackupPreamble{}
+	isGoNaviMySQLDatabaseBackup := false
+	if strings.EqualFold(strings.TrimSpace(config.Type), "mysql") {
+		backupPreamble, isGoNaviMySQLDatabaseBackup = parseGoNaviMySQLDatabaseBackupPreamble(preamble)
+	}
+
+	// GoNavi 的 MySQL 整库备份会在脚本中创建并 USE 源库，因此不能先连接到该库。
+	runConfig := resolveSQLFileExecutionRunConfig(config, dbName, preamble)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		logger.Error(err, "ExecuteSQLFile 获取连接失败：%s", formatConnSummary(runConfig))
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 
 	// 获取文件大小用于计算进度
 	var totalSize int64
@@ -1605,6 +1682,12 @@ func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, 
 		delete(a.runningQueries, jobID)
 		a.queryMu.Unlock()
 	}()
+
+	if bootstrapSQL := buildGoNaviMySQLDatabaseBackupBootstrapSQL(backupPreamble); isGoNaviMySQLDatabaseBackup && bootstrapSQL != "" {
+		if _, err := execSQLFileStatement(ctx, dbInst, bootstrapSQL); err != nil {
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+	}
 
 	// 发送进度事件的辅助函数
 	emitProgress := func(status string, executed, failed, total int, bytesRead int64, currentSQL string, errMsg string) {
@@ -2881,7 +2964,7 @@ func (a *App) exportDatabaseSQLToFile(
 	w := bufio.NewWriterSize(f, 1024*1024)
 	defer w.Flush()
 
-	if err := writeSQLHeader(w, runConfig, dbName); err != nil {
+	if err := writeSQLDatabaseBackupHeader(w, runConfig, dbName); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	for _, objectName := range objects {
@@ -3206,6 +3289,14 @@ func quoteQualifiedIdentByType(dbType string, ident string) string {
 }
 
 func writeSQLHeader(w *bufio.Writer, config connection.ConnectionConfig, dbName string) error {
+	return writeSQLHeaderWithDatabaseBootstrap(w, config, dbName, false)
+}
+
+func writeSQLDatabaseBackupHeader(w *bufio.Writer, config connection.ConnectionConfig, dbName string) error {
+	return writeSQLHeaderWithDatabaseBootstrap(w, config, dbName, true)
+}
+
+func writeSQLHeaderWithDatabaseBootstrap(w *bufio.Writer, config connection.ConnectionConfig, dbName string, createDatabase bool) error {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	if _, err := w.WriteString(fmt.Sprintf("-- GoNavi SQL Export\n-- Time: %s\n", now)); err != nil {
 		return err
@@ -3217,6 +3308,11 @@ func writeSQLHeader(w *bufio.Writer, config connection.ConnectionConfig, dbName 
 	}
 
 	if strings.ToLower(strings.TrimSpace(config.Type)) == "mysql" && strings.TrimSpace(dbName) != "" {
+		if createDatabase {
+			if _, err := w.WriteString(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s;\n\n", quoteIdentByType("mysql", dbName))); err != nil {
+				return err
+			}
+		}
 		if _, err := w.WriteString(fmt.Sprintf("USE %s;\n\n", quoteIdentByType("mysql", dbName))); err != nil {
 			return err
 		}
