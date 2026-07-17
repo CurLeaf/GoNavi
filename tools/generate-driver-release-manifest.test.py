@@ -71,6 +71,21 @@ def expected_revision(revision_file: Path, driver: str):
 
 
 class GenerateDriverReleaseManifestTest(unittest.TestCase):
+    def test_release_jobs_pin_go_toolchain_before_generating_driver_manifest(self):
+        setup_go_step = (
+            "      - name: Setup Go\n"
+            "        uses: actions/setup-go@v6\n"
+            "        with:\n"
+            "          go-version-file: 'go.mod'"
+        )
+        manifest_command = "python3 ../tools/generate-driver-release-manifest.py"
+
+        for workflow_name in ("dev-build.yml", "release.yml"):
+            workflow = (ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
+            release_job = workflow.split("\n  release:\n", 1)[1]
+            self.assertIn(setup_go_step, release_job)
+            self.assertLess(release_job.index(setup_go_step), release_job.index(manifest_command))
+
     def _host_platform(self):
         goos = subprocess.run(
             ["go", "env", "GOOS"],
@@ -142,6 +157,61 @@ class GenerateDriverReleaseManifestTest(unittest.TestCase):
             self.assertIn("src-stale-agent", proc.stderr)
             self.assertFalse(output.exists())
 
+    def test_rejects_native_asset_when_sha_bound_provenance_disagrees_with_binary(self):
+        goos, goarch = self._host_platform()
+        platform = f"{goos}/{goarch}"
+        extension = ".exe" if goos == "windows" else ""
+        with tempfile.TemporaryDirectory(prefix="gonavi-release-manifest-native-provenance-") as tmp:
+            tmpdir = Path(tmp)
+            assets_dir = tmpdir / "drivers"
+            assets_dir.mkdir(parents=True)
+            asset = assets_dir / f"clickhouse-driver-agent-{goos}-{goarch}{extension}"
+            self._build_metadata_agent(asset, "src-binary-revision")
+            content = asset.read_bytes()
+            provenance = tmpdir / "provenance.json"
+            provenance.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "assets": {
+                            asset.name: {
+                                "driver": "clickhouse",
+                                "driverType": "clickhouse",
+                                "platform": platform,
+                                "revision": "src-provenance-revision",
+                                "sha256": hashlib.sha256(content).hexdigest(),
+                                "size": len(content),
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            output = tmpdir / "manifest.json"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--assets-dir",
+                    str(assets_dir),
+                    "--output",
+                    str(output),
+                    "--provenance",
+                    str(provenance),
+                ],
+                cwd=ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            self.assertNotEqual(proc.returncode, 0, proc.stdout)
+            self.assertIn("provenance revision mismatch", proc.stderr)
+            self.assertIn("src-binary-revision", proc.stderr)
+            self.assertIn("src-provenance-revision", proc.stderr)
+            self.assertFalse(output.exists())
+
     def test_rejects_cross_platform_asset_without_binary_revision_provenance(self):
         goos, goarch = self._cross_platform().split("/", 1)
         extension = ".exe" if goos == "windows" else ""
@@ -169,8 +239,7 @@ class GenerateDriverReleaseManifestTest(unittest.TestCase):
         platform = self._cross_platform()
         goos, goarch = platform.split("/", 1)
         extension = ".exe" if goos == "windows" else ""
-        revision_file = self._generate_revision_file(platform)
-        revision = expected_revision(revision_file, "clickhouse")
+        revision = "src-build-provenance"
 
         with tempfile.TemporaryDirectory(prefix="gonavi-release-manifest-provenance-") as tmp:
             tmpdir = Path(tmp)
@@ -221,7 +290,7 @@ class GenerateDriverReleaseManifestTest(unittest.TestCase):
             manifest = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(manifest["assets"][asset.name]["revision"], revision)
 
-    def test_rejects_sha_matching_provenance_with_stale_revision(self):
+    def test_accepts_sha_matching_provenance_from_the_build_runner(self):
         platform = self._cross_platform()
         goos, goarch = platform.split("/", 1)
         extension = ".exe" if goos == "windows" else ""
@@ -242,7 +311,7 @@ class GenerateDriverReleaseManifestTest(unittest.TestCase):
                                 "driver": "clickhouse",
                                 "driverType": "clickhouse",
                                 "platform": platform,
-                                "revision": "src-stale-agent",
+                                "revision": "src-build-runner",
                                 "sha256": hashlib.sha256(content).hexdigest(),
                                 "size": len(content),
                             }
@@ -270,10 +339,9 @@ class GenerateDriverReleaseManifestTest(unittest.TestCase):
                 text=True,
             )
 
-            self.assertNotEqual(proc.returncode, 0, proc.stdout)
-            self.assertIn("provenance revision mismatch", proc.stderr)
-            self.assertIn("src-stale-agent", proc.stderr)
-            self.assertFalse(output.exists())
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            manifest = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["assets"][asset.name]["revision"], "src-build-runner")
 
     def test_writes_sha_bound_build_provenance_from_revision_file(self):
         platform = self._cross_platform()
