@@ -99,7 +99,7 @@ func (a *App) DBReleaseConnection(config connection.ConnectionConfig) connection
 		logger.Error(wrapped, "DBReleaseConnection 解析连接密文失败：%s", formatConnSummary(config))
 		return connection.QueryResult{Success: false, Message: wrapped.Error()}
 	}
-	closed := a.releaseCachedDatabaseConnectionsForConfig(applyGlobalProxyToConnection(resolvedConfig))
+	closed := a.releaseCachedDatabaseConnectionsForConfig(resolvedConfig)
 
 	logger.Infof("DBReleaseConnection 已释放数据库连接：%s 数量=%d", formatConnSummary(resolvedConfig), closed)
 	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.release_success", nil), Data: map[string]int{"closed": closed}}

@@ -564,7 +564,7 @@ func (a *App) invalidateCachedDatabase(config connection.ConnectionConfig, reaso
 	if resolvedConfig, err := a.resolveConnectionSecrets(config); err == nil {
 		config = resolvedConfig
 	}
-	effectiveConfig := applyGlobalProxyToConnection(config)
+	effectiveConfig := config
 	key := getCacheKey(effectiveConfig)
 	shortKey := shortCacheKey(key)
 
@@ -876,7 +876,7 @@ func (a *App) resolveEffectiveConnectionConfig(config connection.ConnectionConfi
 	if err != nil {
 		return config, wrapConnectError(config, err)
 	}
-	return applyGlobalProxyToConnection(resolvedConfig), nil
+	return resolvedConfig, nil
 }
 
 func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing bool) (db.Database, error) {
@@ -884,7 +884,7 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	if err != nil {
 		return nil, wrapConnectError(config, err)
 	}
-	effectiveConfig := applyGlobalProxyToConnection(resolvedConfig)
+	effectiveConfig := resolvedConfig
 	isFileDB := isFileDatabaseType(effectiveConfig.Type)
 
 	key := getCacheKey(effectiveConfig)
@@ -1164,7 +1164,7 @@ func (a *App) connectDatabaseWithStartupRetry(rawConfig connection.ConnectionCon
 	var lastEffectiveConfig connection.ConnectionConfig
 
 	for attempt := 1; attempt <= startupConnectRetryAttempts; attempt++ {
-		effectiveConfig := applyGlobalProxyToConnection(rawConfig)
+		effectiveConfig := rawConfig
 		lastEffectiveConfig = effectiveConfig
 		cacheKey := shortenCacheKey(getCacheKey(effectiveConfig))
 
@@ -1219,12 +1219,7 @@ func (a *App) startupPhaseLabel() string {
 		age = 0
 	}
 	if age <= startupConnectRetryWindow {
-		snapshot := currentGlobalProxyConfig()
-		state := "关闭"
-		if snapshot.Enabled {
-			state = fmt.Sprintf("启用(%s://%s:%d)", strings.ToLower(strings.TrimSpace(snapshot.Proxy.Type)), strings.TrimSpace(snapshot.Proxy.Host), snapshot.Proxy.Port)
-		}
-		return fmt.Sprintf("启动期(age=%s,全局代理=%s)", age, state)
+		return fmt.Sprintf("启动期(age=%s)", age)
 	}
 	return fmt.Sprintf("稳定期(age=%s)", age)
 }
