@@ -2702,6 +2702,18 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 		viewLookup := listViewNameLookup(dbInst, runConfig, dbName)
+		if err := writeSQLDropIfExistsPreamble(
+			w,
+			runConfig,
+			dbName,
+			[]string{tableName},
+			viewLookup,
+			true,
+			options,
+		); err != nil {
+			reporter.Error(0, err.Error())
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
 		if err := dumpTableSQL(w, dbInst, runConfig, dbName, tableName, true, true, viewLookup); err != nil {
 			reporter.Error(0, err.Error())
 			return connection.QueryResult{Success: false, Message: err.Error()}
@@ -2776,7 +2788,7 @@ func (a *App) ExportTablesSQLWithOptions(
 	if reporter != nil {
 		reporter.Start(a.appText("data_export.progress.stage.preparing_batch_tables_export", nil))
 	}
-	return a.exportTablesSQLToFile(config, dbName, objects, includeSchema, includeData, filename, reporter)
+	return a.exportTablesSQLToFile(config, dbName, objects, includeSchema, includeData, filename, reporter, options)
 }
 
 func (a *App) exportTablesSQL(config connection.ConnectionConfig, dbName string, tableNames []string, includeSchema bool, includeData bool) connection.QueryResult {
@@ -2793,7 +2805,16 @@ func (a *App) exportTablesSQL(config connection.ConnectionConfig, dbName string,
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
-	return a.exportTablesSQLToFile(config, dbName, objects, includeSchema, includeData, filename, nil)
+	return a.exportTablesSQLToFile(
+		config,
+		dbName,
+		objects,
+		includeSchema,
+		includeData,
+		filename,
+		nil,
+		ExportFileOptions{Format: "sql"},
+	)
 }
 
 func (a *App) exportTablesSQLToFile(
@@ -2804,6 +2825,7 @@ func (a *App) exportTablesSQLToFile(
 	includeData bool,
 	filename string,
 	reporter *exportProgressReporter,
+	options ExportFileOptions,
 ) connection.QueryResult {
 	if !includeSchema && !includeData {
 		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.invalid_export_mode", nil)}
@@ -2834,6 +2856,20 @@ func (a *App) exportTablesSQLToFile(
 	defer w.Flush()
 
 	if err := writeSQLHeader(w, runConfig, dbName); err != nil {
+		if reporter != nil {
+			reporter.Error(0, err.Error())
+		}
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if err := writeSQLDropIfExistsPreamble(
+		w,
+		runConfig,
+		dbName,
+		objects,
+		viewLookup,
+		includeSchema,
+		options,
+	); err != nil {
 		if reporter != nil {
 			reporter.Error(0, err.Error())
 		}
@@ -2883,10 +2919,20 @@ func (a *App) exportTablesSQLToFile(
 }
 
 func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName string, includeData bool) connection.QueryResult {
+	return a.ExportDatabaseSQLWithOptions(config, dbName, includeData, ExportFileOptions{Format: "sql"})
+}
+
+func (a *App) ExportDatabaseSQLWithOptions(
+	config connection.ConnectionConfig,
+	dbName string,
+	includeData bool,
+	options ExportFileOptions,
+) connection.QueryResult {
 	safeDbName := strings.TrimSpace(dbName)
 	if safeDbName == "" {
 		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.database_name_required", nil)}
 	}
+	options = normalizeExportFileOptions("sql", options)
 
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           a.appText("file.backend.dialog.export_database_sql", map[string]any{"database": safeDbName}),
@@ -2896,7 +2942,7 @@ func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName strin
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
-	return a.exportDatabaseSQLToFile(config, safeDbName, includeData, filename)
+	return a.exportDatabaseSQLToFile(config, safeDbName, includeData, filename, options)
 }
 
 func (a *App) ExportDatabasesSQLWithOptions(
@@ -2935,7 +2981,7 @@ func (a *App) ExportDatabasesSQLWithOptions(
 			}))
 		}
 		targetFile := filepath.Join(directory, buildDatabaseExportDefaultFilename(name, includeData))
-		result := a.exportDatabaseSQLToFile(config, name, includeData, targetFile)
+		result := a.exportDatabaseSQLToFile(config, name, includeData, targetFile, options)
 		if !result.Success {
 			if reporter != nil {
 				reporter.Error(int64(index), result.Message)
@@ -2970,6 +3016,7 @@ func (a *App) exportDatabaseSQLToFile(
 	dbName string,
 	includeData bool,
 	filename string,
+	options ExportFileOptions,
 ) connection.QueryResult {
 	safeDbName := strings.TrimSpace(dbName)
 	if safeDbName == "" {
@@ -3001,6 +3048,17 @@ func (a *App) exportDatabaseSQLToFile(
 	if err := writeSQLDatabaseBackupHeader(w, runConfig, dbName); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
+	if err := writeSQLDropIfExistsPreamble(
+		w,
+		runConfig,
+		dbName,
+		objects,
+		viewLookup,
+		true,
+		options,
+	); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	for _, objectName := range objects {
 		if err := dumpTableSQL(w, dbInst, runConfig, dbName, objectName, true, includeData, viewLookup); err != nil {
 			return connection.QueryResult{Success: false, Message: err.Error()}
@@ -3020,6 +3078,16 @@ func (a *App) exportDatabaseSQLToFile(
 }
 
 func (a *App) ExportSchemaSQL(config connection.ConnectionConfig, dbName string, schemaName string, includeData bool) connection.QueryResult {
+	return a.ExportSchemaSQLWithOptions(config, dbName, schemaName, includeData, ExportFileOptions{Format: "sql"})
+}
+
+func (a *App) ExportSchemaSQLWithOptions(
+	config connection.ConnectionConfig,
+	dbName string,
+	schemaName string,
+	includeData bool,
+	options ExportFileOptions,
+) connection.QueryResult {
 	safeDbName := strings.TrimSpace(dbName)
 	safeSchemaName := strings.TrimSpace(schemaName)
 	if safeDbName == "" {
@@ -3028,6 +3096,7 @@ func (a *App) ExportSchemaSQL(config connection.ConnectionConfig, dbName string,
 	if safeSchemaName == "" {
 		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.schema_name_required", nil)}
 	}
+	options = normalizeExportFileOptions("sql", options)
 
 	suffix := "schema"
 	if includeData {
@@ -3070,6 +3139,17 @@ func (a *App) ExportSchemaSQL(config connection.ConnectionConfig, dbName string,
 	defer w.Flush()
 
 	if err := writeSQLSchemaExportHeader(w, runConfig, dbName, safeSchemaName); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if err := writeSQLDropIfExistsPreamble(
+		w,
+		runConfig,
+		dbName,
+		objects,
+		filteredViews,
+		true,
+		options,
+	); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	for _, objectName := range objects {
@@ -3387,6 +3467,84 @@ func writeSQLFooter(w *bufio.Writer, config connection.ConnectionConfig) error {
 		if _, err := w.WriteString("\nSET FOREIGN_KEY_CHECKS=1;\n"); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func buildSQLDropIfExistsStatement(
+	config connection.ConnectionConfig,
+	dbName string,
+	objectName string,
+	isView bool,
+) string {
+	schemaName, pureObjectName := normalizeSchemaAndTable(config, dbName, objectName)
+	if strings.TrimSpace(pureObjectName) == "" {
+		return ""
+	}
+
+	dbType := resolveDDLDBType(config)
+	objectType := "TABLE"
+	// ClickHouse exposes views (including materialized views) through the table
+	// namespace and removes them with DROP TABLE.
+	if isView && dbType != "clickhouse" {
+		objectType = "VIEW"
+	}
+	qualifiedObject := quoteQualifiedIdentByType(dbType, qualifyTable(schemaName, pureObjectName))
+	if strings.TrimSpace(qualifiedObject) == "" {
+		return ""
+	}
+
+	// Not every supported Oracle version has native DROP ... IF EXISTS.
+	// Use a PL/SQL guard so exported SQL remains backward compatible.
+	if dbType == "oracle" {
+		dropSQL := fmt.Sprintf("DROP %s %s", objectType, qualifiedObject)
+		return fmt.Sprintf(
+			"BEGIN\n  EXECUTE IMMEDIATE '%s';\nEXCEPTION\n  WHEN OTHERS THEN\n    IF SQLCODE != -942 THEN\n      RAISE;\n    END IF;\nEND;\n/",
+			escapeSQLLiteral(dropSQL),
+		)
+	}
+
+	return fmt.Sprintf("DROP %s IF EXISTS %s;", objectType, qualifiedObject)
+}
+
+func writeSQLDropIfExistsPreamble(
+	w *bufio.Writer,
+	config connection.ConnectionConfig,
+	dbName string,
+	objects []string,
+	viewLookup map[string]string,
+	includeSchema bool,
+	options ExportFileOptions,
+) error {
+	if !includeSchema || !options.IncludeDropIfExists || len(objects) == 0 {
+		return nil
+	}
+
+	wroteStatement := false
+	for index := len(objects) - 1; index >= 0; index-- {
+		objectName := strings.TrimSpace(objects[index])
+		if objectName == "" {
+			continue
+		}
+		objectKey := normalizeExportObjectKey(config, dbName, objectName)
+		_, isView := viewLookup[objectKey]
+		statement := buildSQLDropIfExistsStatement(config, dbName, objectName, isView)
+		if statement == "" {
+			continue
+		}
+		if !wroteStatement {
+			if _, err := w.WriteString("\n-- Drop existing objects before recreation\n"); err != nil {
+				return err
+			}
+			wroteStatement = true
+		}
+		if _, err := w.WriteString(statement + "\n"); err != nil {
+			return err
+		}
+	}
+	if wroteStatement {
+		_, err := w.WriteString("\n")
+		return err
 	}
 	return nil
 }

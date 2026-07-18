@@ -13,6 +13,7 @@ import { buildSqlServerObjectDefinitionQueries } from '../../utils/sqlServerObje
 import { buildStarRocksMaterializedViewPreviewSql } from '../tableDesignerSchemaSql';
 import type { ExportRunResult, RunExportWithProgressOptions } from '../useExportProgressRunner';
 import { getTableDataDangerActionMeta, type TableDataDangerActionKind } from '../tableDataDangerActions';
+import { showSQLExportOptionsDialog } from '../SQLExportOptionsDialog';
 import {
   buildDuckDBMacroDDL,
   escapeSQLLiteral,
@@ -235,6 +236,11 @@ export const useSidebarObjectActions = ({
 
   const handleExport = async (node: any, options: { format: string; xlsxMaxRowsPerSheet?: number }) => {
     const { config, dbName, tableName } = node.dataRef;
+    const sqlOptions = options.format === 'sql'
+      ? await showSQLExportOptionsDialog()
+      : null;
+    if (options.format === 'sql' && !sqlOptions) return;
+    const resolvedOptions = sqlOptions ? { ...options, ...sqlOptions } : options;
     const rowCount = Number(node?.dataRef?.rowCount);
     const totalRowsKnown = Number.isFinite(rowCount) && rowCount > 0;
     await runExportWithProgress({
@@ -247,7 +253,7 @@ export const useSidebarObjectActions = ({
         dbName,
         tableName,
         {
-          ...options,
+          ...resolvedOptions,
           jobId,
           totalRowsHint: totalRowsKnown ? rowCount : 0,
           totalRowsKnown,

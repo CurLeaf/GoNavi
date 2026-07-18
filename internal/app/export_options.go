@@ -17,6 +17,7 @@ type ExportFileOptions struct {
 	JobID                          string            `json:"jobId,omitempty"`
 	TotalRowsHint                  int64             `json:"totalRowsHint,omitempty"`
 	TotalRowsKnown                 bool              `json:"totalRowsKnown,omitempty"`
+	IncludeDropIfExists            bool              `json:"includeDropIfExists,omitempty"`
 	InsertSQLDialect               string            `json:"insertSQLDialect,omitempty"`
 	InsertSQLTargetTable           string            `json:"insertSQLTargetTable,omitempty"`
 	InsertSQLColumnTypes           map[string]string `json:"insertSQLColumnTypes,omitempty"`
@@ -36,6 +37,7 @@ func normalizeExportFileOptions(format string, options ExportFileOptions) Export
 		JobID:                          strings.TrimSpace(options.JobID),
 		TotalRowsHint:                  normalizeExportTotalRowsHint(options.TotalRowsHint, options.TotalRowsKnown),
 		TotalRowsKnown:                 options.TotalRowsKnown,
+		IncludeDropIfExists:            options.IncludeDropIfExists,
 		InsertSQLDialect:               strings.ToLower(strings.TrimSpace(options.InsertSQLDialect)),
 		InsertSQLTargetTable:           strings.TrimSpace(options.InsertSQLTargetTable),
 		InsertSQLColumnTypes:           options.InsertSQLColumnTypes,

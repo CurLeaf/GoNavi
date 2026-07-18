@@ -307,6 +307,19 @@ describe('TableExportWorkbench', () => {
     expect(source).toContain('ExportTableWithOptions(');
   });
 
+  it('offers DROP IF EXISTS only for SQL exports that include schema', () => {
+    const source = readFileSync(new URL('./TableExportWorkbench.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("batchTableMode !== 'dataOnly'");
+    expect(source).toContain("format === 'sql' && !activeScopeQuery");
+    expect(source).toContain("includeDropIfExists: format === 'sql' && !activeScopeQuery && includeDropIfExists");
+    expect(source).toContain("format !== 'sql' || activeScopeQuery");
+    expect(source).toContain("{ value: 'sql', label: t('data_export.label.sql_file') }");
+    expect(source).toContain('includeDropIfExists: includeSchema && includeDropIfExists');
+    expect(source).toContain("t('data_export.sql_options.drop_if_exists.label')");
+    expect(source).toContain("t('data_export.sql_options.drop_if_exists.description')");
+  });
+
   it('prefers backend startedAt over a placeholder history timestamp for the same job', () => {
     const entry = buildTableExportHistoryEntry({
       progressState: {

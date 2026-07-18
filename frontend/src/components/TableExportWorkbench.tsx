@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Empty, InputNumber, Select, Tooltip, Typography } from 'antd';
+import { Alert, Button, Checkbox, Empty, InputNumber, Select, Tooltip, Typography } from 'antd';
 import { ClockCircleOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
   DBGetColumns,
@@ -43,6 +43,10 @@ import type { ExportProgressState } from './useExportProgressRunner';
 
 const { Text, Paragraph, Title } = Typography;
 const EMPTY_HISTORY: TableExportHistoryEntry[] = [];
+const createTableExportFormatOptions = (): Array<{ value: DataExportFormat; label: string }> => [
+  ...DATA_EXPORT_FORMAT_OPTIONS,
+  { value: 'sql', label: t('data_export.label.sql_file') },
+];
 
 type ExportWorkbenchMode = NonNullable<TabData['exportWorkbenchMode']>;
 type BatchTableExportMode = 'schema' | 'dataOnly' | 'backup';
@@ -308,6 +312,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [selectedDatabaseNames, setSelectedDatabaseNames] = useState<string[]>([]);
   const [batchTableMode, setBatchTableMode] = useState<BatchTableExportMode>('schema');
   const [batchDatabaseMode, setBatchDatabaseMode] = useState<BatchDatabaseExportMode>('schema');
+  const [includeDropIfExists, setIncludeDropIfExists] = useState(false);
   const [loadingDatabases, setLoadingDatabases] = useState(false);
   const [loadingObjects, setLoadingObjects] = useState(false);
   const [loadingColumns, setLoadingColumns] = useState(false);
@@ -700,6 +705,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
           jobId,
           totalRowsHint: singleTotalRowsKnown ? singleScopeRowCount : 0,
           totalRowsKnown: singleTotalRowsKnown,
+          includeDropIfExists: false,
         };
         if (scope !== 'all' && activeScopeQuery) {
           return ExportQueryWithOptions(
@@ -723,7 +729,10 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
           buildRpcConnectionConfig(connectionConfig) as any,
           tab.dbName || '',
           objectName,
-          options as any,
+          {
+            ...options,
+            includeDropIfExists: format === 'sql' && !activeScopeQuery && includeDropIfExists,
+          } as any,
         );
       },
     });
@@ -752,6 +761,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
             jobId,
             totalRowsHint: selectedObjectNames.length,
             totalRowsKnown: true,
+            includeDropIfExists: includeSchema && includeDropIfExists,
           } as any,
         ),
     });
@@ -777,6 +787,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
             jobId,
             totalRowsHint: selectedDatabaseNames.length,
             totalRowsKnown: true,
+            includeDropIfExists,
           } as any,
         ),
     });
@@ -1018,28 +1029,47 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                   <Select
                     style={{ width: '100%' }}
                     value={format}
-                    options={DATA_EXPORT_FORMAT_OPTIONS}
+                    options={createTableExportFormatOptions()}
                     onChange={(next) => setFormat(next as DataExportFormat)}
                   />
                 </div>
 
-                <div>
-                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.dialog.field.columns')}</div>
-                  <Select
-                    style={{ width: '100%' }}
-                    mode="multiple"
-                    value={selectedColumns}
-                    loading={loadingColumns}
-                    options={availableColumns.map((column) => ({ value: column, label: column }))}
-                    maxTagCount="responsive"
-                    onChange={(columns) => setSelectedColumns(
-                      resolveDataExportColumns(columns, availableColumns) || [],
-                    )}
-                  />
-                  <div style={{ marginTop: 6, fontSize: 12, color: secondaryTextColor }}>
-                    {t('data_export.dialog.field.columns_help')}
+                {format === 'sql' && !activeScopeQuery ? (
+                  <div>
+                    <Checkbox
+                      checked={includeDropIfExists}
+                      onChange={(event) => setIncludeDropIfExists(event.target.checked)}
+                    >
+                      {t('data_export.sql_options.drop_if_exists.label')}
+                    </Checkbox>
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginTop: 8 }}
+                      message={t('data_export.sql_options.drop_if_exists.description')}
+                    />
                   </div>
-                </div>
+                ) : null}
+
+                {format !== 'sql' || activeScopeQuery ? (
+                  <div>
+                    <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.dialog.field.columns')}</div>
+                    <Select
+                      style={{ width: '100%' }}
+                      mode="multiple"
+                      value={selectedColumns}
+                      loading={loadingColumns}
+                      options={availableColumns.map((column) => ({ value: column, label: column }))}
+                      maxTagCount="responsive"
+                      onChange={(columns) => setSelectedColumns(
+                        resolveDataExportColumns(columns, availableColumns) || [],
+                      )}
+                    />
+                    <div style={{ marginTop: 6, fontSize: 12, color: secondaryTextColor }}>
+                      {t('data_export.dialog.field.columns_help')}
+                    </div>
+                  </div>
+                ) : null}
 
                 {format === 'xlsx' ? (
                   <div>
@@ -1179,6 +1209,23 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                   </div>
                 </div>
 
+                {batchTableMode !== 'dataOnly' ? (
+                  <div>
+                    <Checkbox
+                      checked={includeDropIfExists}
+                      onChange={(event) => setIncludeDropIfExists(event.target.checked)}
+                    >
+                      {t('data_export.sql_options.drop_if_exists.label')}
+                    </Checkbox>
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginTop: 8 }}
+                      message={t('data_export.sql_options.drop_if_exists.description')}
+                    />
+                  </div>
+                ) : null}
+
                 <div>
                   <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.format')}</div>
                   <Select
@@ -1266,6 +1313,21 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                   <div style={{ marginTop: 6, fontSize: 12, color: secondaryTextColor }}>
                     {batchDatabaseModeMeta.description}
                   </div>
+                </div>
+
+                <div>
+                  <Checkbox
+                    checked={includeDropIfExists}
+                    onChange={(event) => setIncludeDropIfExists(event.target.checked)}
+                  >
+                    {t('data_export.sql_options.drop_if_exists.label')}
+                  </Checkbox>
+                  <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginTop: 8 }}
+                    message={t('data_export.sql_options.drop_if_exists.description')}
+                  />
                 </div>
 
                 <div>

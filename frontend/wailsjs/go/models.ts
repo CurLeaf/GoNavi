@@ -499,6 +499,7 @@ export namespace app {
 	    jobId?: string;
 	    totalRowsHint?: number;
 	    totalRowsKnown?: boolean;
+	    includeDropIfExists?: boolean;
 	    insertSQLDialect?: string;
 	    insertSQLTargetTable?: string;
 	    insertSQLColumnTypes?: Record<string, string>;
@@ -517,6 +518,7 @@ export namespace app {
 	        this.jobId = source["jobId"];
 	        this.totalRowsHint = source["totalRowsHint"];
 	        this.totalRowsKnown = source["totalRowsKnown"];
+	        this.includeDropIfExists = source["includeDropIfExists"];
 	        this.insertSQLDialect = source["insertSQLDialect"];
 	        this.insertSQLTargetTable = source["insertSQLTargetTable"];
 	        this.insertSQLColumnTypes = source["insertSQLColumnTypes"];

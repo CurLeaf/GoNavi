@@ -29,6 +29,7 @@ import { buildTableExportTab } from '../utils/tableExportTab';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { V2TableContextMenuView, type V2TableContextMenuActionKey } from './V2TableContextMenu';
 import { useExportProgressDialog } from './ExportProgressModal';
+import { showSQLExportOptionsDialog } from './SQLExportOptionsDialog';
 
 interface TableOverviewProps {
     tab: TabData;
@@ -578,6 +579,11 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const handleExport = useCallback(async (tableName: string, options: { format: string; xlsxMaxRowsPerSheet?: number }, totalRows?: number) => {
         const config = buildConfig();
         if (!config) return;
+        const sqlOptions = options.format === 'sql'
+            ? await showSQLExportOptionsDialog()
+            : null;
+        if (options.format === 'sql' && !sqlOptions) return;
+        const resolvedOptions = sqlOptions ? { ...options, ...sqlOptions } : options;
         const totalRowsKnown = Number.isFinite(totalRows) && Number(totalRows) > 0;
         await runExportWithProgress({
             title: t('table_overview.message.exporting_table_format', {
@@ -592,7 +598,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 tab.dbName || '',
                 tableName,
                 {
-                    ...options,
+                    ...resolvedOptions,
                     jobId,
                     totalRowsHint: totalRowsKnown ? Number(totalRows) : 0,
                     totalRowsKnown,

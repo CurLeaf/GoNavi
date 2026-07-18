@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState, type MutableRefObject } from 'react';
 import { Modal, message } from 'antd';
 
-import { DBGetDatabases, DBGetTables, DropDatabase, DropTable } from '../../../wailsjs/go/app/App';
+import {
+  DBGetDatabases,
+  DBGetTables,
+  DropDatabase,
+  DropTable,
+  ExportDatabaseSQLWithOptions,
+  ExportSchemaSQLWithOptions,
+  ExportTablesDataSQL,
+  ExportTablesSQLWithOptions,
+} from '../../../wailsjs/go/app/App';
+import { showSQLExportOptionsDialog } from '../SQLExportOptionsDialog';
 import type { SavedConnection } from '../../types';
 import { t } from '../../i18n';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
@@ -109,6 +119,8 @@ export const useSidebarBatchExport = ({
   const handleExportDatabaseSQL = async (node: any, includeData: boolean) => {
       const conn = node.dataRef;
       const dbName = conn.dbName || node.title;
+      const exportOptions = await showSQLExportOptionsDialog();
+      if (!exportOptions) return;
       const hide = message.loading(
           includeData
               ? t('sidebar.message.exporting_database_backup', { database: dbName })
@@ -116,7 +128,12 @@ export const useSidebarBatchExport = ({
           0,
       );
       try {
-          const res = await (window as any).go.app.App.ExportDatabaseSQL(normalizeConnConfig(conn.config), dbName, includeData);
+          const res = await ExportDatabaseSQLWithOptions(
+              normalizeConnConfig(conn.config) as any,
+              dbName,
+              includeData,
+              { format: 'sql', ...exportOptions } as any,
+          );
           hide();
           if (res.success) {
               message.success(t('sidebar.message.export_success'));
@@ -137,6 +154,8 @@ export const useSidebarBatchExport = ({
           message.error(t('sidebar.message.schema_export_target_missing'));
           return;
       }
+      const exportOptions = await showSQLExportOptionsDialog();
+      if (!exportOptions) return;
       const hide = message.loading(
           includeData
               ? t('sidebar.message.exporting_schema_backup', { schema: schemaName })
@@ -144,11 +163,12 @@ export const useSidebarBatchExport = ({
           0,
       );
       try {
-          const res = await (window as any).go.app.App.ExportSchemaSQL(
+          const res = await ExportSchemaSQLWithOptions(
               buildRpcConnectionConfig(conn.config, { database: dbName }) as any,
               dbName,
               schemaName,
               includeData,
+              { format: 'sql', ...exportOptions } as any,
           );
           hide();
           if (res.success) {
@@ -174,6 +194,8 @@ export const useSidebarBatchExport = ({
       }
 
       const tableNames = nodes.map(n => n.dataRef.tableName).filter(Boolean);
+      const exportOptions = await showSQLExportOptionsDialog();
+      if (!exportOptions) return;
       const hide = message.loading(
           includeData
               ? t('sidebar.message.backing_up_selected_tables', { count: tableNames.length })
@@ -181,7 +203,14 @@ export const useSidebarBatchExport = ({
           0,
       );
       try {
-          const res = await (window as any).go.app.App.ExportTablesSQL(normalizeConnConfig(first.config), dbName, tableNames, includeData);
+          const res = await ExportTablesSQLWithOptions(
+              normalizeConnConfig(first.config) as any,
+              dbName,
+              tableNames,
+              true,
+              includeData,
+              { format: 'sql', ...exportOptions } as any,
+          );
           hide();
           if (res.success) {
               message.success(t('sidebar.message.export_success'));
@@ -387,6 +416,11 @@ export const useSidebarBatchExport = ({
           return;
       }
 
+      const exportOptions = mode === 'dataOnly'
+          ? { includeDropIfExists: false }
+          : await showSQLExportOptionsDialog();
+      if (!exportOptions) return;
+
       setIsBatchModalOpen(false);
 
       const { conn, dbName } = batchDbContext;
@@ -400,10 +434,16 @@ export const useSidebarBatchExport = ({
               : t('sidebar.message.exporting_selected_object_schema', { count: objectNames.length });
       const hide = message.loading(loadingText, 0);
       try {
-          const app = (window as any).go.app.App;
           const res = mode === 'dataOnly'
-              ? await app.ExportTablesDataSQL(normalizeConnConfig(conn.config), dbName, objectNames)
-              : await app.ExportTablesSQL(normalizeConnConfig(conn.config), dbName, objectNames, mode === 'backup');
+              ? await ExportTablesDataSQL(normalizeConnConfig(conn.config) as any, dbName, objectNames)
+              : await ExportTablesSQLWithOptions(
+                  normalizeConnConfig(conn.config) as any,
+                  dbName,
+                  objectNames,
+                  true,
+                  mode === 'backup',
+                  { format: 'sql', ...exportOptions } as any,
+              );
           hide();
           if (res.success) {
               if (mode !== 'schema' && selectedViewCount > 0) {
@@ -731,6 +771,9 @@ export const useSidebarBatchExport = ({
           return;
       }
 
+      const exportOptions = await showSQLExportOptionsDialog();
+      if (!exportOptions) return;
+
       setIsBatchDbModalOpen(false);
 
       for (const db of selectedDbs) {
@@ -741,7 +784,12 @@ export const useSidebarBatchExport = ({
               0,
           );
           try {
-              const res = await (window as any).go.app.App.ExportDatabaseSQL(normalizeConnConfig(batchConnContext.config), db.dbName, includeData);
+              const res = await ExportDatabaseSQLWithOptions(
+                  normalizeConnConfig(batchConnContext.config) as any,
+                  db.dbName,
+                  includeData,
+                  { format: 'sql', ...exportOptions } as any,
+              );
               hide();
               if (res.success) {
                   message.success(t('sidebar.message.database_export_success', { database: db.dbName }));

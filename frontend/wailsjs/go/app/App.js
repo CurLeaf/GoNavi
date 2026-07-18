@@ -266,6 +266,10 @@ export function ExportDatabaseSQL(arg1, arg2, arg3) {
   return window['go']['app']['App']['ExportDatabaseSQL'](arg1, arg2, arg3);
 }
 
+export function ExportDatabaseSQLWithOptions(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ExportDatabaseSQLWithOptions'](arg1, arg2, arg3, arg4);
+}
+
 export function ExportDatabasesSQLWithOptions(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportDatabasesSQLWithOptions'](arg1, arg2, arg3, arg4);
 }
@@ -288,6 +292,10 @@ export function ExportSQLFile(arg1, arg2) {
 
 export function ExportSchemaSQL(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportSchemaSQL'](arg1, arg2, arg3, arg4);
+}
+
+export function ExportSchemaSQLWithOptions(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['ExportSchemaSQLWithOptions'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function ExportTable(arg1, arg2, arg3, arg4) {

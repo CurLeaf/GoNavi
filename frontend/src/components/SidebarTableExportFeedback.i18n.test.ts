@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+const source = readFileSync(new URL('./sidebar/useSidebarObjectActions.tsx', import.meta.url), 'utf8');
 const locales = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'] as const;
 const extractHandleExportBlock = (): string => {
   const start = source.indexOf('const handleExport = async');
@@ -22,6 +22,8 @@ describe('Sidebar table export feedback i18n', () => {
     expect(block).not.toContain('ExportTable(');
     expect(block).toContain('runExportWithProgress({');
     expect(block).toContain('ExportTableWithOptions(');
+    expect(block).toContain('showSQLExportOptionsDialog()');
+    expect(block).toContain('...resolvedOptions');
     expect(block).toContain('jobId');
     expect(block).toContain('totalRowsHint');
     expect(block).toContain('totalRowsKnown');

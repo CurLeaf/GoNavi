@@ -53,6 +53,12 @@ type fakeGeneratedValueStreamExportDB struct {
 	valueHits  int
 }
 
+type fakeSQLDumpExportDB struct {
+	fakeExportQueryDB
+	tables    []string
+	createSQL string
+}
+
 func (f *fakeExportQueryDB) Connect(config connection.ConnectionConfig) error { return nil }
 func (f *fakeExportQueryDB) Close() error                                     { return nil }
 func (f *fakeExportQueryDB) Ping() error                                      { return nil }
@@ -90,6 +96,14 @@ func (f *fakeExportQueryDB) GetForeignKeys(dbName, tableName string) ([]connecti
 }
 func (f *fakeExportQueryDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDefinition, error) {
 	return nil, nil
+}
+
+func (f *fakeSQLDumpExportDB) GetTables(dbName string) ([]string, error) {
+	return append([]string(nil), f.tables...), nil
+}
+
+func (f *fakeSQLDumpExportDB) GetCreateStatement(dbName, tableName string) (string, error) {
+	return f.createSQL, nil
 }
 
 func (f *fakeStreamExportDB) Query(query string) ([]map[string]interface{}, []string, error) {
@@ -1648,6 +1662,204 @@ func TestDumpTableSQL_OracleBackupBatchesRowsIntoInsertAll(t *testing.T) {
 	}
 	if !strings.Contains(content, "INTO \"APP\".\"USERS\" (\"id\", \"name\") VALUES (1, 'alice')\n  INTO \"APP\".\"USERS\" (\"id\", \"name\") VALUES (2, 'bob')\nSELECT 1 FROM DUAL;") {
 		t.Fatalf("Oracle INSERT ALL 内容异常，content=%s", content)
+	}
+}
+
+func TestNormalizeExportFileOptionsPreservesIncludeDropIfExists(t *testing.T) {
+	normalized := normalizeExportFileOptions("sql", ExportFileOptions{
+		Format:              " SQL ",
+		IncludeDropIfExists: true,
+	})
+
+	if normalized.Format != "sql" {
+		t.Fatalf("expected normalized SQL format, got %q", normalized.Format)
+	}
+	if !normalized.IncludeDropIfExists {
+		t.Fatal("expected IncludeDropIfExists to survive option normalization")
+	}
+}
+
+func TestWriteSQLDropIfExistsPreambleDefaultsOffAndRequiresSchemaExport(t *testing.T) {
+	config := connection.ConnectionConfig{Type: "mysql"}
+	objects := []string{"users"}
+
+	for _, tc := range []struct {
+		name          string
+		includeSchema bool
+		options       ExportFileOptions
+	}{
+		{name: "default off", includeSchema: true, options: ExportFileOptions{}},
+		{name: "data only", includeSchema: false, options: ExportFileOptions{IncludeDropIfExists: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var output bytes.Buffer
+			writer := bufio.NewWriter(&output)
+			if err := writeSQLDropIfExistsPreamble(
+				writer,
+				config,
+				"app",
+				objects,
+				map[string]string{},
+				tc.includeSchema,
+				tc.options,
+			); err != nil {
+				t.Fatalf("writeSQLDropIfExistsPreamble returned error: %v", err)
+			}
+			if err := writer.Flush(); err != nil {
+				t.Fatalf("flush drop preamble: %v", err)
+			}
+			if output.Len() != 0 {
+				t.Fatalf("drop preamble must be omitted, got %q", output.String())
+			}
+		})
+	}
+}
+
+func TestExportDatabaseSQLToFileDefaultOptionsDoNotEmitDrops(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	fakeDB := &fakeSQLDumpExportDB{
+		tables:    []string{"users"},
+		createSQL: "CREATE TABLE `users` (`id` BIGINT)",
+	}
+	newDatabaseFunc = func(string) (db.Database, error) {
+		return fakeDB, nil
+	}
+	app := NewApp()
+	config := connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306}
+
+	legacyFile, err := os.CreateTemp(t.TempDir(), "legacy-export-*.sql")
+	if err != nil {
+		t.Fatalf("create legacy export file: %v", err)
+	}
+	legacyPath := legacyFile.Name()
+	if err := legacyFile.Close(); err != nil {
+		t.Fatalf("close legacy export file: %v", err)
+	}
+	legacyResult := app.exportDatabaseSQLToFile(config, "app", false, legacyPath, ExportFileOptions{})
+	if !legacyResult.Success {
+		t.Fatalf("legacy export failed: %+v", legacyResult)
+	}
+	legacyContent, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatalf("read legacy export: %v", err)
+	}
+	if strings.Contains(string(legacyContent), "DROP TABLE") {
+		t.Fatalf("default/legacy export must not emit DROP statements: %s", legacyContent)
+	}
+
+	optInFile, err := os.CreateTemp(t.TempDir(), "drop-export-*.sql")
+	if err != nil {
+		t.Fatalf("create opt-in export file: %v", err)
+	}
+	optInPath := optInFile.Name()
+	if err := optInFile.Close(); err != nil {
+		t.Fatalf("close opt-in export file: %v", err)
+	}
+	optInResult := app.exportDatabaseSQLToFile(
+		config,
+		"app",
+		false,
+		optInPath,
+		ExportFileOptions{IncludeDropIfExists: true},
+	)
+	if !optInResult.Success {
+		t.Fatalf("opt-in export failed: %+v", optInResult)
+	}
+	optInContent, err := os.ReadFile(optInPath)
+	if err != nil {
+		t.Fatalf("read opt-in export: %v", err)
+	}
+	dropIndex := strings.Index(string(optInContent), "DROP TABLE IF EXISTS `app`.`users`;")
+	createIndex := strings.Index(string(optInContent), "CREATE TABLE `users`")
+	if dropIndex < 0 || createIndex < 0 || dropIndex >= createIndex {
+		t.Fatalf("opt-in export must place DROP before CREATE: %s", optInContent)
+	}
+}
+
+func TestWriteSQLDropIfExistsPreambleReversesCreateOrderAndDistinguishesViews(t *testing.T) {
+	config := connection.ConnectionConfig{Type: "mysql"}
+	objects := []string{"accounts", "orders", "active_orders"}
+	viewLookup := map[string]string{
+		normalizeExportObjectKey(config, "app", "active_orders"): "active_orders",
+	}
+	var output bytes.Buffer
+	writer := bufio.NewWriter(&output)
+
+	if err := writeSQLDropIfExistsPreamble(
+		writer,
+		config,
+		"app",
+		objects,
+		viewLookup,
+		true,
+		ExportFileOptions{IncludeDropIfExists: true},
+	); err != nil {
+		t.Fatalf("writeSQLDropIfExistsPreamble returned error: %v", err)
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatalf("flush drop preamble: %v", err)
+	}
+
+	content := output.String()
+	wantStatements := []string{
+		"DROP VIEW IF EXISTS `app`.`active_orders`;",
+		"DROP TABLE IF EXISTS `app`.`orders`;",
+		"DROP TABLE IF EXISTS `app`.`accounts`;",
+	}
+	previousIndex := -1
+	for _, statement := range wantStatements {
+		index := strings.Index(content, statement)
+		if index < 0 {
+			t.Fatalf("drop preamble is missing %q: %s", statement, content)
+		}
+		if index <= previousIndex {
+			t.Fatalf("drop statements do not follow reverse create order: %s", content)
+		}
+		previousIndex = index
+	}
+}
+
+func TestBuildSQLDropIfExistsStatementKeepsOracleBackwardCompatible(t *testing.T) {
+	statement := buildSQLDropIfExistsStatement(
+		connection.ConnectionConfig{Type: "oracle"},
+		"APP",
+		"USERS",
+		false,
+	)
+
+	for _, fragment := range []string{
+		`EXECUTE IMMEDIATE 'DROP TABLE "APP"."USERS"'`,
+		"IF SQLCODE != -942 THEN",
+		"END;\n/",
+	} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("Oracle drop block is missing %q: %s", fragment, statement)
+		}
+	}
+
+	statements := splitSQLStatementsForDialect("oracle", statement+"\nCREATE TABLE \"APP\".\"USERS\" (\"ID\" NUMBER);")
+	if len(statements) != 2 {
+		t.Fatalf("Oracle drop block must remain one executable statement before CREATE, got %#v", statements)
+	}
+	if !strings.Contains(statements[0], `EXECUTE IMMEDIATE 'DROP TABLE "APP"."USERS"'`) {
+		t.Fatalf("unexpected Oracle drop statement after splitting: %#v", statements)
+	}
+}
+
+func TestBuildSQLDropIfExistsStatementUsesDropTableForClickHouseViews(t *testing.T) {
+	statement := buildSQLDropIfExistsStatement(
+		connection.ConnectionConfig{Type: "clickhouse"},
+		"analytics",
+		"events_by_hour",
+		true,
+	)
+
+	if want := "DROP TABLE IF EXISTS `analytics`.`events_by_hour`;"; statement != want {
+		t.Fatalf("ClickHouse view drop statement mismatch: got %q, want %q", statement, want)
 	}
 }
 

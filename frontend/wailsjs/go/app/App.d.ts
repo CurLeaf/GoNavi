@@ -140,6 +140,8 @@ export function ExportDataWithOptions(arg1:Array<Record<string, any>>,arg2:Array
 
 export function ExportDatabaseSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:boolean):Promise<connection.QueryResult>;
 
+export function ExportDatabaseSQLWithOptions(arg1:connection.ConnectionConfig,arg2:string,arg3:boolean,arg4:app.ExportFileOptions):Promise<connection.QueryResult>;
+
 export function ExportDatabasesSQLWithOptions(arg1:connection.ConnectionConfig,arg2:Array<string>,arg3:boolean,arg4:app.ExportFileOptions):Promise<connection.QueryResult>;
 
 export function ExportQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string,arg5:string):Promise<connection.QueryResult>;
@@ -151,6 +153,8 @@ export function ExportSQLAuditFile(arg1:sqlaudit.Filter,arg2:string):Promise<con
 export function ExportSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
 export function ExportSchemaSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:boolean):Promise<connection.QueryResult>;
+
+export function ExportSchemaSQLWithOptions(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:boolean,arg5:app.ExportFileOptions):Promise<connection.QueryResult>;
 
 export function ExportTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
