@@ -7,10 +7,24 @@ import {
     resolveOracleLikeDefaultSchemaName,
     resolveOracleLikeExecutionSchemaName,
     resolveOracleLikeLookupSchemaCandidates,
+    resolveQueryEditorMonacoLanguage,
     resolveQueryEditorNavigationTarget,
     selectUnqualifiedCompletionSynonyms,
     shouldHandleQueryEditorRunShortcutFallback,
 } from './QueryEditorHelpers';
+
+describe('QueryEditor Monaco SQL grammar', () => {
+    it.each([
+        [{ config: { type: 'mysql' } }, 'mysql'],
+        [{ config: { type: 'mariadb' } }, 'mysql'],
+        [{ config: { type: 'custom', driver: 'greatdb' } }, 'mysql'],
+        [{ config: { type: 'oceanbase', oceanBaseProtocol: 'mysql' } }, 'mysql'],
+        [{ config: { type: 'oceanbase', oceanBaseProtocol: 'oracle' } }, 'sql'],
+        [{ config: { type: 'postgres' } }, 'sql'],
+    ])('maps connection row %# to the expected Monaco grammar', (connection, expectedLanguage) => {
+        expect(resolveQueryEditorMonacoLanguage(connection)).toBe(expectedLanguage);
+    });
+});
 
 describe('QueryEditor run shortcut routing', () => {
     it('reserves editor-originated shortcuts for Monaco and keeps document targets as a fallback', () => {

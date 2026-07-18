@@ -2,7 +2,7 @@ import type { SqlLanguage } from 'sql-formatter';
 import type { TabData, ColumnDefinition, IndexDefinition } from '../../types';
 import { DBGetColumns, DBGetIndexes, DBQuery } from '../../../wailsjs/go/app/App';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
-import { isOracleLikeDialect, resolveSqlDialect } from '../../utils/sqlDialect';
+import { isMysqlFamilyDialect, isOracleLikeDialect, resolveSqlDialect } from '../../utils/sqlDialect';
 import { extractQueryResultTableRef, type QueryResultTableRef } from '../../utils/queryResultTable';
 import { quoteIdentPart } from '../../utils/sql';
 import { splitSidebarQualifiedName } from '../../utils/sidebarLocate';
@@ -570,6 +570,17 @@ export const normalizeMetadataDialect = (conn: any): string => {
     if (dialect === 'diros' || dialect === 'sphinx' || dialect === 'mariadb' || dialect === 'oceanbase') return 'mysql';
     if (dialect === 'dameng') return 'oracle';
     return String(dialect || '').toLowerCase();
+};
+
+export type QueryEditorMonacoLanguage = 'sql' | 'mysql';
+
+export const resolveQueryEditorMonacoLanguage = (conn: any): QueryEditorMonacoLanguage => {
+    const dialect = resolveSqlDialect(
+        String(conn?.config?.type || ''),
+        String(conn?.config?.driver || ''),
+        { oceanBaseProtocol: conn?.config?.oceanBaseProtocol },
+    );
+    return isMysqlFamilyDialect(dialect) ? 'mysql' : 'sql';
 };
 
 export const resolveQueryEditorFormatterLanguage = (conn: any): SqlLanguage => {

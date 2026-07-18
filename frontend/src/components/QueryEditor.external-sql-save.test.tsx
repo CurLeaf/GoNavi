@@ -170,6 +170,7 @@ const autoFetchState = vi.hoisted(() => ({
 
 const monacoEditorMockState = vi.hoisted(() => ({
   deferOnMount: false,
+  latestProps: null as any,
 }));
 
 const defaultEditorContributionResolver = (state: {
@@ -199,7 +200,9 @@ const editorState = vi.hoisted(() => {
     position: { lineNumber: 1, column: 1 },
     selection: null as any,
     providers: [] as any[],
+    providerLanguages: [] as string[],
     hoverProviders: [] as any[],
+    hoverProviderLanguages: [] as string[],
     contentChangeListeners: [] as Array<() => void>,
     cursorPositionListeners: [] as Array<(event: any) => void>,
     modelContentListeners: [] as Array<(event: any) => void>,
@@ -365,7 +368,9 @@ vi.mock('../utils/autoFetchVisibility', () => ({
 }));
 
 vi.mock('@monaco-editor/react', () => ({
-  default: ({ defaultValue, onChange, onMount }: any) => {
+  default: (props: any) => {
+    const { defaultValue, onChange, onMount } = props;
+    monacoEditorMockState.latestProps = props;
     React.useEffect(() => {
       editorState.value = String(defaultValue || '');
       editorState.latestOnChange = onChange;
@@ -376,11 +381,13 @@ vi.mock('@monaco-editor/react', () => ({
         languages: {
           CompletionItemKind: { Keyword: 1, Function: 2, Field: 3 },
           CompletionItemInsertTextRule: { InsertAsSnippet: 1 },
-          registerCompletionItemProvider: vi.fn((_language: string, provider: any) => {
+          registerCompletionItemProvider: vi.fn((language: string, provider: any) => {
+            editorState.providerLanguages.push(language);
             editorState.providers.push(provider);
             return { dispose: vi.fn() };
           }),
-          registerHoverProvider: vi.fn((_language: string, provider: any) => {
+          registerHoverProvider: vi.fn((language: string, provider: any) => {
+            editorState.hoverProviderLanguages.push(language);
             editorState.hoverProviders.push(provider);
             return { dispose: vi.fn() };
           }),
@@ -865,9 +872,12 @@ describe('QueryEditor external SQL save', () => {
     editorState.value = '';
     editorState.position = { lineNumber: 1, column: 1 };
     editorState.selection = null;
+    monacoEditorMockState.latestProps = null;
     editorState.domNode.style.cursor = '';
     editorState.providers = [];
+    editorState.providerLanguages = [];
     editorState.hoverProviders = [];
+    editorState.hoverProviderLanguages = [];
     editorState.contentChangeListeners = [];
     editorState.cursorPositionListeners = [];
     editorState.modelContentListeners = [];
@@ -2369,9 +2379,34 @@ describe('QueryEditor external SQL save', () => {
 
     const completionState = (globalThis as any).__gonaviSqlCompletionState;
 
-    expect(editorState.hoverProviders).toHaveLength(1);
-    expect(editorState.providers).toHaveLength(3);
-    expect(completionState.disposables).toHaveLength(4);
+    expect(editorState.hoverProviderLanguages).toEqual(['sql', 'mysql']);
+    expect(editorState.providerLanguages).toEqual(['sql', 'mysql', 'sql', 'mysql', 'sql', 'mysql']);
+    expect(editorState.hoverProviders).toHaveLength(2);
+    expect(editorState.providers).toHaveLength(6);
+    expect(completionState.disposables).toHaveLength(8);
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
+  it.each([
+    ['mysql', 'mysql'],
+    ['mariadb', 'mysql'],
+    ['postgres', 'sql'],
+  ])('uses the %s connection grammar before formatting SQL', async (dbType, expectedLanguage) => {
+    storeState.connections[0].config.type = dbType;
+    const initialSql = "update finan_ set openid = 'ol_' where pay_status = '0' limit 50";
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: initialSql })} />);
+    });
+
+    expect(monacoEditorMockState.latestProps).toMatchObject({
+      defaultValue: initialSql,
+      language: expectedLanguage,
+    });
 
     await act(async () => {
       renderer.unmount();
@@ -6122,7 +6157,7 @@ describe('QueryEditor external SQL save', () => {
       await Promise.resolve();
     });
 
-    expect(editorState.hoverProviders).toHaveLength(1);
+    expect(editorState.hoverProviders).toHaveLength(2);
     const hover = editorState.hoverProviders[0].provideHover(
       editorState.editor.getModel(),
       { lineNumber: 1, column: 18 },

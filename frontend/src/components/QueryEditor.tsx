@@ -160,6 +160,7 @@ import {
     resolveOracleLikeExecutionSchemaName,
     resolveOracleLikeLookupSchemaCandidates,
     resolveQueryEditorFormatterLanguage,
+    resolveQueryEditorMonacoLanguage,
     resolveQueryEditorHoverTarget,
     resolveQueryEditorNavigationDecorations,
     resolveQueryEditorNavigationTarget,
@@ -886,7 +887,8 @@ const resolveQueryEditorAiConnectionHost = (connection: any): string => {
 
 // HMR 重载时释放旧注册避免补全和 hover 内容重复
 const _g = globalThis as any;
-const SQL_COMPLETION_PROVIDER_VERSION = '20260715-oracle-view-synonym-v1';
+const SQL_COMPLETION_PROVIDER_VERSION = '20260718-mysql-language-v1';
+const QUERY_EDITOR_MONACO_LANGUAGE_IDS = ['sql', 'mysql'] as const;
 if (!_g.__gonaviSqlCompletionState) {
     _g.__gonaviSqlCompletionState = { registered: false, version: '', disposables: [] as any[] };
 }
@@ -1376,6 +1378,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const currentConnectionCapabilities = useMemo(
       () => getDataSourceCapabilities(
           connections.find(connection => connection.id === currentConnectionId)?.config,
+      ),
+      [connections, currentConnectionId],
+  );
+  const queryEditorMonacoLanguage = useMemo(
+      () => resolveQueryEditorMonacoLanguage(
+          connections.find(connection => connection.id === currentConnectionId),
       ),
       [connections, currentConnectionId],
   );
@@ -4860,7 +4868,17 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       _g.__gonaviSqlCompletionState.version = SQL_COMPLETION_PROVIDER_VERSION;
       sqlCompletionDisposables.forEach((d: any) => d?.dispose?.());
       sqlCompletionDisposables.length = 0;
-      sqlCompletionDisposables.push(monaco.languages.registerHoverProvider('sql', {
+      const registerQueryEditorHoverProvider = (provider: any) => {
+          QUERY_EDITOR_MONACO_LANGUAGE_IDS.forEach((languageId) => {
+              sqlCompletionDisposables.push(monaco.languages.registerHoverProvider(languageId, provider));
+          });
+      };
+      const registerQueryEditorCompletionProvider = (provider: any) => {
+          QUERY_EDITOR_MONACO_LANGUAGE_IDS.forEach((languageId) => {
+              sqlCompletionDisposables.push(monaco.languages.registerCompletionItemProvider(languageId, provider));
+          });
+      };
+      registerQueryEditorHoverProvider({
           provideHover: (model: any, position: any) => {
               const normalizedPosition = normalizeEditorPosition(position);
               if (!normalizedPosition) {
@@ -4896,8 +4914,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   contents: [{ value: buildQueryEditorHoverMarkdown(hoverTarget) }],
               };
           },
-      }));
-      sqlCompletionDisposables.push(monaco.languages.registerCompletionItemProvider('sql', {
+      });
+      registerQueryEditorCompletionProvider({
           triggerCharacters: ['.'],
           provideCompletionItems: async (model: any, position: any, _context?: any, token?: { isCancellationRequested?: boolean }) => {
               if (isSqlCompletionRequestCancelled(token)) {
@@ -5792,8 +5810,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   ];
               return { suggestions };
           }
-      }));
-      sqlCompletionDisposables.push(monaco.languages.registerCompletionItemProvider('sql', {
+      });
+      registerQueryEditorCompletionProvider({
           triggerCharacters: ['/'],
           provideCompletionItems: (model: any, position: any) => {
               const lineContent = model.getLineContent(position.lineNumber);
@@ -5820,11 +5838,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   })),
               };
           },
-      }));
+      });
 
 
       // SQL snippet completion provider
-      sqlCompletionDisposables.push(monaco.languages.registerCompletionItemProvider('sql', {
+      registerQueryEditorCompletionProvider({
           provideCompletionItems: (model: any, position: any) => {
               const word = model.getWordUntilPosition(position);
               const prefix = word.word.toLowerCase();
@@ -5856,7 +5874,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   })),
               };
           },
-      }));
+      });
 
       } // end sqlCompletionRegistered guard
 
@@ -8710,7 +8728,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           <Editor 
             height="100%" 
             gonaviTypography="code"
-            defaultLanguage="sql" 
+            language={queryEditorMonacoLanguage}
             theme={darkMode ? "transparent-dark" : "transparent-light"}
             defaultValue={query}
             onChange={(val) => {
