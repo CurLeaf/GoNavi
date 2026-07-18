@@ -46,7 +46,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: frontend/node_modules
-          key: ${{ runner.os }}-node20-frontend-${{ hashFiles('frontend/package-lock.json') }}
+          key: ${{ runner.os }}-node20-frontend-${{ hashFiles('frontend/package-lock.json', 'frontend/patches/*.patch') }}
 
       - name: Install Wails
         run: go install -v github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
@@ -60,6 +60,9 @@ jobs:
           wails generate module
           node frontend/scripts/wails-frontend-install.mjs
           npm --prefix frontend run build
+
+      - name: Test frontend virtual scrolling
+        run: npm --prefix frontend test -- src/components/dataGridVirtualScroll.test.ts src/components/DataGrid.layout.test.tsx
 
       - name: Pack frontend dist
         shell: bash

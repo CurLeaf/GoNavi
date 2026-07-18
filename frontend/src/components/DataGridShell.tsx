@@ -331,6 +331,8 @@ const DataGridShell: React.FC<DataGridShellProps> = (props) => {
     useStore,
     viewMode,
     virtualListItemHeight,
+    virtualListItemHeightFixed,
+    virtualListItemColumnVirtual,
     window,
   } = props;
 
@@ -361,7 +363,11 @@ const renderDataTableView = () => (
                                       dataSource={tableRenderData}
                                       columns={tableColumns}
                                       {...(enableVirtual && typeof virtualListItemHeight === 'number'
-                                          ? { listItemHeight: virtualListItemHeight }
+                                          ? {
+                                              listItemHeight: virtualListItemHeight,
+                                              listItemHeightFixed: virtualListItemHeightFixed,
+                                              listItemColumnVirtual: virtualListItemColumnVirtual,
+                                          }
                                           : {})}
                                       showSorterTooltip={{ target: 'sorter-icon' }}
                                       size="small"

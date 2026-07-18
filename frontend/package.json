@@ -9,6 +9,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "postinstall": "patch-package --error-on-fail",
     "i18n:scan": "go run ../tools/i18n-scan --root .."
   },
   "dependencies": {
@@ -44,6 +45,7 @@
     "@types/react-test-renderer": "^18.0.7",
     "@types/uuid": "^9.0.7",
     "@vitejs/plugin-react": "^4.2.1",
+    "patch-package": "^8.0.1",
     "react-test-renderer": "^18.2.0",
     "typescript": "^5.2.2",
     "vite": "^5.0.8",

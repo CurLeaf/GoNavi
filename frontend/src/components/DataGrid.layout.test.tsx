@@ -2592,6 +2592,13 @@ describe('DataGrid layout', () => {
     expect(source).toContain("onCancel={() => setPageFindText('')}");
     expect(source).toContain('enumerable: true');
     expect(source).toContain('resolveDataGridColumnQuickFindScrollLeft({');
+    const pageFindFocusSource = source.slice(
+      source.indexOf('const focusPageFindMatch = useCallback'),
+      source.indexOf('const handleNavigatePageFind = useCallback'),
+    );
+    expect(pageFindFocusSource.indexOf("'[data-column-name]'"))
+      .toBeLessThan(pageFindFocusSource.indexOf('if (applyVisibleFocus()) return;'));
+    expect(pageFindFocusSource).toContain("headerTarget.closest('.ant-table-cell-fix-left, .ant-table-cell-fix-right')");
     expect(source).toContain('const applied = applyVirtualHorizontalOffset(tableContainer, nextScrollLeft);');
     expect(source).toContain('syncExternalScrollFromTargets();');
     expect(source).toContain("const columnQuickFindContent = isTableSurfaceActive ? (");
@@ -2604,8 +2611,9 @@ describe('DataGrid layout', () => {
     expect(source).toContain('const externalScrollSequenceRef = useRef(0);');
     expect(source).toContain('const externalScrollbarDraggingRef = useRef(false);');
     expect(source).toContain('const EXTERNAL_HORIZONTAL_SCROLL_IDLE_SETTLE_MS = 80;');
-    expect(source).toContain('const externalScrollInteractionTimerRef = useRef<number | null>(null);');
+    expect(source).toContain('const externalIdleCommitSchedulerRef = useRef<DataGridIdleCommitScheduler<number> | null>(null);');
     expect(source).toContain('const externalScrollInteractionUntilRef = useRef(0);');
+    expect(source).toContain('createDataGridIdleCommitScheduler<number>({');
     expect(source).toContain('const isExternalScrollbarInteractionActive = useCallback(() => (');
     expect(source).toContain('const refreshExternalScrollbarInteraction = useCallback(() => {');
     expect(source).toContain('const scheduleVirtualHorizontalWheel = useCallback');
@@ -2615,7 +2623,12 @@ describe('DataGrid layout', () => {
     expect(source).toContain('virtualHorizontalElementsRef.current = { tableContainer: null, holderEl: null, innerEl: null, headerEl: null };');
     expect(source).toContain('applyVirtualHorizontalOffset(tableContainer, nextLeft, { forceInternalScroll: true });');
     expect(source).toContain('}, [horizontalScrollVisible, scheduleVirtualHorizontalAlignment, tableRenderData, tableScrollX, virtualEditingCell]);');
-    expect(source).toContain('tableInstance.scrollTo({ left: clampedOffset, top: holderEl.scrollTop });');
+    expect(source).toContain('tableInstance.scrollTo({ left: clampedOffset });');
+    expect(source).not.toContain('tableInstance.scrollTo({ left: clampedOffset, top: holderEl.scrollTop });');
+    expect(source).toContain("tableContainer.addEventListener('scroll', stopPreviewHeaderScroll, true);");
+    expect(source).toContain("innerEl.style.setProperty('--gn-datagrid-h-scroll', scrollVar);");
+    expect(source).not.toContain("tableContainer.style.setProperty('--gn-datagrid-h-scroll', scrollVar);");
+    expect(source).not.toContain("holderEl.style.setProperty('--gn-datagrid-h-scroll', scrollVar);");
     expect(source).toContain('const requestedExternalScrollLeft = pendingExternalScrollLeftRef.current ?? latestExternalScroll.scrollLeft;');
     expect(source).toContain('if (isExternalScrollbarInteractionActive()) {');
     expect(source).toContain('const visual = syncVirtualHorizontalVisualOffset(tableContainer, requestedExternalScrollLeft);');
@@ -2638,6 +2651,7 @@ describe('DataGrid layout', () => {
       source.indexOf('const handleExternalHorizontalScrollPointerRelease = useCallback'),
     );
     expect(finishExternalScrollbarDragSource).toContain('if (isExternalScrollbarInteractionActive()) {');
+    expect(finishExternalScrollbarDragSource).toContain('externalIdleCommitSchedulerRef.current?.flush()');
     expect(finishExternalScrollbarDragSource).not.toContain('clearExternalScrollbarInteraction();');
     expect(source).toContain('onPointerDown={handleExternalHorizontalScrollPointerDown}');
     expect(source).toContain('onPointerUp={handleExternalHorizontalScrollPointerRelease}');
@@ -2675,6 +2689,10 @@ describe('DataGrid layout', () => {
     expect(source).toContain('const shouldUsePlainVirtualContent = isV2Ui && !modifiedStyle;');
     expect(source).toContain('if (shouldUsePlainVirtualContent) {');
     expect(source).toContain('return originalRenderContent;');
+    expect(source).toContain('const virtualListItemHeightFixed = !!(');
+    expect(source).toContain('listItemHeightFixed: virtualListItemHeightFixed');
+    expect(source).toContain('const virtualListItemColumnVirtual = isV2Ui && enableVirtual && !virtualEditingCell;');
+    expect(source).toContain('listItemColumnVirtual: virtualListItemColumnVirtual');
     expect(source).toContain('if (scrollSnapshotRafRef.current !== null) return;');
     expect(source).toContain('scrollSnapshotRafRef.current = requestAnimationFrame');
     expect(source).toContain('didRestoreScrollRef.current = false;');
