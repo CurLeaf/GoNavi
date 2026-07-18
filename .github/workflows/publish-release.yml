@@ -1,0 +1,129 @@
+name: Publish Draft Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (for example, v0.8.7)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Validate and publish draft
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Validate assets and publish
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const tag = String(process.env.RELEASE_TAG || '').trim();
+            if (!/^v\d+\.\d+\.\d+$/.test(tag)) {
+              core.setFailed(`Invalid release tag: ${tag}`);
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            const tagRef = await github.rest.git.getRef({
+              owner,
+              repo,
+              ref: `tags/${tag}`,
+            });
+
+            let commitSha = tagRef.data.object.sha;
+            if (tagRef.data.object.type === 'tag') {
+              const annotatedTag = await github.rest.git.getTag({
+                owner,
+                repo,
+                tag_sha: tagRef.data.object.sha,
+              });
+              commitSha = annotatedTag.data.object.sha;
+            }
+
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRuns,
+              {
+                owner,
+                repo,
+                workflow_id: 'release.yml',
+                event: 'push',
+                branch: tag,
+                per_page: 100,
+              },
+              (response) => response.data.workflow_runs,
+            );
+            const successfulRun = runs.find((run) => (
+              run.head_sha === commitSha
+              && run.status === 'completed'
+              && run.conclusion === 'success'
+            ));
+            if (!successfulRun) {
+              core.setFailed(`No successful Release workflow found for ${tag} at ${commitSha}`);
+              return;
+            }
+
+            const releases = await github.paginate(
+              github.rest.repos.listReleases,
+              { owner, repo, per_page: 100 },
+              (response) => response.data,
+            );
+            const release = releases.find((item) => item.tag_name === tag);
+            if (!release) {
+              core.setFailed(`Draft release not found for ${tag}`);
+              return;
+            }
+            if (!release.draft) {
+              core.setFailed(`Release ${tag} is already published`);
+              return;
+            }
+
+            const version = tag.slice(1);
+            const expectedAssets = [
+              'LICENSE',
+              'NOTICE',
+              'SHA256SUMS',
+              'latest.json',
+              `GoNavi-${version}-Linux-Amd64-WebKit41.tar.gz`,
+              `GoNavi-${version}-Linux-Amd64.tar.gz`,
+              `GoNavi-${version}-Linux-Arm64.tar.gz`,
+              `GoNavi-${version}-MacOS-Amd64.dmg`,
+              `GoNavi-${version}-MacOS-Arm64.dmg`,
+              `GoNavi-${version}-Windows-Amd64-Installer.msi`,
+              `GoNavi-${version}-Windows-Amd64-Portable.exe`,
+              `GoNavi-${version}-Windows-Arm64-Installer.msi`,
+              `GoNavi-${version}-Windows-Arm64-Portable.exe`,
+            ];
+            const assetsByName = new Map(release.assets.map((asset) => [asset.name, asset]));
+            const missingAssets = expectedAssets.filter((name) => {
+              const asset = assetsByName.get(name);
+              return !asset || asset.state !== 'uploaded' || asset.size <= 0;
+            });
+            if (missingAssets.length > 0) {
+              core.setFailed(`Release assets are incomplete: ${missingAssets.join(', ')}`);
+              return;
+            }
+
+            const published = await github.rest.repos.updateRelease({
+              owner,
+              repo,
+              release_id: release.id,
+              draft: false,
+              prerelease: false,
+              make_latest: 'true',
+            });
+            if (published.data.draft || !published.data.published_at) {
+              core.setFailed(`Release ${tag} was not published successfully`);
+              return;
+            }
+
+            core.notice(`Published ${tag}: ${published.data.html_url}`);
