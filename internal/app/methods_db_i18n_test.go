@@ -406,7 +406,7 @@ func TestMethodsDBSchemaDDLUsesEnglishMessages(t *testing.T) {
 		t.Fatalf("expected localized schema name message, got %q", missingSchemaName.Message)
 	}
 
-	sameSchemaName := app.RenameSchema(connection.ConnectionConfig{Type: "postgres", Database: "tenant"}, "", "sales", "SALES")
+	sameSchemaName := app.RenameSchema(connection.ConnectionConfig{Type: "postgres", Database: "tenant"}, "", "sales", "sales")
 	if sameSchemaName.Success {
 		t.Fatalf("RenameSchema with same names returned success: %+v", sameSchemaName)
 	}

@@ -3065,10 +3065,7 @@ func (a *App) ExportSchemaSQL(config connection.ConnectionConfig, dbName string,
 	w := bufio.NewWriterSize(f, 1024*1024)
 	defer w.Flush()
 
-	if err := writeSQLHeader(w, runConfig, dbName); err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
-	}
-	if _, err := w.WriteString(fmt.Sprintf("-- Schema: %s\n\n", safeSchemaName)); err != nil {
+	if err := writeSQLSchemaExportHeader(w, runConfig, dbName, safeSchemaName); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	for _, objectName := range objects {
@@ -3320,6 +3317,33 @@ func quoteQualifiedIdentByType(dbType string, ident string) string {
 
 func writeSQLHeader(w *bufio.Writer, config connection.ConnectionConfig, dbName string) error {
 	return writeSQLHeaderWithDatabaseBootstrap(w, config, dbName, false)
+}
+
+func writeSQLSchemaExportHeader(
+	w *bufio.Writer,
+	config connection.ConnectionConfig,
+	dbName string,
+	schemaName string,
+) error {
+	safeSchemaName := strings.TrimSpace(schemaName)
+	if safeSchemaName == "" {
+		return errors.New("schema name is required")
+	}
+	if err := writeSQLHeader(w, config, dbName); err != nil {
+		return err
+	}
+	if _, err := w.WriteString(fmt.Sprintf("-- Schema: %s\n\n", safeSchemaName)); err != nil {
+		return err
+	}
+	dbType := resolveDDLDBType(config)
+	if isPostgresSchemaDDLDBType(dbType) {
+		_, err := w.WriteString(fmt.Sprintf(
+			"CREATE SCHEMA IF NOT EXISTS %s;\n\n",
+			quoteIdentByType(dbType, safeSchemaName),
+		))
+		return err
+	}
+	return nil
 }
 
 func writeSQLDatabaseBackupHeader(w *bufio.Writer, config connection.ConnectionConfig, dbName string) error {

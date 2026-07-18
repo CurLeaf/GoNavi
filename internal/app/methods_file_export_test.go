@@ -1717,3 +1717,53 @@ func TestFilterExportViewLookupBySchema_PostgresQualifiedViewsOnly(t *testing.T)
 		t.Fatalf("expected public.v_users to be filtered out, got=%v", got)
 	}
 }
+
+func TestWriteSQLSchemaExportHeaderPostgresCreatesQuotedSchema(t *testing.T) {
+	var output bytes.Buffer
+	writer := bufio.NewWriter(&output)
+	if err := writeSQLSchemaExportHeader(
+		writer,
+		connection.ConnectionConfig{Type: "postgres"},
+		"app_db",
+		`Sales"Ops`,
+	); err != nil {
+		t.Fatalf("write postgres schema export header: %v", err)
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatalf("flush postgres schema export header: %v", err)
+	}
+
+	content := output.String()
+	if !strings.Contains(content, `-- Schema: Sales"Ops`) {
+		t.Fatalf("schema export header must describe the selected schema, content=%q", content)
+	}
+	if !strings.Contains(content, `CREATE SCHEMA IF NOT EXISTS "Sales""Ops";`) {
+		t.Fatalf("schema export header must bootstrap the quoted schema, content=%q", content)
+	}
+	databaseIndex := strings.Index(content, "-- Database: app_db")
+	schemaIndex := strings.Index(content, `-- Schema: Sales"Ops`)
+	createIndex := strings.Index(content, `CREATE SCHEMA IF NOT EXISTS "Sales""Ops";`)
+	if databaseIndex < 0 || schemaIndex < databaseIndex || createIndex < schemaIndex {
+		t.Fatalf("schema bootstrap must follow the database and schema metadata, content=%q", content)
+	}
+}
+
+func TestWriteSQLSchemaExportHeaderDoesNotBootstrapNonPostgresSchema(t *testing.T) {
+	var output bytes.Buffer
+	writer := bufio.NewWriter(&output)
+	if err := writeSQLSchemaExportHeader(
+		writer,
+		connection.ConnectionConfig{Type: "mysql"},
+		"app_db",
+		"sales",
+	); err != nil {
+		t.Fatalf("write non-postgres schema export header: %v", err)
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatalf("flush non-postgres schema export header: %v", err)
+	}
+
+	if strings.Contains(output.String(), "CREATE SCHEMA") {
+		t.Fatalf("non-postgres schema export must not inject postgres bootstrap SQL, content=%q", output.String())
+	}
+}

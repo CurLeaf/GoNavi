@@ -322,7 +322,7 @@ func buildRenameSchemaSQLWithText(dbType string, oldSchemaName string, newSchema
 	if oldSchemaName == "" || newSchemaName == "" {
 		return "", fmt.Errorf("%s", text("db.backend.error.schema_name_required", nil))
 	}
-	if strings.EqualFold(oldSchemaName, newSchemaName) {
+	if oldSchemaName == newSchemaName {
 		return "", fmt.Errorf("%s", text("db.backend.error.schema_same_name", nil))
 	}
 	if !isPostgresSchemaDDLDBType(dbType) {
