@@ -56,18 +56,15 @@ jobs:
               commitSha = annotatedTag.data.object.sha;
             }
 
-            const runs = await github.paginate(
-              github.rest.actions.listWorkflowRuns,
-              {
-                owner,
-                repo,
-                workflow_id: 'release.yml',
-                event: 'push',
-                branch: tag,
-                per_page: 100,
-              },
-              (response) => response.data.workflow_runs,
-            );
+            const workflowRuns = await github.rest.actions.listWorkflowRuns({
+              owner,
+              repo,
+              workflow_id: 'release.yml',
+              event: 'push',
+              branch: tag,
+              per_page: 100,
+            });
+            const runs = workflowRuns.data.workflow_runs;
             const successfulRun = runs.find((run) => (
               run.head_sha === commitSha
               && run.status === 'completed'
@@ -78,11 +75,12 @@ jobs:
               return;
             }
 
-            const releases = await github.paginate(
-              github.rest.repos.listReleases,
-              { owner, repo, per_page: 100 },
-              (response) => response.data,
-            );
+            const releaseList = await github.rest.repos.listReleases({
+              owner,
+              repo,
+              per_page: 100,
+            });
+            const releases = releaseList.data;
             const release = releases.find((item) => item.tag_name === tag);
             if (!release) {
               core.setFailed(`Draft release not found for ${tag}`);
