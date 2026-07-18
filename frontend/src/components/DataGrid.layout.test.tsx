@@ -149,6 +149,37 @@ const zhObjectDesignLabel = zhCnCatalog['data_grid.secondary.object_design'];
 const enUndoCellChangeLabel = enUsCatalog['data_grid.context_menu.undo_cell_change'];
 
 describe('DataGrid layout', () => {
+  it('renders without navigator in server-side environments', () => {
+    const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    Reflect.deleteProperty(globalThis, 'navigator');
+
+    try {
+      expect(() => renderDataGridWithI18n(
+        <DataGrid
+          data={[]}
+          columnNames={[]}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          readOnly
+          pagination={{
+            current: 1,
+            pageSize: 100,
+            total: 0,
+          }}
+          onPageChange={() => {}}
+        />,
+      )).not.toThrow();
+    } finally {
+      if (navigatorDescriptor) {
+        Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'navigator');
+      }
+    }
+  });
+
   it('renders a secondary action strip for view switching and auxiliary actions', () => {
     const markup = renderDataGridWithI18n(
       <DataGrid

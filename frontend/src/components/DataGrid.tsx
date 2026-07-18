@@ -3407,7 +3407,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     isQueryResultExport,
     mergedDisplayData,
     modal,
-    navigator,
+    navigator: globalThis.navigator,
     objectType,
     pagination,
     pickDataGridOutputRows,
