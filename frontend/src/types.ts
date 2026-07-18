@@ -635,6 +635,7 @@ export interface StreamEntry {
 // --- AI Types ---
 
 export type AIProviderType = "openai" | "anthropic" | "gemini" | "custom";
+export type AIProviderAuthMode = "api-key" | "local-cli";
 export type AISafetyLevel = "readonly" | "readwrite" | "full";
 export type AIContextLevel = "schema_only" | "with_samples" | "with_results";
 
@@ -649,6 +650,7 @@ export interface AIProviderConfig {
   type: AIProviderType;
   name: string;
   apiKey: string;
+  authMode?: AIProviderAuthMode;
   secretRef?: string;
   hasSecret?: boolean;
   baseUrl: string;

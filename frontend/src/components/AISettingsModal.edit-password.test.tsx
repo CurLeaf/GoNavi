@@ -149,6 +149,12 @@ describe('AISettingsModal edit password behavior', () => {
     expect(providersSectionSource).toContain('visible: primaryPasswordVisible,');
   });
 
+  it('retains an existing API secret but blocks a keyless local-cli to API switch', () => {
+    expect(source).toContain('isProviderSecretRequirementSatisfied({');
+    expect(source).toContain('canRetainExistingProviderSecret({ currentAuthMode: authMode, editingProvider })');
+    expect(source).toContain('retainExistingSecret,');
+  });
+
   it('does not render the clear helper block anymore', () => {
     expect(source).not.toContain('当前已保存 API Key。留空表示继续沿用，输入新值表示替换。');
     expect(source).not.toContain('清除已保存 API Key');

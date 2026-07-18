@@ -123,6 +123,18 @@ var claudeCLIHealthCheckFunc = func(config ai.ProviderConfig) error {
 	return err
 }
 
+var claudeCLILocalAuthCheckFunc = func(_ ai.ProviderConfig) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return provider.CheckClaudeCLILocalAuth(ctx)
+}
+
+var codexCLIHealthCheckFunc = func(config ai.ProviderConfig) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return provider.CheckCodexCLIAuth(ctx)
+}
+
 var codebuddyCLIHealthCheckFunc = func(config ai.ProviderConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -421,6 +433,13 @@ func (s *Service) AISaveProvider(config ai.ProviderConfig) error {
 	defer s.mu.Unlock()
 
 	config = normalizeProviderConfig(config)
+	if err := validateCodexCLIProviderAuth(config); err != nil {
+		return err
+	}
+	localCLIAuth := isLocalCLIAuthProvider(config)
+	if localCLIAuth {
+		config = clearLocalCLIProviderSecrets(config)
+	}
 	if strings.TrimSpace(config.ID) == "" {
 		config.ID = "provider-" + uuid.New().String()[:8]
 	}
@@ -452,7 +471,7 @@ func (s *Service) AISaveProvider(config ai.ProviderConfig) error {
 			return s.serviceErrorLocked("ai_service.backend.error.provider_secret_save_failed", nil, err)
 		}
 		runtimeConfig = mergeProviderSecrets(storedMeta, mergedBundle)
-	case found && (config.HasSecret || existing.HasSecret):
+	case found && !localCLIAuth && (config.HasSecret || existing.HasSecret):
 		meta.SecretRef = existing.SecretRef
 		meta.HasSecret = config.HasSecret || existing.HasSecret
 		meta, existingBundle := applyExistingRuntimeProviderSecrets(meta, existing)
@@ -528,11 +547,14 @@ func (s *Service) AIDeleteProvider(id string) error {
 
 // AITestProvider 测试 Provider 配置是否可用，仅测试端点连通性与密钥，不实际调用对话
 func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{} {
-	if isMaskedAPIKey(config.APIKey) {
+	localCLIAuth := isLocalCLIAuthProvider(config)
+	if localCLIAuth {
+		config = clearLocalCLIProviderSecrets(config)
+	} else if isMaskedAPIKey(config.APIKey) {
 		config.APIKey = ""
 		config.HasSecret = true
 	}
-	if strings.TrimSpace(config.APIKey) == "" && (config.HasSecret || strings.TrimSpace(config.SecretRef) != "") {
+	if !localCLIAuth && strings.TrimSpace(config.APIKey) == "" && (config.HasSecret || strings.TrimSpace(config.SecretRef) != "") {
 		s.mu.RLock()
 		var existing ai.ProviderConfig
 		found := false
@@ -622,11 +644,21 @@ func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{
 			}
 		}
 	case "claude-cli":
-		testConfig := config
-		if strings.TrimSpace(testConfig.Model) == "" && isDashScopeCodingPlanProvider(testConfig) && len(dashScopeCodingPlanModels) > 0 {
-			testConfig.Model = dashScopeCodingPlanModels[0]
+		if isLocalCLIAuthProvider(config) {
+			err = claudeCLILocalAuthCheckFunc(config)
+		} else {
+			testConfig := config
+			if strings.TrimSpace(testConfig.Model) == "" && isDashScopeCodingPlanProvider(testConfig) && len(dashScopeCodingPlanModels) > 0 {
+				testConfig.Model = dashScopeCodingPlanModels[0]
+			}
+			err = claudeCLIHealthCheckFunc(testConfig)
 		}
-		err = claudeCLIHealthCheckFunc(testConfig)
+	case "codex-cli":
+		if authErr := validateCodexCLIProviderAuth(config); authErr != nil {
+			err = authErr
+		} else {
+			err = codexCLIHealthCheckFunc(config)
+		}
 	case "codebuddy-cli":
 		err = codebuddyCLIHealthCheckFunc(config)
 	default:
@@ -669,6 +701,40 @@ func normalizedProviderType(config ai.ProviderConfig) string {
 		return apiFormat
 	}
 	return providerType
+}
+
+func isLocalCLIAuthProvider(config ai.ProviderConfig) bool {
+	if !strings.EqualFold(strings.TrimSpace(config.AuthMode), "local-cli") {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(config.Type), "custom") {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(config.APIFormat)) {
+	case "codex-cli", "claude-cli":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateCodexCLIProviderAuth(config ai.ProviderConfig) error {
+	if !strings.EqualFold(strings.TrimSpace(config.APIFormat), "codex-cli") {
+		return nil
+	}
+	if !isLocalCLIAuthProvider(config) {
+		return fmt.Errorf("Codex CLI provider requires the Codex Subscription preset with local-cli authentication")
+	}
+	return nil
+}
+
+func clearLocalCLIProviderSecrets(config ai.ProviderConfig) ai.ProviderConfig {
+	config.APIKey = ""
+	config.SecretRef = ""
+	config.HasSecret = false
+	config.BaseURL = ""
+	config.Headers = nil
+	return config
 }
 
 func isMiniMaxAnthropicProvider(config ai.ProviderConfig) bool {
@@ -773,6 +839,7 @@ func defaultStaticModelsForProvider(config ai.ProviderConfig) []string {
 }
 
 func normalizeProviderConfig(config ai.ProviderConfig) ai.ProviderConfig {
+	config.AuthMode = strings.ToLower(strings.TrimSpace(config.AuthMode))
 	switch {
 	case isDashScopeBailianAnthropicProvider(config):
 		config.Models = nil
@@ -854,7 +921,7 @@ func resolveModelsURL(config ai.ProviderConfig) string {
 		return baseURL + "/v1beta/models?key=" + config.APIKey
 	case "cursor-agent":
 		return provider.ResolveCursorAPIEndpoint(baseURL, "models")
-	case "codebuddy-cli":
+	case "codex-cli", "codebuddy-cli":
 		return ""
 	case "openai":
 		fallthrough
@@ -1005,7 +1072,7 @@ func (s *Service) AIListModels() map[string]interface{} {
 	}
 
 	config = normalizeProviderConfig(config)
-	if normalizedProviderType(config) == "codebuddy-cli" {
+	if isLocalCLIAuthProvider(config) || normalizedProviderType(config) == "codebuddy-cli" {
 		return map[string]interface{}{
 			"success": true,
 			"models":  append([]string(nil), config.Models...),
@@ -1051,7 +1118,7 @@ func fetchModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string,
 		return fetchGeminiModels(config, localizer)
 	case "cursor-agent":
 		return fetchCursorModels(config, localizer)
-	case "codebuddy-cli":
+	case "codex-cli", "codebuddy-cli":
 		return append([]string(nil), config.Models...), nil
 	default:
 		return fetchOpenAIModels(config, localizer)

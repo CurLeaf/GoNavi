@@ -38,6 +38,7 @@ const REQUIRED_PROVIDER_FORM_KEYS = [
   'ai_settings.form.model_list_placeholder',
   'ai_settings.form.model_list_placeholder.codebuddy',
   'ai_settings.form.model_list_placeholder.cursor',
+  'ai_settings.form.model_list_placeholder.local_cli',
   'ai_settings.form.section.inline_completion',
   'ai_settings.form.inline_completion_model',
   'ai_settings.form.inline_completion_model_hint',
@@ -51,6 +52,9 @@ const REQUIRED_PROVIDER_FORM_KEYS = [
   'ai_settings.form.api_endpoint',
   'ai_settings.form.api_endpoint_required',
   'ai_settings.form.api_endpoint_placeholder.codebuddy',
+  'ai_settings.form.local_cli.title',
+  'ai_settings.form.local_cli.codex_hint',
+  'ai_settings.form.local_cli.claude_hint',
   'ai_settings.action.back',
   'ai_settings.action.save',
   'ai_settings.action.test',
@@ -60,6 +64,8 @@ const REQUIRED_PROVIDER_FORM_KEYS = [
 
 const providerPresets = [
   { key: 'openai', label: 'OpenAI', icon: <span>O</span>, desc: 'GPT', defaultBaseUrl: 'https://api.openai.com/v1' },
+  { key: 'codex', label: 'Codex Subscription', icon: <span>X</span>, desc: 'Codex CLI', defaultBaseUrl: '', authMode: 'local-cli' as const },
+  { key: 'claude-subscription', label: 'Claude Subscription', icon: <span>A</span>, desc: 'Claude Code CLI', defaultBaseUrl: '', authMode: 'local-cli' as const },
   { key: 'codebuddy', label: 'CodeBuddy', icon: <span>B</span>, desc: 'CodeBuddy CLI', defaultBaseUrl: '' },
   { key: 'cursor', label: 'Cursor', icon: <span>R</span>, desc: 'Cursor API', defaultBaseUrl: 'https://api.cursor.com/v1' },
   { key: 'custom', label: '自定义', icon: <span>C</span>, desc: '自定义接口', defaultBaseUrl: 'https://example.com' },
@@ -79,6 +85,12 @@ const provider: AIProviderConfig = {
 const overlayTheme = buildOverlayWorkbenchTheme(false);
 
 describe('AISettingsProvidersSection', () => {
+  it('validates empty API keys against retainable secret state instead of edit identity', () => {
+    expect(providerSectionSource).toContain('isProviderSecretRequirementSatisfied({');
+    expect(providerSectionSource).toContain('editingProvider,');
+    expect(providerSectionSource).not.toContain('apiKey || editingProvider?.id');
+  });
+
   it('renders provider cards in list mode', () => {
     const Wrap = () => {
       const [form] = Form.useForm();
@@ -337,5 +349,58 @@ describe('AISettingsProvidersSection', () => {
 
     const markup = renderToStaticMarkup(<Wrap />);
     expect(markup).toContain("Optional: prefill common Cursor model IDs; leave blank to use Cursor&#x27;s default model automatically");
+  });
+
+  it('uses the local CLI login state without rendering API key or endpoint fields', () => {
+    const Wrap = () => {
+      const [form] = Form.useForm();
+      return (
+        <I18nProvider preference="en-US" systemLanguages={['en-US']} onPreferenceChange={() => {}}>
+          <AISettingsProvidersSection
+            providers={[]}
+            activeProviderId=""
+            editingProvider={{
+              ...provider,
+              type: 'custom',
+              authMode: 'local-cli',
+              apiFormat: 'codex-cli',
+              baseUrl: '',
+              model: '',
+            }}
+            isEditing
+            form={form}
+            providerPresets={providerPresets}
+            watchedPresetKey="codex"
+            watchedApiFormat="codex-cli"
+            loading={false}
+            testStatus="idle"
+            primaryPasswordVisible={false}
+            darkMode={false}
+            overlayTheme={overlayTheme}
+            cardBg="#fff"
+            cardBorder="rgba(0,0,0,0.08)"
+            inputBg="#fff"
+            onPrimaryPasswordVisibleChange={() => {}}
+            resolveProviderPreset={() => ({ label: 'Codex Subscription', icon: <span>X</span> })}
+            resolvePresetByKey={(key) => providerPresets.find((item) => item.key === key) || providerPresets[0]}
+            onAddProvider={() => {}}
+            onEditProvider={() => {}}
+            onDeleteProvider={() => {}}
+            onSetActiveProvider={() => {}}
+            onCancelEdit={() => {}}
+            onPresetChange={() => {}}
+            onTestProvider={() => {}}
+            onSaveProvider={() => {}}
+          />
+        </I18nProvider>
+      );
+    };
+
+    const markup = renderToStaticMarkup(<Wrap />);
+    expect(markup).toContain('Local CLI sign-in');
+    expect(markup).toContain('codex login');
+    expect(markup).toContain('leave blank to let the local CLI choose automatically');
+    expect(markup).not.toContain('API Endpoint (URL)');
+    expect(markup).not.toContain('API Key');
   });
 });

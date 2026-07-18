@@ -290,6 +290,7 @@ export namespace ai {
 	    id: string;
 	    type: string;
 	    name: string;
+	    authMode?: string;
 	    apiKey: string;
 	    secretRef?: string;
 	    hasSecret?: boolean;
@@ -312,6 +313,7 @@ export namespace ai {
 	        this.id = source["id"];
 	        this.type = source["type"];
 	        this.name = source["name"];
+	        this.authMode = source["authMode"];
 	        this.apiKey = source["apiKey"];
 	        this.secretRef = source["secretRef"];
 	        this.hasSecret = source["hasSecret"];

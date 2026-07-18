@@ -7,8 +7,13 @@ import {
     resolvePresetBaseURL,
     resolvePresetModelSelection,
     resolvePresetTransport,
+    type ProviderPresetCandidate,
 } from '../utils/aiProviderPresets';
-import { resolveProviderSecretDraft } from '../utils/providerSecretDraft';
+import {
+    canRetainExistingProviderSecret,
+    isProviderSecretRequirementSatisfied,
+    resolveProviderSecretDraft,
+} from '../utils/providerSecretDraft';
 import { buildAddProviderEditorSession, buildClosedProviderEditorSession, buildEditProviderEditorSession, type ProviderEditorSession } from '../utils/aiProviderEditorState';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { useI18n } from '../i18n/provider';
@@ -147,7 +152,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
         [t],
     );
     const matchLocalizedProviderPreset = useCallback(
-        (provider: Pick<AIProviderConfig, 'type' | 'baseUrl' | 'apiFormat'>) =>
+        (provider: ProviderPresetCandidate) =>
             localizeProviderPreset(matchProviderPreset(provider), t),
         [t],
     );
@@ -317,6 +322,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
             presetModel: preset.defaultModel,
             presetModels: preset.models,
             apiFormat: 'openai',
+            authMode: preset.authMode || 'api-key',
         }));
     };
 
@@ -342,6 +348,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                     models: editableProvider.models || [],
                     presetKey: matchedPreset.key,
                     apiFormat: resolvedTransport.apiFormat || editableProvider.apiFormat || 'openai',
+                    authMode: matchedPreset.authMode || editableProvider.authMode || 'api-key',
                 },
             }));
         } catch (e: any) {
@@ -380,6 +387,8 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
             // 构建 payload，处理 model/models 逻辑
             const preset = findPreset(values.presetKey);
             const localizedPreset = localizeProviderPreset(preset, t);
+            const authMode = preset.authMode || 'api-key';
+            const usesLocalCLI = authMode === 'local-cli';
             const isCustomLike = ['custom', 'ollama', 'codebuddy', 'cursor'].includes(values.presetKey);
             const { model: finalModel, models: resolvedModels } = resolvePresetModelSelection({
                 presetKey: values.presetKey,
@@ -403,8 +412,21 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                 presetFixedApiFormat: preset.fixedApiFormat,
                 valuesApiFormat: values.apiFormat,
             });
+            const apiKeyInput = usesLocalCLI ? '' : values.apiKey;
+            const allowEmptySecret = values.presetKey === 'codebuddy';
+            if (!isProviderSecretRequirementSatisfied({
+                apiKeyInput,
+                currentAuthMode: authMode,
+                editingProvider,
+                allowEmptySecret,
+            })) {
+                throw new Error(t('ai_settings.form.api_key_required'));
+            }
+            const retainExistingSecret = !String(apiKeyInput || '').trim()
+                && canRetainExistingProviderSecret({ currentAuthMode: authMode, editingProvider });
             const secretDraft = resolveProviderSecretDraft({
-                apiKeyInput: values.apiKey,
+                apiKeyInput,
+                retainExistingSecret,
             });
             const payload = { 
                 ...editingProvider, 
@@ -413,6 +435,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                 name: finalName,
                 apiKey: secretDraft.apiKey,
                 hasSecret: secretDraft.hasSecret,
+                authMode,
                 model: finalModel,
                 inlineCompletionModel,
                 models: resolvedModels,
@@ -668,6 +691,8 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
             setTestStatus('idle');
             const Service = (window as any).go?.aiservice?.Service;
             const preset = findPreset(values.presetKey || 'openai');
+            const authMode = preset.authMode || 'api-key';
+            const usesLocalCLI = authMode === 'local-cli';
             const finalBaseUrl = resolvePresetBaseURL({
                 presetKey: values.presetKey || 'openai',
                 presetDefaultBaseUrl: preset.defaultBaseUrl,
@@ -687,18 +712,28 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                 valuesApiFormat: values.apiFormat,
             });
             const allowEmptySecret = values.presetKey === 'codebuddy';
-            const secretDraft = resolveProviderSecretDraft({
-                apiKeyInput: values.apiKey,
-            });
-            if (secretDraft.mode === 'clear' && !allowEmptySecret) {
+            const apiKeyInput = usesLocalCLI ? '' : values.apiKey;
+            if (!isProviderSecretRequirementSatisfied({
+                apiKeyInput,
+                currentAuthMode: authMode,
+                editingProvider,
+                allowEmptySecret,
+            })) {
                 throw new Error(t('ai_settings.message.test_requires_new_api_key'));
             }
+            const retainExistingSecret = !String(apiKeyInput || '').trim()
+                && canRetainExistingProviderSecret({ currentAuthMode: authMode, editingProvider });
+            const secretDraft = resolveProviderSecretDraft({
+                apiKeyInput,
+                retainExistingSecret,
+            });
             const res = await Service?.AITestProvider?.({
                 ...editingProvider,
                 ...values,
                 ...resolvedTransport,
                 apiKey: secretDraft.apiKey,
                 hasSecret: secretDraft.hasSecret,
+                authMode,
                 baseUrl: finalBaseUrl,
                 model: finalModel,
                 inlineCompletionModel: String(values.inlineCompletionModel || '').trim(),
@@ -715,6 +750,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
 
     const handlePresetChange = (presetKey: string) => {
         const preset = findPreset(presetKey);
+        const authMode = preset.authMode || 'api-key';
         const resolvedTransport = resolvePresetTransport({
             presetKey,
             presetBackendType: preset.backendType,
@@ -735,6 +771,8 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
             model: presetModel,
             models: presetModels,
             inlineCompletionModel: '',
+            authMode,
+            ...(authMode === 'local-cli' ? { apiKey: '' } : {}),
         });
     };
 

@@ -6,6 +6,8 @@ import type { FormInstance } from 'antd/es/form';
 import type { AIProviderConfig } from '../../types';
 import { t as catalogTranslate } from '../../i18n/catalog';
 import { useOptionalI18n } from '../../i18n/provider';
+import { isLocalCLISubscriptionProvider, type ProviderPresetCandidate } from '../../utils/aiProviderPresets';
+import { isProviderSecretRequirementSatisfied } from '../../utils/providerSecretDraft';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import {
   PROVIDER_PRESET_CARD_BASE_STYLE,
@@ -23,6 +25,7 @@ export interface AISettingsProviderPresetOption {
   defaultBaseUrl: string;
   defaultModel?: string;
   models?: string[];
+  authMode?: AIProviderConfig['authMode'];
 }
 
 interface MatchedProviderPreset {
@@ -48,7 +51,7 @@ interface AISettingsProvidersSectionProps {
   cardBorder: string;
   inputBg: string;
   onPrimaryPasswordVisibleChange: (visible: boolean) => void;
-  resolveProviderPreset: (provider: Pick<AIProviderConfig, 'type' | 'baseUrl' | 'apiFormat'>) => MatchedProviderPreset;
+  resolveProviderPreset: (provider: ProviderPresetCandidate) => MatchedProviderPreset;
   resolvePresetByKey: (presetKey: string) => AISettingsProviderPresetOption;
   onAddProvider: () => void;
   onEditProvider: (provider: AIProviderConfig) => void;
@@ -112,7 +115,10 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
   const i18n = useOptionalI18n();
   const copy = (key: string) => (i18n?.t ?? ((catalogKey) => catalogTranslate('en-US', catalogKey)))(key);
   const presetKeyFromForm = watchedPresetKey || (editingProvider as (AIProviderConfig & { presetKey?: string }) | null)?.presetKey || 'openai';
+  const presetFromForm = providerPresets.find((preset) => preset.key === presetKeyFromForm);
+  const usesLocalCLI = presetFromForm?.authMode === 'local-cli';
   const supportsAdvancedEndpoint = presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama' || presetKeyFromForm === 'codebuddy' || presetKeyFromForm === 'cursor';
+  const supportsModelList = supportsAdvancedEndpoint || usesLocalCLI;
   const showsApiFormat = presetKeyFromForm === 'custom' || presetKeyFromForm === 'openai';
   const codeBuddyUsesOptionalSecret = presetKeyFromForm === 'codebuddy';
   const cursorUsesOptionalModel = presetKeyFromForm === 'cursor';
@@ -135,7 +141,6 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
   const watchedModel = Form.useWatch('model', form);
   const watchedModels = Form.useWatch('models', form);
   const watchedInlineCompletionModel = Form.useWatch('inlineCompletionModel', form);
-  const presetFromForm = providerPresets.find((preset) => preset.key === presetKeyFromForm);
   const inlineCompletionModelOptions = React.useMemo(() => {
     const values = [
       watchedModel,
@@ -181,7 +186,7 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
           const matchedPreset = resolveProviderPreset(provider);
           const isActive = provider.id === activeProviderId;
           const modelLabel = provider.model
-            || (provider.apiFormat === 'codebuddy-cli' || provider.apiFormat === 'cursor-agent'
+            || (isLocalCLISubscriptionProvider(provider) || provider.apiFormat === 'codebuddy-cli' || provider.apiFormat === 'cursor-agent'
               ? copy('ai_settings.provider.auto_model')
               : copy('ai_settings.provider.no_model'));
           return (
@@ -317,9 +322,10 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
             </div>
           </Form.Item>
           <Form.Item name="type" hidden><Input /></Form.Item>
+          <Form.Item name="authMode" hidden><Input /></Form.Item>
         </div>
 
-        {(supportsAdvancedEndpoint || showsApiFormat) && (
+        {(supportsModelList || showsApiFormat) && (
           <div style={{ ...currentFieldGroupStyle, marginTop: 16 }}>
             <div style={currentFieldLabelStyle}>
               <RobotOutlined style={{ fontSize: 14 }} /> {copy('ai_settings.form.section.basic')}
@@ -370,12 +376,14 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
               </Form.Item>
             )}
 
-            {supportsAdvancedEndpoint && (
+            {supportsModelList && (
               <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.model_list')}</span>} name="models" style={{ marginBottom: 0 }}>
                 <Select
                   mode="tags"
                   size="middle"
-                  placeholder={codeBuddyUsesOptionalSecret
+                  placeholder={usesLocalCLI
+                    ? copy('ai_settings.form.model_list_placeholder.local_cli')
+                    : codeBuddyUsesOptionalSecret
                     ? copy('ai_settings.form.model_list_placeholder.codebuddy')
                     : cursorUsesOptionalModel
                       ? copy('ai_settings.form.model_list_placeholder.cursor')
@@ -415,31 +423,57 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
           <div style={currentFieldLabelStyle}>
             <KeyOutlined style={{ fontSize: 14 }} /> {copy('ai_settings.form.section.auth_connection')}
           </div>
-          <Form.Item
-            label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{codeBuddyUsesOptionalSecret ? copy('ai_settings.form.api_key.codebuddy_optional') : copy('ai_settings.form.api_key')}</span>}
-            name="apiKey"
-            rules={[{
-              validator: (_, value) => {
-                const apiKey = String(value || '').trim();
-                if (apiKey || editingProvider?.id || codeBuddyUsesOptionalSecret) {
-                  return Promise.resolve();
-                }
-                return Promise.reject(new Error(copy('ai_settings.form.api_key_required')));
-              },
-            }]}
-            extra={codeBuddyUsesOptionalSecret ? copy('ai_settings.form.api_key.codebuddy_hint') : undefined}
-            style={{ marginBottom: 16 }}
-          >
-            <Input.Password
-              placeholder={codeBuddyUsesOptionalSecret ? copy('ai_settings.form.api_key_placeholder.codebuddy') : copy('ai_settings.form.api_key_placeholder')}
-              size="middle"
-              visibilityToggle={{
-                visible: primaryPasswordVisible,
-                onVisibleChange: onPrimaryPasswordVisibleChange,
+          {usesLocalCLI ? (
+            <div
+              role="note"
+              style={{
+                padding: '12px 14px',
+                borderRadius: 10,
+                background: darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.035)',
+                border: `1px solid ${cardBorder}`,
+                color: overlayTheme.mutedText,
+                fontSize: 13,
+                lineHeight: 1.6,
               }}
-              style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }}
-            />
-          </Form.Item>
+            >
+              <div style={{ color: overlayTheme.titleText, fontWeight: 600, marginBottom: 2 }}>
+                {copy('ai_settings.form.local_cli.title')}
+              </div>
+              {copy(presetKeyFromForm === 'codex'
+                ? 'ai_settings.form.local_cli.codex_hint'
+                : 'ai_settings.form.local_cli.claude_hint')}
+            </div>
+          ) : (
+            <Form.Item
+              label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{codeBuddyUsesOptionalSecret ? copy('ai_settings.form.api_key.codebuddy_optional') : copy('ai_settings.form.api_key')}</span>}
+              name="apiKey"
+              rules={[{
+                validator: (_, value) => {
+                  if (isProviderSecretRequirementSatisfied({
+                    apiKeyInput: value,
+                    currentAuthMode: usesLocalCLI ? 'local-cli' : 'api-key',
+                    editingProvider,
+                    allowEmptySecret: codeBuddyUsesOptionalSecret,
+                  })) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error(copy('ai_settings.form.api_key_required')));
+                },
+              }]}
+              extra={codeBuddyUsesOptionalSecret ? copy('ai_settings.form.api_key.codebuddy_hint') : undefined}
+              style={{ marginBottom: 16 }}
+            >
+              <Input.Password
+                placeholder={codeBuddyUsesOptionalSecret ? copy('ai_settings.form.api_key_placeholder.codebuddy') : copy('ai_settings.form.api_key_placeholder')}
+                size="middle"
+                visibilityToggle={{
+                  visible: primaryPasswordVisible,
+                  onVisibleChange: onPrimaryPasswordVisibleChange,
+                }}
+                style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }}
+              />
+            </Form.Item>
+          )}
 
           {supportsAdvancedEndpoint && (
             <Form.Item
