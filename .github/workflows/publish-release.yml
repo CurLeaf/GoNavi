@@ -1,6 +1,9 @@
 name: Publish Draft Release
 
 on:
+  push:
+    branches:
+      - 'publish/v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -13,7 +16,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-release-${{ inputs.tag }}
+  group: publish-release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -21,13 +24,16 @@ jobs:
     name: Validate and publish draft
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: Validate assets and publish
         uses: actions/github-script@v8
         with:
           script: |
-            const tag = String(process.env.RELEASE_TAG || '').trim();
+            const requestedTag = String(process.env.RELEASE_TAG || '').trim();
+            const tag = requestedTag.startsWith('publish/')
+              ? requestedTag.slice('publish/'.length)
+              : requestedTag;
             if (!/^v\d+\.\d+\.\d+$/.test(tag)) {
               core.setFailed(`Invalid release tag: ${tag}`);
               return;
