@@ -27,6 +27,7 @@ import { getShortcutPlatform } from '../utils/shortcuts';
 import { t } from '../i18n';
 import { buildTableExportTab } from '../utils/tableExportTab';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
+import { extractTableNameFromMetadataRow } from '../utils/tableMetadataRows';
 import { V2TableContextMenuView, type V2TableContextMenuActionKey } from './V2TableContextMenu';
 import { useExportProgressDialog } from './ExportProgressModal';
 import { showSQLExportOptionsDialog } from './SQLExportOptionsDialog';
@@ -237,7 +238,7 @@ const parseTableStats = (dialect: string, rows: Record<string, any>[]): TableSta
         };
 
         return {
-            name: strVal(['Name', 'name', 'table_name', 'tablename', 'TABLE_NAME', 'Table', 'table', 'Device', 'device']),
+            name: extractTableNameFromMetadataRow(row) || strVal(['Device', 'device']),
             comment: strVal(['Comment', 'table_comment', 'TABLE_COMMENT', 'comments']),
             rows: numVal(['Rows', 'table_rows', 'TABLE_ROWS', 'num_rows', 'reltuples', 'total_rows'], -1),
             dataSize: numVal(['Data_length', 'data_length', 'DATA_LENGTH', 'total_bytes'], -1),

@@ -48,6 +48,7 @@ import {
 } from "../utils/connectionDriverType";
 import { resolveSqlDialect } from "../utils/sqlDialect";
 import { quoteIdentPart, quoteQualifiedIdent } from "../utils/sql";
+import { normalizeTableNamesFromMetadataRows } from "../utils/tableMetadataRows";
 import {
   formatLocalDateTimeLiteral,
   normalizeTemporalLiteralText,
@@ -722,19 +723,7 @@ const DataSyncModal: React.FC<{
         const config = normalizeConnConfig(conn, dbName);
         const res = await DBGetTables(config as any, dbName);
         if (res.success) {
-          // DBGetTables returns [{Table: "name"}, ...]
-          const tableRows = Array.isArray(res.data) ? res.data : [];
-          const tables = tableRows
-            .map(
-              (row: any) =>
-                row?.Table ||
-                row?.table ||
-                row?.TABLE_NAME ||
-                Object.values(row || {})[0],
-            )
-            .filter(
-              (name: any) => typeof name === "string" && name.trim() !== "",
-            );
+          const tables = normalizeTableNamesFromMetadataRows(res.data);
           const nextTables = (
             isSourceQueryMode && targetSupportsSchemaSelection && targetSchema
               ? filterTablesBySchema(tables as string[], targetSchema)
