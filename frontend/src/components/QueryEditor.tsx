@@ -29,6 +29,7 @@ import {
 } from '../utils/queryResultPagination';
 import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/queryResultTable';
 import { quoteIdentPart, quoteQualifiedIdent } from '../utils/sql';
+import { extractTableNameFromMetadataRow } from '../utils/tableMetadataRows';
 import { formatSqlExecutionError, hasLocalizedSqlTimeoutKeyword } from '../utils/sqlErrorSemantics';
 import { canReusePendingSqlEditorTransactionForType, shouldUseSqlEditorManagedTransactionForType } from '../utils/sqlEditorTransaction';
 import { findSqlStatementRanges, resolveCurrentSqlStatementRange, resolveExecutableSql } from '../utils/sqlStatementSelection';
@@ -1009,10 +1010,7 @@ const clearRecord = (record: Record<string, unknown>) => {
 const QUERY_EDITOR_SQL_SNIPPET_SUGGEST_DETAIL_MIN_HEIGHT = 260;
 
 const getCompletionTableNameFromRow = (row: any): string => (
-    normalizeCommentText(
-        getCaseInsensitiveValue(row, ['table_name', 'TABLE_NAME', 'Table', 'table', 'name', 'Name'])
-            ?? Object.values(row || {})[0],
-    )
+    normalizeCommentText(extractTableNameFromMetadataRow(row))
 );
 
 const getCompletionTableCommentFromRow = (row: any): string => (
@@ -6973,7 +6971,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                     }
                     const fetchedTables = resTables.data
                         .map((row: any) => {
-                            const tableName = String(Object.values(row || {})[0] || '').trim();
+                            const tableName = extractTableNameFromMetadataRow(row);
                             if (!tableName) return null;
                             return {
                                 dbName: normalizedDbName,

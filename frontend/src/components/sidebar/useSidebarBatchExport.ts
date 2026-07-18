@@ -16,6 +16,7 @@ import type { SavedConnection } from '../../types';
 import { t } from '../../i18n';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import type { SidebarViewMetadataEntry } from '../../utils/sidebarMetadata';
+import { normalizeTableNamesFromMetadataRows } from '../../utils/tableMetadataRows';
 import {
   buildBatchDatabaseExportWorkbenchTab,
   buildBatchTableExportWorkbenchTab,
@@ -341,7 +342,7 @@ export const useSidebarBatchExport = ({
           return;
       }
 
-      const tableRows: any[] = Array.isArray(res.data) ? res.data : [];
+      const tableNames = normalizeTableNamesFromMetadataRows(res.data);
       const viewRows: SidebarViewMetadataEntry[] = Array.isArray(viewResult.views) ? viewResult.views : [];
       const viewSet = new Set(
           viewRows.flatMap((view) => {
@@ -353,8 +354,7 @@ export const useSidebarBatchExport = ({
           })
       );
 
-      const tableObjects: BatchObjectItem[] = tableRows
-          .map((row: any) => Object.values(row)[0] as string)
+      const tableObjects: BatchObjectItem[] = tableNames
           .filter((tableName: string) => !viewSet.has(tableName.toLowerCase()))
           .map((tableName: string) => ({
               title: getSidebarTableDisplayName(conn, tableName),

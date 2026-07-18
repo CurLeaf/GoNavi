@@ -12,6 +12,7 @@ import {
   type SidebarViewMetadataEntry,
 } from "../../utils/sidebarMetadata";
 import { isPostgresSchemaDialect } from "../sidebarCoreUtils";
+import { extractTableNameFromMetadataRow } from "../../utils/tableMetadataRows";
 
 export const buildSidebarRuntimeConfig = (
   conn: any,
@@ -232,14 +233,7 @@ const getMySQLShowTablesName = (row: Record<string, any>): string => {
 };
 
 const getSidebarTableName = (row: Record<string, any>): string => {
-  return getCaseInsensitiveValue(row, [
-    "Table",
-    "table",
-    "table_name",
-    "TABLE_NAME",
-    "Name",
-    "name",
-  ]) || getMySQLShowTablesName(row) || getFirstRowValue(row);
+  return extractTableNameFromMetadataRow(row);
 };
 
 const parseMetadataRowCount = (

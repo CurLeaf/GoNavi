@@ -22,6 +22,7 @@ import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { getColumnDefinitionName } from '../utils/columnDefinition';
 import { resolveConnectionHostSummary } from '../utils/tabDisplay';
 import { buildExportWorkbenchHistoryKey } from '../utils/tableExportTab';
+import { normalizeTableNamesFromMetadataRows } from '../utils/tableMetadataRows';
 import {
   formatExportElapsed,
   formatExportProgressRows,
@@ -521,11 +522,8 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
           setObjectLoadError(res.message || t('data_export.message.load_objects_failed'));
           return;
         }
-        const tableRows: any[] = Array.isArray(res.data) ? res.data : [];
         const nextOptions = toSortedSelectOptions(
-          tableRows
-            .map((row) => String(Object.values(row)[0] || '').trim())
-            .filter(Boolean),
+          normalizeTableNamesFromMetadataRows(res.data),
         );
         setAvailableObjects(nextOptions);
         const availableNameSet = new Set(nextOptions.map((item) => item.value));
