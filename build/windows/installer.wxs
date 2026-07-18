@@ -16,11 +16,13 @@
     <Icon Id="GoNaviIcon" SourceFile="$(var.IconPath)" />
     <Property Id="ARPPRODUCTICON" Value="GoNaviIcon" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/Syngnat/GoNavi" />
+    <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" Secure="yes" />
     <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" After="CostFinalize" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
 
     <Feature Id="MainFeature" Title="$(var.ProductName)" Level="1">
       <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="DesktopShortcutComponent" />
     </Feature>
 
     <Component Id="MainExecutable"
@@ -35,11 +37,6 @@
              can leave Windows shell caches pointing at the removed product cache after a major upgrade. -->
         <Shortcut Id="StartMenuShortcut"
                   Directory="ProgramMenuFolder"
-                  Name="$(var.ProductName)"
-                  WorkingDirectory="INSTALLFOLDER"
-                  Advertise="no" />
-        <Shortcut Id="DesktopShortcut"
-                  Directory="DesktopFolder"
                   Name="$(var.ProductName)"
                   WorkingDirectory="INSTALLFOLDER"
                   Advertise="no" />
@@ -65,6 +62,27 @@
                      Value="[INSTALLFOLDER]GoNavi.exe"
                      Type="string"
                      KeyPath="no" />
+    </Component>
+
+    <!-- Online updates pass the user's pre-update desktop shortcut state. Keeping this resource
+         in its own component lets a major upgrade remove an unwanted old shortcut without
+         recreating it, while first-time and manual installs retain the existing default. -->
+    <Component Id="DesktopShortcutComponent"
+               Directory="DesktopFolder"
+               Guid="$(var.DesktopShortcutComponentGuid)"
+               Bitness="always64"
+               Condition="INSTALLDESKTOPSHORTCUT = 1">
+      <Shortcut Id="DesktopShortcut"
+                Name="$(var.ProductName)"
+                Target="[#GoNaviExe]"
+                WorkingDirectory="INSTALLFOLDER"
+                Advertise="no" />
+      <RegistryValue Root="HKLM"
+                     Key="Software\Syngnat\$(var.RegistryKeyName)"
+                     Name="DesktopShortcutInstalled"
+                     Value="1"
+                     Type="integer"
+                     KeyPath="yes" />
     </Component>
 
     <ui:WixUI Id="WixUI_InstallDir"

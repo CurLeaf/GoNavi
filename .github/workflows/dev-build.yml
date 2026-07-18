@@ -963,6 +963,11 @@ jobs:
           } else {
               "0BCEE70B-9CF2-449C-9ADE-190188493234"
           }
+          $desktopShortcutComponentGuid = if ($archName -eq "Arm64") {
+              "3CF7DCD2-2658-432D-8677-AB6BB34A9659"
+          } else {
+              "114030DD-DB5F-460A-9CAC-997680E9F938"
+          }
 
           $licenseFile = (Resolve-Path -LiteralPath "..\\..\\LICENSE").Path
           $noticeFile = (Resolve-Path -LiteralPath "..\\..\\NOTICE").Path
@@ -988,6 +993,7 @@ jobs:
               -d "ProductVersion=$productVersion" `
               -d "UpgradeCode=CDD6BF2F-ED1E-4345-A0AB-DCDB7E15FB23" `
               -d "ComponentGuid=$componentGuid" `
+              -d "DesktopShortcutComponentGuid=$desktopShortcutComponentGuid" `
               -d "InstallFolderName=GoNavi" `
               -d "RegistryKeyName=GoNavi" `
               -d "SourceExe=$sourceExe" `

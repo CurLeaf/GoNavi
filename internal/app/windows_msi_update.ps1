@@ -10,6 +10,9 @@ $HostProcessId = 0
 $HostExited = $false
 $InstallSucceeded = $false
 $LaunchSucceeded = $false
+$DesktopShortcutDirectories = @()
+$DesktopShortcutState = $null
+$DesktopShortcutInstallValue = '1'
 
 function Write-UpdateLog {
     param([string]$Message)
@@ -82,10 +85,18 @@ try {
     Write-UpdateLog 'host process exited'
     Start-Sleep -Seconds 2
 
+    $DesktopShortcutDirectories = @(Get-GoNaviDesktopDirectories)
+    $DesktopShortcutState = Save-GoNaviDesktopShortcutState -TargetPath $Target -BackupDirectory $StagedDir -DesktopDirectories $DesktopShortcutDirectories
+    if (-not $DesktopShortcutState.Succeeded) {
+        throw 'desktop shortcut state could not be backed up'
+    }
+    $DesktopShortcutInstallValue = $DesktopShortcutState.InstallValue
+    Write-UpdateLog ("desktop shortcut install value: " + $DesktopShortcutInstallValue)
     $MsiArguments = @(
         '/i',
         (Quote-NativeArgument $Source),
         ('INSTALLFOLDER=' + (Quote-NativeArgument $TargetDir)),
+        ('INSTALLDESKTOPSHORTCUT=' + $DesktopShortcutInstallValue),
         '/passive',
         '/norestart',
         '/L*v',
@@ -103,6 +114,15 @@ try {
     if (-not (Test-Path -LiteralPath $Target -PathType Leaf)) {
         throw 'installed application executable not found'
     }
+    if ($DesktopShortcutInstallValue -eq '0') {
+        if (-not (Remove-GoNaviDesktopShortcutsForTarget -TargetPath $Target -DesktopDirectories $DesktopShortcutDirectories)) {
+            throw 'unexpected desktop shortcut could not be removed'
+        }
+    }
+    if (-not (Restore-GoNaviDesktopShortcutState -State $DesktopShortcutState -OnlyForeign)) {
+        throw 'desktop shortcut state could not be restored'
+    }
+    [void](Repair-LegacyGoNaviTaskbarPins -TargetPath $Target)
     Write-UpdateLog ("launching installed application: " + $Target)
     $NewProcess = Start-Process -FilePath $Target -WorkingDirectory $TargetDir -PassThru -ErrorAction Stop
     Start-Sleep -Milliseconds 1500
@@ -134,6 +154,10 @@ try {
 } catch {
     Write-UpdateLog ("MSI updater failed: " + $_.Exception.Message)
     Write-UpdateLog 'MSI package retained for manual install'
+    if ($DesktopShortcutInstallValue -eq '0') {
+        [void](Remove-GoNaviDesktopShortcutsForTarget -TargetPath $Target -DesktopDirectories $DesktopShortcutDirectories)
+    }
+    [void](Restore-GoNaviDesktopShortcutState -State $DesktopShortcutState)
     if ($HostExited -and -not $LaunchSucceeded -and (Test-Path -LiteralPath $Target -PathType Leaf)) {
         try {
             $TargetDir = [IO.Path]::GetDirectoryName($Target)

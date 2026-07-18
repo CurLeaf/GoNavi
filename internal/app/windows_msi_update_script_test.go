@@ -9,13 +9,25 @@ import (
 func TestBuildWindowsMSIUpdatePowerShellScriptInstallsRelaunchesAndCleans(t *testing.T) {
 	script := buildWindowsMSIUpdatePowerShellScript()
 	mustContain := []string{
+		`function Save-GoNaviDesktopShortcutState`,
+		`function Remove-GoNaviDesktopShortcutsForTarget`,
+		`function Restore-GoNaviDesktopShortcutState`,
+		`function Send-ShellItemUpdatedNotification`,
+		`SHChangeNotify`,
+		`function Repair-LegacyGoNaviTaskbarPins`,
 		`while (Get-Process -Id $HostProcessId -ErrorAction SilentlyContinue)`,
+		`$DesktopShortcutState = Save-GoNaviDesktopShortcutState -TargetPath $Target -BackupDirectory $StagedDir`,
+		`if (-not $DesktopShortcutState.Succeeded)`,
+		`$DesktopShortcutInstallValue = $DesktopShortcutState.InstallValue`,
 		`Start-Process -FilePath $MSIExecPath -Verb RunAs`,
 		`'INSTALLFOLDER=' + (Quote-NativeArgument $TargetDir)`,
+		`'INSTALLDESKTOPSHORTCUT=' + $DesktopShortcutInstallValue`,
 		`'/passive'`,
 		`'/norestart'`,
 		`'/L*v'`,
 		`$InstallerExitCode -notin @(0, 1641, 3010)`,
+		`if (-not (Restore-GoNaviDesktopShortcutState -State $DesktopShortcutState -OnlyForeign))`,
+		`Repair-LegacyGoNaviTaskbarPins -TargetPath $Target`,
 		`Start-Process -FilePath $Target -WorkingDirectory $TargetDir`,
 		`Remove-UpdateArtifact $Source`,
 		`MSI package retained for manual install`,
@@ -28,6 +40,16 @@ func TestBuildWindowsMSIUpdatePowerShellScriptInstallsRelaunchesAndCleans(t *tes
 	}
 	if strings.Index(script, `Remove-UpdateArtifact $Source`) < strings.Index(script, `Start-Process -FilePath $Target -WorkingDirectory $TargetDir`) {
 		t.Fatalf("MSI package must be removed only after relaunch\n%s", script)
+	}
+	desktopStateIndex := strings.Index(script, `$DesktopShortcutState = Save-GoNaviDesktopShortcutState -TargetPath $Target -BackupDirectory $StagedDir`)
+	installerIndex := strings.Index(script, `Start-Process -FilePath $MSIExecPath -Verb RunAs`)
+	if desktopStateIndex < 0 || desktopStateIndex > installerIndex {
+		t.Fatalf("desktop shortcut state must be captured before MSI starts\n%s", script)
+	}
+	repairIndex := strings.Index(script, `Repair-LegacyGoNaviTaskbarPins -TargetPath $Target`)
+	relaunchIndex := strings.Index(script, `Start-Process -FilePath $Target -WorkingDirectory $TargetDir`)
+	if repairIndex < installerIndex || repairIndex > relaunchIndex {
+		t.Fatalf("legacy taskbar pins must be repaired after install and before relaunch\n%s", script)
 	}
 	for _, r := range script {
 		if r > 0x7f {

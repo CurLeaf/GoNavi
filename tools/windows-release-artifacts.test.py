@@ -14,6 +14,8 @@ WIX_NAMESPACE = "http://wixtoolset.org/schemas/v4/wxs"
 UPGRADE_CODE = "CDD6BF2F-ED1E-4345-A0AB-DCDB7E15FB23"
 AMD64_COMPONENT_GUID = "0BCEE70B-9CF2-449C-9ADE-190188493234"
 ARM64_COMPONENT_GUID = "7F4C7757-329F-42B0-B312-D4B8AD50415E"
+AMD64_DESKTOP_SHORTCUT_COMPONENT_GUID = "114030DD-DB5F-460A-9CAC-997680E9F938"
+ARM64_DESKTOP_SHORTCUT_COMPONENT_GUID = "3CF7DCD2-2658-432D-8677-AB6BB34A9659"
 
 
 class WindowsReleaseArtifactsTest(unittest.TestCase):
@@ -38,6 +40,16 @@ class WindowsReleaseArtifactsTest(unittest.TestCase):
                 self.assertIn('-d "RegistryKeyName=GoNavi"', source)
                 self.assertIn(f'"{AMD64_COMPONENT_GUID}"', source)
                 self.assertIn(f'"{ARM64_COMPONENT_GUID}"', source)
+                self.assertIn(f'"{AMD64_DESKTOP_SHORTCUT_COMPONENT_GUID}"', source)
+                self.assertIn(f'"{ARM64_DESKTOP_SHORTCUT_COMPONENT_GUID}"', source)
+                self.assertIn(
+                    f'$desktopShortcutComponentGuid = if ($archName -eq "Arm64") {{\n'
+                    f'              "{ARM64_DESKTOP_SHORTCUT_COMPONENT_GUID}"\n'
+                    f'          }} else {{\n'
+                    f'              "{AMD64_DESKTOP_SHORTCUT_COMPONENT_GUID}"',
+                    source,
+                )
+                self.assertIn('-d "DesktopShortcutComponentGuid=$desktopShortcutComponentGuid"', source)
                 self.assertIn('$installMarkerPath = Join-Path $env:RUNNER_TEMP ".gonavi-msi-install"', source)
                 self.assertIn('-d "InstallMarker=$installMarkerPath"', source)
                 self.assertIn('$licenseFile = (Resolve-Path -LiteralPath "..\\\\..\\\\LICENSE").Path', source)
@@ -75,7 +87,18 @@ class WindowsReleaseArtifactsTest(unittest.TestCase):
         self.assertNotIn("DowngradeErrorMessage", major_upgrade.attrib)
         self.assertIsNotNone(package.find("wix:MediaTemplate", ns))
         self.assertIsNotNone(package.find("wix:Property[@Id='ARPPRODUCTICON']", ns))
+        desktop_property = package.find("wix:Property[@Id='INSTALLDESKTOPSHORTCUT']", ns)
+        self.assertIsNotNone(desktop_property)
+        assert desktop_property is not None
+        self.assertEqual(desktop_property.attrib["Value"], "1")
+        self.assertEqual(desktop_property.attrib["Secure"], "yes")
         self.assertIsNotNone(package.find("wix:SetProperty[@Id='ARPINSTALLLOCATION']", ns))
+
+        main_feature = package.find("wix:Feature[@Id='MainFeature']", ns)
+        self.assertIsNotNone(main_feature)
+        assert main_feature is not None
+        self.assertIsNotNone(main_feature.find("wix:ComponentRef[@Id='DesktopShortcutComponent']", ns))
+
         executable = package.find(".//wix:File[@Id='GoNaviExe']", ns)
         self.assertIsNotNone(executable)
         assert executable is not None
@@ -83,10 +106,29 @@ class WindowsReleaseArtifactsTest(unittest.TestCase):
         self.assertIsNotNone(start_menu_shortcut)
         assert start_menu_shortcut is not None
         self.assertNotIn("Icon", start_menu_shortcut.attrib)
-        desktop_shortcut = executable.find("wix:Shortcut[@Id='DesktopShortcut']", ns)
+        self.assertIsNone(executable.find("wix:Shortcut[@Id='DesktopShortcut']", ns))
+
+        desktop_component = package.find("wix:Component[@Id='DesktopShortcutComponent']", ns)
+        self.assertIsNotNone(desktop_component)
+        assert desktop_component is not None
+        self.assertEqual(desktop_component.attrib["Directory"], "DesktopFolder")
+        self.assertEqual(desktop_component.attrib["Guid"], "$(var.DesktopShortcutComponentGuid)")
+        self.assertEqual(desktop_component.attrib["Bitness"], "always64")
+        self.assertEqual(desktop_component.attrib["Condition"], "INSTALLDESKTOPSHORTCUT = 1")
+        desktop_shortcut = desktop_component.find("wix:Shortcut[@Id='DesktopShortcut']", ns)
         self.assertIsNotNone(desktop_shortcut)
         assert desktop_shortcut is not None
         self.assertNotIn("Icon", desktop_shortcut.attrib)
+        self.assertEqual(desktop_shortcut.attrib["Target"], "[#GoNaviExe]")
+        self.assertEqual(desktop_shortcut.attrib["WorkingDirectory"], "INSTALLFOLDER")
+        desktop_key_path = desktop_component.find("wix:RegistryValue[@KeyPath='yes']", ns)
+        self.assertIsNotNone(desktop_key_path)
+        assert desktop_key_path is not None
+        self.assertEqual(desktop_key_path.attrib["Root"], "HKLM")
+        self.assertEqual(desktop_key_path.attrib["Key"], r"Software\Syngnat\$(var.RegistryKeyName)")
+        self.assertEqual(desktop_key_path.attrib["Name"], "DesktopShortcutInstalled")
+        self.assertEqual(desktop_key_path.attrib["Value"], "1")
+        self.assertEqual(desktop_key_path.attrib["Type"], "integer")
         marker = package.find(".//wix:RegistryValue[@Name='InstallType']", ns)
         self.assertIsNotNone(marker)
         assert marker is not None

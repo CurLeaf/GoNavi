@@ -10,6 +10,9 @@ import (
 //go:embed windows_msi_update.ps1
 var windowsMSIUpdatePowerShellScript string
 
+//go:embed windows_shortcut_repair.ps1
+var windowsShortcutRepairPowerShellScript string
+
 type windowsMSIUpdateLaunchContext struct {
 	SourcePath  string
 	TargetPath  string
@@ -21,7 +24,8 @@ type windowsMSIUpdateLaunchContext struct {
 }
 
 func buildWindowsMSIUpdatePowerShellScript() string {
-	normalized := strings.ReplaceAll(windowsMSIUpdatePowerShellScript, "\r\n", "\n")
+	script := windowsShortcutRepairPowerShellScript + "\n\n" + windowsMSIUpdatePowerShellScript
+	normalized := strings.ReplaceAll(script, "\r\n", "\n")
 	return strings.ReplaceAll(normalized, "\n", "\r\n")
 }
 
