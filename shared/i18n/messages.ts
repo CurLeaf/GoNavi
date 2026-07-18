@@ -672,7 +672,7 @@ export const messages: Record<SupportedLanguage, Record<MessageKey, string>> = {
     "driver.guidance.localImportSingleFileHelp":
       "行内“导入驱动包”仅用于单个驱动文件/总包（如 `mariadb-driver-agent`、`mariadb-driver-agent.exe`、`GoNavi-DriverAgents.zip`），不支持直接导入 JDBC Jar；批量导入请使用上方“导入驱动目录”。",
     "driver.guidance.customConnectionDriverHelp":
-      "已支持: mysql, starrocks, oceanbase, postgres, opengauss, sqlite, oracle, dm, kingbase；别名支持 postgresql/pgx、open_gauss/open-gauss、dm8、kingbase8/kingbasees/kingbasev8。请填写 GoNavi 已注册的 Go database/sql 驱动名，不能直接填写系统 ODBC/JDBC 驱动名或导入 JDBC Jar。",
+      "已支持: mysql, starrocks, oceanbase, postgres, opengauss, sqlite, oracle, dm, kingbase, clickhouse；别名支持 postgresql/pgx、open_gauss/open-gauss、dm8、kingbase8/kingbasees/kingbasev8。ClickHouse 自定义连接可填写 clickhouse://、http(s)://、jdbc:clickhouse:// 或 jdbc:ch:// DSN，并复用 GoNavi ClickHouse driver-agent，不会加载 JDBC Jar。其他驱动请填写 GoNavi 已注册的 Go database/sql 驱动名，不能直接填写系统 ODBC/JDBC 驱动名。",
     "driver.modal.title": "驱动管理",
     "driver.modal.footer.refresh": "刷新",
     "driver.modal.footer.networkCheck": "网络检测",
@@ -1574,7 +1574,7 @@ export const messages: Record<SupportedLanguage, Record<MessageKey, string>> = {
     "driver.guidance.localImportSingleFileHelp":
       "The inline \"Import driver package\" action only accepts a single driver file or bundle (for example `mariadb-driver-agent`, `mariadb-driver-agent.exe`, `GoNavi-DriverAgents.zip`). It does not import JDBC Jar directly. Use \"Import driver directory\" above for batch import.",
     "driver.guidance.customConnectionDriverHelp":
-      "Supported: mysql, starrocks, oceanbase, postgres, opengauss, sqlite, oracle, dm, kingbase; aliases include postgresql/pgx, open_gauss/open-gauss, dm8, kingbase8/kingbasees/kingbasev8. Enter a Go database/sql driver name already registered by GoNavi. Do not enter a system ODBC/JDBC driver name directly or import a JDBC Jar.",
+      "Supported: mysql, starrocks, oceanbase, postgres, opengauss, sqlite, oracle, dm, kingbase, clickhouse; aliases include postgresql/pgx, open_gauss/open-gauss, dm8, kingbase8/kingbasees/kingbasev8. ClickHouse custom connections accept clickhouse://, http(s)://, jdbc:clickhouse://, or jdbc:ch:// DSNs and reuse the GoNavi ClickHouse driver-agent; no JDBC Jar is loaded. For other drivers, enter a Go database/sql driver name already registered by GoNavi, not a system ODBC/JDBC driver name.",
     "driver.modal.title": "Driver Manager",
     "driver.modal.footer.refresh": "Refresh",
     "driver.modal.footer.networkCheck": "Network check",

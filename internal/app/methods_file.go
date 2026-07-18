@@ -365,6 +365,10 @@ func tryResolveExportTableTotalRows(dbInst db.Database, config connection.Connec
 
 func verifyOptionalDriverAgentReadyForExport(config connection.ConnectionConfig) error {
 	driverType := normalizeDriverType(config.Type)
+	if strings.EqualFold(strings.TrimSpace(config.Type), "custom") &&
+		strings.EqualFold(strings.TrimSpace(config.Driver), "clickhouse") {
+		driverType = "clickhouse"
+	}
 	if !db.IsOptionalGoDriver(driverType) {
 		return nil
 	}

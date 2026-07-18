@@ -561,8 +561,8 @@ func shouldRefreshCachedConnection(err error) bool {
 }
 
 func (a *App) invalidateCachedDatabase(config connection.ConnectionConfig, reason error) bool {
-	if resolvedConfig, err := a.resolveConnectionSecrets(config); err == nil {
-		config = resolvedConfig
+	if effectiveConfig, err := a.resolveEffectiveConnectionConfig(config); err == nil {
+		config = effectiveConfig
 	}
 	effectiveConfig := config
 	key := getCacheKey(effectiveConfig)
@@ -876,15 +876,18 @@ func (a *App) resolveEffectiveConnectionConfig(config connection.ConnectionConfi
 	if err != nil {
 		return config, wrapConnectError(config, err)
 	}
-	return resolvedConfig, nil
+	runtimeConfig, err := a.resolveCustomClickHouseRuntimeConfig(resolvedConfig)
+	if err != nil {
+		return config, wrapConnectError(resolvedConfig, err)
+	}
+	return runtimeConfig, nil
 }
 
 func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing bool) (db.Database, error) {
-	resolvedConfig, err := a.resolveConnectionSecrets(config)
+	effectiveConfig, err := a.resolveEffectiveConnectionConfig(config)
 	if err != nil {
-		return nil, wrapConnectError(config, err)
+		return nil, err
 	}
-	effectiveConfig := resolvedConfig
 	isFileDB := isFileDatabaseType(effectiveConfig.Type)
 
 	key := getCacheKey(effectiveConfig)
@@ -992,9 +995,9 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	}
 
 	initialKey := key
-	dbInst, connectedConfig, err := a.connectDatabaseWithStartupRetry(resolvedConfig)
+	dbInst, connectedConfig, err := a.connectEffectiveDatabaseWithStartupRetry(effectiveConfig)
 	if err != nil {
-		retryInst, retryConfig, retryErr := a.retryConnectAfterMySQLMaxUserConnections(resolvedConfig, connectedConfig, err)
+		retryInst, retryConfig, retryErr := a.retryConnectAfterMySQLMaxUserConnections(effectiveConfig, connectedConfig, err)
 		if retryErr != nil {
 			failedKey := getCacheKey(retryConfig)
 			a.recordConnectFailureByKey(failedKey, retryErr)
@@ -1046,7 +1049,7 @@ func (a *App) retryConnectAfterMySQLMaxUserConnections(rawConfig connection.Conn
 		return nil, failedConfig, withMySQLMaxUserConnectionsHint(err, released)
 	}
 
-	dbInst, connectedConfig, retryErr := a.connectDatabaseWithStartupRetry(rawConfig)
+	dbInst, connectedConfig, retryErr := a.connectEffectiveDatabaseWithStartupRetry(rawConfig)
 	if retryErr != nil {
 		if isMySQLMaxUserConnectionsError(retryErr) {
 			return nil, connectedConfig, withMySQLMaxUserConnectionsHint(retryErr, released)
@@ -1154,12 +1157,14 @@ func shortenCacheKey(key string) string {
 }
 
 func (a *App) connectDatabaseWithStartupRetry(rawConfig connection.ConnectionConfig) (db.Database, connection.ConnectionConfig, error) {
-	resolvedConfig, err := a.resolveConnectionSecrets(rawConfig)
+	effectiveConfig, err := a.resolveEffectiveConnectionConfig(rawConfig)
 	if err != nil {
-		return nil, rawConfig, wrapConnectError(rawConfig, err)
+		return nil, rawConfig, err
 	}
-	rawConfig = resolvedConfig
+	return a.connectEffectiveDatabaseWithStartupRetry(effectiveConfig)
+}
 
+func (a *App) connectEffectiveDatabaseWithStartupRetry(rawConfig connection.ConnectionConfig) (db.Database, connection.ConnectionConfig, error) {
 	var lastErr error
 	var lastEffectiveConfig connection.ConnectionConfig
 

@@ -93,15 +93,14 @@ func (a *App) DBReleaseConnection(config connection.ConnectionConfig) connection
 		return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.release_success", nil), Data: map[string]int{"closed": closed}}
 	}
 
-	resolvedConfig, err := a.resolveConnectionSecrets(config)
+	effectiveConfig, err := a.resolveEffectiveConnectionConfig(config)
 	if err != nil {
-		wrapped := wrapConnectError(config, err)
-		logger.Error(wrapped, "DBReleaseConnection 解析连接密文失败：%s", formatConnSummary(config))
-		return connection.QueryResult{Success: false, Message: wrapped.Error()}
+		logger.Error(err, "DBReleaseConnection 解析运行时连接配置失败：%s", formatConnSummary(config))
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	closed := a.releaseCachedDatabaseConnectionsForConfig(resolvedConfig)
+	closed := a.releaseCachedDatabaseConnectionsForConfig(effectiveConfig)
 
-	logger.Infof("DBReleaseConnection 已释放数据库连接：%s 数量=%d", formatConnSummary(resolvedConfig), closed)
+	logger.Infof("DBReleaseConnection 已释放数据库连接：%s 数量=%d", formatConnSummary(effectiveConfig), closed)
 	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.release_success", nil), Data: map[string]int{"closed": closed}}
 }
 
@@ -205,6 +204,9 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 
 	runConfig := config
 	runConfig.Database = ""
+	if resolveDDLDBType(config) == "clickhouse" && strings.EqualFold(strings.TrimSpace(config.Type), "custom") {
+		runConfig = runConfig.WithRuntimeDatabaseOverride("")
+	}
 
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
@@ -758,6 +760,9 @@ func (a *App) DropDatabase(config connection.ConnectionConfig, dbName string) (r
 	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "tdengine", "clickhouse":
 		runConfig = config
 		runConfig.Database = ""
+		if dbType == "clickhouse" && strings.EqualFold(strings.TrimSpace(config.Type), "custom") {
+			runConfig = runConfig.WithRuntimeDatabaseOverride("")
+		}
 		sql = fmt.Sprintf("DROP DATABASE %s", quoteIdentByType(dbType, dbName))
 	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		runConfig = resolvePGLikeDatabaseDDLRunConfig(config, dbType, dbName)

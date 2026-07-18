@@ -31,6 +31,18 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('uses ClickHouse capabilities for a custom ClickHouse JDBC connection', () => {
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'clickhouse' })).toMatchObject({
+      type: 'clickhouse',
+      supportsQueryEditor: true,
+      supportsExplainDiagnosis: true,
+      supportsSqlQueryExport: true,
+      supportsCreateDatabase: true,
+      supportsDropDatabase: true,
+      forceReadOnlyQueryResult: true,
+    });
+  });
+
   it('only enables execution-plan diagnosis for backend-supported SQL dialects', () => {
     expect(getDataSourceCapabilities({ type: 'goldendb' }).supportsExplainDiagnosis).toBe(true);
     expect(getDataSourceCapabilities({ type: 'custom', driver: 'greatdb' }).supportsExplainDiagnosis).toBe(true);

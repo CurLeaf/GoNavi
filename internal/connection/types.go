@@ -133,6 +133,34 @@ type ConnectionConfig struct {
 	MongoReplicaUser         string                     `json:"mongoReplicaUser,omitempty"`         // MongoDB replica auth user
 	MongoReplicaPassword     string                     `json:"mongoReplicaPassword,omitempty"`     // MongoDB replica auth password
 	JVM                      JVMConfig                  `json:"jvm,omitempty"`                      // JVM connector config
+	runtimeDBOverride        string                     // App-only selected database; never persisted or sent over RPC.
+	runtimeDBOverrideSet     bool                       // Distinguishes an explicit server-level override from no override.
+}
+
+// WithRuntimeDatabaseOverride carries a caller-selected database through runtime
+// connection normalization without letting stale persisted fields override a DSN.
+func (c ConnectionConfig) WithRuntimeDatabaseOverride(database string) ConnectionConfig {
+	c.runtimeDBOverride = database
+	c.runtimeDBOverrideSet = true
+	return c
+}
+
+// RuntimeDatabaseOverride returns the app-only selected database override.
+func (c ConnectionConfig) RuntimeDatabaseOverride() string {
+	return c.runtimeDBOverride
+}
+
+// HasRuntimeDatabaseOverride reports whether the app explicitly selected a
+// database, including an empty server-level selection.
+func (c ConnectionConfig) HasRuntimeDatabaseOverride() bool {
+	return c.runtimeDBOverrideSet
+}
+
+// WithoutRuntimeDatabaseOverride removes the app-only selected database marker.
+func (c ConnectionConfig) WithoutRuntimeDatabaseOverride() ConnectionConfig {
+	c.runtimeDBOverride = ""
+	c.runtimeDBOverrideSet = false
+	return c
 }
 
 // ResultSetData 表示一个查询结果集（行 + 列名），用于多结果集场景。

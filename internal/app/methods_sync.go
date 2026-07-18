@@ -56,28 +56,26 @@ func (a *App) resolveDataSyncEndpointConfig(raw connection.ConnectionConfig, sel
 		return resolved, selectedDatabase, err
 	}
 
-	if !strings.EqualFold(strings.TrimSpace(raw.Type), "oracle") || strings.TrimSpace(raw.ID) == "" {
-		return resolved, strings.TrimSpace(selectedDatabase), nil
-	}
-
-	repo := newSavedConnectionRepository(a.configDir, a.secretStore)
-	view, findErr := repo.Find(raw.ID)
-	if findErr != nil {
-		return resolved, strings.TrimSpace(selectedDatabase), nil
-	}
-
-	savedServiceName := strings.TrimSpace(view.Config.Database)
-	if savedServiceName == "" {
-		return resolved, strings.TrimSpace(selectedDatabase), nil
-	}
-
 	selected := strings.TrimSpace(selectedDatabase)
-	incomingDatabase := strings.TrimSpace(raw.Database)
-	if selected == "" && incomingDatabase != "" && !strings.EqualFold(incomingDatabase, savedServiceName) {
-		selected = incomingDatabase
+	if strings.EqualFold(strings.TrimSpace(raw.Type), "oracle") && strings.TrimSpace(raw.ID) != "" {
+		repo := newSavedConnectionRepository(a.configDir, a.secretStore)
+		if view, findErr := repo.Find(raw.ID); findErr == nil {
+			savedServiceName := strings.TrimSpace(view.Config.Database)
+			if savedServiceName != "" {
+				incomingDatabase := strings.TrimSpace(raw.Database)
+				if selected == "" && incomingDatabase != "" && !strings.EqualFold(incomingDatabase, savedServiceName) {
+					selected = incomingDatabase
+				}
+				resolved.Database = savedServiceName
+			}
+		}
 	}
-	resolved.Database = savedServiceName
-	return resolved, selected, nil
+
+	effectiveConfig, err := a.resolveCustomClickHouseRuntimeConfig(resolved)
+	if err != nil {
+		return resolved, selected, err
+	}
+	return effectiveConfig, selected, nil
 }
 
 // DataSync executes a data synchronization task
