@@ -3,7 +3,10 @@ import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import TableExportWorkbench, { buildTableExportHistoryEntry } from './TableExportWorkbench';
+import TableExportWorkbench, {
+  buildTableExportHistoryEntry,
+  resolveTableExportColumnNames,
+} from './TableExportWorkbench';
 import { setCurrentLanguage } from '../i18n';
 import type { ExportProgressState } from './useExportProgressRunner';
 
@@ -281,6 +284,27 @@ describe('TableExportWorkbench', () => {
     expect(source).not.toContain('<Tabs');
     expect(source).toContain("t('data_export.workbench.description.history')");
     expect(source).toContain("t('data_export.label.elapsed')");
+  });
+
+  it('normalizes table column metadata without changing database order', () => {
+    expect(resolveTableExportColumnNames([
+      { Name: 'id' },
+      { name: 'display_name' },
+      { COLUMN_NAME: 'created_at' },
+      { name: 'display_name' },
+      { name: '' },
+    ])).toEqual(['id', 'display_name', 'created_at']);
+  });
+
+  it('loads selectable columns and sends the selection through both single-table export paths', () => {
+    const source = readFileSync(new URL('./TableExportWorkbench.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('DBGetColumns(');
+    expect(source).toContain('mode="multiple"');
+    expect(source).toContain('columns: selectedColumns');
+    expect(source).toContain('selectedColumns.length > 0');
+    expect(source.match(/ExportQueryWithOptions\(/g)).toHaveLength(2);
+    expect(source).toContain('ExportTableWithOptions(');
   });
 
   it('prefers backend startedAt over a placeholder history timestamp for the same job', () => {

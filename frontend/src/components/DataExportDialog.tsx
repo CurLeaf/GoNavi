@@ -9,6 +9,7 @@ export type DataExportScope = 'selected' | 'page' | 'all' | 'filteredAll';
 
 export type DataExportFileOptions = {
   format: DataExportFormat;
+  columns?: string[];
   xlsxMaxRowsPerSheet?: number;
   insertSQLDialect?: string;
   insertSQLTargetTable?: string;
@@ -31,6 +32,7 @@ export type DataExportScopeOption = {
 export type ShowDataExportDialogOptions = {
   title: string;
   scopeOptions: DataExportScopeOption[];
+  availableColumns?: string[];
   initialValues?: Partial<DataExportDialogValues>;
   allowInsertSql?: boolean;
   okText?: string;
@@ -66,10 +68,30 @@ const resolveDefaultScope = (scopeOptions: DataExportScopeOption[], initialScope
   return String(firstEnabled?.value || scopeOptions[0]?.value || 'all');
 };
 
-const normalizeDialogValues = (
+export const resolveDataExportColumns = (
+  requestedColumns: string[] | undefined,
+  availableColumns: string[] | undefined,
+): string[] | undefined => {
+  if (!Array.isArray(availableColumns)) return undefined;
+
+  const seenAvailable = new Set<string>();
+  const normalizedAvailable = availableColumns.filter((column) => {
+    const value = String(column ?? '');
+    if (!value.trim() || seenAvailable.has(value)) return false;
+    seenAvailable.add(value);
+    return true;
+  });
+  if (requestedColumns === undefined) return normalizedAvailable;
+
+  const requested = new Set(requestedColumns.map((column) => String(column ?? '')));
+  return normalizedAvailable.filter((column) => requested.has(column));
+};
+
+export const normalizeDataExportDialogValues = (
   scopeOptions: DataExportScopeOption[],
   initialValues?: Partial<DataExportDialogValues>,
   allowInsertSql = false,
+  availableColumns?: string[],
 ): DataExportDialogValues => {
   const requestedFormat = (initialValues?.format || DEFAULT_DATA_EXPORT_FORMAT) as DataExportFormat;
   const format = resolveFormatOptions(allowInsertSql).some((item) => item.value === requestedFormat)
@@ -79,17 +101,20 @@ const normalizeDialogValues = (
   const xlsxMaxRowsPerSheet = Number(initialValues?.xlsxMaxRowsPerSheet) > 0
     ? Math.min(MAX_XLSX_ROWS_PER_SHEET, Math.trunc(Number(initialValues?.xlsxMaxRowsPerSheet)))
     : DEFAULT_XLSX_ROWS_PER_SHEET;
+  const columns = resolveDataExportColumns(initialValues?.columns, availableColumns);
   return {
     format,
     scope,
     xlsxMaxRowsPerSheet,
+    ...(columns === undefined ? {} : { columns }),
   };
 };
 
-const validateDialogValues = (
+export const validateDataExportDialogValues = (
   values: DataExportDialogValues,
   scopeOptions: DataExportScopeOption[],
   allowInsertSql = false,
+  availableColumns?: string[],
 ): string | null => {
   if (!resolveFormatOptions(allowInsertSql).some((item) => item.value === values.format)) {
     return t('data_export.dialog.validation.format_required');
@@ -99,6 +124,9 @@ const validateDialogValues = (
     if (!matchedScope || matchedScope.disabled) {
       return t('data_export.dialog.validation.scope_required');
     }
+  }
+  if (Array.isArray(availableColumns) && (!Array.isArray(values.columns) || values.columns.length === 0)) {
+    return t('data_export.dialog.validation.columns_required');
   }
   if (values.format === 'xlsx') {
     const rows = Math.trunc(Number(values.xlsxMaxRowsPerSheet) || 0);
@@ -116,12 +144,25 @@ const validateDialogValues = (
 
 const DataExportDialogContent: React.FC<{
   scopeOptions: DataExportScopeOption[];
+  availableColumns?: string[];
   initialValues?: Partial<DataExportDialogValues>;
   allowInsertSql?: boolean;
   onChange: (values: DataExportDialogValues) => void;
-}> = ({ scopeOptions, initialValues, allowInsertSql = false, onChange }) => {
-  const [values, setValues] = useState<DataExportDialogValues>(() => normalizeDialogValues(scopeOptions, initialValues, allowInsertSql));
+}> = ({ scopeOptions, availableColumns, initialValues, allowInsertSql = false, onChange }) => {
+  const [values, setValues] = useState<DataExportDialogValues>(() => normalizeDataExportDialogValues(
+    scopeOptions,
+    initialValues,
+    allowInsertSql,
+    availableColumns,
+  ));
   const formatOptions = useMemo(() => resolveFormatOptions(allowInsertSql), [allowInsertSql]);
+  const columnOptions = useMemo(
+    () => (resolveDataExportColumns(undefined, availableColumns) || []).map((column) => ({
+      value: column,
+      label: column,
+    })),
+    [availableColumns],
+  );
 
   useEffect(() => {
     onChange(values);
@@ -162,6 +203,25 @@ const DataExportDialogContent: React.FC<{
           </div>
         )}
 
+        {Array.isArray(availableColumns) && (
+          <Form.Item
+            label={t('data_export.dialog.field.columns')}
+            extra={t('data_export.dialog.field.columns_help')}
+            style={{ marginBottom: 16 }}
+          >
+            <Select
+              mode="multiple"
+              value={values.columns || []}
+              options={columnOptions}
+              maxTagCount="responsive"
+              onChange={(columns) => setValues((prev) => ({
+                ...prev,
+                columns: resolveDataExportColumns(columns, availableColumns) || [],
+              }))}
+            />
+          </Form.Item>
+        )}
+
         {values.format === 'xlsx' && (
           <Form.Item
             label={t('data_export.dialog.field.xlsx_max_rows')}
@@ -195,7 +255,12 @@ export async function showDataExportDialog(
   options: ShowDataExportDialogOptions,
 ): Promise<DataExportDialogValues | null> {
   const allowInsertSql = options.allowInsertSql === true;
-  const initialValues = normalizeDialogValues(options.scopeOptions, options.initialValues, allowInsertSql);
+  const initialValues = normalizeDataExportDialogValues(
+    options.scopeOptions,
+    options.initialValues,
+    allowInsertSql,
+    options.availableColumns,
+  );
 
   return new Promise((resolve) => {
     let resolved = false;
@@ -218,6 +283,7 @@ export async function showDataExportDialog(
       content: (
         <DataExportDialogContent
           scopeOptions={options.scopeOptions}
+          availableColumns={options.availableColumns}
           initialValues={initialValues}
           allowInsertSql={allowInsertSql}
           onChange={(values) => {
@@ -226,7 +292,12 @@ export async function showDataExportDialog(
         />
       ),
       onOk: async () => {
-        const errorMessage = validateDialogValues(latestValues, options.scopeOptions, allowInsertSql);
+        const errorMessage = validateDataExportDialogValues(
+          latestValues,
+          options.scopeOptions,
+          allowInsertSql,
+          options.availableColumns,
+        );
         if (errorMessage) {
           void message.error(errorMessage);
           throw new Error(errorMessage);

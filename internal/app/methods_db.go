@@ -2463,6 +2463,30 @@ func buildFallbackColumnCommentStatement(dbType string, schemaName string, table
 	return fmt.Sprintf("COMMENT ON COLUMN %s IS '%s';", columnRef, strings.ReplaceAll(commentText, "'", "''"))
 }
 
+func getColumnsWithMetadataFallback(
+	dbInst db.Database,
+	config connection.ConnectionConfig,
+	schemaName string,
+	tableName string,
+	text func(string, map[string]any) string,
+) ([]connection.ColumnDefinition, error) {
+	columns, err := dbInst.GetColumns(schemaName, tableName)
+	if err != nil {
+		return nil, err
+	}
+	if len(columns) > 0 || resolveDDLDBType(config) != "oracle" {
+		return columns, nil
+	}
+
+	if inferred, inferErr := inferOracleColumnsFromDictionary(dbInst, schemaName, tableName, text); inferErr == nil && len(inferred) > 0 {
+		return inferred, nil
+	}
+	if inferred, inferErr := inferOracleColumnsFromEmptySelect(dbInst, schemaName, tableName, text); inferErr == nil && len(inferred) > 0 {
+		return inferred, nil
+	}
+	return columns, nil
+}
+
 func (a *App) DBGetColumns(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
 	runConfig := normalizeRunConfig(config, dbName)
 	text := a.appText
@@ -2474,7 +2498,7 @@ func (a *App) DBGetColumns(config connection.ConnectionConfig, dbName string, ta
 	}
 
 	schemaName, pureTableName := normalizeMetadataSchemaAndTable(config, dbName, tableName)
-	columns, err := dbInst.GetColumns(schemaName, pureTableName)
+	columns, err := getColumnsWithMetadataFallback(dbInst, config, schemaName, pureTableName, text)
 	if err != nil && shouldRefreshCachedConnection(err) {
 		if a.invalidateCachedDatabase(runConfig, err) {
 			retryInst, retryErr := a.getDatabaseForcePing(runConfig)
@@ -2482,24 +2506,13 @@ func (a *App) DBGetColumns(config connection.ConnectionConfig, dbName string, ta
 				logger.Error(retryErr, "DBGetColumns 重建连接失败：%s 表=%s.%s", formatConnSummary(runConfig), dbName, tableName)
 				return connection.QueryResult{Success: false, Message: retryErr.Error()}
 			}
-			columns, err = retryInst.GetColumns(schemaName, pureTableName)
+			columns, err = getColumnsWithMetadataFallback(retryInst, config, schemaName, pureTableName, text)
 		}
 	}
 	if err != nil {
 		logger.Error(err, "DBGetColumns 获取列定义失败：%s 表=%s.%s schema=%s pureTable=%s", formatConnSummary(runConfig), dbName, tableName, schemaName, pureTableName)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	if len(columns) == 0 && resolveDDLDBType(config) == "oracle" {
-		if inferred, inferErr := inferOracleColumnsFromDictionary(dbInst, schemaName, pureTableName, text); inferErr == nil && len(inferred) > 0 {
-			columns = inferred
-		}
-		if len(columns) == 0 {
-			if inferred, inferErr := inferOracleColumnsFromEmptySelect(dbInst, schemaName, pureTableName, text); inferErr == nil && len(inferred) > 0 {
-				columns = inferred
-			}
-		}
-	}
-
 	return connection.QueryResult{Success: true, Data: ensureNonNilSlice(columns)}
 }
 

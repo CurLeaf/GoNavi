@@ -249,6 +249,139 @@ func TestFormatExportCellText_FloatNoScientificNotation(t *testing.T) {
 	}
 }
 
+func TestBuildExportTableSelectQuery_QuotesRequestedColumnsInOrder(t *testing.T) {
+	got := buildExportTableSelectQuery(
+		"mysql",
+		"audit.users",
+		[]string{"display name", " id "},
+	)
+	want := "SELECT `display name`, ` id ` FROM `audit`.`users`"
+	if got != want {
+		t.Fatalf("整表选列查询异常，want=%q got=%q", want, got)
+	}
+
+	got = buildExportTableSelectQuery("postgres", "public.users", nil)
+	want = `SELECT * FROM "public"."users"`
+	if got != want {
+		t.Fatalf("未指定列时应保持 SELECT * 兼容行为，want=%q got=%q", want, got)
+	}
+}
+
+func TestWriteRowsToFile_TabularFormatsExportNilAsEmptyCell(t *testing.T) {
+	var nilTime *time.Time
+	data := []map[string]interface{}{
+		{"id": 1, "nullable": nil, "nullable_time": nilTime, "tail": "end"},
+	}
+	columns := []string{"id", "nullable", "nullable_time", "tail"}
+
+	for _, format := range []string{"csv", "md", "html", "xlsx"} {
+		t.Run(format, func(t *testing.T) {
+			f, err := os.CreateTemp("", fmt.Sprintf("gonavi-export-null-*.%s", format))
+			if err != nil {
+				t.Fatalf("创建临时文件失败: %v", err)
+			}
+			defer os.Remove(f.Name())
+			defer f.Close()
+
+			if err := writeRowsToFile(f, data, columns, ExportFileOptions{Format: format}); err != nil {
+				t.Fatalf("写入 %s 失败: %v", format, err)
+			}
+
+			if format == "xlsx" {
+				workbook, err := excelize.OpenFile(f.Name())
+				if err != nil {
+					t.Fatalf("打开 xlsx 失败: %v", err)
+				}
+				defer workbook.Close()
+				rows, err := workbook.GetRows("Sheet1")
+				if err != nil {
+					t.Fatalf("读取 xlsx 失败: %v", err)
+				}
+				if len(rows) < 2 || len(rows[1]) < 4 || rows[1][1] != "" || rows[1][2] != "" {
+					t.Fatalf("xlsx 实际 nil 应导出为空单元格，rows=%v", rows)
+				}
+				return
+			}
+
+			contentBytes, err := os.ReadFile(f.Name())
+			if err != nil {
+				t.Fatalf("读取 %s 失败: %v", format, err)
+			}
+			content := string(contentBytes)
+			switch format {
+			case "csv":
+				if !strings.Contains(content, "1,,,end") {
+					t.Fatalf("csv 实际 nil 应导出为空单元格: %q", content)
+				}
+			case "md":
+				if !strings.Contains(content, "| 1 |  |  | end |") {
+					t.Fatalf("markdown 实际 nil 应导出为空单元格: %q", content)
+				}
+			case "html":
+				if !strings.Contains(content, "<td>1</td><td></td><td></td><td>end</td>") {
+					t.Fatalf("html 实际 nil 应导出为空单元格: %q", content)
+				}
+			}
+		})
+	}
+}
+
+func TestWriteRowsToFile_ProjectsColumnsFromExportOptions(t *testing.T) {
+	f, err := os.CreateTemp("", "gonavi-export-buffered-selected-columns-*.csv")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	data := []map[string]interface{}{
+		{"id": 1, " name ": "alice", "note": "internal"},
+	}
+	columns := []string{"id", " name ", "note"}
+	if err := writeRowsToFile(f, data, columns, ExportFileOptions{
+		Format:  "csv",
+		Columns: []string{" name ", "id", " name ", "   "},
+	}); err != nil {
+		t.Fatalf("写入 csv 失败: %v", err)
+	}
+
+	contentBytes, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatalf("读取导出文件失败: %v", err)
+	}
+	content := strings.TrimPrefix(string(contentBytes), "\uFEFF")
+	want := "\" name \",id\nalice,1\n"
+	if content != want {
+		t.Fatalf("缓冲导出未按 options.Columns 投影，want=%q got=%q", want, content)
+	}
+}
+
+func TestWriteRowsToFile_RejectsExplicitEmptyColumnSelection(t *testing.T) {
+	data := []map[string]interface{}{{"id": 1}}
+	columns := []string{"id"}
+	for name, selectedColumns := range map[string][]string{
+		"empty":      {},
+		"blank-only": {"", "   "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, err := os.CreateTemp("", "gonavi-export-empty-columns-*.csv")
+			if err != nil {
+				t.Fatalf("创建临时文件失败: %v", err)
+			}
+			defer os.Remove(f.Name())
+			defer f.Close()
+
+			err = writeRowsToFile(f, data, columns, ExportFileOptions{
+				Format:  "csv",
+				Columns: selectedColumns,
+			})
+			if err == nil || !strings.Contains(err.Error(), "at least one export column must be selected") {
+				t.Fatalf("显式空选列应拒绝导出，err=%v", err)
+			}
+		})
+	}
+}
+
 func TestWriteRowsToFile_Markdown_NumberKeepPlainText(t *testing.T) {
 	f, err := os.CreateTemp("", "gonavi-export-*.md")
 	if err != nil {
@@ -316,6 +449,37 @@ func TestWriteRowsToFile_JSON_NumberKeepPlainText(t *testing.T) {
 	}
 	if decoded[0]["id"].String() != "1445663" {
 		t.Fatalf("json 数值格式异常，want=1445663 got=%s", decoded[0]["id"].String())
+	}
+}
+
+func TestWriteRowsToFile_JSONKeepsNilAsJSONNull(t *testing.T) {
+	f, err := os.CreateTemp("", "gonavi-export-null-*.json")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	if err := writeRowsToFile(
+		f,
+		[]map[string]interface{}{{"nullable": nil}},
+		[]string{"nullable"},
+		ExportFileOptions{Format: "json"},
+	); err != nil {
+		t.Fatalf("写入 json 失败: %v", err)
+	}
+
+	contentBytes, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatalf("读取 json 失败: %v", err)
+	}
+	var decoded []map[string]interface{}
+	if err := json.Unmarshal(contentBytes, &decoded); err != nil {
+		t.Fatalf("解析 json 失败: %v", err)
+	}
+	value, exists := decoded[0]["nullable"]
+	if !exists || value != nil {
+		t.Fatalf("JSON 导出应保留 null 语义，decoded=%v", decoded)
 	}
 }
 
@@ -830,6 +994,150 @@ func TestExportQueryResultToFile_UsesValueStreamPathWhenAvailable(t *testing.T) 
 	}
 }
 
+func TestExportQueryResultToFile_ProjectsRequestedColumnsInOrderForValueStream(t *testing.T) {
+	f, err := os.CreateTemp("", "gonavi-export-selected-columns-*.csv")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	fake := &fakeValueStreamExportDB{
+		streamCols: []string{"id", "name", "note"},
+		streamValues: [][]interface{}{
+			{1, "alice", "internal"},
+			{2, "bob", "private"},
+		},
+	}
+
+	rowCount, columns, err := exportQueryResultToFile(
+		f,
+		fake,
+		connection.ConnectionConfig{Type: "mysql", Timeout: 10},
+		"SELECT id, name, note FROM users",
+		ExportFileOptions{Format: "csv", Columns: []string{"name", "id"}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("exportQueryResultToFile 返回错误: %v", err)
+	}
+	if rowCount != 2 {
+		t.Fatalf("导出行数异常，want=2 got=%d", rowCount)
+	}
+	if len(columns) != 2 || columns[0] != "name" || columns[1] != "id" {
+		t.Fatalf("导出列未按请求顺序投影，got=%v", columns)
+	}
+
+	contentBytes, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatalf("读取导出文件失败: %v", err)
+	}
+	content := strings.TrimPrefix(string(contentBytes), "\uFEFF")
+	want := "name,id\nalice,1\nbob,2\n"
+	if content != want {
+		t.Fatalf("选列导出内容异常，want=%q got=%q", want, content)
+	}
+}
+
+func TestExportQueryResultToFile_ProjectsRequestedColumnsInOrderForMapStream(t *testing.T) {
+	f, err := os.CreateTemp("", "gonavi-export-selected-map-columns-*.csv")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	fake := &fakeStreamExportDB{
+		streamCols: []string{"id", "name", "note"},
+		streamData: []map[string]interface{}{
+			{"id": 1, "name": "alice", "note": "internal"},
+		},
+	}
+
+	_, columns, err := exportQueryResultToFile(
+		f,
+		fake,
+		connection.ConnectionConfig{Type: "mysql", Timeout: 10},
+		"SELECT id, name, note FROM users",
+		ExportFileOptions{Format: "csv", Columns: []string{"note", "id"}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("exportQueryResultToFile 返回错误: %v", err)
+	}
+	if len(columns) != 2 || columns[0] != "note" || columns[1] != "id" {
+		t.Fatalf("导出列未按请求顺序投影，got=%v", columns)
+	}
+
+	contentBytes, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatalf("读取导出文件失败: %v", err)
+	}
+	content := strings.TrimPrefix(string(contentBytes), "\uFEFF")
+	want := "note,id\ninternal,1\n"
+	if content != want {
+		t.Fatalf("选列 map 流导出内容异常，want=%q got=%q", want, content)
+	}
+}
+
+func TestExportQueryResultToFile_RejectsRequestedColumnMissingFromResult(t *testing.T) {
+	f, err := os.CreateTemp("", "gonavi-export-missing-column-*.csv")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	fake := &fakeValueStreamExportDB{
+		streamCols:   []string{"id", "name"},
+		streamValues: [][]interface{}{{1, "alice"}},
+	}
+
+	_, _, err = exportQueryResultToFile(
+		f,
+		fake,
+		connection.ConnectionConfig{Type: "mysql", Timeout: 10},
+		"SELECT id, name FROM users",
+		ExportFileOptions{Format: "csv", Columns: []string{"name", "missing"}},
+		nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), `requested export column "missing" was not found`) {
+		t.Fatalf("查询结果不包含请求列时应拒绝导出，err=%v", err)
+	}
+}
+
+func TestExportQueryResultToFile_RejectsExplicitEmptyColumnSelection(t *testing.T) {
+	fake := &fakeValueStreamExportDB{
+		streamCols:   []string{"id"},
+		streamValues: [][]interface{}{{1}},
+	}
+	for name, selectedColumns := range map[string][]string{
+		"empty":      {},
+		"blank-only": {"", "   "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, err := os.CreateTemp("", "gonavi-export-empty-query-columns-*.csv")
+			if err != nil {
+				t.Fatalf("创建临时文件失败: %v", err)
+			}
+			defer os.Remove(f.Name())
+			defer f.Close()
+
+			_, _, err = exportQueryResultToFile(
+				f,
+				fake,
+				connection.ConnectionConfig{Type: "mysql", Timeout: 10},
+				"SELECT id FROM users",
+				ExportFileOptions{Format: "csv", Columns: selectedColumns},
+				nil,
+			)
+			if err == nil || !strings.Contains(err.Error(), "at least one export column must be selected") {
+				t.Fatalf("显式空选列应拒绝查询导出，err=%v", err)
+			}
+		})
+	}
+}
+
 func TestGetExportQueryTimeout_ClickHouseUsesLongerMinimum(t *testing.T) {
 	timeout := getExportQueryTimeout(connection.ConnectionConfig{
 		Type:    "clickhouse",
@@ -912,7 +1220,7 @@ func TestWriteRowsToFile_HTML_EscapeAndStyle(t *testing.T) {
 	if !strings.Contains(content, "line1<br>line2") {
 		t.Fatalf("html 导出换行未转为 <br>: %s", content)
 	}
-	if !strings.Contains(content, "<td>NULL</td>") {
+	if !strings.Contains(content, "<td></td>") {
 		t.Fatalf("html 导出空值显示异常: %s", content)
 	}
 }

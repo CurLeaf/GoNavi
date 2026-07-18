@@ -208,6 +208,8 @@ export function ImportData(arg1:connection.ConnectionConfig,arg2:string,arg3:str
 
 export function ImportDataWithProgress(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
+export function ImportDataWithProgressOptions(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string,arg5:app.ImportFileOptions):Promise<connection.QueryResult>;
+
 export function ImportLegacyConnections(arg1:Array<connection.SavedConnectionInput>):Promise<Array<connection.SavedConnectionView>>;
 
 export function ImportLegacyGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;

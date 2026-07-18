@@ -863,6 +863,7 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
           const values = await showDataExportDialog(modal, {
               title: translateDataGrid('file.backend.dialog.export_query_result'),
               scopeOptions,
+              availableColumns: displayOutputColumnNames,
               allowInsertSql: canExportInsertSQL,
               initialValues: {
                   ...commonInitialValues,
@@ -870,7 +871,10 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
               },
           });
           if (!values) return;
-          await exportQueryResultRows(values, values.scope as Exclude<DataGridExportScope, 'filteredAll'>);
+          await exportQueryResultRows(
+              { ...values, columns: values.columns },
+              values.scope as Exclude<DataGridExportScope, 'filteredAll'>,
+          );
           return;
       }
 
@@ -937,6 +941,7 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
       connectionId,
       dbName,
       displayData.length,
+      displayOutputColumnNames,
       exportQueryResultRows,
       hasFilteredExportSql,
       objectType,

@@ -142,6 +142,7 @@ import { buildDataGridTransactionLog } from './dataGridTransactionLog';
 import {
     DEFAULT_DATA_EXPORT_FORMAT,
     DEFAULT_XLSX_ROWS_PER_SHEET,
+    resolveDataExportColumns,
     showDataExportDialog,
     type DataExportDialogValues,
     type DataExportFileOptions,
@@ -1079,7 +1080,9 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   // Helper to export specific data
   const exportData = async (rows: any[], options: DataExportFileOptions) => {
-      const cleanRows = pickDataGridOutputRows(rows, displayOutputColumnNames);
+      const exportColumns = resolveDataExportColumns(options.columns, displayOutputColumnNames)
+          || displayOutputColumnNames;
+      const cleanRows = pickDataGridOutputRows(rows, exportColumns);
       const exportTitle = String(tableName || '').trim()
           ? translateDataGrid('file.backend.dialog.export_table', { table: tableName })
           : translateDataGrid('file.backend.dialog.export_data');
@@ -1090,7 +1093,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           totalRows: cleanRows.length,
           run: (jobId) => ExportDataWithOptions(
               cleanRows,
-              displayOutputColumnNames,
+              exportColumns,
               tableName || 'export',
               {
                   ...buildBackendExportOptions(options),

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Empty, InputNumber, Select, Tooltip, Typography } from 'antd';
 import { ClockCircleOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
+  DBGetColumns,
   DBGetDatabases,
   DBGetTables,
   ExportDatabasesSQLWithOptions,
@@ -18,6 +19,7 @@ import type {
   TableExportScopeOption,
 } from '../types';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { getColumnDefinitionName } from '../utils/columnDefinition';
 import { resolveConnectionHostSummary } from '../utils/tabDisplay';
 import { buildExportWorkbenchHistoryKey } from '../utils/tableExportTab';
 import {
@@ -32,6 +34,7 @@ import {
   DEFAULT_DATA_EXPORT_FORMAT,
   DEFAULT_XLSX_ROWS_PER_SHEET,
   MAX_XLSX_ROWS_PER_SHEET,
+  resolveDataExportColumns,
   type DataExportFormat,
 } from './DataExportDialog';
 import ExportProgressBar from './ExportProgressBar';
@@ -109,6 +112,19 @@ const resolveInitialScope = (
     return preferred;
   }
   return scopeOptions.find((item) => !item.disabled)?.value || 'all';
+};
+
+export const resolveTableExportColumnNames = (definitions: unknown): string[] => {
+  if (!Array.isArray(definitions)) return [];
+  const seen = new Set<string>();
+  const columns: string[] = [];
+  definitions.forEach((definition) => {
+    const column = getColumnDefinitionName(definition);
+    if (!column || seen.has(column)) return;
+    seen.add(column);
+    columns.push(column);
+  });
+  return columns;
 };
 
 const normalizeConnectionConfig = (connection: SavedConnection) => ({
@@ -286,14 +302,18 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [selectedDbName, setSelectedDbName] = useState(() => String(tab.dbName || '').trim());
   const [availableDatabases, setAvailableDatabases] = useState<SelectOption[]>([]);
   const [availableObjects, setAvailableObjects] = useState<SelectOption[]>([]);
+  const [availableColumns, setAvailableColumns] = useState<string[]>([]);
+  const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
   const [selectedObjectNames, setSelectedObjectNames] = useState<string[]>([]);
   const [selectedDatabaseNames, setSelectedDatabaseNames] = useState<string[]>([]);
   const [batchTableMode, setBatchTableMode] = useState<BatchTableExportMode>('schema');
   const [batchDatabaseMode, setBatchDatabaseMode] = useState<BatchDatabaseExportMode>('schema');
   const [loadingDatabases, setLoadingDatabases] = useState(false);
   const [loadingObjects, setLoadingObjects] = useState(false);
+  const [loadingColumns, setLoadingColumns] = useState(false);
   const [databaseLoadError, setDatabaseLoadError] = useState('');
   const [objectLoadError, setObjectLoadError] = useState('');
+  const [columnLoadError, setColumnLoadError] = useState('');
 
   const effectiveConnectionId = isSingleWorkbench ? String(tab.connectionId || '').trim() : selectedConnectionId;
   const effectiveDbName = isSingleWorkbench ? String(tab.dbName || '').trim() : selectedDbName;
@@ -359,6 +379,50 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
       return resolveInitialScope(scopeOptions, tab.tableExportInitialScope);
     });
   }, [scopeOptions, tab.tableExportInitialScope]);
+
+  useEffect(() => {
+    const objectName = String(tab.tableName || '').trim();
+    if (!isSingleWorkbench || !connectionConfig || !objectName) {
+      setAvailableColumns([]);
+      setSelectedColumns([]);
+      setColumnLoadError('');
+      setLoadingColumns(false);
+      return undefined;
+    }
+
+    let alive = true;
+    setLoadingColumns(true);
+    setColumnLoadError('');
+    DBGetColumns(buildRpcConnectionConfig(connectionConfig) as any, effectiveDbName, objectName)
+      .then((res) => {
+        if (!alive) return;
+        if (!res.success) {
+          setAvailableColumns([]);
+          setSelectedColumns([]);
+          setColumnLoadError(res.message || t('data_export.message.load_columns_failed'));
+          return;
+        }
+        const nextColumns = resolveTableExportColumnNames(res.data);
+        setAvailableColumns(nextColumns);
+        setSelectedColumns(nextColumns);
+        if (nextColumns.length === 0) {
+          setColumnLoadError(t('data_export.message.load_columns_failed'));
+        }
+      })
+      .catch((error: any) => {
+        if (!alive) return;
+        setAvailableColumns([]);
+        setSelectedColumns([]);
+        setColumnLoadError(error?.message || t('data_export.message.load_columns_failed'));
+      })
+      .finally(() => {
+        if (alive) setLoadingColumns(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [connectionConfig, effectiveDbName, isSingleWorkbench, tab.tableName]);
 
   useEffect(() => {
     if (!progressState.startedAt || progressState.finishedAt > 0) return undefined;
@@ -588,7 +652,12 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
       return false;
     }
     if (isSingleWorkbench) {
-      return !!tab.tableName && !!scope && !activeScopeOption?.disabled && (scope === 'all' || !!activeScopeQuery);
+      return !!tab.tableName
+        && !!scope
+        && !activeScopeOption?.disabled
+        && !loadingColumns
+        && selectedColumns.length > 0
+        && (scope === 'all' || !!activeScopeQuery);
     }
     if (isBatchTablesWorkbench) {
       return !!selectedDbName && selectedObjectNames.length > 0;
@@ -601,9 +670,11 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
     isBatchTablesWorkbench,
     isRunning,
     isSingleWorkbench,
+    loadingColumns,
     scope,
     selectedDatabaseNames.length,
     selectedDbName,
+    selectedColumns.length,
     selectedObjectNames.length,
     tab.tableName,
   ]);
@@ -624,6 +695,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
       run: (jobId) => {
         const options = {
           format,
+          columns: selectedColumns,
           xlsxMaxRowsPerSheet,
           jobId,
           totalRowsHint: singleTotalRowsKnown ? singleScopeRowCount : 0,
@@ -910,6 +982,15 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
             />
           ) : null}
 
+          {columnLoadError ? (
+            <Alert
+              type="error"
+              showIcon
+              message={t('data_export.dialog.field.columns')}
+              description={columnLoadError}
+            />
+          ) : null}
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {isSingleWorkbench ? (
               <>
@@ -940,6 +1021,24 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                     options={DATA_EXPORT_FORMAT_OPTIONS}
                     onChange={(next) => setFormat(next as DataExportFormat)}
                   />
+                </div>
+
+                <div>
+                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.dialog.field.columns')}</div>
+                  <Select
+                    style={{ width: '100%' }}
+                    mode="multiple"
+                    value={selectedColumns}
+                    loading={loadingColumns}
+                    options={availableColumns.map((column) => ({ value: column, label: column }))}
+                    maxTagCount="responsive"
+                    onChange={(columns) => setSelectedColumns(
+                      resolveDataExportColumns(columns, availableColumns) || [],
+                    )}
+                  />
+                  <div style={{ marginTop: 6, fontSize: 12, color: secondaryTextColor }}>
+                    {t('data_export.dialog.field.columns_help')}
+                  </div>
                 </div>
 
                 {format === 'xlsx' ? (

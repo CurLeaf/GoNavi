@@ -2468,8 +2468,18 @@ func formatImportSQLValue(dbType, columnType string, value interface{}) string {
 
 // ImportDataWithProgress 执行导入并发送进度事件
 func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName, tableName, filePath string) (result connection.QueryResult) {
+	return a.ImportDataWithProgressOptions(config, dbName, tableName, filePath, ImportFileOptions{})
+}
+
+// ImportDataWithProgressOptions executes a streamed import with optional source-header
+// to database-column mappings. ImportDataWithProgress remains the compatibility entrypoint.
+func (a *App) ImportDataWithProgressOptions(config connection.ConnectionConfig, dbName, tableName, filePath string, options ImportFileOptions) (result connection.QueryResult) {
+	if strings.TrimSpace(filePath) == "" {
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.import_file_empty", nil)}
+	}
 	dbType := resolveDDLDBType(config)
 	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
+	metadataSchemaName, metadataTableName := normalizeMetadataSchemaAndTable(config, dbName, tableName)
 	auditTarget := strings.TrimSpace(tableName)
 	if pureTableName != "" {
 		auditTarget = quoteTableIdentByType(dbType, schemaName, pureTableName)
@@ -2491,27 +2501,32 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	columnTypeMap := map[string]string{}
-	if defs, colErr := dbInst.GetColumns(schemaName, pureTableName); colErr == nil {
-		columnTypeMap = buildImportColumnTypeMap(defs)
+	targetColumns, colErr := getColumnsWithMetadataFallback(dbInst, config, metadataSchemaName, metadataTableName, a.appText)
+	if colErr != nil && options.ColumnMappings != nil {
+		return connection.QueryResult{Success: false, Message: colErr.Error()}
 	}
 
-	writer := newImportDatabaseRowWriter(dbInst, dbType, tableName, columnTypeMap)
-	consumer := newImportBatchConsumer(writer, defaultImportApplyBatchSize, 0, false, func(state importProgressState) {
+	writer := newImportDatabaseRowWriter(dbInst, dbType, tableName, newImportColumnTypeLookup(targetColumns))
+	batchConsumer := newImportBatchConsumer(writer, defaultImportApplyBatchSize, 0, false, func(state importProgressState) {
 		uievents.Emit(a.ctx, "import:progress", state)
 	})
+	batchConsumer.jobID = strings.TrimSpace(options.JobID)
+	consumer, err := newImportColumnMappingConsumer(batchConsumer, options.ColumnMappings, targetColumns)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	if err := streamImportFile(filePath, consumer); err != nil {
-		resultData := consumer.Result()
+		resultData := batchConsumer.Result()
 		maybeReleaseFileTransferMemory("import-stream-error", int64(resultData.Total), filePath)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	if err := consumer.Flush(); err != nil {
-		resultData := consumer.Result()
+	if err := batchConsumer.Flush(); err != nil {
+		resultData := batchConsumer.Result()
 		maybeReleaseFileTransferMemory("import-flush-error", int64(resultData.Total), filePath)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	resultData := consumer.Result()
+	resultData := batchConsumer.Result()
 	if resultData.Total == 0 {
 		maybeReleaseFileTransferMemory("import-empty", 0, filePath)
 		return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.import_no_data", nil)}
@@ -2612,8 +2627,23 @@ func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tab
 	return a.ExportTableWithOptions(config, dbName, tableName, ExportFileOptions{Format: format})
 }
 
+func buildExportTableSelectQuery(dbType string, tableName string, columns []string) string {
+	selectList := "*"
+	if len(columns) > 0 {
+		quotedColumns := make([]string, len(columns))
+		for index, column := range columns {
+			quotedColumns[index] = quoteIdentByType(dbType, column)
+		}
+		selectList = strings.Join(quotedColumns, ", ")
+	}
+	return fmt.Sprintf("SELECT %s FROM %s", selectList, quoteQualifiedIdentByType(dbType, tableName))
+}
+
 func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName string, tableName string, options ExportFileOptions) connection.QueryResult {
 	options = normalizeExportFileOptions("", options)
+	if err := validateExportColumnsSelection(options); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	format := options.Format
 	if format != "sql" {
 		if err := verifyOptionalDriverAgentReadyForExport(config); err != nil {
@@ -2684,7 +2714,7 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 	}
 
 	dbType := resolveDDLDBType(config)
-	query := fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(dbType, tableName))
+	query := buildExportTableSelectQuery(dbType, tableName, options.Columns)
 
 	f, err := os.Create(filename)
 	if err != nil {
@@ -4060,6 +4090,9 @@ func (a *App) ExportDataWithOptions(data []map[string]interface{}, columns []str
 		defaultName = "export"
 	}
 	options = normalizeExportFileOptions("", options)
+	if err := validateExportColumnsSelection(options); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	if !options.TotalRowsKnown {
 		options.TotalRowsKnown = true
 		options.TotalRowsHint = int64(len(data))
@@ -4116,6 +4149,9 @@ func (a *App) ExportQueryWithOptions(config connection.ConnectionConfig, dbName 
 		defaultName = "export"
 	}
 	options = normalizeExportFileOptions("", options)
+	if err := validateExportColumnsSelection(options); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	format := options.Format
 	if format != "sql" {
 		if err := verifyOptionalDriverAgentReadyForExport(config); err != nil {
@@ -4232,6 +4268,66 @@ type exportFileWriter interface {
 
 type exportValueStreamConsumer interface {
 	ConsumeRowValues(values []interface{}) error
+}
+
+type exportColumnProjectionConsumer struct {
+	delegate         db.QueryStreamConsumer
+	requestedColumns []string
+	columns          []string
+	columnIndexes    []int
+	values           []interface{}
+}
+
+func (c *exportColumnProjectionConsumer) SetColumns(columns []string) error {
+	selectedColumns, err := resolveRequestedExportColumns(columns, c.requestedColumns)
+	if err != nil {
+		return err
+	}
+	indexByColumn := make(map[string]int, len(columns))
+	for index, column := range columns {
+		if _, exists := indexByColumn[column]; !exists {
+			indexByColumn[column] = index
+		}
+	}
+
+	c.columns = selectedColumns
+	c.columnIndexes = make([]int, len(selectedColumns))
+	for index, column := range selectedColumns {
+		c.columnIndexes[index] = indexByColumn[column]
+	}
+	c.values = make([]interface{}, len(c.columns))
+	if c.delegate == nil {
+		return nil
+	}
+	return c.delegate.SetColumns(c.columns)
+}
+
+func (c *exportColumnProjectionConsumer) ConsumeRow(row map[string]interface{}) error {
+	if c.delegate == nil {
+		return nil
+	}
+	return c.delegate.ConsumeRow(row)
+}
+
+func (c *exportColumnProjectionConsumer) ConsumeRowValues(values []interface{}) error {
+	for selectedIndex, sourceIndex := range c.columnIndexes {
+		if sourceIndex < len(values) {
+			c.values[selectedIndex] = values[sourceIndex]
+		} else {
+			c.values[selectedIndex] = nil
+		}
+	}
+	if c.delegate == nil {
+		return nil
+	}
+	if valueConsumer, ok := c.delegate.(exportValueStreamConsumer); ok {
+		return valueConsumer.ConsumeRowValues(c.values)
+	}
+	row := make(map[string]interface{}, len(c.columns))
+	for index, column := range c.columns {
+		row[column] = c.values[index]
+	}
+	return c.delegate.ConsumeRow(row)
 }
 
 type countingExportConsumer struct {
@@ -4861,6 +4957,24 @@ func resolveExportColumns(columns []string, data []map[string]interface{}) []str
 	return derived
 }
 
+func resolveRequestedExportColumns(columns []string, requested []string) ([]string, error) {
+	if len(requested) == 0 {
+		return columns, nil
+	}
+	available := make(map[string]struct{}, len(columns))
+	for _, column := range columns {
+		available[column] = struct{}{}
+	}
+	selected := make([]string, 0, len(requested))
+	for _, column := range requested {
+		if _, exists := available[column]; !exists {
+			return nil, fmt.Errorf("requested export column %q was not found in query result", column)
+		}
+		selected = append(selected, column)
+	}
+	return selected, nil
+}
+
 func newExportFileWriter(f *os.File, options ExportFileOptions) (exportFileWriter, error) {
 	options = normalizeExportFileOptions("", options)
 	switch options.Format {
@@ -4924,6 +5038,10 @@ func streamQueryDataForExport(dbInst db.Database, config connection.ConnectionCo
 }
 
 func exportQueryResultToFile(f *os.File, dbInst db.Database, config connection.ConnectionConfig, query string, options ExportFileOptions, reporter *exportProgressReporter) (int64, []string, error) {
+	options = normalizeExportFileOptions("", options)
+	if err := validateExportColumnsSelection(options); err != nil {
+		return 0, nil, err
+	}
 	writer, err := newExportFileWriter(f, options)
 	if err != nil {
 		return 0, nil, err
@@ -4932,19 +5050,32 @@ func exportQueryResultToFile(f *os.File, dbInst db.Database, config connection.C
 	if reporter != nil {
 		reporter.Start(reporter.text("data_export.progress.stage.querying_data", nil))
 	}
-	consumer := &countingExportConsumer{delegate: writer, reporter: reporter}
+	var projection *exportColumnProjectionConsumer
+	delegate := db.QueryStreamConsumer(writer)
+	if len(options.Columns) > 0 {
+		projection = &exportColumnProjectionConsumer{
+			delegate:         writer,
+			requestedColumns: options.Columns,
+		}
+		delegate = projection
+	}
+	consumer := &countingExportConsumer{delegate: delegate, reporter: reporter}
 	streamErr := streamQueryDataForExport(dbInst, config, query, consumer)
 	if reporter != nil && streamErr == nil {
 		reporter.Finalizing(consumer.rowCount)
 	}
 	closeErr := writer.Close()
+	exportedColumns := consumer.columns
+	if projection != nil {
+		exportedColumns = projection.columns
+	}
 	if streamErr != nil {
-		return consumer.rowCount, consumer.columns, streamErr
+		return consumer.rowCount, exportedColumns, streamErr
 	}
 	if closeErr != nil {
-		return consumer.rowCount, consumer.columns, closeErr
+		return consumer.rowCount, exportedColumns, closeErr
 	}
-	return consumer.rowCount, consumer.columns, nil
+	return consumer.rowCount, exportedColumns, nil
 }
 
 func fillExportRecordFromValues(record []string, values []interface{}, markdown bool) []string {
@@ -4969,7 +5100,7 @@ func fillExportRecordFromRow(record []string, row map[string]interface{}, column
 
 func formatExportRecordValue(val interface{}, markdown bool) string {
 	if val == nil {
-		return "NULL"
+		return ""
 	}
 	text := formatExportCellText(val)
 	if markdown {
@@ -4988,7 +5119,15 @@ func writeRowsToFileWithReporter(f *os.File, data []map[string]interface{}, colu
 	if f == nil {
 		return 0, fmt.Errorf("file required")
 	}
+	options = normalizeExportFileOptions("", options)
+	if err := validateExportColumnsSelection(options); err != nil {
+		return 0, err
+	}
 	columns = resolveExportColumns(columns, data)
+	columns, err := resolveRequestedExportColumns(columns, options.Columns)
+	if err != nil {
+		return 0, err
+	}
 	writer, err := newExportFileWriter(f, options)
 	if err != nil {
 		return 0, err
@@ -5202,7 +5341,7 @@ func writeRowsToHTML(f *os.File, data []map[string]interface{}, columns []string
 
 func formatExportCellText(val interface{}) string {
 	if val == nil {
-		return "NULL"
+		return ""
 	}
 
 	switch v := val.(type) {
@@ -5210,7 +5349,7 @@ func formatExportCellText(val interface{}) string {
 		return v.Format("2006-01-02 15:04:05")
 	case *time.Time:
 		if v == nil {
-			return "NULL"
+			return ""
 		}
 		return v.Format("2006-01-02 15:04:05")
 	case float32:

@@ -68,6 +68,7 @@ var desktopOnlyAppMethods = map[string]struct{}{
 	"ImportData":                    {},
 	"PreviewImportFile":             {},
 	"ImportDataWithProgress":        {},
+	"ImportDataWithProgressOptions": {},
 	"ExportTable":                   {},
 	"ExportTableWithOptions":        {},
 	"ExportTablesSQL":               {},

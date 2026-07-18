@@ -104,7 +104,7 @@ func TestMethodInvokerRejectsDesktopOnlyAppMethodsBeforeReflection(t *testing.T)
 
 	for _, method := range []string{
 		"Shutdown", "ExportSQLAuditFile", "OpenSQLFile", "ExecuteSQLFile", "ReadSQLFile",
-		"PreviewImportFile", "ImportDataWithProgress", "GetDataRootDirectoryInfo",
+		"PreviewImportFile", "ImportDataWithProgress", "ImportDataWithProgressOptions", "GetDataRootDirectoryInfo",
 		"ApplyDataRootDirectory", "OpenDataRootDirectory", "SetApplicationBrandIcon",
 	} {
 		_, err := invoker.Invoke(invokeRequest{Namespace: "app", Receiver: "app", Method: method})

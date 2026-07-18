@@ -494,6 +494,7 @@ export namespace app {
 	}
 	export class ExportFileOptions {
 	    format: string;
+	    columns?: string[];
 	    xlsxMaxRowsPerSheet?: number;
 	    jobId?: string;
 	    totalRowsHint?: number;
@@ -511,6 +512,7 @@ export namespace app {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.format = source["format"];
+	        this.columns = source["columns"];
 	        this.xlsxMaxRowsPerSheet = source["xlsxMaxRowsPerSheet"];
 	        this.jobId = source["jobId"];
 	        this.totalRowsHint = source["totalRowsHint"];
@@ -520,6 +522,20 @@ export namespace app {
 	        this.insertSQLColumnTypes = source["insertSQLColumnTypes"];
 	        this.insertSQLTargetColumns = source["insertSQLTargetColumns"];
 	        this.insertSQLAllowEmptyTargetTable = source["insertSQLAllowEmptyTargetTable"];
+	    }
+	}
+	export class ImportFileOptions {
+	    columnMappings?: Record<string, string>;
+	    jobId?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new ImportFileOptions(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.columnMappings = source["columnMappings"];
+	        this.jobId = source["jobId"];
 	    }
 	}
 	export class RedisExportKeysOptions {
