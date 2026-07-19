@@ -1496,6 +1496,7 @@ const ConnectionModal: React.FC<{
             Number(config.keepAliveIntervalMinutes) > 0
               ? Number(config.keepAliveIntervalMinutes)
               : DEFAULT_KEEPALIVE_INTERVAL_MINUTES,
+          keepAliveSQL: config.keepAliveSQL || "",
           mysqlTopology: mysqlIsReplica ? "replica" : "single",
           mysqlReplicaHosts: mysqlReplicaHosts,
           rocketmqTopology: rocketmqIsCluster ? "cluster" : "single",
@@ -2104,6 +2105,7 @@ const ConnectionModal: React.FC<{
         timeout: 30,
         keepAliveEnabled: false,
         keepAliveIntervalMinutes: DEFAULT_KEEPALIVE_INTERVAL_MINUTES,
+        keepAliveSQL: "",
         uri: "",
         connectionParams: "",
         includeDatabases: undefined,
@@ -2178,6 +2180,7 @@ const ConnectionModal: React.FC<{
         httpTunnelPassword: "",
         keepAliveEnabled: false,
         keepAliveIntervalMinutes: DEFAULT_KEEPALIVE_INTERVAL_MINUTES,
+        keepAliveSQL: "",
         mysqlTopology: "single",
         rocketmqTopology: "single",
         mqttTopology: "single",
@@ -2228,6 +2231,7 @@ const ConnectionModal: React.FC<{
         httpTunnelPassword: "",
         keepAliveEnabled: false,
         keepAliveIntervalMinutes: DEFAULT_KEEPALIVE_INTERVAL_MINUTES,
+        keepAliveSQL: "",
         mysqlTopology: "single",
         rocketmqTopology: "single",
         mqttTopology: "single",

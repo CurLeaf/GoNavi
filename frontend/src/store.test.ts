@@ -689,6 +689,7 @@ describe('store appearance persistence', () => {
           user: 'postgres',
           keepAliveEnabled: true,
           keepAliveIntervalMinutes: 0,
+          keepAliveSQL: '  SELECT 1  ',
         },
       },
     ]);
@@ -696,6 +697,7 @@ describe('store appearance persistence', () => {
     const config = useStore.getState().connections[0]?.config;
     expect(config?.keepAliveEnabled).toBe(true);
     expect(config?.keepAliveIntervalMinutes).toBe(240);
+    expect(config?.keepAliveSQL).toBe('SELECT 1');
   });
 
   it('keeps StarRocks saved connections as independent datasource type', async () => {

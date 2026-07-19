@@ -50,12 +50,17 @@ var (
 )
 
 type cachedDatabase struct {
-	inst              db.Database
-	lastPing          time.Time
-	config            connection.ConnectionConfig
-	keepAliveEnabled  bool
-	keepAliveInterval time.Duration
-	keepAliveInFlight bool
+	inst                      db.Database
+	lastPing                  time.Time
+	lastKeepAliveAt           time.Time
+	config                    connection.ConnectionConfig
+	keepAliveEnabled          bool
+	keepAliveInterval         time.Duration
+	keepAliveSQL              string
+	keepAliveDBType           string
+	keepAliveRevision         uint64
+	keepAliveInFlight         bool
+	keepAliveInFlightRevision uint64
 }
 
 type cachedConnectFailure struct {
@@ -374,6 +379,7 @@ func normalizeCacheKeyConfig(config connection.ConnectionConfig) connection.Conn
 	// keepalive 仅影响后台保活策略，不应参与物理连接复用键。
 	normalized.KeepAliveEnabled = false
 	normalized.KeepAliveIntervalMinutes = 0
+	normalized.KeepAliveSQL = ""
 	normalized.SavePassword = false
 
 	if !normalized.UseSSH {
@@ -918,13 +924,31 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	a.mu.RUnlock()
 	if ok {
 		keepAliveEnabled, keepAliveInterval := resolveConnectionKeepAliveSettings(effectiveConfig)
-		if entry.keepAliveEnabled != keepAliveEnabled || entry.keepAliveInterval != keepAliveInterval {
+		keepAliveSQL, keepAliveDBType := resolveConnectionKeepAliveSQL(effectiveConfig)
+		if entry.keepAliveEnabled != keepAliveEnabled ||
+			entry.keepAliveInterval != keepAliveInterval ||
+			entry.keepAliveSQL != keepAliveSQL ||
+			entry.keepAliveDBType != keepAliveDBType {
 			a.mu.Lock()
 			if cur, exists := a.dbCache[key]; exists && cur.inst == entry.inst {
-				cur.keepAliveEnabled = keepAliveEnabled
-				cur.keepAliveInterval = keepAliveInterval
-				if !keepAliveEnabled {
-					cur.keepAliveInFlight = false
+				policyChanged := cur.keepAliveEnabled != keepAliveEnabled ||
+					cur.keepAliveInterval != keepAliveInterval ||
+					cur.keepAliveSQL != keepAliveSQL ||
+					cur.keepAliveDBType != keepAliveDBType
+				if policyChanged {
+					wasKeepAliveEnabled := cur.keepAliveEnabled
+					cur.keepAliveRevision = nextConnectionKeepAliveRevision(cur.keepAliveRevision)
+					cur.keepAliveEnabled = keepAliveEnabled
+					cur.keepAliveInterval = keepAliveInterval
+					cur.keepAliveSQL = keepAliveSQL
+					cur.keepAliveDBType = keepAliveDBType
+					if !keepAliveEnabled {
+						cur.keepAliveInFlight = false
+						cur.keepAliveInFlightRevision = 0
+						cur.lastKeepAliveAt = time.Time{}
+					} else if !wasKeepAliveEnabled || cur.lastKeepAliveAt.IsZero() {
+						cur.lastKeepAliveAt = time.Now()
+					}
 				}
 				a.dbCache[key] = cur
 				entry = cur
@@ -1014,9 +1038,30 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 
 	now := time.Now()
 	keepAliveEnabled, keepAliveInterval := resolveConnectionKeepAliveSettings(effectiveConfig)
+	keepAliveSQL, keepAliveDBType := resolveConnectionKeepAliveSQL(effectiveConfig)
 
 	a.mu.Lock()
 	if existing, exists := a.dbCache[key]; exists && existing.inst != nil {
+		policyChanged := existing.keepAliveEnabled != keepAliveEnabled ||
+			existing.keepAliveInterval != keepAliveInterval ||
+			existing.keepAliveSQL != keepAliveSQL ||
+			existing.keepAliveDBType != keepAliveDBType
+		if policyChanged {
+			wasKeepAliveEnabled := existing.keepAliveEnabled
+			existing.keepAliveRevision = nextConnectionKeepAliveRevision(existing.keepAliveRevision)
+			existing.keepAliveEnabled = keepAliveEnabled
+			existing.keepAliveInterval = keepAliveInterval
+			existing.keepAliveSQL = keepAliveSQL
+			existing.keepAliveDBType = keepAliveDBType
+			if !keepAliveEnabled {
+				existing.keepAliveInFlight = false
+				existing.keepAliveInFlightRevision = 0
+				existing.lastKeepAliveAt = time.Time{}
+			} else if !wasKeepAliveEnabled || existing.lastKeepAliveAt.IsZero() {
+				existing.lastKeepAliveAt = now
+			}
+		}
+		a.dbCache[key] = existing
 		a.mu.Unlock()
 		// Prefer existing cached connection to avoid cache racing duplicates.
 		_ = dbInst.Close()
@@ -1028,9 +1073,13 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	a.dbCache[key] = cachedDatabase{
 		inst:              dbInst,
 		lastPing:          now,
+		lastKeepAliveAt:   now,
 		config:            normalizeCacheKeyConfig(effectiveConfig),
 		keepAliveEnabled:  keepAliveEnabled,
 		keepAliveInterval: keepAliveInterval,
+		keepAliveSQL:      keepAliveSQL,
+		keepAliveDBType:   keepAliveDBType,
+		keepAliveRevision: 1,
 	}
 	a.mu.Unlock()
 

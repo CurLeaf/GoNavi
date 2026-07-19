@@ -114,6 +114,7 @@ type ConnectionConfig struct {
 	Timeout                  int                        `json:"timeout,omitempty"`                  // Connection timeout in seconds (default: 30)
 	KeepAliveEnabled         bool                       `json:"keepAliveEnabled,omitempty"`         // Enable background keep-alive ping for long-lived cached connections
 	KeepAliveIntervalMinutes int                        `json:"keepAliveIntervalMinutes,omitempty"` // Keep-alive ping interval in minutes (default: 240)
+	KeepAliveSQL             string                     `json:"keepAliveSQL,omitempty"`             // Optional single SELECT/WITH probe used instead of the driver ping
 	RedisDB                  int                        `json:"redisDB,omitempty"`                  // Redis database index (0-15)
 	RedisSentinelMaster      string                     `json:"redisSentinelMaster,omitempty"`      // Redis Sentinel master name
 	RedisSentinelUser        string                     `json:"redisSentinelUser,omitempty"`        // Redis Sentinel auth user

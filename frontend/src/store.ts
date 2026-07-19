@@ -107,8 +107,10 @@ import {
 } from "./utils/sqlFileTabDrafts";
 import {
   deriveLegacyConnectionReadOnlyFlag,
+  MAX_CONNECTION_KEEPALIVE_SQL_LENGTH,
   normalizeConnectionProtectionConfig,
   resolveConnectionProtectionConfig,
+  supportsConnectionKeepAliveSQL,
 } from "./utils/connectionReadOnly";
 import {
   DEFAULT_QUERY_EDITOR_EDITOR_HEIGHT_RATIO,
@@ -914,6 +916,17 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
       MIN_KEEPALIVE_INTERVAL_MINUTES,
       MAX_KEEPALIVE_INTERVAL_MINUTES,
     ),
+    keepAliveSQL: supportsConnectionKeepAliveSQL({
+      type,
+      driver: toTrimmedString(raw.driver),
+      oceanBaseProtocol:
+        raw.oceanBaseProtocol as ConnectionConfig["oceanBaseProtocol"],
+    })
+      ? toTrimmedString(raw.keepAliveSQL).slice(
+          0,
+          MAX_CONNECTION_KEEPALIVE_SQL_LENGTH,
+        )
+      : "",
   };
 
   const resolvedProtection = resolveConnectionProtectionConfig(safeConfig);

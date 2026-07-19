@@ -1121,6 +1121,7 @@ export namespace connection {
 	    timeout?: number;
 	    keepAliveEnabled?: boolean;
 	    keepAliveIntervalMinutes?: number;
+	    keepAliveSQL?: string;
 	    redisDB?: number;
 	    redisSentinelMaster?: string;
 	    redisSentinelUser?: string;
@@ -1174,6 +1175,7 @@ export namespace connection {
 	        this.timeout = source["timeout"];
 	        this.keepAliveEnabled = source["keepAliveEnabled"];
 	        this.keepAliveIntervalMinutes = source["keepAliveIntervalMinutes"];
+	        this.keepAliveSQL = source["keepAliveSQL"];
 	        this.redisDB = source["redisDB"];
 	        this.redisSentinelMaster = source["redisSentinelMaster"];
 	        this.redisSentinelUser = source["redisSentinelUser"];

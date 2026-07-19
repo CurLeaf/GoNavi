@@ -433,6 +433,7 @@ describe("ConnectionModal i18n", () => {
       expect(pageText).toContain("首选");
       expect(pageText).toContain("必需");
       expect(pageText).toContain("跳过验证");
+      expect(pageText).toContain("自定义探活 SQL");
     },
   );
 

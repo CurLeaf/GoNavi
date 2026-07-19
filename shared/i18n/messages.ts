@@ -649,9 +649,16 @@ export const messages: Record<SupportedLanguage, Record<MessageKey, string>> = {
       "仅在跳板机 token 或长连接会话需要定期续期时开启。",
     "connection.modal.network.keepAliveInterval.label": "探活间隔 (分钟)",
     "connection.modal.network.keepAliveInterval.help":
-      "后台会按这个间隔对已建立的缓存连接执行 Ping，默认 240 分钟。",
+      "后台会按这个间隔对已建立的缓存连接执行 Ping 或自定义探活 SQL，默认 240 分钟。",
     "connection.modal.network.keepAliveInterval.range":
       "探活间隔范围: 1-1440 分钟",
+    "connection.modal.network.keepAliveSQL.label": "自定义探活 SQL",
+    "connection.modal.network.keepAliveSQL.help":
+      "留空时使用驱动 Ping；仅允许一条 SELECT/WITH，请使用只返回少量数据的轻量查询和数据库只读账号。配置会随连接明文保存，请勿填写凭证。",
+    "connection.modal.network.keepAliveSQL.maxLength":
+      "自定义探活 SQL 不能超过 4096 个字符",
+    "connection.modal.network.keepAliveSQL.readOnly":
+      "自定义探活 SQL 仅允许一条 SELECT 或 WITH 语句",
     "connection.modal.appearance.title": "外观",
     "connection.modal.appearance.description": "自定义图标与颜色",
     "connection.modal.appearance.icon": "图标",
@@ -1549,9 +1556,16 @@ export const messages: Record<SupportedLanguage, Record<MessageKey, string>> = {
     "connection.modal.network.keepAliveInterval.label":
       "Keep-alive interval (minutes)",
     "connection.modal.network.keepAliveInterval.help":
-      "GoNavi pings established cached connections at this interval. Default is 240 minutes.",
+      "GoNavi runs Ping or the custom keep-alive SQL on established cached connections at this interval. Default is 240 minutes.",
     "connection.modal.network.keepAliveInterval.range":
       "Keep-alive interval must be between 1 and 1440 minutes.",
+    "connection.modal.network.keepAliveSQL.label": "Custom keep-alive SQL",
+    "connection.modal.network.keepAliveSQL.help":
+      "Leave blank to use the driver Ping. Only one SELECT/WITH statement is allowed; use a lightweight query that returns little data and a database account with read-only permissions. This value is stored in plain text with the connection; do not include credentials.",
+    "connection.modal.network.keepAliveSQL.maxLength":
+      "Custom keep-alive SQL cannot exceed 4096 characters.",
+    "connection.modal.network.keepAliveSQL.readOnly":
+      "Custom keep-alive SQL must be one SELECT or WITH statement.",
     "connection.modal.appearance.title": "Appearance",
     "connection.modal.appearance.description": "Custom icon and color",
     "connection.modal.appearance.icon": "Icon",

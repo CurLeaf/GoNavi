@@ -65,6 +65,8 @@ const CONNECTION_READ_ONLY_TYPES = new Set([
   "mongodb",
 ]);
 
+export const MAX_CONNECTION_KEEPALIVE_SQL_LENGTH = 4096;
+
 const SQL_READ_ONLY_KEYWORDS = new Set([
   "select",
   "with",
@@ -278,6 +280,167 @@ const isConnectionReadOnlyStatement = (
     return isReadOnlyMongoStatement(statement);
   }
   return isReadOnlySqlStatement(statement, dialect);
+};
+
+const KEEPALIVE_EXECUTABLE_COMMENT_DIALECTS = new Set([
+  "mysql",
+  "mariadb",
+  "oceanbase",
+  "diros",
+  "starrocks",
+]);
+
+const skipKeepAliveLineComment = (text: string, start: number): number => {
+  let index = start;
+  while (index < text.length && text[index] !== "\n" && text[index] !== "\r") {
+    index += 1;
+  }
+  return index;
+};
+
+const skipKeepAliveQuotedText = (
+  text: string,
+  start: number,
+  quote: string,
+): number => {
+  for (let index = start + 1; index < text.length; index += 1) {
+    if (text[index] === "\\" && index + 1 < text.length) {
+      index += 1;
+      continue;
+    }
+    if (text[index] !== quote) continue;
+    if (index + 1 < text.length && text[index + 1] === quote) {
+      index += 1;
+      continue;
+    }
+    return index + 1;
+  }
+  return text.length;
+};
+
+const hasExecutableKeepAliveComment = (
+  text: string,
+  dbType: string,
+): boolean => {
+  if (!KEEPALIVE_EXECUTABLE_COMMENT_DIALECTS.has(dbType)) return false;
+  for (let index = 0; index < text.length;) {
+    const remaining = text.slice(index);
+    if (
+      remaining.startsWith("/*!") ||
+      remaining.slice(0, 4).toLowerCase() === "/*m!"
+    ) {
+      return true;
+    }
+    const current = text[index];
+    if (current === "'" || current === '"' || current === "`") {
+      index = skipKeepAliveQuotedText(text, index, current);
+      continue;
+    }
+    if (current === "#") {
+      index = skipKeepAliveLineComment(text, index + 1);
+      continue;
+    }
+    if (remaining.startsWith("--") && isDashLineCommentStart(remaining, dbType)) {
+      index = skipKeepAliveLineComment(text, index + 2);
+      continue;
+    }
+    if (remaining.startsWith("/*")) {
+      const end = remaining.indexOf("*/", 2);
+      index = end >= 0 ? index + end + 2 : text.length;
+      continue;
+    }
+    index += 1;
+  }
+  return false;
+};
+
+const isKeepAliveWhitespace = (character: string): boolean =>
+  character === " " ||
+  character === "\t" ||
+  character === "\n" ||
+  character === "\r" ||
+  character === "\f" ||
+  character === "\v";
+
+const containsOnlyTrailingKeepAliveTrivia = (
+  text: string,
+  dbType: string,
+): boolean => {
+  for (let index = 0; index < text.length;) {
+    const remaining = text.slice(index);
+    if (isKeepAliveWhitespace(text[index])) {
+      index += 1;
+      continue;
+    }
+    if (remaining.startsWith("--") && isDashLineCommentStart(remaining, dbType)) {
+      index = skipKeepAliveLineComment(text, index + 2);
+      continue;
+    }
+    if (text[index] === "#" && supportsHashLineComment(dbType)) {
+      index = skipKeepAliveLineComment(text, index + 1);
+      continue;
+    }
+    if (remaining.startsWith("/*")) {
+      const end = remaining.indexOf("*/", 2);
+      if (end < 0) return false;
+      index += end + 2;
+      continue;
+    }
+    return false;
+  }
+  return true;
+};
+
+const hasSafeKeepAliveStatementDelimiter = (
+  text: string,
+  dbType: string,
+): boolean => {
+  const asciiCount = text.split(";").length - 1;
+  const fullWidthCount = text.split("；").length - 1;
+  if (asciiCount + fullWidthCount === 0) return true;
+  if (asciiCount + fullWidthCount !== 1) return false;
+  const delimiter = asciiCount === 1 ? ";" : "；";
+  const index = text.indexOf(delimiter);
+  return containsOnlyTrailingKeepAliveTrivia(
+    text.slice(index + delimiter.length),
+    dbType,
+  );
+};
+
+export const supportsConnectionKeepAliveSQL = (
+  config: ConnectionReadOnlyLike,
+): boolean => {
+  const type = resolveConnectionReadOnlyType(config);
+  return (
+    type !== "mongodb" &&
+    type !== "sqlite" &&
+    type !== "duckdb" &&
+    CONNECTION_READ_ONLY_TYPES.has(type)
+  );
+};
+
+export const isSingleReadOnlyConnectionQuery = (
+  config: ConnectionReadOnlyLike,
+  sql: string,
+): boolean => {
+  if (!supportsConnectionKeepAliveSQL(config)) return false;
+  const dialect = resolveConnectionReadOnlyType(config);
+  const text = String(sql || "");
+  if (
+    hasExecutableKeepAliveComment(text, dialect) ||
+    !hasSafeKeepAliveStatementDelimiter(text, dialect)
+  ) {
+    return false;
+  }
+  const statements = findSqlStatementRanges(text, dialect)
+    .map((range) => range.text.trim())
+    .filter(Boolean);
+  if (statements.length !== 1) return false;
+  const keyword = extractLeadingSqlKeyword(statements[0], dialect);
+  return (
+    (keyword === "select" || keyword === "with") &&
+    isConnectionReadOnlyStatement(config, statements[0])
+  );
 };
 
 export const supportsConnectionReadOnlyMode = (
