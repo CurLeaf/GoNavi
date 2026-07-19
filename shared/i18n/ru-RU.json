@@ -5439,6 +5439,7 @@
   "file.backend.error.table_data_truncate_failed_partial": "Не удалось выполнить TRUNCATE для {{table}}: {{detail}}. Предупреждение: для первых {{count}} таблиц уже выполнен TRUNCATE, их нельзя восстановить",
   "file.backend.error.table_data_truncate_unsupported": "Текущий тип базы данных {{type}} не поддерживает TRUNCATE для таблиц. Используйте очистку",
   "file.backend.error.target_directory_exists": "Целевой каталог уже существует",
+  "file.backend.error.target_file_overwrite_confirmation_required": "Целевой файл после добавления {{extension}} уже существует. Укажите полное имя файла в диалоге сохранения, чтобы подтвердить перезапись: {{path}}",
   "file.backend.error.target_sql_file_exists": "Целевой SQL-файл уже существует",
   "file.backend.error.task_not_found": "Задача не найдена",
   "file.backend.error.write_failed": "Ошибка записи: {{detail}}",

@@ -5439,6 +5439,7 @@
   "file.backend.error.table_data_truncate_failed_partial": "{{table}} の truncate に失敗しました: {{detail}}。警告: 先頭 {{count}} 件のテーブルはすでに truncate され、復元できません",
   "file.backend.error.table_data_truncate_unsupported": "現在のデータベース型 {{type}} はテーブルの TRUNCATE をサポートしていません。代わりにクリアを使用してください",
   "file.backend.error.target_directory_exists": "対象ディレクトリは既に存在します",
+  "file.backend.error.target_file_overwrite_confirmation_required": "{{extension}} を補完した保存先ファイルは既に存在します。上書きを確認するには、保存ダイアログで完全なファイル名を入力してください: {{path}}",
   "file.backend.error.target_sql_file_exists": "対象 SQL ファイルは既に存在します",
   "file.backend.error.task_not_found": "タスクが見つかりません",
   "file.backend.error.write_failed": "書き込みに失敗しました: {{detail}}",

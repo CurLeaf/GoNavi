@@ -51,6 +51,15 @@ const appLogTailReadWindowBytes int64 = 256 * 1024
 
 var mysqlCreateViewPrefixPattern = regexp.MustCompile(`(?is)^\s*create\s+(?:algorithm\s*=\s*\w+\s+)?(?:definer\s*=\s*(?:` + "`[^`]+`" + `|\S+)\s*@\s*(?:` + "`[^`]+`" + `|\S+)\s+)?(?:sql\s+security\s+(?:definer|invoker)\s+)?view\s+`)
 
+type saveFileDialogFunc func(context.Context, runtime.SaveDialogOptions) (string, error)
+
+func (a *App) showSaveFileDialog(options runtime.SaveDialogOptions) (string, error) {
+	if a.saveFileDialog != nil {
+		return a.saveFileDialog(a.ctx, options)
+	}
+	return runtime.SaveFileDialog(a.ctx, options)
+}
+
 type sqlFileExecutionProgress struct {
 	Status     string
 	Executed   int
@@ -560,7 +569,7 @@ func createSQLFileInDirectoryWithText(directoryPath string, rawName string, text
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	target := filepath.Join(directory, name)
-	if _, err := os.Stat(target); err == nil {
+	if _, err := os.Lstat(target); err == nil {
 		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.sql_file_exists", nil)}
 	} else if !os.IsNotExist(err) {
 		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.read_file_info_failed", map[string]any{"detail": err.Error()})}
@@ -866,13 +875,22 @@ func normalizeSQLExportDefaultFilename(rawName string) string {
 	return name
 }
 
-func normalizeSQLExportTargetPath(filePath string) string {
+func exportFormatExtension(format string) string {
+	switch normalized := strings.ToLower(strings.TrimSpace(format)); normalized {
+	case "csv", "xlsx", "json", "md", "html", "sql":
+		return "." + normalized
+	default:
+		return ""
+	}
+}
+
+func normalizeExportTargetPath(filePath string, format string) string {
 	target := strings.TrimSpace(filePath)
 	if target == "" {
 		return ""
 	}
-	if !strings.EqualFold(filepath.Ext(target), ".sql") {
-		target += ".sql"
+	if extension := exportFormatExtension(format); extension != "" && !strings.EqualFold(filepath.Ext(target), extension) {
+		target += extension
 	}
 	if abs, err := filepath.Abs(target); err == nil {
 		target = abs
@@ -880,12 +898,81 @@ func normalizeSQLExportTargetPath(filePath string) string {
 	return target
 }
 
+type exportTargetOverwriteConfirmationError struct {
+	targetPath string
+	extension  string
+}
+
+func (e *exportTargetOverwriteConfirmationError) Error() string {
+	return fmt.Sprintf("target file already exists after adding %s: %s", e.extension, e.targetPath)
+}
+
+func resolveExportTargetPath(filePath string, format string) (string, error) {
+	selected := strings.TrimSpace(filePath)
+	target := normalizeExportTargetPath(selected, format)
+	if selected == "" || target == "" {
+		return target, nil
+	}
+	if abs, err := filepath.Abs(selected); err == nil {
+		selected = abs
+	}
+	if filepath.Clean(selected) == filepath.Clean(target) {
+		return target, nil
+	}
+	if _, err := os.Stat(target); err == nil {
+		return "", &exportTargetOverwriteConfirmationError{
+			targetPath: target,
+			extension:  exportFormatExtension(format),
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	return target, nil
+}
+
+func exportTargetPathErrorMessage(err error, text fileBackendTextFunc) string {
+	var overwriteErr *exportTargetOverwriteConfirmationError
+	if errors.As(err, &overwriteErr) {
+		return fileBackendText(text, "file.backend.error.target_file_overwrite_confirmation_required", map[string]any{
+			"extension": overwriteErr.extension,
+			"path":      overwriteErr.targetPath,
+		})
+	}
+	return fileBackendText(text, "file.backend.error.read_file_info_failed", map[string]any{"detail": err.Error()})
+}
+
+func (a *App) resolveExportDialogTargetPath(filePath string, format string) (string, error) {
+	target, err := resolveExportTargetPath(filePath, format)
+	if err != nil {
+		return "", errors.New(exportTargetPathErrorMessage(err, a.appText))
+	}
+	return target, nil
+}
+
+func exportFileDialogFilters(format string) []runtime.FileFilter {
+	extension := exportFormatExtension(format)
+	if extension == "" {
+		return nil
+	}
+	return []runtime.FileFilter{{
+		DisplayName: strings.ToUpper(strings.TrimPrefix(extension, ".")),
+		Pattern:     "*" + extension,
+	}}
+}
+
+func normalizeSQLExportTargetPath(filePath string) string {
+	return normalizeExportTargetPath(filePath, "sql")
+}
+
 func writeExportedSQLFileByPath(filePath string, content string) connection.QueryResult {
 	return writeExportedSQLFileByPathWithText(filePath, content, nil)
 }
 
 func writeExportedSQLFileByPathWithText(filePath string, content string, text fileBackendTextFunc) connection.QueryResult {
-	target := normalizeSQLExportTargetPath(filePath)
+	target, targetErr := resolveExportTargetPath(filePath, "sql")
+	if targetErr != nil {
+		return connection.QueryResult{Success: false, Message: exportTargetPathErrorMessage(targetErr, text)}
+	}
 	if target == "" {
 		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.file_path_required", nil)}
 	}
@@ -1202,7 +1289,7 @@ func (a *App) RenameSQLDirectory(directoryPath string, name string) connection.Q
 }
 
 func (a *App) ExportSQLFile(defaultName string, content string) connection.QueryResult {
-	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	filename, err := a.showSaveFileDialog(runtime.SaveDialogOptions{
 		Title:           a.appText("query_editor.action.export_sql_file", nil),
 		DefaultFilename: normalizeSQLExportDefaultFilename(defaultName),
 		Filters: []runtime.FileFilter{
@@ -1879,7 +1966,7 @@ func (a *App) ImportConfigFile() connection.QueryResult {
 }
 
 func (a *App) ExportConnectionsPackage(options ConnectionExportOptions) connection.QueryResult {
-	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	filename, err := a.showSaveFileDialog(runtime.SaveDialogOptions{
 		Title:           a.appText("file.backend.dialog.export_connections", nil),
 		DefaultFilename: "connections" + connectionPackageExtension,
 		Filters: []runtime.FileFilter{
@@ -2654,13 +2741,18 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 	}
-	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	filename, err := a.showSaveFileDialog(runtime.SaveDialogOptions{
 		Title:           a.appText("file.backend.dialog.export_table", map[string]any{"table": tableName}),
 		DefaultFilename: fmt.Sprintf("%s.%s", tableName, format),
+		Filters:         exportFileDialogFilters(format),
 	})
 
-	if err != nil || filename == "" {
+	if err != nil || strings.TrimSpace(filename) == "" {
 		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+	filename, err = a.resolveExportDialogTargetPath(filename, format)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	reporter := newExportProgressReporter(a, options, tableName, filename)
@@ -2776,12 +2868,17 @@ func (a *App) ExportTablesSQLWithOptions(
 	options.TotalRowsHint = int64(len(objects))
 	options.TotalRowsKnown = true
 
-	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	filename, err := a.showSaveFileDialog(runtime.SaveDialogOptions{
 		Title:           a.appText("file.backend.dialog.export_tables_sql", nil),
 		DefaultFilename: buildTablesExportDefaultFilename(dbName, objects, includeSchema, includeData),
+		Filters:         exportFileDialogFilters("sql"),
 	})
-	if err != nil || filename == "" {
+	if err != nil || strings.TrimSpace(filename) == "" {
 		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+	filename, err = a.resolveExportDialogTargetPath(filename, "sql")
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	reporter := newExportProgressReporter(a, options, resolveBatchObjectsTargetNameWithText(dbName, objects, a.appText), filename)
@@ -2797,12 +2894,17 @@ func (a *App) exportTablesSQL(config connection.ConnectionConfig, dbName string,
 	}
 	objects := normalizeExportNameList(tableNames)
 
-	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	filename, err := a.showSaveFileDialog(runtime.SaveDialogOptions{
 		Title:           a.appText("file.backend.dialog.export_tables_sql", nil),
 		DefaultFilename: buildTablesExportDefaultFilename(dbName, objects, includeSchema, includeData),
+		Filters:         exportFileDialogFilters("sql"),
 	})
-	if err != nil || filename == "" {
+	if err != nil || strings.TrimSpace(filename) == "" {
 		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+	filename, err = a.resolveExportDialogTargetPath(filename, "sql")
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	return a.exportTablesSQLToFile(
@@ -2934,12 +3036,17 @@ func (a *App) ExportDatabaseSQLWithOptions(
 	}
 	options = normalizeExportFileOptions("sql", options)
 
-	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	filename, err := a.showSaveFileDialog(runtime.SaveDialogOptions{
 		Title:           a.appText("file.backend.dialog.export_database_sql", map[string]any{"database": safeDbName}),
 		DefaultFilename: buildDatabaseExportDefaultFilename(safeDbName, includeData),
+		Filters:         exportFileDialogFilters("sql"),
 	})
-	if err != nil || filename == "" {
+	if err != nil || strings.TrimSpace(filename) == "" {
 		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+	filename, err = a.resolveExportDialogTargetPath(filename, "sql")
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	return a.exportDatabaseSQLToFile(config, safeDbName, includeData, filename, options)
@@ -3103,12 +3210,17 @@ func (a *App) ExportSchemaSQLWithOptions(
 		suffix = "backup"
 	}
 
-	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	filename, err := a.showSaveFileDialog(runtime.SaveDialogOptions{
 		Title:           a.appText("file.backend.dialog.export_database_sql", map[string]any{"database": safeDbName + "." + safeSchemaName}),
 		DefaultFilename: fmt.Sprintf("%s_%s_%s.sql", safeDbName, safeSchemaName, suffix),
+		Filters:         exportFileDialogFilters("sql"),
 	})
-	if err != nil || filename == "" {
+	if err != nil || strings.TrimSpace(filename) == "" {
 		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+	filename, err = a.resolveExportDialogTargetPath(filename, "sql")
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	runConfig := normalizeRunConfig(config, dbName)
@@ -4285,14 +4397,20 @@ func (a *App) ExportDataWithOptions(data []map[string]interface{}, columns []str
 	}
 	format := options.Format
 	logger.Infof("ExportData 开始：rows=%d cols=%d format=%s defaultName=%s", len(data), len(columns), strings.ToLower(strings.TrimSpace(format)), strings.TrimSpace(defaultName))
-	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	filename, err := a.showSaveFileDialog(runtime.SaveDialogOptions{
 		Title:           a.appText("file.backend.dialog.export_data", nil),
 		DefaultFilename: fmt.Sprintf("%s.%s", defaultName, strings.ToLower(format)),
+		Filters:         exportFileDialogFilters(format),
 	})
 
-	if err != nil || filename == "" {
+	if err != nil || strings.TrimSpace(filename) == "" {
 		logger.Infof("ExportData 已取消或未选择文件：err=%v", err)
 		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+	filename, err = a.resolveExportDialogTargetPath(filename, format)
+	if err != nil {
+		logger.Warnf("ExportData 目标文件无效：file=%s err=%v", filename, err)
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	logger.Infof("ExportData 选定文件：%s", filename)
 	reporter := newExportProgressReporter(a, options, defaultName, filename)
@@ -4345,13 +4463,19 @@ func (a *App) ExportQueryWithOptions(config connection.ConnectionConfig, dbName 
 		}
 	}
 
-	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	filename, err := a.showSaveFileDialog(runtime.SaveDialogOptions{
 		Title:           a.appText("file.backend.dialog.export_query_result", nil),
 		DefaultFilename: fmt.Sprintf("%s.%s", defaultName, strings.ToLower(format)),
+		Filters:         exportFileDialogFilters(format),
 	})
-	if err != nil || filename == "" {
+	if err != nil || strings.TrimSpace(filename) == "" {
 		logger.Infof("ExportQuery 已取消或未选择文件：err=%v", err)
 		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+	filename, err = a.resolveExportDialogTargetPath(filename, format)
+	if err != nil {
+		logger.Warnf("ExportQuery 目标文件无效：file=%s err=%v", filename, err)
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	logger.Infof("ExportQuery 开始：type=%s db=%s format=%s file=%s sql=%q", strings.TrimSpace(config.Type), strings.TrimSpace(dbName), strings.ToLower(strings.TrimSpace(format)), filename, sqlSnippet(query))
 	reporter := newExportProgressReporter(a, options, defaultName, filename)

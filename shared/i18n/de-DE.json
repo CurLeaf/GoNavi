@@ -5439,6 +5439,7 @@
   "file.backend.error.table_data_truncate_failed_partial": "TRUNCATE für {{table}} fehlgeschlagen: {{detail}}. Warnung: Für die ersten {{count}} Tabellen wurde bereits TRUNCATE ausgeführt und sie können nicht wiederhergestellt werden",
   "file.backend.error.table_data_truncate_unsupported": "Der aktuelle Datenbanktyp {{type}} unterstützt TRUNCATE für Tabellen nicht. Verwenden Sie stattdessen Leeren",
   "file.backend.error.target_directory_exists": "Zielverzeichnis ist bereits vorhanden",
+  "file.backend.error.target_file_overwrite_confirmation_required": "Die Zieldatei ist nach dem Ergänzen von {{extension}} bereits vorhanden. Geben Sie den vollständigen Dateinamen im Speicherdialog ein, um das Überschreiben zu bestätigen: {{path}}",
   "file.backend.error.target_sql_file_exists": "Ziel-SQL-Datei ist bereits vorhanden",
   "file.backend.error.task_not_found": "Aufgabe nicht gefunden",
   "file.backend.error.write_failed": "Schreiben fehlgeschlagen: {{detail}}",

@@ -1016,17 +1016,20 @@ func (a *App) ExportSQLAuditFile(filter sqlaudit.Filter, format string) connecti
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	filters := []runtime.FileFilter{{DisplayName: strings.ToUpper(normalizedFormat), Pattern: "*." + normalizedFormat}}
-	fileName, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	fileName, err := a.showSaveFileDialog(runtime.SaveDialogOptions{
 		Title:           "Export SQL audit",
 		DefaultFilename: fmt.Sprintf("gonavi-sql-audit-%s.%s", time.Now().Format("20060102-150405"), normalizedFormat),
-		Filters:         filters,
+		Filters:         exportFileDialogFilters(normalizedFormat),
 	})
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if strings.TrimSpace(fileName) == "" {
 		return connection.QueryResult{Success: false, Message: "cancelled"}
+	}
+	fileName, err = a.resolveExportDialogTargetPath(fileName, normalizedFormat)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if err := a.validateSQLAuditExportTarget(fileName); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}

@@ -5439,6 +5439,7 @@
   "file.backend.error.table_data_truncate_failed_partial": "截斷 {{table}} 失敗: {{detail}}（注意：前 {{count}} 張表已截斷且無法復原）",
   "file.backend.error.table_data_truncate_unsupported": "目前資料庫型別 {{type}} 不支援截斷表，請改用清空表",
   "file.backend.error.target_directory_exists": "目標目錄已存在",
+  "file.backend.error.target_file_overwrite_confirmation_required": "補全 {{extension}} 後的目標檔案已存在。請在儲存對話框中輸入完整檔名並確認覆寫：{{path}}",
   "file.backend.error.target_sql_file_exists": "目標 SQL 檔案已存在",
   "file.backend.error.task_not_found": "未找到該任務",
   "file.backend.error.write_failed": "寫入失敗: {{detail}}",

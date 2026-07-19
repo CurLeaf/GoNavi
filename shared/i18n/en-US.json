@@ -5439,6 +5439,7 @@
   "file.backend.error.table_data_truncate_failed_partial": "Failed to truncate {{table}}: {{detail}}. Warning: the first {{count}} tables have been truncated and cannot be restored",
   "file.backend.error.table_data_truncate_unsupported": "Current database type {{type}} does not support truncating tables. Use clearing instead",
   "file.backend.error.target_directory_exists": "Target directory already exists",
+  "file.backend.error.target_file_overwrite_confirmation_required": "The target file already exists after adding {{extension}}. Enter the complete filename in the save dialog to confirm overwrite: {{path}}",
   "file.backend.error.target_sql_file_exists": "Target SQL file already exists",
   "file.backend.error.task_not_found": "Task not found",
   "file.backend.error.write_failed": "Write failed: {{detail}}",

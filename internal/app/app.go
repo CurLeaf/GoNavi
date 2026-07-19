@@ -130,6 +130,7 @@ type App struct {
 	keepAliveCancel               context.CancelFunc
 	keepAliveDone                 chan struct{}
 	resultDiffManager             *resultdiff.Manager
+	saveFileDialog                saveFileDialogFunc
 }
 
 // NewApp creates a new App application struct
