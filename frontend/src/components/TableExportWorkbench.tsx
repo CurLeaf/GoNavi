@@ -700,6 +700,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
           format,
           columns: selectedColumns,
           xlsxMaxRowsPerSheet,
+          insertSQLTargetTable: format === 'sql' ? objectName : undefined,
           jobId,
           totalRowsHint: singleTotalRowsKnown ? singleScopeRowCount : 0,
           totalRowsKnown: singleTotalRowsKnown,

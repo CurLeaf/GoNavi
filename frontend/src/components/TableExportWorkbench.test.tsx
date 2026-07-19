@@ -1,16 +1,20 @@
 import React from 'react';
 import { readFileSync } from 'node:fs';
+import { Button, Select } from 'antd';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import TableExportWorkbench, {
   buildTableExportHistoryEntry,
   resolveTableExportColumnNames,
 } from './TableExportWorkbench';
+import { DBGetColumns, ExportQueryWithOptions, ExportTableWithOptions } from '../../wailsjs/go/app/App';
 import { setCurrentLanguage } from '../i18n';
 import type { ExportProgressState } from './useExportProgressRunner';
 
 const mockUpsertTableExportHistory = vi.fn();
+const mockRunExportWithProgress = vi.fn();
 const createMockStoreState = () => ({
   theme: 'light',
   connections: [
@@ -55,11 +59,42 @@ const createProgressRunnerState = (
 let mockStoreState = createMockStoreState();
 let mockProgressRunnerState: ExportProgressState = createMockProgressRunnerState();
 
+vi.mock('antd', async () => {
+  const { createElement } = await import('react');
+  const component = (tag: string) => ({ children, ...props }: any) => createElement(tag, props, children);
+  return {
+    Alert: component('mock-alert'),
+    Button: component('mock-button'),
+    Checkbox: component('mock-checkbox'),
+    Empty: component('mock-empty'),
+    InputNumber: component('mock-input-number'),
+    Progress: component('mock-progress'),
+    Select: component('mock-select'),
+    Tooltip: component('mock-tooltip'),
+    Typography: {
+      Paragraph: component('mock-paragraph'),
+      Text: component('mock-text'),
+      Title: component('mock-title'),
+    },
+  };
+});
+
+vi.mock('@ant-design/icons', async () => {
+  const { createElement } = await import('react');
+  const icon = () => createElement('mock-icon');
+  return {
+    ClockCircleOutlined: icon,
+    ExportOutlined: icon,
+    ReloadOutlined: icon,
+  };
+});
+
 vi.mock('../store', () => ({
   useStore: (selector: (state: any) => any) => selector(mockStoreState),
 }));
 
 vi.mock('../../wailsjs/go/app/App', () => ({
+  DBGetColumns: vi.fn(),
   DBGetDatabases: vi.fn(),
   DBGetTables: vi.fn(),
   ExportDatabasesSQLWithOptions: vi.fn(),
@@ -72,7 +107,7 @@ vi.mock('./useExportProgressRunner', () => ({
   useExportProgressRunner: () => ({
     state: mockProgressRunnerState,
     reset: vi.fn(),
-    runExportWithProgress: vi.fn(),
+    runExportWithProgress: mockRunExportWithProgress,
     isRunning: ['start', 'running', 'finalizing'].includes(mockProgressRunnerState.status),
   }),
 }));
@@ -81,6 +116,10 @@ describe('TableExportWorkbench', () => {
   beforeEach(() => {
     setCurrentLanguage('zh-CN');
     mockUpsertTableExportHistory.mockReset();
+    mockRunExportWithProgress.mockReset();
+    vi.mocked(DBGetColumns).mockReset();
+    vi.mocked(ExportQueryWithOptions).mockReset();
+    vi.mocked(ExportTableWithOptions).mockReset();
     mockStoreState = createMockStoreState();
     mockProgressRunnerState = createMockProgressRunnerState();
   });
@@ -305,6 +344,106 @@ describe('TableExportWorkbench', () => {
     expect(source).toContain('selectedColumns.length > 0');
     expect(source.match(/ExportQueryWithOptions\(/g)).toHaveLength(2);
     expect(source).toContain('ExportTableWithOptions(');
+  });
+
+  it('passes the MariaDB table as the INSERT target for current-page SQL export', async () => {
+    mockStoreState = {
+      ...createMockStoreState(),
+      connections: [
+        {
+          ...createMockStoreState().connections[0],
+          config: {
+            ...createMockStoreState().connections[0].config,
+            type: 'mariadb',
+            database: 'app',
+          },
+        },
+      ],
+    };
+    mockProgressRunnerState = createProgressRunnerState({
+      open: false,
+      jobId: '',
+      title: '',
+      targetName: '',
+      format: '',
+      startedAt: 0,
+      finishedAt: 0,
+      status: 'idle',
+      stage: '',
+      current: 0,
+      total: 0,
+      totalRowsKnown: false,
+      filePath: '',
+      message: '',
+    });
+    vi.mocked(DBGetColumns).mockResolvedValue({
+      success: true,
+      data: [{ name: 'id' }, { name: 'display_name' }],
+    } as any);
+    vi.mocked(ExportQueryWithOptions).mockResolvedValue({ success: true } as any);
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <TableExportWorkbench
+          tab={{
+            id: 'table-export-conn-1-app-user',
+            title: '导出 user',
+            type: 'table-export',
+            connectionId: 'conn-1',
+            dbName: 'app',
+            tableName: 'user',
+            objectType: 'table',
+            tableExportScopeOptions: [{ value: 'page', label: '当前页（3 条）' }],
+            tableExportInitialScope: 'page',
+            tableExportQueryByScope: {
+              page: 'SELECT id, display_name FROM `user` LIMIT 3',
+            },
+            tableExportRowCountByScope: { page: 3 },
+          }}
+        />,
+      );
+    });
+
+    const formatSelect = renderer.root.findAllByType(Select).find((node) => (
+      Array.isArray(node.props.options)
+      && node.props.options.some((option: { value?: string }) => option.value === 'sql')
+      && node.props.mode !== 'multiple'
+    ));
+    expect(formatSelect).toBeDefined();
+    await act(async () => {
+      formatSelect?.props.onChange('sql');
+    });
+
+    const startButton = renderer.root.findAllByType(Button).find((node) => (
+      node.props.type === 'primary' && node.props.size === 'large'
+    ));
+    expect(startButton?.props.disabled).toBe(false);
+    await act(async () => {
+      startButton?.props.onClick();
+    });
+
+    expect(mockRunExportWithProgress).toHaveBeenCalledTimes(1);
+    const run = mockRunExportWithProgress.mock.calls[0][0].run as (jobId: string) => Promise<unknown>;
+    await run('job-mariadb-current-page');
+
+    expect(ExportQueryWithOptions).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'mariadb' }),
+      'app',
+      'SELECT id, display_name FROM `user` LIMIT 3',
+      'user',
+      expect.objectContaining({
+        format: 'sql',
+        columns: ['id', 'display_name'],
+        insertSQLTargetTable: 'user',
+        jobId: 'job-mariadb-current-page',
+        totalRowsHint: 3,
+        totalRowsKnown: true,
+      }),
+    );
+    expect(ExportTableWithOptions).not.toHaveBeenCalled();
+
+    renderer.unmount();
   });
 
   it('offers DROP IF EXISTS only for SQL exports that include schema', () => {
