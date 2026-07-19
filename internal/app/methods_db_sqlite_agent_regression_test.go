@@ -99,7 +99,7 @@ func (s *fakeUnsupportedMultiResultSession) QueryMultiContextWithMessages(contex
 	return nil, nil, nil
 }
 
-func installFakeOptionalSQLiteDatabase(t *testing.T, fakeDB db.Database) {
+func installFakeOptionalDriverDatabase(t *testing.T, fakeDB db.Database) {
 	t.Helper()
 	originalNewDatabaseFunc := newDatabaseFunc
 	originalDriverRuntimeSupportStatusFunc := driverRuntimeSupportStatusFunc
@@ -126,7 +126,7 @@ func TestDBQueryMultiSQLiteAgentStyleQueryReturnsRowsAndAuditCount(t *testing.T)
 		queryErr: map[string]error{},
 	}
 	fakeDB := &fakeUnsupportedMultiResultDB{fakeBatchWriteDB: baseDB}
-	installFakeOptionalSQLiteDatabase(t, fakeDB)
+	installFakeOptionalDriverDatabase(t, fakeDB)
 
 	app := newSQLAuditTestApp(t)
 	config := connection.ConnectionConfig{Type: "sqlite", Host: "/tmp/orders.sqlite"}
