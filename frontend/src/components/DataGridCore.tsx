@@ -1322,6 +1322,10 @@ interface DataGridProps {
     resultSql?: string;
     resultExportAllSql?: string;
     dbName?: string;
+    /** DDL 查询使用的数据库/命名空间；查询结果页不复用列元数据目标。 */
+    ddlDbName?: string;
+    /** DDL 查询使用的表名；查询结果页仅在该目标明确时显示 DDL 入口。 */
+    ddlTableName?: string;
     connectionId?: string;
     pkColumns?: string[];
     editLocator?: EditRowLocator;

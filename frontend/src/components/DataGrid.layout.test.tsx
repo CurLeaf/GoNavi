@@ -2322,7 +2322,7 @@ describe('DataGrid layout', () => {
     });
   });
 
-  it('renders a DDL action for table data pages only', () => {
+  it('renders a DDL action whenever a physical table context is available', () => {
     const tableMarkup = renderDataGridWithI18n(
       <DataGrid
         data={[
@@ -2380,14 +2380,44 @@ describe('DataGrid layout', () => {
         loading={false}
         tableName="users"
         dbName="main"
+        ddlDbName="main"
+        ddlTableName="users"
         connectionId="conn-1"
         exportScope="queryResult"
       />,
     );
 
-    expect(queryMarkup).not.toContain('data-grid-ddl-action="true"');
+    expect(queryMarkup).toContain('data-grid-ddl-action="true"');
+    expect(queryMarkup).toContain('查看 DDL');
     expect(queryMarkup).toContain('字段信息');
     expect(queryMarkup).not.toContain(zhObjectDesignLabel);
+
+    const ambiguousQueryMarkup = renderDataGridWithI18n(
+      <DataGrid
+        data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+        columnNames={['id']}
+        loading={false}
+        tableName="users"
+        dbName="main"
+        connectionId="conn-1"
+        exportScope="queryResult"
+      />,
+    );
+
+    expect(ambiguousQueryMarkup).not.toContain('data-grid-ddl-action="true"');
+
+    const derivedQueryMarkup = renderDataGridWithI18n(
+      <DataGrid
+        data={[{ __gonavi_row_key__: 'row-1', total: 2 }]}
+        columnNames={['total']}
+        loading={false}
+        dbName="main"
+        connectionId="conn-1"
+        exportScope="queryResult"
+      />,
+    );
+
+    expect(derivedQueryMarkup).not.toContain('data-grid-ddl-action="true"');
   });
 
   it('keeps row copy and paste as context menu actions instead of toolbar buttons', () => {

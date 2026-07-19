@@ -297,6 +297,8 @@ const FloatingQueryResultWindows: React.FC = () => {
                   readOnly={windowState.result.readOnly !== false}
                   connectionId={windowState.connectionId}
                   dbName={windowState.result.metadataDbName || windowState.dbName || ''}
+                  ddlDbName={windowState.result.ddlDbName}
+                  ddlTableName={windowState.result.ddlTableName}
                   resultSql={windowState.result.exportSql || windowState.result.sql}
                   exportScope="queryResult"
                 />

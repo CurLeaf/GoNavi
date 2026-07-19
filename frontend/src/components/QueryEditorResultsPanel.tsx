@@ -41,6 +41,9 @@ export type QueryEditorResultSet = {
     metadataDbName?: string;
     /** 列元数据查询用表名（PG 等可能为 schema.table） */
     metadataTableName?: string;
+    /** DDL 查询目标，与列元数据目标独立，避免多段限定名被误解析。 */
+    ddlDbName?: string;
+    ddlTableName?: string;
     pkColumns: string[];
     editLocator?: EditRowLocator;
     readOnly: boolean;
@@ -506,6 +509,8 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                         resultSql={rs.exportSql || rs.sql}
                         resultExportAllSql={rs.page?.exportAllSql}
                         dbName={rs.metadataDbName || currentDb}
+                        ddlDbName={rs.ddlDbName}
+                        ddlTableName={rs.ddlTableName}
                         connectionId={currentConnectionId}
                         pkColumns={rs.pkColumns}
                         editLocator={rs.editLocator}

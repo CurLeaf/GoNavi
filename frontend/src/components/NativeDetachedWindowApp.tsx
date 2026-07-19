@@ -202,6 +202,8 @@ const NativeDetachedQueryResult: React.FC<{
       readOnly={result.readOnly !== false}
       connectionId={windowState.connectionId}
       dbName={result.metadataDbName || windowState.dbName || ''}
+      ddlDbName={result.ddlDbName}
+      ddlTableName={result.ddlTableName}
       resultSql={result.exportSql || result.sql}
       exportScope="queryResult"
       showRowNumberColumn={result.showRowNumberColumn}

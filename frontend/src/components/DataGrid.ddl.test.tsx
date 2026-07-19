@@ -947,6 +947,48 @@ describe('DataGrid DDL interactions', () => {
     vi.unstubAllGlobals();
   });
 
+  it.each(['legacy', 'v2'] as const)(
+    'opens the referenced table DDL from a %s query result',
+    async (uiVersion) => {
+      storeState.appearance.uiVersion = uiVersion;
+      backendApp.DBShowCreateTable.mockResolvedValueOnce({
+        success: true,
+        data: 'CREATE TABLE users (`id` bigint)',
+      });
+
+      let renderer: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(
+          <DataGrid
+            data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+            columnNames={['id']}
+            loading={false}
+            tableName="users"
+            dbName="main"
+            ddlDbName="main"
+            ddlTableName="users"
+            connectionId="conn-1"
+            exportScope="queryResult"
+          />,
+        );
+      });
+      await waitForEffects();
+
+      await act(async () => {
+        findButton(renderer!, '查看 DDL').props.onClick();
+      });
+      await waitForEffects();
+
+      expect(backendApp.DBShowCreateTable).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'mysql' }),
+        'main',
+        'users',
+      );
+      expect(textContent(renderer!.root)).toContain('CREATE TABLE users');
+      expect(textContent(renderer!.root)).not.toContain('对象设计');
+    },
+  );
+
   it('ignores stale DDL responses after the table context changes', async () => {
     let resolveFirstRequest: (value: any) => void = () => {};
     backendApp.DBShowCreateTable.mockReturnValueOnce(new Promise((resolve) => {

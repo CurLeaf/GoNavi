@@ -294,7 +294,7 @@ export {
 const EXTERNAL_HORIZONTAL_SCROLL_IDLE_SETTLE_MS = 80;
 
 const DataGrid: React.FC<DataGridProps> = ({
-    data, columnNames, loading, tableName, columnPinScope, objectType = 'table', exportScope = 'table', dbName, connectionId, pkColumns = [], editLocator, readOnly = false,
+    data, columnNames, loading, tableName, columnPinScope, objectType = 'table', exportScope = 'table', dbName, ddlDbName, ddlTableName, connectionId, pkColumns = [], editLocator, readOnly = false,
     resultSql,
     resultExportAllSql,
     onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions, quickWhereCondition,
@@ -596,7 +596,9 @@ const DataGrid: React.FC<DataGridProps> = ({
   const isQueryResultExport = exportScope === 'queryResult';
   const canImport = exportScope === 'table' && !!tableName && !importRestricted;
   const canExport = !!connectionId && (isQueryResultExport || !!tableName);
-  const canViewDdl = exportScope === 'table' && !!connectionId && !!tableName;
+  const resolvedDdlDbName = isQueryResultExport ? ddlDbName : (ddlDbName ?? dbName);
+  const resolvedDdlTableName = isQueryResultExport ? ddlTableName : (ddlTableName ?? tableName);
+  const canViewDdl = !!connectionId && !!resolvedDdlTableName;
   const canOpenObjectDesigner = exportScope === 'table' && objectType === 'table' && !!connectionId && !!tableName;
   const filteredExportSql = useMemo(() => String(exportSqlWithFilter || '').trim(), [exportSqlWithFilter]);
   const hasFilteredExportSql = exportScope === 'table' && filteredExportSql.length > 0;
@@ -1547,9 +1549,9 @@ const DataGrid: React.FC<DataGridProps> = ({
   } = useDataGridDdlView({
       canViewDdl,
       currentConnConfig,
-      dbName,
+      dbName: resolvedDdlDbName,
       dbType,
-      tableName,
+      tableName: resolvedDdlTableName,
       isV2Ui,
       isActive,
       cellEditMode,
@@ -2117,8 +2119,8 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [dataChangeOutputColumnNames, deletedRowKeys, mergedDisplayData, onDataChange, rowKeyStr]);
 
   const dataSourceContextKey = useMemo(
-      () => `${connectionId || ''}\u0001${dbName || ''}\u0001${tableName || ''}`,
-      [connectionId, dbName, tableName],
+      () => `${connectionId || ''}\u0001${dbName || ''}\u0001${tableName || ''}\u0001${resolvedDdlDbName || ''}\u0001${resolvedDdlTableName || ''}`,
+      [connectionId, dbName, resolvedDdlDbName, resolvedDdlTableName, tableName],
   );
   const previousDataSourceContextKeyRef = useRef<string | null>(null);
 
@@ -2142,7 +2144,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           && viewMode === 'ddl'
           && canViewDdl
           && !!currentConnConfig
-          && !!tableName;
+          && !!resolvedDdlTableName;
       if (!shouldKeepOpenV2DdlView && previousContextKey !== null) {
           resetDdlViewState();
       }
@@ -2158,7 +2160,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       dataSourceContextKey,
       isV2Ui,
       resetDdlViewState,
-      tableName,
+      resolvedDdlTableName,
       viewMode,
   ]); // Reset on context change
 

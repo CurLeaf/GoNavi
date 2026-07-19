@@ -24,6 +24,8 @@ export type DetachedQueryResultSnapshot = {
   /** 列类型/注释元数据所属库（跨库 SELECT 时可能与窗口 dbName 不同） */
   metadataDbName?: string;
   metadataTableName?: string;
+  ddlDbName?: string;
+  ddlTableName?: string;
   pkColumns: string[];
   editLocator?: {
     strategy?: string;
