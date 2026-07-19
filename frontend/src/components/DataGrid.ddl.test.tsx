@@ -1234,6 +1234,7 @@ describe('DataGrid DDL interactions', () => {
     expect(renderer!.root.findByProps({ 'data-v2-column-context-menu': 'true' })).toBeTruthy();
     expect(textContent(renderer!.root)).toContain(t('sidebar.v2_table_menu.copy_section'));
     expect(textContent(renderer!.root)).toContain(t('data_grid.context_menu.copy_field_name'));
+    expect(textContent(renderer!.root)).toContain(t('data_grid.context_menu.copy_column_comment'));
     expect(textContent(renderer!.root)).toContain(t('data_grid.context_menu.copy_column_data'));
     expect(textContent(renderer!.root)).toContain(t('data_grid.context_menu.sort_ascending'));
     expect(textContent(renderer!.root)).toContain(t('data_grid.context_menu.hide_column'));
@@ -1241,6 +1242,15 @@ describe('DataGrid DDL interactions', () => {
     expect(textContent(renderer!.root)).toContain(t('data_grid.context_menu.hide_column_comment'));
     expect(textContent(renderer!.root)).toContain('bigint');
     expect(textContent(renderer!.root)).toContain('主键 ID');
+
+    await act(async () => {
+      findButton(renderer!, t('data_grid.context_menu.copy_column_comment')).props.onClick({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('主键 ID');
     renderer!.unmount();
   });
 
@@ -1509,6 +1519,7 @@ describe('DataGrid DDL interactions', () => {
     expect(content).toContain(t('data_grid.context_menu.column_unnamed_field'));
     expect(content).toContain(t('data_grid.context_menu.column_unknown_type'));
     expect(content).toContain(t('data_grid.context_menu.column_no_comment'));
+    expect(content).not.toContain(t('data_grid.context_menu.copy_column_comment'));
     expect(content).toContain(t('data_grid.context_menu.show_column_type'));
     expect(content).toContain(t('data_grid.context_menu.show_column_comment'));
     renderer.unmount();
@@ -1586,6 +1597,7 @@ describe('DataGrid DDL interactions', () => {
       "t('data_grid.context_menu.column_no_comment')",
       "t('data_grid.context_menu.column_unnamed_field')",
       "t('data_grid.context_menu.copy_field_name')",
+      "t('data_grid.context_menu.copy_column_comment')",
       "t('data_grid.context_menu.copy_column_data')",
       "t('data_grid.context_menu.sort_section')",
       "t('data_grid.context_menu.sort_ascending')",
@@ -1611,6 +1623,7 @@ describe('DataGrid DDL interactions', () => {
       '暂无备注',
       '未命名字段',
       '复制字段名称',
+      '复制注释',
       '复制列数据',
       '排序',
       '升序排序',

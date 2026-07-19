@@ -22,7 +22,10 @@ import {
   getMetadataDialect,
   splitQualifiedName,
 } from './sidebarMetadataLoaders';
-import { resolveSidebarTableNameForCopy } from './sidebarHelpers';
+import {
+  resolveSidebarDatabaseNameForCopy,
+  resolveSidebarTableNameForCopy,
+} from './sidebarHelpers';
 import { normalizeMySQLViewDDLForEditing } from '../sidebarCoreUtils';
 import {
   DBQuery,
@@ -228,6 +231,21 @@ export const useSidebarObjectActions = ({
     }
     try {
       await navigator.clipboard.writeText(objectName);
+      message.success(t('sidebar.copy_object_name.copied', { label }));
+    } catch (e: any) {
+      message.error(t('sidebar.copy_object_name.failed', { label, error: e?.message || String(e) }));
+    }
+  };
+
+  const handleCopyDatabaseName = async (node: any) => {
+    const databaseName = resolveSidebarDatabaseNameForCopy(node);
+    const label = t('sidebar.copy_object_name.label.database');
+    if (!databaseName) {
+      message.warning(t('sidebar.copy_object_name.empty', { label }));
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(databaseName);
       message.success(t('sidebar.copy_object_name.copied', { label }));
     } catch (e: any) {
       message.error(t('sidebar.copy_object_name.failed', { label, error: e?.message || String(e) }));
@@ -1314,6 +1332,7 @@ export const useSidebarObjectActions = ({
   return {
     handleCopyStructure,
     handleCopyTableName,
+    handleCopyDatabaseName,
     handleExport,
     openExportDialog,
     handleCopyTableAsInsert,

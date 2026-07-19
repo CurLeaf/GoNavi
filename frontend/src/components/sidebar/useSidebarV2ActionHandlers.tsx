@@ -67,6 +67,7 @@ type UseSidebarV2ActionHandlersArgs = {
   openTableDdlInDesigner: (node: any) => void;
   openTableInERView: (node: any) => void;
   handleCopyTableName: (node: any) => Promise<void>;
+  handleCopyDatabaseName: (node: any) => Promise<void>;
   handleCopyStructure: (node: any) => Promise<void>;
   handleCopyTableAsInsert: (node: any) => Promise<void>;
   openCreateStarRocksRollup: (node: any) => void;
@@ -130,6 +131,7 @@ export const useSidebarV2ActionHandlers = ({
   openTableDdlInDesigner,
   openTableInERView,
   handleCopyTableName,
+  handleCopyDatabaseName,
   handleCopyStructure,
   handleCopyTableAsInsert,
   openCreateStarRocksRollup,
@@ -304,6 +306,9 @@ export const useSidebarV2ActionHandlers = ({
 
   const handleV2DatabaseContextMenuAction = (node: any, action: V2DatabaseContextMenuActionKey) => {
     switch (action) {
+      case 'copy-database-name':
+        void handleCopyDatabaseName(node);
+        return;
       case 'new-table':
         openNewTableDesign(node);
         return;

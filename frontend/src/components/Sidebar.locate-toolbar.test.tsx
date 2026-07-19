@@ -32,6 +32,7 @@ import Sidebar, {
   isSidebarTablePinned,
   SQLFileExecutionProgressContent,
   resolveSidebarTableNameForCopy,
+  resolveSidebarDatabaseNameForCopy,
   shouldKeepSidebarSwitcherCollapsedWhileLoading,
   shouldClearSidebarActiveContextOnEmptySelect,
   shouldSkipSidebarLoadOnExpandWhileDragging,
@@ -2499,6 +2500,7 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('data-v2-database-context-menu="true"');
     expect(markup).toContain('mkefu_ai_dev');
     expect(markup).toContain('DB');
+    expect(markup).toContain(t('sidebar.menu.copy_database_name'));
     expect(markup).toContain(t('sidebar.menu.create_table'));
     expect(markup).toContain(t('sidebar.menu.new_query'));
     expect(markup).toContain(t('sidebar.sql_file_exec.title'));
@@ -2513,6 +2515,29 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain(t('sidebar.v2_database_menu.export_all_table_schema_sql'));
     expect(markup).toContain(t('sidebar.v2_database_menu.backup_all_tables_sql'));
     expect(markup).toContain(t('sidebar.v2_table_menu.item_with_suffix', { label: t('sidebar.menu.delete_database'), suffix: 'DROP' }));
+  });
+
+  it('resolves and wires database-name copy for both sidebar menu generations', () => {
+    expect(resolveSidebarDatabaseNameForCopy({
+      title: 'fallback_db',
+      dataRef: { dbName: '  main_db  ' },
+    })).toBe('main_db');
+    expect(resolveSidebarDatabaseNameForCopy({ title: ' fallback_db ' })).toBe('fallback_db');
+    expect(resolveSidebarDatabaseNameForCopy(null)).toBe('');
+
+    const legacySource = readLegacyNodeMenuSource();
+    const menuSource = readSourceFile('./V2TableContextMenu.tsx');
+    const actionSource = readSourceFile('./sidebar/useSidebarV2ActionHandlers.tsx');
+    const objectActionSource = readSourceFile('./sidebar/useSidebarObjectActions.tsx');
+
+    expect(legacySource).toContain("t('sidebar.menu.copy_database_name')");
+    expect(legacySource).toContain("handleV2DatabaseContextMenuAction(node, 'copy-database-name')");
+    expect(menuSource).toContain("action: 'copy-database-name'");
+    expect(menuSource).toContain("t('sidebar.menu.copy_database_name')");
+    expect(actionSource).toContain("case 'copy-database-name':");
+    expect(actionSource).toContain('void handleCopyDatabaseName(node);');
+    expect(objectActionSource).toContain('const handleCopyDatabaseName = async (node: any) => {');
+    expect(objectActionSource).toContain('await navigator.clipboard.writeText(databaseName);');
   });
 
   it('renders the v2 database schema action for PostgreSQL-compatible databases', () => {

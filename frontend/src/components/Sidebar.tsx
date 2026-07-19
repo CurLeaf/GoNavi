@@ -66,6 +66,7 @@ export {
   isV2SidebarObjectNode,
   resolveV2ObjectGroupTitle,
   resolveSidebarTableNameForCopy,
+  resolveSidebarDatabaseNameForCopy,
   parseV2CommandSearchQuery,
 } from './sidebar/sidebarHelpers';
 import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from 'react';
@@ -2285,6 +2286,7 @@ const Sidebar: React.FC<{
   const {
       handleCopyStructure,
       handleCopyTableName,
+      handleCopyDatabaseName,
       handleExport,
       openExportDialog,
       handleCopyTableAsInsert,
@@ -2439,6 +2441,7 @@ const Sidebar: React.FC<{
       openTableDdlInDesigner,
       openTableInERView,
       handleCopyTableName,
+      handleCopyDatabaseName,
       handleCopyStructure,
       handleCopyTableAsInsert,
       openCreateStarRocksRollup,

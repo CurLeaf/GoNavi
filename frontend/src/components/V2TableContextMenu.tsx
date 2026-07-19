@@ -320,6 +320,7 @@ export const V2TableGroupContextMenuView: React.FC<{
 };
 
 export type V2DatabaseContextMenuActionKey =
+  | 'copy-database-name'
   | 'new-table'
   | 'new-schema'
   | 'new-materialized-view'
@@ -378,6 +379,7 @@ export const V2DatabaseContextMenuView: React.FC<{
 
       <div className="gn-v2-context-menu-body">
         {renderItems([
+          { action: 'copy-database-name', icon: <CopyOutlined />, title: t('sidebar.menu.copy_database_name'), kbd: primaryShortcut('C', shortcutPlatform), featured: true },
           { action: 'new-table', icon: <TableOutlined />, title: t('sidebar.menu.create_table'), kbd: primaryShortcut('N', shortcutPlatform), featured: true },
           ...(supportsSchemaActions ? [{ action: 'new-schema', icon: <FolderAddOutlined />, title: t('sidebar.v2_database_menu.new_schema') }] : []),
           ...(supportsSchemaVisibility ? [{ action: 'schema-visibility', icon: <FolderOpenOutlined />, title: t('sidebar.schema_visibility.menu.manage') }] : []),
@@ -647,6 +649,7 @@ export type V2CellContextMenuActionKey =
 
 export type V2ColumnHeaderContextMenuActionKey =
   | 'copy-field-name'
+  | 'copy-column-comment'
   | 'copy-column-data'
   | 'sort-asc'
   | 'sort-desc'
@@ -707,6 +710,7 @@ export const V2ColumnHeaderContextMenuView: React.FC<{
         <div className="gn-v2-context-menu-section-title">{t('sidebar.v2_table_menu.copy_section')}</div>
         {renderItems([
           { action: 'copy-field-name', icon: <CopyOutlined />, title: t('data_grid.context_menu.copy_field_name'), kbd: primaryShortcut('C', shortcutPlatform), featured: true },
+          ...(normalizedComment ? [{ action: 'copy-column-comment', icon: <CopyOutlined />, title: t('data_grid.context_menu.copy_column_comment') }] : []),
           { action: 'copy-column-data', icon: <CopyOutlined />, title: t('data_grid.context_menu.copy_column_data') },
         ])}
 

@@ -124,6 +124,17 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
           case 'copy-field-name':
               copyToClipboard(columnName);
               break;
+          case 'copy-column-comment': {
+              const columnMeta = columnMetaMap[columnName]
+                  || columnMetaMapByLowerName[columnName.toLowerCase()];
+              const comment = String(columnMeta?.comment || '').trim();
+              if (!comment) {
+                  void message.info(translateDataGrid('data_grid.context_menu.column_no_comment'));
+                  break;
+              }
+              copyToClipboard(comment);
+              break;
+          }
           case 'copy-column-data':
               handleCopyColumnData(columnName);
               break;
@@ -186,6 +197,8 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
       cellContextMenu.dataIndex,
       cellContextMenu.title,
       connectionId,
+      columnMetaMap,
+      columnMetaMapByLowerName,
       copyToClipboard,
       dbName,
       displayColumnNames.length,

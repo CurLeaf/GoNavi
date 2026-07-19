@@ -651,6 +651,12 @@ export const buildSidebarLegacyNodeMenuItems = (
            && shouldHideSchemaPrefix(databaseConn);
        const canCreateTable = !isStructureOnlyDbType(String(databaseConn?.id || ''));
        return [
+            {
+                key: 'copy-database-name',
+                label: t('sidebar.menu.copy_database_name'),
+                icon: <CopyOutlined />,
+                onClick: () => handleV2DatabaseContextMenuAction(node, 'copy-database-name')
+            },
            ...(canCreateTable ? [{
                 key: 'new-table',
                 label: t('sidebar.menu.create_table'),
