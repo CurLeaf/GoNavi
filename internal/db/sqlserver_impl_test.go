@@ -5,10 +5,13 @@ package db
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"io"
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"GoNavi-Wails/shared/i18n"
@@ -18,6 +21,97 @@ import (
 )
 
 var rawSQLServerTableNameRequiredText = string([]rune{0x8868, 0x540d, 0x4e0d, 0x80fd, 0x4e3a, 0x7a7a})
+
+const sqlServerPrintOnlyDriverName = "gonavi-sqlserver-print-only"
+
+var registerSQLServerPrintOnlyDriver sync.Once
+
+type sqlServerPrintOnlyDriver struct{}
+
+type sqlServerPrintOnlyConn struct {
+	retmsg *sqlexp.ReturnMessage
+}
+
+type sqlServerPrintOnlyRows struct {
+	remainingBoundaries int
+	drained             bool
+}
+
+type sqlServerPrintOnlyNotice string
+
+func (sqlServerPrintOnlyDriver) Open(string) (driver.Conn, error) {
+	return &sqlServerPrintOnlyConn{}, nil
+}
+
+func (c *sqlServerPrintOnlyConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (c *sqlServerPrintOnlyConn) Close() error {
+	return nil
+}
+
+func (c *sqlServerPrintOnlyConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (c *sqlServerPrintOnlyConn) CheckNamedValue(value *driver.NamedValue) error {
+	retmsg, ok := value.Value.(*sqlexp.ReturnMessage)
+	if !ok {
+		return nil
+	}
+	sqlexp.ReturnMessageInit(retmsg)
+	c.retmsg = retmsg
+	return driver.ErrRemoveArgument
+}
+
+func (c *sqlServerPrintOnlyConn) QueryContext(ctx context.Context, _ string, _ []driver.NamedValue) (driver.Rows, error) {
+	for _, message := range []sqlexp.RawMessage{
+		sqlexp.MsgNextResultSet{},
+		sqlexp.MsgNotice{Message: sqlServerPrintOnlyNotice("INSERT c_user(userid) values('168')")},
+		sqlexp.MsgNextResultSet{},
+		sqlexp.MsgNotice{Message: sqlServerPrintOnlyNotice("INSERT c_user(userid) values('169')")},
+		sqlexp.MsgNextResultSet{},
+		sqlexp.MsgNextResultSet{},
+	} {
+		if err := sqlexp.ReturnMessageEnqueue(ctx, c.retmsg, message); err != nil {
+			return nil, err
+		}
+	}
+	return &sqlServerPrintOnlyRows{remainingBoundaries: 3}, nil
+}
+
+func (r *sqlServerPrintOnlyRows) Columns() []string {
+	// go-mssqldb Rowsq.Columns drains all empty DONE boundaries when no column
+	// metadata exists. Calling it before the message loop ends loses later PRINTs.
+	r.drained = true
+	r.remainingBoundaries = 0
+	return []string{}
+}
+
+func (*sqlServerPrintOnlyRows) Close() error {
+	return nil
+}
+
+func (*sqlServerPrintOnlyRows) Next([]driver.Value) error {
+	return io.EOF
+}
+
+func (*sqlServerPrintOnlyRows) HasNextResultSet() bool {
+	return true
+}
+
+func (r *sqlServerPrintOnlyRows) NextResultSet() error {
+	if r.drained || r.remainingBoundaries == 0 {
+		return io.EOF
+	}
+	r.remainingBoundaries--
+	return nil
+}
+
+func (m sqlServerPrintOnlyNotice) String() string {
+	return string(m)
+}
 
 type fakeSQLServerExecResult struct {
 	affected int64
@@ -109,61 +203,7 @@ func TestSQLServerSessionExecerDiscardEvictsPhysicalConnection(t *testing.T) {
 	}
 }
 
-func TestScanSQLServerFallbackResultSetPreservesRowsWhenMessageLoopYieldsNoResult(t *testing.T) {
-	dbConn, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = dbConn.Close()
-	})
-
-	rows, err := dbConn.Query("SELECT 'config:roomType:add' AS menuName")
-	if err != nil {
-		t.Fatalf("query rows: %v", err)
-	}
-	defer rows.Close()
-
-	resultSet, err := scanSQLServerFallbackResultSet(rows)
-	if err != nil {
-		t.Fatalf("scanSQLServerFallbackResultSet returned error: %v", err)
-	}
-	if !reflect.DeepEqual(resultSet.Columns, []string{"menuName"}) {
-		t.Fatalf("expected SELECT columns to be preserved, got %#v", resultSet.Columns)
-	}
-	if len(resultSet.Rows) != 1 || resultSet.Rows[0]["menuName"] != "config:roomType:add" {
-		t.Fatalf("expected SELECT rows to be preserved, got %#v", resultSet.Rows)
-	}
-}
-
-func TestScanSQLServerFallbackResultSetPreservesColumnsWhenResultHasNoRows(t *testing.T) {
-	dbConn, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = dbConn.Close()
-	})
-
-	rows, err := dbConn.Query("SELECT 1 AS menuName WHERE 1 = 0")
-	if err != nil {
-		t.Fatalf("query empty rows: %v", err)
-	}
-	defer rows.Close()
-
-	resultSet, err := scanSQLServerFallbackResultSet(rows)
-	if err != nil {
-		t.Fatalf("scanSQLServerFallbackResultSet returned error: %v", err)
-	}
-	if len(resultSet.Rows) != 0 {
-		t.Fatalf("expected empty rows, got %#v", resultSet.Rows)
-	}
-	if !reflect.DeepEqual(resultSet.Columns, []string{"menuName"}) {
-		t.Fatalf("expected empty SELECT columns to be preserved, got %#v", resultSet.Columns)
-	}
-}
-
-func TestScanSQLServerRowsWithMessagesRecoversRowsWhenMessageLoopOmitsMsgNext(t *testing.T) {
+func TestScanSQLServerRowsWithMessagesPreservesRowsFromMsgNext(t *testing.T) {
 	dbConn, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -182,6 +222,7 @@ func TestScanSQLServerRowsWithMessagesRecoversRowsWhenMessageLoopOmitsMsgNext(t 
 	retmsg := &sqlexp.ReturnMessage{}
 	sqlexp.ReturnMessageInit(retmsg)
 	for _, message := range []sqlexp.RawMessage{
+		sqlexp.MsgNext{},
 		sqlexp.MsgRowsAffected{Count: 1},
 		sqlexp.MsgNextResultSet{},
 	} {
@@ -198,17 +239,52 @@ func TestScanSQLServerRowsWithMessagesRecoversRowsWhenMessageLoopOmitsMsgNext(t 
 		t.Fatalf("expected no SQL Server notices, got %#v", messages)
 	}
 	if len(resultSets) != 2 {
-		t.Fatalf("expected recovered SELECT rows plus affected-row status, got %#v", resultSets)
+		t.Fatalf("expected SELECT rows plus affected-row status, got %#v", resultSets)
 	}
 	if !reflect.DeepEqual(resultSets[0].Columns, []string{"menuName"}) ||
 		len(resultSets[0].Rows) != 1 ||
 		resultSets[0].Rows[0]["menuName"] != "config:roomType:add" {
-		t.Fatalf("expected recovered SELECT rows first, got %#v", resultSets)
+		t.Fatalf("expected SELECT rows first, got %#v", resultSets)
 	}
 	if !reflect.DeepEqual(resultSets[1].Columns, []string{"affectedRows"}) ||
 		len(resultSets[1].Rows) != 1 ||
 		resultSets[1].Rows[0]["affectedRows"] != int64(1) {
 		t.Fatalf("expected affected-row status after SELECT rows, got %#v", resultSets)
+	}
+}
+
+func TestSQLServerQueryMultiWithMessagesPreservesPrintsAfterEmptyResultBoundaries(t *testing.T) {
+	registerSQLServerPrintOnlyDriver.Do(func() {
+		sql.Register(sqlServerPrintOnlyDriverName, sqlServerPrintOnlyDriver{})
+	})
+	dbConn, err := sql.Open(sqlServerPrintOnlyDriverName, "")
+	if err != nil {
+		t.Fatalf("open print-only SQL Server driver: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = dbConn.Close()
+	})
+
+	dbInst := &SqlServerDB{conn: dbConn}
+	resultSets, messages, err := dbInst.QueryMultiWithMessages("p_get_select 'c_user','1=1',1")
+	if err != nil {
+		t.Fatalf("QueryMultiWithMessages returned error: %v", err)
+	}
+	wantMessages := []string{
+		"INSERT c_user(userid) values('168')",
+		"INSERT c_user(userid) values('169')",
+	}
+	if !reflect.DeepEqual(messages, wantMessages) {
+		t.Fatalf("expected all PRINT messages, got %#v", messages)
+	}
+	if len(resultSets) != 1 {
+		t.Fatalf("expected one message-only result set, got %#v", resultSets)
+	}
+	if len(resultSets[0].Rows) != 0 || len(resultSets[0].Columns) != 0 {
+		t.Fatalf("expected message-only result set without tabular data, got %#v", resultSets[0])
+	}
+	if !reflect.DeepEqual(resultSets[0].Messages, wantMessages) {
+		t.Fatalf("expected result set to preserve all PRINT messages, got %#v", resultSets[0].Messages)
 	}
 }
 

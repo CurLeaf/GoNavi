@@ -40,33 +40,10 @@ func scanSQLServerRowsWithMessages(ctx context.Context, rows *sql.Rows, retmsg *
 	}
 
 	var (
-		resultSets           []connection.ResultSetData
-		messages             []string
-		allMessages          []string
-		currentResultScanned bool
-		currentResultStart   int
+		resultSets  []connection.ResultSetData
+		messages    []string
+		allMessages []string
 	)
-	// go-mssqldb can emit a result-set boundary without MsgNext. Recover the
-	// unread rows before advancing and keep them before any affectedRows status.
-	scanCurrentResultIfNeeded := func() error {
-		if currentResultScanned {
-			return nil
-		}
-		result, err := scanSQLServerFallbackResultSet(rows)
-		if err != nil {
-			return err
-		}
-		currentResultScanned = true
-		if len(result.Columns) == 0 && len(result.Rows) == 0 {
-			return nil
-		}
-		result.Messages = append([]string(nil), messages...)
-		resultSets = append(resultSets, connection.ResultSetData{})
-		copy(resultSets[currentResultStart+1:], resultSets[currentResultStart:])
-		resultSets[currentResultStart] = result
-		messages = nil
-		return nil
-	}
 	active := true
 	for active {
 		raw := retmsg.Message(ctx)
@@ -93,7 +70,6 @@ func scanSQLServerRowsWithMessages(ctx context.Context, rows *sql.Rows, retmsg *
 				Columns:  cols,
 				Messages: append([]string(nil), messages...),
 			})
-			currentResultScanned = true
 			messages = nil
 		case sqlexp.MsgRowsAffected:
 			resultSets = append(resultSets, connection.ResultSetData{
@@ -103,24 +79,15 @@ func scanSQLServerRowsWithMessages(ctx context.Context, rows *sql.Rows, retmsg *
 			})
 			messages = nil
 		case sqlexp.MsgNextResultSet:
-			if err := scanCurrentResultIfNeeded(); err != nil {
-				return resultSets, messages, err
-			}
+			// Only MsgNext proves a row set is ready. Calling Columns at an empty
+			// boundary drains later DONE and PRINT tokens in go-mssqldb Rowsq.
 			active = rows.NextResultSet()
-			if active {
-				currentResultScanned = false
-				currentResultStart = len(resultSets)
-			}
 		case sqlexp.MsgError:
 			return resultSets, messages, msg.Error
 		default:
 			active = false
 		}
 	}
-	if err := scanCurrentResultIfNeeded(); err != nil {
-		return resultSets, messages, err
-	}
-
 	if len(messages) > 0 {
 		resultSets = append(resultSets, connection.ResultSetData{
 			Rows:     []map[string]interface{}{},
@@ -142,23 +109,6 @@ func emptySQLServerRowsResultSet() connection.ResultSetData {
 		Rows:    []map[string]interface{}{},
 		Columns: []string{},
 	}
-}
-
-func scanSQLServerFallbackResultSet(rows *sql.Rows) (connection.ResultSetData, error) {
-	data, columns, err := scanRows(rows)
-	if err != nil {
-		return emptySQLServerRowsResultSet(), err
-	}
-	if data == nil {
-		data = []map[string]interface{}{}
-	}
-	if columns == nil {
-		columns = []string{}
-	}
-	return connection.ResultSetData{
-		Rows:    data,
-		Columns: columns,
-	}, nil
 }
 
 // quoteBracket escapes ] in identifiers for safe use in SQL Server [bracket] notation
