@@ -107,7 +107,7 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().appearance.uiVersion).toBe('v2');
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
-    expect(persisted.version).toBe(16);
+    expect(persisted.version).toBe(17);
     expect(persisted.state.appearance.uiVersion).toBe('v2');
   });
 
@@ -1249,7 +1249,7 @@ describe('store appearance persistence', () => {
     )).toEqual(legacyTag?.childOrder);
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
-    expect(persisted.version).toBe(16);
+    expect(persisted.version).toBe(17);
     expect(persisted.state.connectionTags[0].childOrder).toEqual([
       'connection:conn-a',
       'connection:conn-b',
@@ -1830,12 +1830,12 @@ describe('store appearance persistence', () => {
               jobId: 'job-1',
               targetName: '   ',
               startedAt: 1,
-              finishedAt: 0,
+              finishedAt: 2,
               format: 'csv',
               scope: 'table',
               scopeLabel: 'Table',
               strategyLabel: 'Export',
-              status: 'running',
+              status: 'done',
               stage: '',
               current: 0,
               total: 0,
@@ -2425,6 +2425,42 @@ describe('store appearance persistence', () => {
         status: 'done',
       }),
     ]);
+  });
+
+  it('does not persist export jobs that cannot survive an app restart', async () => {
+    const { useStore } = await importStore();
+    const runningEntry = {
+      jobId: 'job-running',
+      targetName: 'users',
+      startedAt: 1_000,
+      finishedAt: 0,
+      format: 'SQL',
+      scope: 'all',
+      scopeLabel: '全表数据',
+      strategyLabel: '备份',
+      status: 'running' as const,
+      stage: '正在备份',
+      current: 1,
+      total: 2,
+      totalRowsKnown: true,
+      filePath: '/tmp/users.sql',
+      message: '',
+    };
+
+    useStore.getState().upsertTableExportHistory('conn-1::main::users', runningEntry);
+    expect(useStore.getState().tableExportHistories['conn-1::main::users']).toBeUndefined();
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        tableExportHistories: {
+          'conn-1::main::users': [runningEntry],
+        },
+      },
+      version: 16,
+    }));
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().tableExportHistories['conn-1::main::users']).toBeUndefined();
   });
 
   it('only restores persisted query tabs with useful SQL state', async () => {

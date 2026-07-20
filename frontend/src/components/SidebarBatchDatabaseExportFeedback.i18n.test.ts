@@ -38,26 +38,17 @@ const placeholders = (value: string): string[] => [...value.matchAll(/\{\{(\w+)\
   .sort();
 
 describe('Sidebar batch database export feedback i18n', () => {
-  it('localizes batch database export list loading, selection, progress, success, and failure wrappers', () => {
+  it('loads databases and routes the selected targets into the background workbench', () => {
     const block = extractBatchDatabaseExportBlock();
 
-    expect(block).not.toContain("'获取数据库列表失败: ' + res.message");
-    expect(block).not.toContain("message.warning('请至少选择一个数据库')");
-    expect(block).not.toContain('`正在备份数据库 ${db.dbName} (结构+数据)...`');
-    expect(block).not.toContain('`正在导出数据库 ${db.dbName} 表结构...`');
-    expect(block).not.toContain('`${db.dbName} 导出成功`');
-    expect(block).not.toContain('`${db.dbName} 导出失败: ` + res.message');
-    expect(block).not.toContain('`${db.dbName} 导出失败: ` + (e?.message || String(e))');
     expect(block).toContain("t('sidebar.message.load_database_list_failed'");
     expect(block).toContain("t('sidebar.message.select_database_required')");
-    expect(block).toContain("t('sidebar.message.exporting_database_backup'");
-    expect(block).toContain("t('sidebar.message.exporting_database_schema'");
-    expect(block).toContain("t('sidebar.message.database_export_success'");
-    expect(block).toContain("t('sidebar.message.database_export_failed'");
-    expect(block).toContain('database: db.dbName');
-    expect(block).toContain('error: res.message');
-    expect(block).toContain('error: e?.message || String(e)');
-    expect(block).toContain("res.message !== '已取消'");
+    expect(block).toContain('addTab(buildBatchDatabaseExportWorkbenchTab({');
+    expect(block).toContain('initialDatabaseNames: selectedDbs.map(db => db.dbName)');
+    expect(block).toContain("contentMode: includeData ? 'backup' : 'schema'");
+    expect(block).toContain('includeDropIfExists: exportOptions.includeDropIfExists');
+    expect(block).toContain("requestKey: createTableExportRequestKey('batch-databases')");
+    expect(block).not.toContain('ExportDatabaseSQLWithOptions(');
   });
 
   it('localizes handleBatchDbDelete confirmation, loading, success, and failure wrappers', () => {

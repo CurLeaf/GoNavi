@@ -9,14 +9,17 @@ const modelSource = readFileSync(new URL('../../wailsjs/go/models.ts', import.me
 
 describe('Sidebar SQL export options', () => {
   it('collects SQL options for database, schema, and table schema export entry points', () => {
-    expect(hookSource).toContain('ExportDatabaseSQLWithOptions(');
-    expect(hookSource).toContain('ExportSchemaSQLWithOptions(');
-    expect(hookSource).toContain('ExportTablesSQLWithOptions(');
+    expect(hookSource).toContain('buildDatabaseExportWorkbenchTab({');
+    expect(hookSource).toContain('buildSchemaExportWorkbenchTab({');
+    expect(hookSource).toContain('buildBatchTableExportWorkbenchTab({');
+    expect(hookSource).toContain('buildBatchDatabaseExportWorkbenchTab({');
     expect(hookSource.match(/showSQLExportOptionsDialog\(\)/g)).toHaveLength(5);
     expect(hookSource).toContain("mode === 'dataOnly'");
     expect(hookSource).toContain('{ includeDropIfExists: false }');
-    expect(objectActionsSource).toContain('await showSQLExportOptionsDialog()');
-    expect(objectActionsSource).toContain('...resolvedOptions');
+    expect(objectActionsSource).toContain("if (options.format === 'sql')");
+    expect(objectActionsSource).toContain("await openTableSQLExportWorkbench(node, 'backup')");
+    expect(objectActionsSource).toContain("await openTableSQLExportWorkbench(node, 'dataOnly')");
+    expect(objectActionsSource).toContain('includeDropIfExists: exportOptions.includeDropIfExists');
     expect(tableOverviewSource).toContain('await showSQLExportOptionsDialog()');
     expect(tableOverviewSource).toContain('...resolvedOptions');
   });

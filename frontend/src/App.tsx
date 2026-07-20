@@ -15,7 +15,6 @@ import NativeDetachedWindowController from './components/NativeDetachedWindowCon
 import ConnectionModal from './components/ConnectionModal';
 import SnippetSettingsModal from './components/SnippetSettingsModal';
 import ConnectionPackagePasswordModal from './components/ConnectionPackagePasswordModal';
-import DataSyncModal from './components/DataSyncModal';
 import { type DataSyncEntryMode } from './components/dataSyncEntryMode';
 import DriverManagerModal from './components/DriverManagerModal';
 import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';
@@ -81,6 +80,7 @@ import {
   normalizeConnectionPackagePassword,
 } from './utils/connectionExport';
 import { downloadBrowserTextFile } from './utils/browserFileTransfer';
+import { buildDataSyncWorkbenchTab } from './utils/dataSyncTab';
 import { buildSqlAuditWorkbenchTab } from './utils/sqlAuditTab';
 import {
   extractCustomThemeAntTokens,
@@ -469,9 +469,6 @@ type ToolCenterPaneKey =
   | 'connection-package'
   | 'data-root'
   | 'security-update'
-  | 'schema-compare'
-  | 'data-compare'
-  | 'sync'
   | 'drivers'
   | 'snippet-settings'
   | 'shortcut-settings';
@@ -661,8 +658,6 @@ function App() {
   const { language, t } = useI18n();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isConnectionModalMounted, setIsConnectionModalMounted] = useState(false);
-  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
-  const [syncModalEntryMode, setSyncModalEntryMode] = useState<DataSyncEntryMode>('sync');
   const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<SavedConnection | null>(null);
   const connectionModalWarmupDoneRef = useRef(false);
@@ -3273,6 +3268,10 @@ function App() {
           finalizeSecurityRepairReturnFromAISettings();
       }
   }, [activeSettingsCenterPane?.key, closeConnectionPackageDialog, finalizeSecurityRepairReturnFromAISettings]);
+  const handleOpenDataSyncWorkbench = useCallback((entryMode: DataSyncEntryMode) => {
+      handleCancelSettingsCenterPane();
+      addTab(buildDataSyncWorkbenchTab({ entryMode }));
+  }, [addTab, handleCancelSettingsCenterPane]);
   const isSettingsAboutPaneOpen = isSettingsModalOpen && activeSettingsCenterPane?.key === 'about-go-navi';
   const isSettingsAboutPaneOpenRef = useRef(false);
   useEffect(() => {
@@ -7291,8 +7290,7 @@ function App() {
                     title: t('app.tools.entry.schema_compare.title'),
                     description: t('app.tools.entry.schema_compare.description'),
                     onClick: () => {
-                      setSyncModalEntryMode('schemaCompare');
-                      handleOpenToolCenterPane('workflow', 'schema-compare');
+                      handleOpenDataSyncWorkbench('schemaCompare');
                     },
                   },
                   {
@@ -7301,8 +7299,7 @@ function App() {
                     title: t('app.tools.entry.data_compare.title'),
                     description: t('app.tools.entry.data_compare.description'),
                     onClick: () => {
-                      setSyncModalEntryMode('dataCompare');
-                      handleOpenToolCenterPane('workflow', 'data-compare');
+                      handleOpenDataSyncWorkbench('dataCompare');
                     },
                   },
                   {
@@ -7311,8 +7308,7 @@ function App() {
                     title: t('app.tools.entry.sync.title'),
                     description: t('app.tools.entry.sync.description'),
                     onClick: () => {
-                      setSyncModalEntryMode('sync');
-                      handleOpenToolCenterPane('workflow', 'sync');
+                      handleOpenDataSyncWorkbench('sync');
                     },
                   },
                 ],
@@ -7570,22 +7566,6 @@ function App() {
                     onRetry={handleRetrySecurityUpdate}
                     onRestart={handleRestartSecurityUpdate}
                     onIssueAction={handleSecurityUpdateIssueAction}
-                  />
-                );
-              }
-
-              if (
-                activeSettingsCenterPane.key === 'schema-compare'
-                || activeSettingsCenterPane.key === 'data-compare'
-                || activeSettingsCenterPane.key === 'sync'
-              ) {
-                return (
-                  <DataSyncModal
-                    embedded
-                    open
-                    onClose={closeToolCenterPane}
-                    onBack={closeToolCenterPane}
-                    entryMode={syncModalEntryMode}
                   />
                 );
               }
@@ -8041,17 +8021,6 @@ function App() {
               </div>
             )}
           </Modal>
-          )}
-          {isSyncModalOpen && (
-          <DataSyncModal
-            open={isSyncModalOpen}
-            onClose={() => {
-              setIsSyncModalOpen(false);
-              setToolCenterBackGroupKey(null);
-            }}
-            onBack={toolCenterBackGroupKey === 'workflow' ? () => handleReturnToToolCenter(() => setIsSyncModalOpen(false)) : undefined}
-            entryMode={syncModalEntryMode}
-          />
           )}
           {isDriverModalOpen && (
           <DriverManagerModal

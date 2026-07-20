@@ -152,10 +152,6 @@ import {
 } from '../utils/schemaVisibility';
 import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors } from '../utils/jvmSidebarActions';
-import {
-    buildBatchDatabaseExportWorkbenchTab,
-    buildBatchTableExportWorkbenchTab,
-} from '../utils/tableExportTab';
 import { useExportProgressDialog } from './ExportProgressModal';
 import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLRootNode, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
@@ -935,7 +931,6 @@ const Sidebar: React.FC<{
       handleExportDatabaseSQL,
       handleExportSchemaSQL,
       openBatchOperationModal,
-      openBatchTableExportWorkbench,
       handleConnectionChange,
       handleDatabaseChange,
       handleBatchExport,
@@ -944,7 +939,6 @@ const Sidebar: React.FC<{
       handleCheckAll,
       handleInvertSelection,
       openBatchDatabaseModal,
-      openBatchDatabaseExportWorkbench,
       handleDbConnectionChange,
       handleBatchDbExport,
       handleBatchDbDelete,

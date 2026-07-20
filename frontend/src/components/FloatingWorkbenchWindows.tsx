@@ -23,6 +23,7 @@ const getTabKindLabel = (type: string): string => {
   if (type === 'design') return t('tab_manager.kind_badge.design');
   if (type === 'table-overview') return t('tab_manager.kind_badge.table_overview');
   if (type === 'table-export') return t('tab_manager.kind_badge.table_export');
+  if (type === 'data-sync') return t('app.tools.entry.sync.title');
   if (type === 'sql-file-execution') return t('sidebar.sql_file_exec.title');
   if (type === 'sql-analysis') return t('tab_manager.kind_badge.sql_analysis');
   if (type === 'sql-audit') return t('tab_manager.kind_badge.sql_audit');

@@ -1,12 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Checkbox, Empty, InputNumber, Select, Tooltip, Typography } from 'antd';
 import { ClockCircleOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
   DBGetColumns,
   DBGetDatabases,
   DBGetTables,
+  ExportDatabaseSQLWithOptions,
   ExportDatabasesSQLWithOptions,
   ExportQueryWithOptions,
+  ExportSchemaSQLWithOptions,
   ExportTableWithOptions,
   ExportTablesSQLWithOptions,
 } from '../../wailsjs/go/app/App';
@@ -23,6 +25,7 @@ import { getColumnDefinitionName } from '../utils/columnDefinition';
 import { resolveConnectionHostSummary } from '../utils/tabDisplay';
 import { buildExportWorkbenchHistoryKey } from '../utils/tableExportTab';
 import { normalizeTableNamesFromMetadataRows } from '../utils/tableMetadataRows';
+import { buildSQLFileExecutionWorkbenchTab } from '../utils/sqlFileExecutionTab';
 import {
   formatExportElapsed,
   formatExportProgressRows,
@@ -298,10 +301,15 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
   const connections = useStore((state) => state.connections);
   const theme = useStore((state) => state.theme);
   const upsertTableExportHistory = useStore((state) => state.upsertTableExportHistory);
+  const addTab = useStore((state) => state.addTab);
   const workbenchMode = resolveWorkbenchMode(tab);
   const isSingleWorkbench = workbenchMode === 'single';
   const isBatchTablesWorkbench = workbenchMode === 'batch-tables';
   const isBatchDatabasesWorkbench = workbenchMode === 'batch-databases';
+  const isDirectDatabaseWorkbench = workbenchMode === 'database';
+  const isDirectSchemaWorkbench = workbenchMode === 'schema';
+  const isDirectSQLWorkbench = isDirectDatabaseWorkbench || isDirectSchemaWorkbench;
+  const hasFixedConnection = isSingleWorkbench || isDirectSQLWorkbench;
 
   const [selectedConnectionId, setSelectedConnectionId] = useState(() => String(tab.connectionId || '').trim());
   const [selectedDbName, setSelectedDbName] = useState(() => String(tab.dbName || '').trim());
@@ -309,20 +317,23 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [availableObjects, setAvailableObjects] = useState<SelectOption[]>([]);
   const [availableColumns, setAvailableColumns] = useState<string[]>([]);
   const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
-  const [selectedObjectNames, setSelectedObjectNames] = useState<string[]>([]);
-  const [selectedDatabaseNames, setSelectedDatabaseNames] = useState<string[]>([]);
-  const [batchTableMode, setBatchTableMode] = useState<BatchTableExportMode>('schema');
-  const [batchDatabaseMode, setBatchDatabaseMode] = useState<BatchDatabaseExportMode>('schema');
-  const [includeDropIfExists, setIncludeDropIfExists] = useState(false);
+  const [selectedObjectNames, setSelectedObjectNames] = useState<string[]>(() => tab.tableExportInitialObjectNames || []);
+  const [selectedDatabaseNames, setSelectedDatabaseNames] = useState<string[]>(() => tab.tableExportInitialDatabaseNames || []);
+  const [batchTableMode, setBatchTableMode] = useState<BatchTableExportMode>(() => tab.tableExportContentMode || 'schema');
+  const [batchDatabaseMode, setBatchDatabaseMode] = useState<BatchDatabaseExportMode>(() => (
+    tab.tableExportContentMode === 'backup' ? 'backup' : 'schema'
+  ));
+  const [includeDropIfExists, setIncludeDropIfExists] = useState(tab.tableExportIncludeDropIfExists === true);
   const [loadingDatabases, setLoadingDatabases] = useState(false);
   const [loadingObjects, setLoadingObjects] = useState(false);
   const [loadingColumns, setLoadingColumns] = useState(false);
   const [databaseLoadError, setDatabaseLoadError] = useState('');
   const [objectLoadError, setObjectLoadError] = useState('');
   const [columnLoadError, setColumnLoadError] = useState('');
+  const [appliedLaunchRequestKey, setAppliedLaunchRequestKey] = useState(() => String(tab.tableExportRequestKey || '').trim());
 
-  const effectiveConnectionId = isSingleWorkbench ? String(tab.connectionId || '').trim() : selectedConnectionId;
-  const effectiveDbName = isSingleWorkbench ? String(tab.dbName || '').trim() : selectedDbName;
+  const effectiveConnectionId = hasFixedConnection ? String(tab.connectionId || '').trim() : selectedConnectionId;
+  const effectiveDbName = hasFixedConnection ? String(tab.dbName || '').trim() : selectedDbName;
   const connection = useMemo(
     () => connections.find((item) => item.id === effectiveConnectionId),
     [connections, effectiveConnectionId],
@@ -345,9 +356,10 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
       connectionId: effectiveConnectionId,
       dbName: isBatchDatabasesWorkbench ? undefined : effectiveDbName,
       tableName: isSingleWorkbench ? tab.tableName : undefined,
+      schemaName: tab.schemaName,
       exportWorkbenchMode: workbenchMode,
     }),
-    [effectiveConnectionId, effectiveDbName, isBatchDatabasesWorkbench, isSingleWorkbench, tab.tableName, workbenchMode],
+    [effectiveConnectionId, effectiveDbName, isBatchDatabasesWorkbench, isSingleWorkbench, tab.schemaName, tab.tableName, workbenchMode],
   );
   const history = useStore((state) => state.tableExportHistories[exportHistoryKey] || EMPTY_HISTORY);
   const darkMode = theme === 'dark';
@@ -368,14 +380,46 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [format, setFormat] = useState<DataExportFormat>(DEFAULT_DATA_EXPORT_FORMAT);
   const [xlsxMaxRowsPerSheet, setXlsxMaxRowsPerSheet] = useState<number>(DEFAULT_XLSX_ROWS_PER_SHEET);
   const [nowTick, setNowTick] = useState(() => Date.now());
-  const { state: progressState, reset, runExportWithProgress, isRunning } = useExportProgressRunner();
+  const {
+    state: progressState,
+    logs: progressLogs,
+    reset,
+    runExportWithProgress,
+    isRunning,
+  } = useExportProgressRunner({
+    taskKey: tab.id,
+    requestKey: tab.tableExportRequestKey,
+  });
 
   useEffect(() => {
-    if (isSingleWorkbench || selectedConnectionId || connections.length === 0) {
+    const requestKey = String(tab.tableExportRequestKey || '').trim();
+    if (!requestKey || requestKey === appliedLaunchRequestKey || isRunning) {
+      return;
+    }
+    setSelectedDbName(String(tab.dbName || '').trim());
+    setSelectedObjectNames(tab.tableExportInitialObjectNames || []);
+    setSelectedDatabaseNames(tab.tableExportInitialDatabaseNames || []);
+    setBatchTableMode(tab.tableExportContentMode || 'schema');
+    setBatchDatabaseMode(tab.tableExportContentMode === 'backup' ? 'backup' : 'schema');
+    setIncludeDropIfExists(tab.tableExportIncludeDropIfExists === true);
+    setAppliedLaunchRequestKey(requestKey);
+  }, [
+    appliedLaunchRequestKey,
+    isRunning,
+    tab.dbName,
+    tab.tableExportContentMode,
+    tab.tableExportIncludeDropIfExists,
+    tab.tableExportInitialDatabaseNames,
+    tab.tableExportInitialObjectNames,
+    tab.tableExportRequestKey,
+  ]);
+
+  useEffect(() => {
+    if (hasFixedConnection || selectedConnectionId || connections.length === 0) {
       return;
     }
     setSelectedConnectionId(connections[0].id);
-  }, [connections, isSingleWorkbench, selectedConnectionId]);
+  }, [connections, hasFixedConnection, selectedConnectionId]);
 
   useEffect(() => {
     setScope((prev) => {
@@ -432,17 +476,17 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
 
   useEffect(() => {
     if (!progressState.startedAt || progressState.finishedAt > 0) return undefined;
-    const timer = window.setInterval(() => {
+    const timer = globalThis.setInterval(() => {
       setNowTick(Date.now());
     }, 1000);
     return () => {
-      window.clearInterval(timer);
+      globalThis.clearInterval(timer);
     };
   }, [progressState.startedAt, progressState.finishedAt, isRunning]);
 
   useEffect(() => {
-    if (isSingleWorkbench || !connectionConfig) {
-      if (!isSingleWorkbench) {
+    if ((!isBatchTablesWorkbench && !isBatchDatabasesWorkbench) || !connectionConfig) {
+      if (isBatchTablesWorkbench || isBatchDatabasesWorkbench) {
         setAvailableDatabases([]);
         setAvailableObjects([]);
         setSelectedObjectNames([]);
@@ -499,7 +543,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
     return () => {
       alive = false;
     };
-  }, [connection?.includeDatabases, connectionConfig, isBatchTablesWorkbench, isSingleWorkbench, selectedDbName]);
+  }, [connection?.includeDatabases, connectionConfig, isBatchDatabasesWorkbench, isBatchTablesWorkbench, selectedDbName]);
 
   useEffect(() => {
     if (!isBatchTablesWorkbench || !connectionConfig || !selectedDbName) {
@@ -567,17 +611,25 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
   const batchDatabaseModeMeta = resolveBatchDatabaseModeMeta(batchDatabaseMode);
   const activeScopeLabel = isSingleWorkbench
     ? singleScopeLabel
+    : isDirectSQLWorkbench
+      ? (isDirectSchemaWorkbench ? String(tab.schemaName || '').trim() : t('data_export.label.database'))
     : isBatchTablesWorkbench
       ? t('data_export.workbench.scope.selected_objects', { count: selectedObjectNames.length })
       : t('data_export.workbench.scope.selected_databases', { count: selectedDatabaseNames.length });
   const activeScopeCount = isSingleWorkbench
     ? singleScopeRowCount
+    : isDirectSQLWorkbench
+      ? undefined
     : (isBatchTablesWorkbench ? selectedObjectNames.length : selectedDatabaseNames.length);
-  const totalRowsKnown = isSingleWorkbench ? singleTotalRowsKnown : true;
+  const totalRowsKnown = isSingleWorkbench
+    ? singleTotalRowsKnown
+    : !isDirectSQLWorkbench;
   const exportStrategyLabel = isSingleWorkbench
     ? (scope === 'all' && !activeScopeQuery
       ? t('data_export.workbench.strategy.full_table')
       : t('data_export.workbench.strategy.query_replay'))
+    : isDirectSQLWorkbench
+      ? t('data_export.workbench.strategy.batch_databases', { mode: batchDatabaseModeMeta.label })
     : (isBatchTablesWorkbench
       ? t('data_export.workbench.strategy.batch_tables', { mode: batchTableModeMeta.label })
       : t('data_export.workbench.strategy.batch_databases', { mode: batchDatabaseModeMeta.label }));
@@ -590,12 +642,17 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
   const progressOutputLabel = resolveOutputLabel(workbenchMode);
   const fallbackTargetName = isSingleWorkbench
     ? (tab.tableName || t('data_export.progress.value.target_fallback'))
+    : isDirectSQLWorkbench
+      ? ([tab.dbName, isDirectSchemaWorkbench ? tab.schemaName : ''].filter(Boolean).join('.') || t('data_export.workbench.target.current_database'))
     : (isBatchTablesWorkbench ? resolveBatchTablesTargetName(selectedDbName, selectedObjectNames.length) : resolveBatchDatabasesTargetName(selectedDatabaseNames.length));
   const fallbackFormat = isSingleWorkbench ? String(format || '').toUpperCase() : 'SQL';
 
   useEffect(() => {
     const jobId = String(progressState.jobId || '').trim();
-    if (!jobId) return;
+    if (
+      !jobId
+      || (progressState.status !== 'done' && progressState.status !== 'error')
+    ) return;
     const existingEntry = history.find((item) => item.jobId === jobId);
     const entry = buildTableExportHistoryEntry({
       progressState,
@@ -649,6 +706,30 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
     progressState.total,
     progressState.totalRowsKnown,
   );
+  const completedBackupFilePath = String(progressState.filePath || '').trim();
+  const isSingleFileBackup = progressState.status === 'done'
+    && completedBackupFilePath.toLowerCase().endsWith('.sql')
+    && !isBatchDatabasesWorkbench
+    && (
+      (isSingleWorkbench && String(progressState.format || '').toLowerCase() === 'sql')
+      || (isBatchTablesWorkbench && batchTableMode === 'backup')
+      || (isDirectSQLWorkbench && batchDatabaseMode === 'backup')
+    );
+
+  const openBackupRestoreWorkbench = (filePath = completedBackupFilePath) => {
+    const normalizedFilePath = String(filePath || '').trim();
+    if (!normalizedFilePath.toLowerCase().endsWith('.sql') || !effectiveConnectionId) {
+      return;
+    }
+    const pathParts = normalizedFilePath.split(/[\\/]/);
+    addTab(buildSQLFileExecutionWorkbenchTab({
+      connectionId: effectiveConnectionId,
+      dbName: effectiveDbName || undefined,
+      filePath: normalizedFilePath,
+      fileName: pathParts[pathParts.length - 1] || undefined,
+      autoStart: false,
+    }));
+  };
 
   const canStart = useMemo(() => {
     if (!connectionConfig || isRunning) {
@@ -665,12 +746,19 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
     if (isBatchTablesWorkbench) {
       return !!selectedDbName && selectedObjectNames.length > 0;
     }
+    if (isDirectSQLWorkbench) {
+      return !!effectiveDbName && (!isDirectSchemaWorkbench || !!String(tab.schemaName || '').trim());
+    }
     return selectedDatabaseNames.length > 0;
   }, [
     activeScopeOption?.disabled,
     activeScopeQuery,
     connectionConfig,
+    effectiveDbName,
     isBatchTablesWorkbench,
+    isDirectDatabaseWorkbench,
+    isDirectSQLWorkbench,
+    isDirectSchemaWorkbench,
     isRunning,
     isSingleWorkbench,
     loadingColumns,
@@ -680,6 +768,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
     selectedColumns.length,
     selectedObjectNames.length,
     tab.tableName,
+    tab.schemaName,
   ]);
 
   const handleStartSingleExport = async () => {
@@ -792,6 +881,56 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
     });
   };
 
+  const handleStartDirectDatabaseExport = async () => {
+    if (!connectionConfig || !effectiveDbName) {
+      return;
+    }
+    const includeData = batchDatabaseMode === 'backup';
+    await runExportWithProgress({
+      title: tab.title || t('data_export.workbench.task.export_target', { name: effectiveDbName }),
+      targetName: effectiveDbName,
+      format: 'sql',
+      run: (jobId) => ExportDatabaseSQLWithOptions(
+        buildRpcConnectionConfig(connectionConfig) as any,
+        effectiveDbName,
+        includeData,
+        {
+          format: 'sql',
+          jobId,
+          totalRowsHint: 0,
+          totalRowsKnown: false,
+          includeDropIfExists,
+        } as any,
+      ),
+    });
+  };
+
+  const handleStartDirectSchemaExport = async () => {
+    const schemaName = String(tab.schemaName || '').trim();
+    if (!connectionConfig || !effectiveDbName || !schemaName) {
+      return;
+    }
+    const includeData = batchDatabaseMode === 'backup';
+    await runExportWithProgress({
+      title: tab.title || t('data_export.workbench.task.export_target', { name: `${effectiveDbName}.${schemaName}` }),
+      targetName: `${effectiveDbName}.${schemaName}`,
+      format: 'sql',
+      run: (jobId) => ExportSchemaSQLWithOptions(
+        buildRpcConnectionConfig(connectionConfig, { database: effectiveDbName }) as any,
+        effectiveDbName,
+        schemaName,
+        includeData,
+        {
+          format: 'sql',
+          jobId,
+          totalRowsHint: 0,
+          totalRowsKnown: false,
+          includeDropIfExists,
+        } as any,
+      ),
+    });
+  };
+
   const handleStartExport = async () => {
     if (isSingleWorkbench) {
       await handleStartSingleExport();
@@ -801,8 +940,33 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
       await handleStartBatchTablesExport();
       return;
     }
+    if (isDirectDatabaseWorkbench) {
+      await handleStartDirectDatabaseExport();
+      return;
+    }
+    if (isDirectSchemaWorkbench) {
+      await handleStartDirectSchemaExport();
+      return;
+    }
     await handleStartBatchDatabasesExport();
   };
+
+  const lastAutoStartRequestKeyRef = useRef('');
+  useEffect(() => {
+    const requestKey = String(tab.tableExportRequestKey || '').trim();
+    if (
+      !requestKey
+      || requestKey !== appliedLaunchRequestKey
+      || requestKey === lastAutoStartRequestKeyRef.current
+      || requestKey === String(progressState.requestKey || '').trim()
+      || !canStart
+      || isRunning
+    ) {
+      return;
+    }
+    lastAutoStartRequestKeyRef.current = requestKey;
+    void handleStartExport();
+  }, [appliedLaunchRequestKey, canStart, isRunning, progressState.requestKey, tab.tableExportRequestKey]);
 
   const headerBadges = useMemo(() => {
     if (isSingleWorkbench) {
@@ -822,6 +986,14 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
         `${t('data_export.label.host')} · ${hostSummary || '-'}`,
       ];
     }
+    if (isDirectSQLWorkbench) {
+      return [
+        `${t('data_export.label.database')} · ${effectiveDbName || '-'}`,
+        ...(isDirectSchemaWorkbench ? [`${t('data_export.label.schema')} · ${tab.schemaName || '-'}`] : []),
+        `${t('data_export.label.connection')} · ${connection?.name || '-'}`,
+        `${t('data_export.label.host')} · ${hostSummary || '-'}`,
+      ];
+    }
     return [
       `${t('data_export.label.mode')} · ${t('data_export.workbench.mode.batch_databases')}`,
       `${t('data_export.label.connection')} · ${connection?.name || '-'}`,
@@ -830,14 +1002,19 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
     ];
   }, [
     connection?.name,
+    effectiveDbName,
     hostSummary,
     isBatchTablesWorkbench,
+    isDirectDatabaseWorkbench,
+    isDirectSQLWorkbench,
+    isDirectSchemaWorkbench,
     isSingleWorkbench,
     selectedDatabaseNames.length,
     selectedDbName,
     selectedObjectNames.length,
     tab.dbName,
     tab.objectType,
+    tab.schemaName,
     tab.tableName,
   ]);
 
@@ -910,7 +1087,10 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
             borderRadius: 8,
             background: panelBg,
             border: panelBorder,
+            pointerEvents: isRunning ? 'none' : 'auto',
+            opacity: isRunning ? 0.78 : 1,
           }}
+          aria-disabled={isRunning}
         >
           <div>
             <div style={{ fontSize: 13, fontWeight: 600, color: headingColor, marginBottom: 10 }}>{t('data_export.workbench.section.config')}</div>
@@ -927,6 +1107,27 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
 
                 <Text type="secondary">{t('data_export.label.database')}</Text>
                 <Text>{tab.dbName || '-'}</Text>
+
+                <Text type="secondary">{t('data_export.label.host')}</Text>
+                <Text>{hostSummary || '-'}</Text>
+              </div>
+            ) : isDirectSQLWorkbench ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '84px minmax(0, 1fr)', rowGap: 10, columnGap: 12 }}>
+                <Text type="secondary">{t('data_export.label.mode')}</Text>
+                <Text>{batchDatabaseModeMeta.label}</Text>
+
+                <Text type="secondary">{t('data_export.label.connection')}</Text>
+                <Text>{connection?.name || '-'}</Text>
+
+                <Text type="secondary">{t('data_export.label.database')}</Text>
+                <Text>{effectiveDbName || '-'}</Text>
+
+                {isDirectSchemaWorkbench ? (
+                  <>
+                    <Text type="secondary">{t('data_export.label.schema')}</Text>
+                    <Text>{tab.schemaName || '-'}</Text>
+                  </>
+                ) : null}
 
                 <Text type="secondary">{t('data_export.label.host')}</Text>
                 <Text>{hostSummary || '-'}</Text>
@@ -1009,6 +1210,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                   <Select
                     style={{ width: '100%' }}
                     value={scope}
+                    disabled={isRunning}
                     options={scopeOptions.map((item) => ({
                       value: item.value,
                       label: item.label,
@@ -1028,6 +1230,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                   <Select
                     style={{ width: '100%' }}
                     value={format}
+                    disabled={isRunning}
                     options={createTableExportFormatOptions()}
                     onChange={(next) => setFormat(next as DataExportFormat)}
                   />
@@ -1037,6 +1240,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                   <div>
                     <Checkbox
                       checked={includeDropIfExists}
+                      disabled={isRunning}
                       onChange={(event) => setIncludeDropIfExists(event.target.checked)}
                     >
                       {t('data_export.sql_options.drop_if_exists.label')}
@@ -1058,6 +1262,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                       mode="multiple"
                       value={selectedColumns}
                       loading={loadingColumns}
+                      disabled={isRunning}
                       options={availableColumns.map((column) => ({ value: column, label: column }))}
                       maxTagCount="responsive"
                       onChange={(columns) => setSelectedColumns(
@@ -1078,6 +1283,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                       max={MAX_XLSX_ROWS_PER_SHEET}
                       step={100000}
                       value={xlsxMaxRowsPerSheet}
+                      disabled={isRunning}
                       style={{ width: '100%' }}
                       onChange={(value) => {
                         const next = Number(value);
@@ -1096,6 +1302,48 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                   </div>
                 ) : null}
               </>
+            ) : isDirectSQLWorkbench ? (
+              <>
+                <div>
+                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.export_content')}</div>
+                  <Select
+                    style={{ width: '100%' }}
+                    value={batchDatabaseMode}
+                    disabled={isRunning}
+                    options={createBatchDatabaseExportModeOptions().map((item) => ({ value: item.value, label: item.label }))}
+                    onChange={(next) => setBatchDatabaseMode(next as BatchDatabaseExportMode)}
+                  />
+                  <div style={{ marginTop: 6, fontSize: 12, color: secondaryTextColor }}>
+                    {batchDatabaseModeMeta.description}
+                  </div>
+                </div>
+
+                <div>
+                  <Checkbox
+                    checked={includeDropIfExists}
+                    disabled={isRunning}
+                    onChange={(event) => setIncludeDropIfExists(event.target.checked)}
+                  >
+                    {t('data_export.sql_options.drop_if_exists.label')}
+                  </Checkbox>
+                  <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginTop: 8 }}
+                    message={t('data_export.sql_options.drop_if_exists.description')}
+                  />
+                </div>
+
+                <div>
+                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.format')}</div>
+                  <Select
+                    style={{ width: '100%' }}
+                    value="sql"
+                    disabled
+                    options={[{ value: 'sql', label: t('data_export.label.sql_file') }]}
+                  />
+                </div>
+              </>
             ) : isBatchTablesWorkbench ? (
               <>
                 <div>
@@ -1105,6 +1353,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                       <Select
                         style={{ width: '100%' }}
                         value={selectedConnectionId || undefined}
+                        disabled={isRunning}
                         placeholder={t('data_export.workbench.placeholder.select_connection')}
                         options={connectionOptions}
                         showSearch
@@ -1129,6 +1378,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                       <Select
                         style={{ width: '100%' }}
                         value={selectedDbName || undefined}
+                        disabled={isRunning}
                         placeholder={loadingDatabases
                           ? t('data_export.workbench.placeholder.loading_databases')
                           : t('data_export.workbench.placeholder.select_database')}
@@ -1154,7 +1404,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                       <Button
                         size="small"
                         type="text"
-                        disabled={availableObjects.length === 0}
+                        disabled={isRunning || availableObjects.length === 0}
                         onClick={() => setSelectedObjectNames(availableObjects.map((item) => item.value))}
                       >
                         {t('data_export.action.select_all')}
@@ -1162,7 +1412,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                       <Button
                         size="small"
                         type="text"
-                        disabled={selectedObjectNames.length === 0}
+                        disabled={isRunning || selectedObjectNames.length === 0}
                         onClick={() => setSelectedObjectNames([])}
                       >
                         {t('data_export.action.clear')}
@@ -1180,7 +1430,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                       : t('data_export.workbench.placeholder.select_database_first')}
                     loading={loadingObjects}
                     options={availableObjects}
-                    disabled={!selectedDbName}
+                    disabled={isRunning || !selectedDbName}
                     showSearch
                     optionFilterProp="title"
                     filterOption={filterOptionByLabel as any}
@@ -1200,6 +1450,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                   <Select
                     style={{ width: '100%' }}
                     value={batchTableMode}
+                    disabled={isRunning}
                     options={createBatchTableExportModeOptions().map((item) => ({ value: item.value, label: item.label }))}
                     onChange={(next) => setBatchTableMode(next as BatchTableExportMode)}
                   />
@@ -1212,6 +1463,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                   <div>
                     <Checkbox
                       checked={includeDropIfExists}
+                      disabled={isRunning}
                       onChange={(event) => setIncludeDropIfExists(event.target.checked)}
                     >
                       {t('data_export.sql_options.drop_if_exists.label')}
@@ -1244,6 +1496,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                       <Select
                         style={{ width: '100%' }}
                         value={selectedConnectionId || undefined}
+                        disabled={isRunning}
                         placeholder={t('data_export.workbench.placeholder.select_connection')}
                         options={connectionOptions}
                         showSearch
@@ -1266,7 +1519,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                       <Button
                         size="small"
                         type="text"
-                        disabled={availableDatabases.length === 0}
+                        disabled={isRunning || availableDatabases.length === 0}
                         onClick={() => setSelectedDatabaseNames(availableDatabases.map((item) => item.value))}
                       >
                         {t('data_export.action.select_all')}
@@ -1274,7 +1527,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                       <Button
                         size="small"
                         type="text"
-                        disabled={selectedDatabaseNames.length === 0}
+                        disabled={isRunning || selectedDatabaseNames.length === 0}
                         onClick={() => setSelectedDatabaseNames([])}
                       >
                         {t('data_export.action.clear')}
@@ -1290,6 +1543,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                       : t('data_export.workbench.placeholder.select_database')}
                     loading={loadingDatabases}
                     options={availableDatabases}
+                    disabled={isRunning}
                     showSearch
                     optionFilterProp="title"
                     filterOption={filterOptionByLabel as any}
@@ -1306,6 +1560,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                   <Select
                     style={{ width: '100%' }}
                     value={batchDatabaseMode}
+                    disabled={isRunning}
                     options={createBatchDatabaseExportModeOptions().map((item) => ({ value: item.value, label: item.label }))}
                     onChange={(next) => setBatchDatabaseMode(next as BatchDatabaseExportMode)}
                   />
@@ -1317,6 +1572,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                 <div>
                   <Checkbox
                     checked={includeDropIfExists}
+                    disabled={isRunning}
                     onChange={(event) => setIncludeDropIfExists(event.target.checked)}
                   >
                     {t('data_export.sql_options.drop_if_exists.label')}
@@ -1366,7 +1622,9 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
             <div style={{ display: 'grid', gridTemplateColumns: '96px minmax(0, 1fr)', rowGap: 6, columnGap: 8 }}>
               <Text type="secondary">{isSingleWorkbench
                 ? t('data_export.label.estimated_rows')
-                : (isBatchDatabasesWorkbench ? t('data_export.label.selected_databases') : t('data_export.label.object'))}</Text>
+                : (isBatchDatabasesWorkbench
+                  ? t('data_export.label.selected_databases')
+                  : (isDirectSQLWorkbench ? t('data_export.label.database') : t('data_export.label.object')))}</Text>
               <Text>
                 {typeof activeScopeCount === 'number'
                   ? activeScopeCount.toLocaleString()
@@ -1379,6 +1637,8 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
             <div style={{ fontSize: 12, color: secondaryTextColor }}>
               {isSingleWorkbench
                 ? t('data_export.workbench.helper.single_export_start')
+                : isDirectSQLWorkbench
+                  ? t('data_export.workbench.helper.single_export_start')
                 : isBatchTablesWorkbench
                   ? t('data_export.workbench.helper.batch_tables_start')
                   : t('data_export.workbench.helper.batch_databases_start')}
@@ -1500,8 +1760,63 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                   />
                 ) : null}
 
+                {progressLogs.length > 0 ? (
+                  <div data-export-workbench-logs="true">
+                    <div style={{ fontSize: 12, color: secondaryTextColor, marginBottom: 8 }}>
+                      {t('data_export.workbench.section.logs')}
+                    </div>
+                    <div
+                      style={{
+                        maxHeight: 180,
+                        overflow: 'auto',
+                        padding: '4px 12px',
+                        borderRadius: 8,
+                        background: subtleBg,
+                        border: `1px solid ${dividerColor}`,
+                      }}
+                    >
+                      {progressLogs.slice(-50).map((entry, index) => (
+                        <div
+                          key={`${entry.jobId}-${entry.sequence}`}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '72px minmax(0, 1fr)',
+                            gap: 10,
+                            padding: '8px 0',
+                            borderTop: index === 0 ? 'none' : `1px solid ${dividerColor}`,
+                            fontSize: 12,
+                          }}
+                        >
+                          <Text type="secondary">
+                            {new Date(entry.timestamp).toLocaleTimeString(undefined, { hour12: false })}
+                          </Text>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ color: headingColor, wordBreak: 'break-word' }}>
+                              {entry.stage || resolveStatusMeta(entry.status).label}
+                            </div>
+                            {entry.message ? (
+                              <div style={{ marginTop: 3, color: entry.status === 'error' ? '#dc2626' : secondaryTextColor, wordBreak: 'break-word' }}>
+                                {entry.message}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
                 {(progressState.status === 'done' || progressState.status === 'error') ? (
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+                    {isSingleFileBackup ? (
+                      <Button
+                        data-export-restore-backup={true}
+                        icon={<ReloadOutlined />}
+                        onClick={() => openBackupRestoreWorkbench()}
+                      >
+                        {t('data_export.action.restore_backup')}
+                      </Button>
+                    ) : null}
                     <Button icon={<ReloadOutlined />} onClick={reset}>{t('data_export.action.clear_progress')}</Button>
                   </div>
                 ) : null}
@@ -1585,6 +1900,20 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                           {entry.filePath || '-'}
                         </Paragraph>
                       </div>
+                      {entry.status === 'done'
+                        && !isBatchDatabasesWorkbench
+                        && String(entry.filePath || '').trim().toLowerCase().endsWith('.sql') ? (
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                            <Button
+                              size="small"
+                              data-export-history-restore={entry.jobId}
+                              icon={<ReloadOutlined />}
+                              onClick={() => openBackupRestoreWorkbench(entry.filePath)}
+                            >
+                              {t('data_export.action.restore_backup')}
+                            </Button>
+                          </div>
+                        ) : null}
                     </div>
                   </div>
                 ))}

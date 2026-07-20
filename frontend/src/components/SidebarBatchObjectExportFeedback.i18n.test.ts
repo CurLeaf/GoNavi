@@ -26,30 +26,19 @@ const placeholders = (value: string): string[] => [...value.matchAll(/\{\{(\w+)\
   .sort();
 
 describe('Sidebar batch object export feedback i18n', () => {
-  it('localizes handleBatchExport validation, loading, success, and failure wrappers', () => {
+  it('routes the selected objects and export mode into the background workbench', () => {
     const block = extractHandleBatchExportBlock();
 
-    expect(block).not.toContain("message.warning('请至少选择一个对象')");
-    expect(block).not.toContain('`正在备份选中对象 (${objectNames.length})...`');
-    expect(block).not.toContain('`正在导出选中对象数据 (INSERT) (${objectNames.length})...`');
-    expect(block).not.toContain('`正在导出选中对象结构 (${objectNames.length})...`');
-    expect(block).not.toContain('`导出成功（已自动跳过 ${selectedViewCount} 个视图的数据导出）`');
-    expect(block).not.toContain("message.success('导出成功')");
-    expect(block).not.toContain("'导出失败: ' + res.message");
-    expect(block).not.toContain("'导出失败: ' + (e?.message || String(e))");
     expect(block).toContain("t('sidebar.message.select_object_required')");
-    expect(block).toContain("t('sidebar.message.backing_up_selected_objects'");
-    expect(block).toContain("t('sidebar.message.exporting_selected_object_data'");
-    expect(block).toContain("t('sidebar.message.exporting_selected_object_schema'");
-    expect(block).toContain("t('sidebar.message.export_success_skipped_views'");
-    expect(block).toContain("t('sidebar.message.export_success')");
-    expect(block).toContain("t('sidebar.message.export_failed'");
-    expect(block).toContain('count: objectNames.length');
-    expect(block).toContain("format: 'INSERT'");
-    expect(block).toContain('count: selectedViewCount');
-    expect(block).toContain('error: res.message');
-    expect(block).toContain('error: e?.message || String(e)');
-    expect(block).toContain("res.message !== '已取消'");
+    expect(block).toContain("mode === 'dataOnly'");
+    expect(block).toContain('addTab(buildBatchTableExportWorkbenchTab({');
+    expect(block).toContain('initialObjectNames: objectNames');
+    expect(block).toContain('contentMode: mode');
+    expect(block).toContain('includeDropIfExists: exportOptions.includeDropIfExists');
+    expect(block).toContain("requestKey: createTableExportRequestKey('batch-objects')");
+    expect(block).not.toContain('ExportTablesSQLWithOptions(');
+    expect(block).not.toContain('ExportTablesDataSQL(');
+    expect(block).not.toContain('message.loading(');
   });
 
   it('keeps batch object export feedback keys available with stable placeholders', () => {

@@ -24,23 +24,18 @@ const placeholders = (value: string): string[] => [...value.matchAll(/\{\{(\w+)\
   .sort();
 
 describe('Sidebar schema export feedback i18n', () => {
-  it('localizes handleExportSchemaSQL target, loading, success, and failure wrappers', () => {
+  it('validates the target and routes schema SQL export into the background workbench', () => {
     const block = extractHandleExportSchemaBlock();
 
-    expect(block).not.toContain("message.error('未找到目标模式，无法导出')");
-    expect(block).not.toContain('`正在备份模式 ${schemaName} (结构+数据)...`');
-    expect(block).not.toContain('`正在导出模式 ${schemaName} 表结构...`');
-    expect(block).not.toContain("message.success('导出成功')");
-    expect(block).not.toContain("'导出失败: ' + res.message");
-    expect(block).not.toContain("'导出失败: ' + (e?.message || String(e))");
     expect(block).toContain("t('sidebar.message.schema_export_target_missing')");
-    expect(block).toContain("t('sidebar.message.exporting_schema_backup'");
-    expect(block).toContain("t('sidebar.message.exporting_schema_structure'");
-    expect(block).toContain("t('sidebar.message.export_success')");
-    expect(block).toContain("t('sidebar.message.export_failed'");
-    expect(block).toContain('schema: schemaName');
-    expect(block).toContain('error: res.message');
-    expect(block).toContain('error: e?.message || String(e)');
+    expect(block).toContain('showSQLExportOptionsDialog()');
+    expect(block).toContain('addTab(buildSchemaExportWorkbenchTab({');
+    expect(block).toContain('schemaName,');
+    expect(block).toContain("contentMode: includeData ? 'backup' : 'schema'");
+    expect(block).toContain('includeDropIfExists: exportOptions.includeDropIfExists');
+    expect(block).toContain("requestKey: createTableExportRequestKey('schema')");
+    expect(block).not.toContain('ExportSchemaSQLWithOptions(');
+    expect(block).not.toContain('message.loading(');
   });
 
   it('keeps schema export feedback keys available with stable placeholders', () => {

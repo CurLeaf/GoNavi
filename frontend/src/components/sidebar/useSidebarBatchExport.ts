@@ -6,10 +6,6 @@ import {
   DBGetTables,
   DropDatabase,
   DropTable,
-  ExportDatabaseSQLWithOptions,
-  ExportSchemaSQLWithOptions,
-  ExportTablesDataSQL,
-  ExportTablesSQLWithOptions,
 } from '../../../wailsjs/go/app/App';
 import { showSQLExportOptionsDialog } from '../SQLExportOptionsDialog';
 import type { SavedConnection } from '../../types';
@@ -20,6 +16,8 @@ import { normalizeTableNamesFromMetadataRows } from '../../utils/tableMetadataRo
 import {
   buildBatchDatabaseExportWorkbenchTab,
   buildBatchTableExportWorkbenchTab,
+  buildDatabaseExportWorkbenchTab,
+  buildSchemaExportWorkbenchTab,
 } from '../../utils/tableExportTab';
 import {
   buildSidebarObjectKeyName,
@@ -41,6 +39,10 @@ export interface BatchObjectItem {
   objectType: BatchObjectType;
   dataRef: any;
 }
+
+const createTableExportRequestKey = (prefix: string): string => (
+  `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+);
 
 interface UseSidebarBatchExportArgs {
   connections: SavedConnection[];
@@ -122,29 +124,13 @@ export const useSidebarBatchExport = ({
       const dbName = conn.dbName || node.title;
       const exportOptions = await showSQLExportOptionsDialog();
       if (!exportOptions) return;
-      const hide = message.loading(
-          includeData
-              ? t('sidebar.message.exporting_database_backup', { database: dbName })
-              : t('sidebar.message.exporting_database_schema', { database: dbName }),
-          0,
-      );
-      try {
-          const res = await ExportDatabaseSQLWithOptions(
-              normalizeConnConfig(conn.config) as any,
-              dbName,
-              includeData,
-              { format: 'sql', ...exportOptions } as any,
-          );
-          hide();
-          if (res.success) {
-              message.success(t('sidebar.message.export_success'));
-          } else if (res.message !== '已取消') {
-              message.error(t('sidebar.message.export_failed', { error: res.message }));
-          }
-      } catch (e: any) {
-          hide();
-          message.error(t('sidebar.message.export_failed', { error: e?.message || String(e) }));
-      }
+      addTab(buildDatabaseExportWorkbenchTab({
+          connectionId: String(conn.id || '').trim(),
+          dbName,
+          contentMode: includeData ? 'backup' : 'schema',
+          includeDropIfExists: exportOptions.includeDropIfExists,
+          requestKey: createTableExportRequestKey('database'),
+      }));
   };
 
   const handleExportSchemaSQL = async (node: any, includeData: boolean) => {
@@ -157,30 +143,14 @@ export const useSidebarBatchExport = ({
       }
       const exportOptions = await showSQLExportOptionsDialog();
       if (!exportOptions) return;
-      const hide = message.loading(
-          includeData
-              ? t('sidebar.message.exporting_schema_backup', { schema: schemaName })
-              : t('sidebar.message.exporting_schema_structure', { schema: schemaName }),
-          0,
-      );
-      try {
-          const res = await ExportSchemaSQLWithOptions(
-              buildRpcConnectionConfig(conn.config, { database: dbName }) as any,
-              dbName,
-              schemaName,
-              includeData,
-              { format: 'sql', ...exportOptions } as any,
-          );
-          hide();
-          if (res.success) {
-              message.success(t('sidebar.message.export_success'));
-          } else if (res.message !== '已取消') {
-              message.error(t('sidebar.message.export_failed', { error: res.message }));
-          }
-      } catch (e: any) {
-          hide();
-          message.error(t('sidebar.message.export_failed', { error: e?.message || String(e) }));
-      }
+      addTab(buildSchemaExportWorkbenchTab({
+          connectionId: String(conn.id || '').trim(),
+          dbName,
+          schemaName,
+          contentMode: includeData ? 'backup' : 'schema',
+          includeDropIfExists: exportOptions.includeDropIfExists,
+          requestKey: createTableExportRequestKey('schema'),
+      }));
   };
 
   const handleExportTablesSQL = async (nodes: any[], includeData: boolean) => {
@@ -197,31 +167,14 @@ export const useSidebarBatchExport = ({
       const tableNames = nodes.map(n => n.dataRef.tableName).filter(Boolean);
       const exportOptions = await showSQLExportOptionsDialog();
       if (!exportOptions) return;
-      const hide = message.loading(
-          includeData
-              ? t('sidebar.message.backing_up_selected_tables', { count: tableNames.length })
-              : t('sidebar.message.exporting_selected_table_schema', { count: tableNames.length }),
-          0,
-      );
-      try {
-          const res = await ExportTablesSQLWithOptions(
-              normalizeConnConfig(first.config) as any,
-              dbName,
-              tableNames,
-              true,
-              includeData,
-              { format: 'sql', ...exportOptions } as any,
-          );
-          hide();
-          if (res.success) {
-              message.success(t('sidebar.message.export_success'));
-          } else if (res.message !== '已取消') {
-              message.error(t('sidebar.message.export_failed', { error: res.message }));
-          }
-      } catch (e: any) {
-          hide();
-          message.error(t('sidebar.message.export_failed', { error: e?.message || String(e) }));
-      }
+      addTab(buildBatchTableExportWorkbenchTab({
+          connectionId: String(connId || '').trim(),
+          dbName,
+          initialObjectNames: tableNames,
+          contentMode: includeData ? 'backup' : 'schema',
+          includeDropIfExists: exportOptions.includeDropIfExists,
+          requestKey: createTableExportRequestKey('tables'),
+      }));
   };
 
   const openBatchOperationModal = async () => {
@@ -260,32 +213,6 @@ export const useSidebarBatchExport = ({
       }
 
       setIsBatchModalOpen(true);
-  };
-
-  const openBatchTableExportWorkbench = () => {
-      let connId = '';
-      let dbName = '';
-
-      if (selectedNodesRef.current.length > 0) {
-          const node = selectedNodesRef.current[0];
-          if (node.type === 'connection' && node.dataRef?.config?.type !== 'redis') {
-              connId = node.key as string;
-          } else if (node.type === 'database') {
-              connId = node.dataRef.id;
-              dbName = node.title;
-          } else if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view') {
-              connId = node.dataRef.id;
-              dbName = node.dataRef.dbName;
-          }
-      }
-
-      addTab(buildBatchTableExportWorkbenchTab({
-          connectionId: connId,
-          dbName: dbName || undefined,
-          title: dbName
-            ? t('sidebar.tab.batch_export_objects_database', { database: dbName })
-            : t('sidebar.tab.batch_export_objects'),
-      }));
   };
 
 	  const loadDatabasesForBatch = async (conn: SavedConnection) => {
@@ -425,39 +352,15 @@ export const useSidebarBatchExport = ({
 
       const { conn, dbName } = batchDbContext;
       const objectNames = selectedObjects.map(t => t.objectName);
-      const selectedViewCount = selectedObjects.filter(item => item.objectType === 'view').length;
-
-      const loadingText = mode === 'backup'
-          ? t('sidebar.message.backing_up_selected_objects', { count: objectNames.length })
-          : mode === 'dataOnly'
-              ? t('sidebar.message.exporting_selected_object_data', { count: objectNames.length, format: 'INSERT' })
-              : t('sidebar.message.exporting_selected_object_schema', { count: objectNames.length });
-      const hide = message.loading(loadingText, 0);
-      try {
-          const res = mode === 'dataOnly'
-              ? await ExportTablesDataSQL(normalizeConnConfig(conn.config) as any, dbName, objectNames)
-              : await ExportTablesSQLWithOptions(
-                  normalizeConnConfig(conn.config) as any,
-                  dbName,
-                  objectNames,
-                  true,
-                  mode === 'backup',
-                  { format: 'sql', ...exportOptions } as any,
-              );
-          hide();
-          if (res.success) {
-              if (mode !== 'schema' && selectedViewCount > 0) {
-                  message.success(t('sidebar.message.export_success_skipped_views', { count: selectedViewCount }));
-              } else {
-                  message.success(t('sidebar.message.export_success'));
-              }
-          } else if (res.message !== '已取消') {
-              message.error(t('sidebar.message.export_failed', { error: res.message }));
-          }
-      } catch (e: any) {
-          hide();
-          message.error(t('sidebar.message.export_failed', { error: e?.message || String(e) }));
-      }
+      addTab(buildBatchTableExportWorkbenchTab({
+          connectionId: String(conn.id || '').trim(),
+          dbName,
+          initialObjectNames: objectNames,
+          contentMode: mode,
+          includeDropIfExists: exportOptions.includeDropIfExists,
+          requestKey: createTableExportRequestKey('batch-objects'),
+          title: t('sidebar.tab.batch_export_objects_database', { database: dbName }),
+      }));
   };
 
   const handleBatchClear = async () => {
@@ -701,24 +604,6 @@ export const useSidebarBatchExport = ({
       setIsBatchDbModalOpen(true);
   };
 
-  const openBatchDatabaseExportWorkbench = () => {
-      let connId = '';
-
-      if (selectedNodesRef.current.length > 0) {
-          const node = selectedNodesRef.current[0];
-          if (node.type === 'connection' && node.dataRef?.config?.type !== 'redis') {
-              connId = node.key as string;
-          } else if (node.type === 'database' || node.type === 'table' || node.type === 'view' || node.type === 'materialized-view') {
-              connId = node.dataRef.id;
-          }
-      }
-
-      addTab(buildBatchDatabaseExportWorkbenchTab({
-          connectionId: connId,
-          title: t('sidebar.tab.batch_export_databases'),
-      }));
-  };
-
 	  const loadDatabasesForDbBatch = async (conn: SavedConnection) => {
 	      setBatchConnContext(conn);
 
@@ -775,36 +660,14 @@ export const useSidebarBatchExport = ({
       if (!exportOptions) return;
 
       setIsBatchDbModalOpen(false);
-
-      for (const db of selectedDbs) {
-          const hide = message.loading(
-              includeData
-                  ? t('sidebar.message.exporting_database_backup', { database: db.dbName })
-                  : t('sidebar.message.exporting_database_schema', { database: db.dbName }),
-              0,
-          );
-          try {
-              const res = await ExportDatabaseSQLWithOptions(
-                  normalizeConnConfig(batchConnContext.config) as any,
-                  db.dbName,
-                  includeData,
-                  { format: 'sql', ...exportOptions } as any,
-              );
-              hide();
-              if (res.success) {
-                  message.success(t('sidebar.message.database_export_success', { database: db.dbName }));
-              } else if (res.message !== '已取消') {
-                  message.error(t('sidebar.message.database_export_failed', { database: db.dbName, error: res.message }));
-                  break;
-              } else {
-                  break; // User cancelled
-              }
-          } catch (e: any) {
-              hide();
-              message.error(t('sidebar.message.database_export_failed', { database: db.dbName, error: e?.message || String(e) }));
-              break;
-          }
-      }
+      addTab(buildBatchDatabaseExportWorkbenchTab({
+          connectionId: String(batchConnContext.id || '').trim(),
+          initialDatabaseNames: selectedDbs.map(db => db.dbName),
+          contentMode: includeData ? 'backup' : 'schema',
+          includeDropIfExists: exportOptions.includeDropIfExists,
+          requestKey: createTableExportRequestKey('batch-databases'),
+          title: t('sidebar.tab.batch_export_databases'),
+      }));
   };
 
   const handleBatchDbDelete = async () => {
@@ -923,7 +786,6 @@ export const useSidebarBatchExport = ({
       handleExportDatabaseSQL,
       handleExportSchemaSQL,
       openBatchOperationModal,
-      openBatchTableExportWorkbench,
       handleConnectionChange,
       handleDatabaseChange,
       handleBatchExport,
@@ -932,7 +794,6 @@ export const useSidebarBatchExport = ({
       handleCheckAll,
       handleInvertSelection,
       openBatchDatabaseModal,
-      openBatchDatabaseExportWorkbench,
       handleDbConnectionChange,
       handleBatchDbExport,
       handleBatchDbDelete,

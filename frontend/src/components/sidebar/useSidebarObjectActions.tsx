@@ -8,7 +8,7 @@ import { useStore } from '../../store';
 import { t } from '../../i18n';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { getDataSourceCapabilities } from '../../utils/dataSourceCapabilities';
-import { buildTableExportTab } from '../../utils/tableExportTab';
+import { buildBatchTableExportWorkbenchTab, buildTableExportTab } from '../../utils/tableExportTab';
 import { buildSqlServerObjectDefinitionQueries } from '../../utils/sqlServerObjectDefinition';
 import { buildStarRocksMaterializedViewPreviewSql } from '../tableDesignerSchemaSql';
 import type { ExportRunResult, RunExportWithProgressOptions } from '../useExportProgressRunner';
@@ -252,13 +252,36 @@ export const useSidebarObjectActions = ({
     }
   };
 
-  const handleExport = async (node: any, options: { format: string; xlsxMaxRowsPerSheet?: number }) => {
-    const { config, dbName, tableName } = node.dataRef;
-    const sqlOptions = options.format === 'sql'
+  const openTableSQLExportWorkbench = async (node: any, mode: 'backup' | 'dataOnly') => {
+    const tableName = String(node?.dataRef?.tableName || node?.title || '').trim();
+    if (!tableName) {
+      message.warning(t('sidebar.message.table_export_target_missing'));
+      return;
+    }
+    const exportOptions = mode === 'backup'
       ? await showSQLExportOptionsDialog()
-      : null;
-    if (options.format === 'sql' && !sqlOptions) return;
-    const resolvedOptions = sqlOptions ? { ...options, ...sqlOptions } : options;
+      : { includeDropIfExists: false };
+    if (!exportOptions) return;
+    const connectionId = resolveSidebarNodeConnectionId(node, connectionIds)
+      || String(node?.dataRef?.id || '').trim();
+    const dbName = String(node?.dataRef?.dbName || '').trim();
+    addTab(buildBatchTableExportWorkbenchTab({
+      connectionId,
+      dbName,
+      initialObjectNames: [tableName],
+      contentMode: mode,
+      includeDropIfExists: exportOptions.includeDropIfExists,
+      requestKey: `table-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      title: t('file.backend.dialog.export_table', { table: tableName }),
+    }));
+  };
+
+  const handleExport = async (node: any, options: { format: string; xlsxMaxRowsPerSheet?: number }) => {
+    if (options.format === 'sql') {
+      await openTableSQLExportWorkbench(node, 'backup');
+      return;
+    }
+    const { config, dbName, tableName } = node.dataRef;
     const rowCount = Number(node?.dataRef?.rowCount);
     const totalRowsKnown = Number.isFinite(rowCount) && rowCount > 0;
     await runExportWithProgress({
@@ -271,7 +294,7 @@ export const useSidebarObjectActions = ({
         dbName,
         tableName,
         {
-          ...resolvedOptions,
+          ...options,
           jobId,
           totalRowsHint: totalRowsKnown ? rowCount : 0,
           totalRowsKnown,
@@ -303,7 +326,7 @@ export const useSidebarObjectActions = ({
   };
 
   const handleCopyTableAsInsert = async (node: any) => {
-    await handleExport(node, { format: 'sql' });
+    await openTableSQLExportWorkbench(node, 'dataOnly');
   };
 
   const openTableDdlInDesigner = (node: any) => {

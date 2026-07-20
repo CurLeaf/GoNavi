@@ -9,12 +9,24 @@ import TableExportWorkbench, {
   buildTableExportHistoryEntry,
   resolveTableExportColumnNames,
 } from './TableExportWorkbench';
-import { DBGetColumns, ExportQueryWithOptions, ExportTableWithOptions } from '../../wailsjs/go/app/App';
+import {
+  DBGetColumns,
+  DBGetDatabases,
+  DBGetTables,
+  ExportDatabaseSQLWithOptions,
+  ExportQueryWithOptions,
+  ExportSchemaSQLWithOptions,
+  ExportTableWithOptions,
+  ExportTablesSQLWithOptions,
+} from '../../wailsjs/go/app/App';
 import { setCurrentLanguage } from '../i18n';
 import type { ExportProgressState } from './useExportProgressRunner';
+import type { ExportProgressLogEntry } from './useExportProgressRunner';
 
 const mockUpsertTableExportHistory = vi.fn();
 const mockRunExportWithProgress = vi.fn();
+const mockAddTab = vi.fn();
+const mockUseExportProgressRunner = vi.fn();
 const createMockStoreState = () => ({
   theme: 'light',
   connections: [
@@ -32,6 +44,7 @@ const createMockStoreState = () => ({
   ],
   tableExportHistories: {},
   upsertTableExportHistory: mockUpsertTableExportHistory,
+  addTab: mockAddTab,
 });
 const createMockProgressRunnerState = (): ExportProgressState => ({
   open: true,
@@ -58,6 +71,7 @@ const createProgressRunnerState = (
 
 let mockStoreState = createMockStoreState();
 let mockProgressRunnerState: ExportProgressState = createMockProgressRunnerState();
+let mockProgressLogs: ExportProgressLogEntry[] = [];
 
 vi.mock('antd', async () => {
   const { createElement } = await import('react');
@@ -97,19 +111,25 @@ vi.mock('../../wailsjs/go/app/App', () => ({
   DBGetColumns: vi.fn(),
   DBGetDatabases: vi.fn(),
   DBGetTables: vi.fn(),
+  ExportDatabaseSQLWithOptions: vi.fn(),
   ExportDatabasesSQLWithOptions: vi.fn(),
   ExportQueryWithOptions: vi.fn(),
+  ExportSchemaSQLWithOptions: vi.fn(),
   ExportTableWithOptions: vi.fn(),
   ExportTablesSQLWithOptions: vi.fn(),
 }));
 
 vi.mock('./useExportProgressRunner', () => ({
-  useExportProgressRunner: () => ({
-    state: mockProgressRunnerState,
-    reset: vi.fn(),
-    runExportWithProgress: mockRunExportWithProgress,
-    isRunning: ['start', 'running', 'finalizing'].includes(mockProgressRunnerState.status),
-  }),
+  useExportProgressRunner: (options: unknown) => {
+    mockUseExportProgressRunner(options);
+    return {
+      state: mockProgressRunnerState,
+      logs: mockProgressLogs,
+      reset: vi.fn(),
+      runExportWithProgress: mockRunExportWithProgress,
+      isRunning: ['start', 'running', 'finalizing'].includes(mockProgressRunnerState.status),
+    };
+  },
 }));
 
 describe('TableExportWorkbench', () => {
@@ -117,9 +137,17 @@ describe('TableExportWorkbench', () => {
     setCurrentLanguage('zh-CN');
     mockUpsertTableExportHistory.mockReset();
     mockRunExportWithProgress.mockReset();
+    mockAddTab.mockReset();
+    mockUseExportProgressRunner.mockReset();
+    mockProgressLogs = [];
     vi.mocked(DBGetColumns).mockReset();
+    vi.mocked(DBGetDatabases).mockReset();
+    vi.mocked(DBGetTables).mockReset();
+    vi.mocked(ExportDatabaseSQLWithOptions).mockReset();
     vi.mocked(ExportQueryWithOptions).mockReset();
+    vi.mocked(ExportSchemaSQLWithOptions).mockReset();
     vi.mocked(ExportTableWithOptions).mockReset();
+    vi.mocked(ExportTablesSQLWithOptions).mockReset();
     mockStoreState = createMockStoreState();
     mockProgressRunnerState = createMockProgressRunnerState();
   });
@@ -446,6 +474,441 @@ describe('TableExportWorkbench', () => {
     renderer.unmount();
   });
 
+  it('auto-starts a direct database backup inside the workbench', async () => {
+    mockProgressRunnerState = createProgressRunnerState({
+      open: false,
+      jobId: '',
+      title: '',
+      targetName: '',
+      format: '',
+      startedAt: 0,
+      finishedAt: 0,
+      status: 'idle',
+      stage: '',
+      current: 0,
+      total: 0,
+      totalRowsKnown: false,
+      filePath: '',
+      message: '',
+    });
+    vi.mocked(ExportDatabaseSQLWithOptions).mockResolvedValue({ success: true } as any);
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <TableExportWorkbench
+          tab={{
+            id: 'table-export-database-conn-1-SYS',
+            title: '备份 SYS',
+            type: 'table-export',
+            exportWorkbenchMode: 'database',
+            connectionId: 'conn-1',
+            dbName: 'SYS',
+            tableExportContentMode: 'backup',
+            tableExportIncludeDropIfExists: true,
+            tableExportRequestKey: 'database-backup-1',
+          }}
+        />,
+      );
+      await Promise.resolve();
+    });
+
+    expect(mockRunExportWithProgress).toHaveBeenCalledTimes(1);
+    const run = mockRunExportWithProgress.mock.calls[0][0].run as (jobId: string) => Promise<unknown>;
+    await run('database-job-1');
+
+    expect(ExportDatabaseSQLWithOptions).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'mysql' }),
+      'SYS',
+      true,
+      expect.objectContaining({
+        format: 'sql',
+        jobId: 'database-job-1',
+        includeDropIfExists: true,
+      }),
+    );
+
+    renderer.unmount();
+  });
+
+  it('auto-starts a direct schema export inside the workbench', async () => {
+    mockProgressRunnerState = createProgressRunnerState({
+      open: false,
+      jobId: '',
+      title: '',
+      targetName: '',
+      format: '',
+      startedAt: 0,
+      finishedAt: 0,
+      status: 'idle',
+      stage: '',
+      current: 0,
+      total: 0,
+      totalRowsKnown: false,
+      filePath: '',
+      message: '',
+    });
+    vi.mocked(ExportSchemaSQLWithOptions).mockResolvedValue({ success: true } as any);
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <TableExportWorkbench
+          tab={{
+            id: 'table-export-schema-conn-1-SYS-sales',
+            title: '导出 SYS.sales',
+            type: 'table-export',
+            exportWorkbenchMode: 'schema',
+            connectionId: 'conn-1',
+            dbName: 'SYS',
+            schemaName: 'sales',
+            tableExportContentMode: 'schema',
+            tableExportRequestKey: 'schema-export-1',
+          }}
+        />,
+      );
+      await Promise.resolve();
+    });
+
+    expect(mockRunExportWithProgress).toHaveBeenCalledTimes(1);
+    const run = mockRunExportWithProgress.mock.calls[0][0].run as (jobId: string) => Promise<unknown>;
+    await run('schema-job-1');
+
+    expect(ExportSchemaSQLWithOptions).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'mysql', database: 'SYS' }),
+      'SYS',
+      'sales',
+      false,
+      expect.objectContaining({
+        format: 'sql',
+        jobId: 'schema-job-1',
+        includeDropIfExists: false,
+      }),
+    );
+
+    renderer.unmount();
+  });
+
+  it('auto-starts a preselected batch object backup inside the workbench', async () => {
+    mockProgressRunnerState = createProgressRunnerState({
+      open: false,
+      jobId: '',
+      title: '',
+      targetName: '',
+      format: '',
+      startedAt: 0,
+      finishedAt: 0,
+      status: 'idle',
+      stage: '',
+      current: 0,
+      total: 0,
+      totalRowsKnown: false,
+      filePath: '',
+      message: '',
+    });
+    vi.mocked(DBGetDatabases).mockResolvedValue({ success: true, data: [{ Database: 'SYS' }] } as any);
+    vi.mocked(DBGetTables).mockResolvedValue({ success: true, data: [{ name: 'users' }, { name: 'orders' }] } as any);
+    vi.mocked(ExportTablesSQLWithOptions).mockResolvedValue({ success: true } as any);
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <TableExportWorkbench
+          tab={{
+            id: 'table-export-batch-tables-conn-1-SYS',
+            title: '备份已选对象',
+            type: 'table-export',
+            exportWorkbenchMode: 'batch-tables',
+            connectionId: 'conn-1',
+            dbName: 'SYS',
+            tableExportInitialObjectNames: ['users', 'orders'],
+            tableExportContentMode: 'backup',
+            tableExportRequestKey: 'batch-objects-1',
+          }}
+        />,
+      );
+      await Promise.resolve();
+    });
+
+    expect(mockRunExportWithProgress).toHaveBeenCalledTimes(1);
+    const run = mockRunExportWithProgress.mock.calls[0][0].run as (jobId: string) => Promise<unknown>;
+    await run('batch-objects-job-1');
+
+    expect(ExportTablesSQLWithOptions).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'mysql' }),
+      'SYS',
+      ['users', 'orders'],
+      true,
+      true,
+      expect.objectContaining({ jobId: 'batch-objects-job-1' }),
+    );
+
+    renderer.unmount();
+  });
+
+  it('reuses a stable task key and applies merged launch options before restarting', async () => {
+    mockProgressRunnerState = createProgressRunnerState({
+      open: false,
+      jobId: '',
+      title: '',
+      targetName: '',
+      format: '',
+      startedAt: 0,
+      finishedAt: 0,
+      status: 'idle',
+      stage: '',
+      current: 0,
+      total: 0,
+      totalRowsKnown: false,
+      filePath: '',
+      message: '',
+    });
+    vi.mocked(DBGetDatabases).mockResolvedValue({
+      success: true,
+      data: [{ Database: 'SYS' }, { Database: 'audit' }],
+    } as any);
+
+    const buildTab = (requestKey: string, database: string, contentMode: 'schema' | 'backup', includeDropIfExists: boolean) => ({
+      id: 'table-export-batch-databases-conn-1',
+      title: '批量导出库',
+      type: 'table-export' as const,
+      exportWorkbenchMode: 'batch-databases' as const,
+      connectionId: 'conn-1',
+      tableExportInitialDatabaseNames: [database],
+      tableExportContentMode: contentMode,
+      tableExportIncludeDropIfExists: includeDropIfExists,
+      tableExportRequestKey: requestKey,
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<TableExportWorkbench tab={buildTab('request-1', 'SYS', 'schema', false)} />);
+      await Promise.resolve();
+    });
+    expect(mockRunExportWithProgress).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      renderer.update(<TableExportWorkbench tab={buildTab('request-2', 'audit', 'backup', true)} />);
+      await Promise.resolve();
+    });
+
+    expect(mockUseExportProgressRunner).toHaveBeenCalledWith({
+      taskKey: 'table-export-batch-databases-conn-1',
+      requestKey: 'request-2',
+    });
+    expect(mockRunExportWithProgress).toHaveBeenCalledTimes(2);
+    const secondRun = mockRunExportWithProgress.mock.calls[1][0].run as (jobId: string) => Promise<unknown>;
+    await secondRun('batch-databases-job-2');
+
+    const { ExportDatabasesSQLWithOptions } = await import('../../wailsjs/go/app/App');
+    expect(ExportDatabasesSQLWithOptions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'mysql' }),
+      ['audit'],
+      true,
+      expect.objectContaining({ includeDropIfExists: true }),
+    );
+
+    renderer.unmount();
+  });
+
+  it('renders retained task logs in the current task panel', () => {
+    mockProgressLogs = [
+      {
+        sequence: 1,
+        timestamp: 1_000,
+        jobId: 'job-1',
+        source: 'client',
+        status: 'start',
+        stage: '等待选择导出文件',
+        current: 0,
+        total: 0,
+        totalRowsKnown: false,
+        filePath: '',
+        message: '',
+      },
+      {
+        sequence: 2,
+        timestamp: 2_000,
+        jobId: 'job-1',
+        source: 'backend',
+        status: 'running',
+        stage: '正在导出 users (1/2)',
+        current: 1,
+        total: 2,
+        totalRowsKnown: true,
+        filePath: '/tmp/app_backup.sql',
+        message: '',
+      },
+    ];
+
+    const markup = renderToStaticMarkup(
+      <TableExportWorkbench
+        tab={{
+          id: 'table-export-database-conn-1-SYS',
+          title: '备份 SYS',
+          type: 'table-export',
+          exportWorkbenchMode: 'database',
+          connectionId: 'conn-1',
+          dbName: 'SYS',
+          tableExportContentMode: 'backup',
+        }}
+      />,
+    );
+
+    expect(markup).toContain('data-export-workbench-logs="true"');
+    expect(markup).toContain('等待选择导出文件');
+    expect(markup).toContain('正在导出 users (1/2)');
+  });
+
+  it('opens a completed SQL backup in the restore workbench without auto-running it', async () => {
+    mockProgressRunnerState = createProgressRunnerState({
+      open: true,
+      jobId: 'database-backup-job-1',
+      title: '备份 SYS',
+      targetName: 'SYS',
+      format: 'SQL',
+      startedAt: 1_000,
+      finishedAt: 3_000,
+      status: 'done',
+      stage: '导出完成',
+      current: 2,
+      total: 2,
+      totalRowsKnown: true,
+      filePath: '/tmp/SYS_backup.sql',
+      message: '',
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <TableExportWorkbench
+          tab={{
+            id: 'table-export-database-conn-1-SYS',
+            title: '备份 SYS',
+            type: 'table-export',
+            exportWorkbenchMode: 'database',
+            connectionId: 'conn-1',
+            dbName: 'SYS',
+            tableExportContentMode: 'backup',
+          }}
+        />,
+      );
+    });
+
+    const restoreButton = renderer.root.findAllByType(Button).find((node) => (
+      node.props['data-export-restore-backup'] === true
+    ));
+    expect(restoreButton).toBeDefined();
+    await act(async () => {
+      restoreButton?.props.onClick();
+    });
+
+    expect(mockAddTab).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'sql-file-execution-conn-1-SYS-/tmp/SYS_backup.sql',
+      type: 'sql-file-execution',
+      connectionId: 'conn-1',
+      dbName: 'SYS',
+      filePath: '/tmp/SYS_backup.sql',
+    }));
+    expect(mockAddTab.mock.calls[0][0]).not.toHaveProperty('sqlFileExecutionRequestKey');
+
+    renderer.unmount();
+  });
+
+  it('keeps completed SQL backups restorable from task history', async () => {
+    mockProgressRunnerState = createProgressRunnerState({
+      open: false,
+      jobId: '',
+      status: 'idle',
+      filePath: '',
+    });
+    (mockStoreState as any).tableExportHistories = {
+      'conn-1::SYS::__database__': [{
+        jobId: 'historical-backup-1',
+        targetName: 'SYS',
+        startedAt: 1_000,
+        finishedAt: 3_000,
+        format: 'SQL',
+        scope: 'selectedDatabases',
+        scopeLabel: 'SYS',
+        strategyLabel: '备份',
+        status: 'done',
+        stage: '导出完成',
+        current: 2,
+        total: 2,
+        totalRowsKnown: true,
+        filePath: '/tmp/SYS_history_backup.sql',
+        message: '',
+      }],
+    };
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <TableExportWorkbench
+          tab={{
+            id: 'table-export-database-conn-1-SYS',
+            title: '备份 SYS',
+            type: 'table-export',
+            exportWorkbenchMode: 'database',
+            connectionId: 'conn-1',
+            dbName: 'SYS',
+            tableExportContentMode: 'backup',
+          }}
+        />,
+      );
+    });
+
+    const restoreButton = renderer.root.findAllByType(Button).find((node) => (
+      node.props['data-export-history-restore'] === 'historical-backup-1'
+    ));
+    expect(restoreButton).toBeDefined();
+    await act(async () => {
+      restoreButton?.props.onClick();
+    });
+    expect(mockAddTab).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'sql-file-execution',
+      connectionId: 'conn-1',
+      dbName: 'SYS',
+      filePath: '/tmp/SYS_history_backup.sql',
+    }));
+    expect(mockAddTab.mock.calls[0][0]).not.toHaveProperty('sqlFileExecutionRequestKey');
+
+    renderer.unmount();
+  });
+
+  it('does not persist a task before the backend has reached a terminal state', async () => {
+    mockProgressRunnerState = createProgressRunnerState({
+      open: true,
+      jobId: 'pending-file-selection',
+      startedAt: 0,
+      finishedAt: 0,
+      status: 'start',
+      stage: '等待选择导出文件',
+      filePath: '',
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <TableExportWorkbench
+          tab={{
+            id: 'table-export-database-conn-1-SYS',
+            title: '备份 SYS',
+            type: 'table-export',
+            exportWorkbenchMode: 'database',
+            connectionId: 'conn-1',
+            dbName: 'SYS',
+            tableExportContentMode: 'backup',
+          }}
+        />,
+      );
+    });
+
+    expect(mockUpsertTableExportHistory).not.toHaveBeenCalled();
+    renderer.unmount();
+  });
+
   it('offers DROP IF EXISTS only for SQL exports that include schema', () => {
     const source = readFileSync(new URL('./TableExportWorkbench.tsx', import.meta.url), 'utf8');
 
@@ -457,6 +920,12 @@ describe('TableExportWorkbench', () => {
     expect(source).toContain('includeDropIfExists: includeSchema && includeDropIfExists');
     expect(source).toContain("t('data_export.sql_options.drop_if_exists.label')");
     expect(source).toContain("t('data_export.sql_options.drop_if_exists.description')");
+    expect(source).toContain("pointerEvents: isRunning ? 'none' : 'auto'");
+    expect(source).toContain('aria-disabled={isRunning}');
+    expect(source.match(/disabled=\{isRunning\}/g)?.length || 0).toBeGreaterThanOrEqual(10);
+    expect(source).toContain('disabled={isRunning || !selectedDbName}');
+    expect(source).toContain('disabled={isRunning || availableObjects.length === 0}');
+    expect(source).toContain('disabled={isRunning || availableDatabases.length === 0}');
   });
 
   it('prefers backend startedAt over a placeholder history timestamp for the same job', () => {
@@ -493,5 +962,23 @@ describe('TableExportWorkbench', () => {
 
     expect(entry.startedAt).toBe(8_000);
     expect(entry.filePath).toBe('/Users/yangguofeng/Desktop/SYS.test.xlsx');
+  });
+
+  it('keeps task log and backup restore labels available across locales', () => {
+    const locales = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'] as const;
+    const keys = [
+      'data_export.action.restore_backup',
+      'data_export.label.schema',
+      'data_export.workbench.section.logs',
+    ] as const;
+
+    locales.forEach((locale) => {
+      const catalog = JSON.parse(
+        readFileSync(new URL(`../../../shared/i18n/${locale}.json`, import.meta.url), 'utf8'),
+      ) as Record<string, string>;
+      keys.forEach((key) => {
+        expect(catalog[key], `${locale}:${key}`).toBeTruthy();
+      });
+    });
   });
 });

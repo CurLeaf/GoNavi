@@ -421,6 +421,7 @@ export interface TriggerDefinition {
 }
 
 export type TableExportScope = "selected" | "page" | "all" | "filteredAll";
+export type TableExportContentMode = "schema" | "dataOnly" | "backup";
 
 export interface TableExportScopeOption {
   value: TableExportScope;
@@ -462,6 +463,7 @@ export interface TabData {
     | "query"
     | "table"
     | "design"
+    | "data-sync"
     | "sql-file-execution"
     | "sql-analysis"
     | "sql-audit"
@@ -510,11 +512,17 @@ export interface TabData {
   sidebarLocateKey?: string; // Precise sidebar tree key for locating an object node
   savedQueryId?: string; // Saved query identity for quick-save behavior
   objectType?: 'table' | 'view' | 'materialized-view'; // Table-like object type for shared viewers
-  exportWorkbenchMode?: 'single' | 'batch-tables' | 'batch-databases';
+  exportWorkbenchMode?: 'single' | 'batch-tables' | 'batch-databases' | 'database' | 'schema';
+  dataSyncEntryMode?: 'sync' | 'schemaCompare' | 'dataCompare';
   tableExportScopeOptions?: TableExportScopeOption[];
   tableExportInitialScope?: TableExportScope;
   tableExportQueryByScope?: Partial<Record<TableExportScope, string>>;
   tableExportRowCountByScope?: Partial<Record<TableExportScope, number>>;
+  tableExportInitialObjectNames?: string[];
+  tableExportInitialDatabaseNames?: string[];
+  tableExportContentMode?: TableExportContentMode;
+  tableExportIncludeDropIfExists?: boolean;
+  tableExportRequestKey?: string;
   sqlFileExecutionRequestKey?: string;
   sqlFileExecutionFileSizeMB?: string;
   sqlAnalysisView?: "diagnose" | "slow-query";

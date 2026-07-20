@@ -46,6 +46,18 @@ const getGlobalShortcutCaseBlock = (action: string) => {
 };
 
 describe('settings center tool entries', () => {
+  it('opens data workflows as stable workspace tabs instead of settings-center modals', () => {
+    expect(appSource).toContain("import { buildDataSyncWorkbenchTab } from './utils/dataSyncTab';");
+    expect(appSource).toContain('const handleOpenDataSyncWorkbench = useCallback((entryMode: DataSyncEntryMode) => {');
+    expect(appSource).toContain('addTab(buildDataSyncWorkbenchTab({ entryMode }));');
+    expect(appSource).toContain("handleOpenDataSyncWorkbench('schemaCompare');");
+    expect(appSource).toContain("handleOpenDataSyncWorkbench('dataCompare');");
+    expect(appSource).toContain("handleOpenDataSyncWorkbench('sync');");
+    expect(appSource).not.toContain("import DataSyncModal from './components/DataSyncModal';");
+    expect(appSource).not.toContain('isSyncModalOpen');
+    expect(appSource).not.toContain('syncModalEntryMode');
+  });
+
   it('exposes snippet management next to shortcut management', () => {
     expect(appSource).toContain("key: 'snippet-settings'");
     expect(appSource).toContain("title: t('app.tools.entry.snippets.title')");
@@ -148,10 +160,6 @@ describe('settings center tool entries', () => {
     );
     const securityUpdateSource = renderPaneSource.slice(
       renderPaneSource.indexOf("if (activeSettingsCenterPane.key === 'security-update')"),
-      renderPaneSource.indexOf("activeSettingsCenterPane.key === 'schema-compare'"),
-    );
-    const dataSyncSource = renderPaneSource.slice(
-      renderPaneSource.indexOf("activeSettingsCenterPane.key === 'schema-compare'"),
       renderPaneSource.indexOf("if (activeSettingsCenterPane.key === 'drivers')"),
     );
     const driverSource = renderPaneSource.slice(
@@ -175,8 +183,7 @@ describe('settings center tool entries', () => {
     expect(dataRootSource).not.toContain('renderUtilityModalTitle');
     expect(securityUpdateSource).toContain('<SecurityUpdateSettingsModal');
     expect(securityUpdateSource).not.toContain('renderUtilityModalTitle');
-    expect(dataSyncSource).toContain('<DataSyncModal');
-    expect(dataSyncSource).not.toContain('renderUtilityModalTitle');
+    expect(renderPaneSource).not.toContain('<DataSyncModal');
     expect(driverSource).toContain('<DriverManagerModal');
     expect(driverSource).not.toContain('renderUtilityModalTitle');
     expect(snippetSource).toContain('<SnippetSettingsModal');
@@ -323,7 +330,7 @@ describe('settings center tool entries', () => {
     expect(v2ThemeCss).toMatch(/body\[data-ui-version="v2"\]\s+\.gn-v2-app-sider\s*\{[^}]*min-width:\s*232px\s*!important;[^}]*max-width:\s*min\(960px,\s*calc\(100vw - 360px\)\)\s*!important;/s);
   });
 
-  it('keeps connection modal warm-mounted while leaving the other heavyweight modals conditional', () => {
+  it('keeps connection modal warm-mounted while leaving the remaining heavyweight modals conditional', () => {
     expect(appSource).toContain('const [isConnectionModalMounted, setIsConnectionModalMounted] = useState(false);');
     expect(appSource).toContain('{isConnectionModalMounted && (');
     expect(appSource).toContain('{isSettingsModalOpen && (');
@@ -332,7 +339,7 @@ describe('settings center tool entries', () => {
     expect(appSource).not.toContain('{isShortcutModalOpen && (');
     expect(appSource).not.toContain('{isAISettingsOpen && (');
     expect(appSource).toContain('{isDriverModalOpen && (');
-    expect(appSource).toContain('{isSyncModalOpen && (');
+    expect(appSource).not.toContain('{isSyncModalOpen && (');
   });
 
   it('loads editable connection details before opening the edit modal so stored secrets can be shown', () => {

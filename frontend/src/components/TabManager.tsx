@@ -50,6 +50,7 @@ const getTabKindLabel = (tab: TabData): string => {
   if (tab.type === 'design') return t('tab_manager.kind_badge.design');
   if (tab.type === 'table-overview') return t('tab_manager.kind_badge.table_overview');
   if (tab.type === 'table-export') return t('tab_manager.kind_badge.table_export');
+  if (tab.type === 'data-sync') return t('app.tools.entry.sync.title');
   if (tab.type === 'sql-file-execution') return t('sidebar.sql_file_exec.title');
   if (tab.type === 'sql-analysis') return t('tab_manager.kind_badge.sql_analysis');
   if (tab.type === 'sql-audit') return t('tab_manager.kind_badge.sql_audit');
@@ -67,6 +68,10 @@ const getTabKindLabel = (tab: TabData): string => {
   if (tab.type === 'package-def') return t('tab_manager.kind_badge.package');
   return t('tab_manager.kind_badge.fallback');
 };
+
+export const isBackgroundTaskWorkbenchTab = (tab: Pick<TabData, 'type'>): boolean => (
+  tab.type === 'table-export' || tab.type === 'data-sync'
+);
 
 export const TAB_WORKBENCH_CLASS_NAME = 'tab-workbench';
 
@@ -186,6 +191,7 @@ const getTabKindTooltipLabel = (tab: TabData): string => {
   if (tab.type === 'design') return t('tab_manager.hover.kind.design');
   if (tab.type === 'table-overview') return t('tab_manager.hover.kind.table_overview');
   if (tab.type === 'table-export') return t('tab_manager.hover.kind.table_export');
+  if (tab.type === 'data-sync') return t('app.tools.entry.sync.title');
   if (tab.type === 'sql-file-execution') return t('sidebar.sql_file_exec.title');
   if (tab.type === 'sql-analysis') return t('tab_manager.hover.kind.sql_analysis');
   if (tab.type === 'sql-audit') return t('tab_manager.hover.kind.sql_audit');
@@ -633,10 +639,15 @@ const TabManager: React.FC = React.memo(() => {
   const hasTabs = tabs.length > 0;
   const hasDockedTabs = dockedTabs.length > 0;
   const detachTabToWindow = useCallback((tabId: string, preferred?: { x?: number; y?: number; width?: number; height?: number }) => {
+    const tab = tabs.find((item) => item.id === tabId);
+    if (tab && isBackgroundTaskWorkbenchTab(tab)) {
+      void message.warning(t('tab_manager.message.background_task_window_unavailable'));
+      return;
+    }
     void openNativeWorkbenchTabWindow(tabId, preferred).catch((error) => {
       message.error(error instanceof Error ? error.message : String(error));
     });
-  }, []);
+  }, [tabs]);
   const dockedActiveTabId = useMemo(() => {
     if (activeTabId && dockedTabs.some((tab) => tab.id === activeTabId)) {
       return activeTabId;
@@ -1044,6 +1055,7 @@ const TabManager: React.FC = React.memo(() => {
       {
         key: 'open-in-window',
         label: t('tab_manager.menu.open_in_window'),
+        disabled: isBackgroundTaskWorkbenchTab(tab),
         onClick: () => detachTabToWindow(tab.id),
       },
       { type: 'divider' },

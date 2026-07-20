@@ -24,23 +24,18 @@ const placeholders = (value: string): string[] => [...value.matchAll(/\{\{(\w+)\
   .sort();
 
 describe('Sidebar tables export feedback i18n', () => {
-  it('localizes handleExportTablesSQL validation, loading, success, and failure wrappers', () => {
+  it('validates the selection and routes selected tables into the background workbench', () => {
     const block = extractHandleExportTablesBlock();
 
-    expect(block).not.toContain("message.error('请在同一连接、同一数据库下选择多张表进行导出')");
-    expect(block).not.toContain('`正在备份选中表 (${tableNames.length})...`');
-    expect(block).not.toContain('`正在导出选中表结构 (${tableNames.length})...`');
-    expect(block).not.toContain("message.success('导出成功')");
-    expect(block).not.toContain("'导出失败: ' + res.message");
-    expect(block).not.toContain("'导出失败: ' + (e?.message || String(e))");
     expect(block).toContain("t('sidebar.message.export_tables_same_database_required')");
-    expect(block).toContain("t('sidebar.message.backing_up_selected_tables'");
-    expect(block).toContain("t('sidebar.message.exporting_selected_table_schema'");
-    expect(block).toContain("t('sidebar.message.export_success')");
-    expect(block).toContain("t('sidebar.message.export_failed'");
-    expect(block).toContain('count: tableNames.length');
-    expect(block).toContain('error: res.message');
-    expect(block).toContain('error: e?.message || String(e)');
+    expect(block).toContain('showSQLExportOptionsDialog()');
+    expect(block).toContain('addTab(buildBatchTableExportWorkbenchTab({');
+    expect(block).toContain('initialObjectNames: tableNames');
+    expect(block).toContain("contentMode: includeData ? 'backup' : 'schema'");
+    expect(block).toContain('includeDropIfExists: exportOptions.includeDropIfExists');
+    expect(block).toContain("requestKey: createTableExportRequestKey('tables')");
+    expect(block).not.toContain('ExportTablesSQLWithOptions(');
+    expect(block).not.toContain('message.loading(');
   });
 
   it('keeps tables export feedback keys available with stable placeholders', () => {

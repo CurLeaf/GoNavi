@@ -247,7 +247,7 @@ const MIN_KEEPALIVE_INTERVAL_MINUTES = 1;
 const MAX_KEEPALIVE_INTERVAL_MINUTES = 1440;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
-const PERSIST_VERSION = 16;
+const PERSIST_VERSION = 17;
 const UI_VERSION_V2_MIGRATION_VERSION = 14;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
 const PERSIST_WRITE_DEBOUNCE_MS = 160;
@@ -2449,6 +2449,7 @@ const sanitizeTableExportHistories = (
     const sanitizedHistory = (history as unknown[])
       .map((entry) => sanitizeTableExportHistoryEntry(entry))
       .filter((entry): entry is TableExportHistoryEntry => !!entry)
+      .filter((entry) => entry.status === "done" || entry.status === "error")
       .filter((entry) => {
         if (seenJobIds.has(entry.jobId)) {
           return false;
@@ -4947,7 +4948,11 @@ export const useStore = create<AppState>()(
         set((state) => {
           const safeHistoryKey = toTrimmedString(historyKey);
           const safeEntry = sanitizeTableExportHistoryEntry(entry);
-          if (!safeHistoryKey || !safeEntry) {
+          if (
+            !safeHistoryKey
+            || !safeEntry
+            || (safeEntry.status !== "done" && safeEntry.status !== "error")
+          ) {
             return state;
           }
           const existingEntries = state.tableExportHistories[safeHistoryKey] || [];
