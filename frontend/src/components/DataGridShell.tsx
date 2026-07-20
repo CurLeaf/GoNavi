@@ -111,6 +111,7 @@ const DataGridShell: React.FC<DataGridShellProps> = (props) => {
     dataContextValue,
     dataEditAutoCommitDelayMs,
     dataEditCommitMode,
+    deleteTargetRowCount,
     dataPanelDirtyRef,
     dataPanelIsJson,
     dataPanelOpen,
@@ -508,6 +509,7 @@ const renderDataTableView = () => (
 
   const handleRefreshGrid = useCallback(() => {
       setSelectedRowKeys([]);
+      resetCellSelection();
       const normalizedTableName = String(tableName || '').trim();
       const normalizedDbName = String(dbName || '').trim();
       if (connectionId && normalizedTableName) {
@@ -518,7 +520,7 @@ const renderDataTableView = () => (
           setMetadataReloadVersion((value: number) => value + 1);
       }
       if (onReload) onReload();
-  }, [connectionId, dbName, onReload, tableName]);
+  }, [connectionId, dbName, onReload, resetCellSelection, tableName]);
 
   const handleResetPendingChanges = useCallback(() => {
       clearAutoCommitTimer();
@@ -588,6 +590,7 @@ const renderDataTableView = () => (
             onToggleFilter={onToggleFilter}
             canModifyData={canModifyData}
             selectedRowKeysLength={selectedRowKeys.length}
+            deleteTargetRowCount={deleteTargetRowCount}
             allSelectedAreDeleted={allSelectedAreDeleted}
             cellEditMode={cellEditMode}
             selectedCellsSize={selectedCells.size}

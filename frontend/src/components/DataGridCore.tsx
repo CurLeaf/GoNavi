@@ -241,6 +241,15 @@ const splitCellKey = (cellKey: string): { rowKey: string; colName: string } | nu
         colName: cellKey.slice(sepIndex + CELL_KEY_SEP.length),
     };
 };
+const collectDataGridCellSelectionRowKeys = (cellKeys: Iterable<string>): string[] => {
+    const rowKeys = new Set<string>();
+    for (const cellKey of cellKeys) {
+        const parsed = splitCellKey(cellKey);
+        if (!parsed || !parsed.rowKey) continue;
+        rowKeys.add(parsed.rowKey);
+    }
+    return Array.from(rowKeys);
+};
 export const resolveContextMenuFieldName = (dataIndex: string, title?: string): string => {
     const name = String(dataIndex || title || '').trim();
     return name;
@@ -1661,6 +1670,7 @@ export {
     useDataGridI18nLanguage,
     makeCellKey,
     splitCellKey,
+    collectDataGridCellSelectionRowKeys,
     trimSimpleCache,
     looksLikeDateTimeText,
     normalizeDateTimeString,

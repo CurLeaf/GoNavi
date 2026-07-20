@@ -1299,7 +1299,7 @@ describe('DataGrid layout', () => {
       expect(toolbarFrameSource).toContain(`translate('${key}`);
     });
     [
-      /translate\('data_grid\.toolbar\.selected_count', \{ count: selectedRowKeysLength \}\)/,
+      /translate\('data_grid\.toolbar\.selected_count', \{ count: deleteTargetRowCount \}\)/,
       /translate\('data_grid\.toolbar\.copy_selection', \{ count: selectedCellsSize \}\)/,
       /translate\('data_grid\.toolbar\.copy_selection_columns', \{ count: selectedCellsSize \}\)/,
       /translate\('data_grid\.toolbar\.batch_fill', \{ count: selectedCellsSize \}\)/,

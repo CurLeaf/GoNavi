@@ -43,6 +43,7 @@ type DataGridBatchActionsContext = Record<string, any> & {
   >;
   setModifiedRows: React.Dispatch<React.SetStateAction<Record<string, any>>>;
   setSelectedCells: React.Dispatch<React.SetStateAction<Set<string>>>;
+  markCellSelectionDeleteEligible: (eligible: boolean) => void;
   rowKeyStr: (key: React.Key) => string;
   makeCellKey: (rowKey: string, colName: string) => string;
   splitCellKey: (cellKey: string) => { rowKey: string; colName: string } | null;
@@ -93,6 +94,7 @@ export const useDataGridBatchActions = (ctx: DataGridBatchActionsContext) => {
     setCopiedCellPatch,
     setModifiedRows,
     setSelectedCells,
+    markCellSelectionDeleteEligible,
     splitCellKey,
     suppressCellSelectionClickRef,
     translateDataGrid,
@@ -188,6 +190,7 @@ const handleBatchFillCells = useCallback(() => {
 
     // 清除选中状态
     setSelectedCells(new Set());
+    markCellSelectionDeleteEligible(false);
     currentSelectionRef.current = new Set();
     selectionStartRef.current = null;
     isDraggingRef.current = false;
@@ -197,7 +200,7 @@ const handleBatchFillCells = useCallback(() => {
       cellSelectionAutoScrollRafRef.current = null;
     }
     updateCellSelection(new Set());
-  }, [batchEditValue, batchEditSetNull, addedRows, modifiedRows, rowKeyStr, updateCellSelection, closeBatchEditModal, translateDataGrid]);
+  }, [batchEditValue, batchEditSetNull, addedRows, modifiedRows, rowKeyStr, updateCellSelection, closeBatchEditModal, markCellSelectionDeleteEligible, translateDataGrid]);
 
   // 事件委托：在容器级别处理单元格拖选；未开启模式时，拖拽超过阈值会自动进入单元格编辑模式。
   useEffect(() => {
@@ -443,6 +446,7 @@ const handleBatchFillCells = useCallback(() => {
 
       if (currentSelectionRef.current.size > 0) {
         setSelectedCells(new Set(currentSelectionRef.current));
+        markCellSelectionDeleteEligible(true);
       }
     };
 
@@ -489,7 +493,7 @@ const handleBatchFillCells = useCallback(() => {
       cellSelectionPointerRef.current = null;
       isDraggingRef.current = false;
     };
-  }, [canModifyData, isTableSurfaceActive, displayColumnNames, columnIndexMap, effectiveEditLocator, updateCellSelection]);
+  }, [canModifyData, isTableSurfaceActive, displayColumnNames, columnIndexMap, effectiveEditLocator, markCellSelectionDeleteEligible, updateCellSelection]);
 
   const handleCopySelectedColumnsFromRow = useCallback(() => {
     const activeSelection = currentSelectionRef.current.size > 0 ? currentSelectionRef.current : selectedCells;

@@ -6,10 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DataGrid, {
   attachDataGridVirtualEditRenderVersion,
   buildDataGridCommitChangeSet,
+  collectDataGridCellSelectionRowKeys,
   GONAVI_ROW_KEY,
   hasDataGridVirtualEditRenderVersionChanged,
 } from './DataGrid';
 import { resetDataGridDdlViewSharedStateForTests } from './useDataGridDdlView';
+import DataGridPageFind from './DataGridPageFind';
 import DataGridToolbarFrame from './DataGridToolbarFrame';
 import { V2CellContextMenuView, V2ColumnHeaderContextMenuView, V2TableGroupContextMenuView } from './V2TableContextMenu';
 import { setCurrentLanguage, t } from '../i18n';
@@ -511,6 +513,21 @@ const rowKeyToString = (key: any) => String(key);
 const commitColumnGuard = (columnName: string) => (
   columnName !== GONAVI_ROW_KEY && columnName !== ORACLE_ROWID_LOCATOR_COLUMN
 );
+
+describe('DataGrid cell selection row keys', () => {
+  it('deduplicates every record covered by a rectangular cell selection', () => {
+    const cellKeys = Array.from({ length: 6 }, (_, rowIndex) => (
+      ['id', 'user_id', 'app_key'].map((columnName) => `row-${rowIndex + 1}\u0001${columnName}`)
+    )).flat();
+
+    expect(collectDataGridCellSelectionRowKeys([
+      ...cellKeys,
+      'row-3\u0001id',
+      'malformed-cell-key',
+      '\u0001empty-row-key',
+    ])).toEqual(['row-1', 'row-2', 'row-3', 'row-4', 'row-5', 'row-6']);
+  });
+});
 
 describe('DataGrid commit change set', () => {
   it('uses unique locator values instead of falling back to the whole row', () => {
@@ -1133,6 +1150,250 @@ describe('DataGrid DDL interactions', () => {
     expect(event.stopPropagation).toHaveBeenCalledOnce();
     expect(toolbar.props.cellEditMode).toBe(true);
     expect(toolbar.props.selectedCellsSize).toBe(2);
+    renderer!.unmount();
+  });
+
+  it('deletes every record represented by a cell-only column selection', async () => {
+    messageApi.info.mockResolvedValue(undefined);
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', id: 1, name: 'Ada' },
+            { __gonavi_row_key__: 'row-2', id: 2, name: 'Linus' },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      renderer!.root.findByType(DataGridToolbarFrame).props.onToggleCellEditMode();
+    });
+    await waitForEffects();
+
+    const nameColumn = testRenderState.latestColumns.find((column) => column.key === 'name');
+    expect(nameColumn?.editable).toBe(true);
+    const headerProps = nameColumn.onHeaderCell(nameColumn);
+    await act(async () => {
+      headerProps.onClickCapture({
+        target: { closest: vi.fn(() => null) },
+        currentTarget: { querySelector: vi.fn(() => null) },
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    let toolbar = renderer!.root.findByType(DataGridToolbarFrame);
+    expect(toolbar.props.selectedRowKeysLength).toBe(0);
+    expect(toolbar.props.selectedCellsSize).toBe(2);
+    expect(toolbar.props.deleteTargetRowCount).toBe(2);
+    expect(findButton(renderer!, t('data_grid.toolbar.delete_selected')).props.disabled).toBeFalsy();
+
+    await act(async () => {
+      toolbar.props.onRefresh();
+    });
+    await waitForEffects();
+
+    toolbar = renderer!.root.findByType(DataGridToolbarFrame);
+    expect(toolbar.props.selectedCellsSize).toBe(0);
+    expect(toolbar.props.deleteTargetRowCount).toBe(0);
+    expect(findButton(renderer!, t('data_grid.toolbar.delete_selected')).props.disabled).toBe(true);
+
+    await act(async () => {
+      headerProps.onClickCapture({
+        target: { closest: vi.fn(() => null) },
+        currentTarget: { querySelector: vi.fn(() => null) },
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    await act(async () => {
+      findButton(renderer!, t('data_grid.toolbar.delete_selected')).props.onClick();
+    });
+    await waitForEffects();
+
+    toolbar = renderer!.root.findByType(DataGridToolbarFrame);
+    expect(toolbar.props.pendingChangeCount).toBe(2);
+    expect(toolbar.props.selectedCellsSize).toBe(0);
+    expect(toolbar.props.deleteTargetRowCount).toBe(0);
+    expect(findButton(renderer!, t('data_grid.toolbar.delete_selected')).props.disabled).toBe(true);
+    expect(
+      testRenderState.latestTableProps.dataSource.map((row: Record<string, unknown>) => (
+        testRenderState.latestTableProps.rowClassName(row)
+      )),
+    ).toEqual(['row-deleted', 'row-deleted']);
+    renderer!.unmount();
+  });
+
+  it('does not treat page-find highlighting as a deletable cell selection', async () => {
+    messageApi.info.mockResolvedValue(undefined);
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', id: 1, name: 'Ada' },
+            { __gonavi_row_key__: 'row-2', id: 2, name: 'Linus' },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      renderer!.root.findByType(DataGridToolbarFrame).props.onToggleCellEditMode();
+    });
+    await act(async () => {
+      renderer!.root.findByType(DataGridPageFind).props.onPageFindTextChange('Ada');
+    });
+    await waitForEffects();
+
+    const pageFind = renderer!.root.findByType(DataGridPageFind);
+    expect(pageFind.props.matchCount).toBeGreaterThan(0);
+    await act(async () => {
+      pageFind.props.onNavigateNext();
+    });
+    await waitForEffects();
+
+    const toolbar = renderer!.root.findByType(DataGridToolbarFrame);
+    expect(toolbar.props.cellEditMode).toBe(true);
+    expect(toolbar.props.selectedCellsSize).toBe(1);
+    expect(toolbar.props.deleteTargetRowCount).toBe(0);
+    expect(findButton(renderer!, t('data_grid.toolbar.delete_selected')).props.disabled).toBe(true);
+    renderer!.unmount();
+  });
+
+  it('keeps checkbox-selected rows as the delete target when a cell selection also exists', async () => {
+    messageApi.info.mockResolvedValue(undefined);
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', id: 1, name: 'Ada' },
+            { __gonavi_row_key__: 'row-2', id: 2, name: 'Linus' },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      renderer!.root.findByType(DataGridToolbarFrame).props.onToggleCellEditMode();
+    });
+    const nameColumn = testRenderState.latestColumns.find((column) => column.key === 'name');
+    const headerProps = nameColumn.onHeaderCell(nameColumn);
+    await act(async () => {
+      headerProps.onClickCapture({
+        target: { closest: vi.fn(() => null) },
+        currentTarget: { querySelector: vi.fn(() => null) },
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+      testRenderState.latestTableProps.rowSelection.onChange(['row-1']);
+    });
+    await waitForEffects();
+
+    let toolbar = renderer!.root.findByType(DataGridToolbarFrame);
+    expect(toolbar.props.selectedCellsSize).toBe(2);
+    expect(toolbar.props.selectedRowKeysLength).toBe(1);
+    expect(toolbar.props.deleteTargetRowCount).toBe(1);
+
+    await act(async () => {
+      toolbar.props.onDeleteSelected();
+    });
+    await waitForEffects();
+
+    toolbar = renderer!.root.findByType(DataGridToolbarFrame);
+    expect(toolbar.props.pendingChangeCount).toBe(1);
+    expect(toolbar.props.selectedCellsSize).toBe(0);
+    expect(
+      testRenderState.latestTableProps.dataSource.map((row: Record<string, unknown>) => (
+        testRenderState.latestTableProps.rowClassName(row)
+      )),
+    ).toEqual(['row-deleted', '']);
+    renderer!.unmount();
+  });
+
+  it('removes a newly added record selected only through its cells without leaving a pending delete', async () => {
+    messageApi.info.mockResolvedValue(undefined);
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      renderer!.root.findByType(DataGridToolbarFrame).props.onAddRow();
+    });
+    await waitForEffects();
+    expect(testRenderState.latestTableProps.dataSource).toHaveLength(1);
+    expect(renderer!.root.findByType(DataGridToolbarFrame).props.pendingChangeCount).toBe(1);
+
+    await act(async () => {
+      renderer!.root.findByType(DataGridToolbarFrame).props.onToggleCellEditMode();
+    });
+    await waitForEffects();
+
+    const nameColumn = testRenderState.latestColumns.find((column) => column.key === 'name');
+    expect(nameColumn?.editable).toBe(true);
+    const headerProps = nameColumn.onHeaderCell(nameColumn);
+    await act(async () => {
+      headerProps.onClickCapture({
+        target: { closest: vi.fn(() => null) },
+        currentTarget: { querySelector: vi.fn(() => null) },
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    let toolbar = renderer!.root.findByType(DataGridToolbarFrame);
+    expect(toolbar.props.selectedRowKeysLength).toBe(0);
+    expect(toolbar.props.selectedCellsSize).toBe(1);
+    expect(toolbar.props.deleteTargetRowCount).toBe(1);
+
+    await act(async () => {
+      findButton(renderer!, t('data_grid.toolbar.delete_selected')).props.onClick();
+    });
+    await waitForEffects();
+
+    toolbar = renderer!.root.findByType(DataGridToolbarFrame);
+    expect(testRenderState.latestTableProps.dataSource).toHaveLength(0);
+    expect(toolbar.props.pendingChangeCount).toBe(0);
+    expect(toolbar.props.selectedCellsSize).toBe(0);
+    expect(toolbar.props.deleteTargetRowCount).toBe(0);
+    expect(findButton(renderer!, t('data_grid.toolbar.delete_selected')).props.disabled).toBe(true);
     renderer!.unmount();
   });
 

@@ -190,6 +190,7 @@ import {
     useDataGridI18nLanguage,
     makeCellKey,
     splitCellKey,
+    collectDataGridCellSelectionRowKeys,
     resolveContextMenuFieldName,
     trimSimpleCache,
     looksLikeDateTimeText,
@@ -289,6 +290,7 @@ export {
     resolveNextGridFilterOperatorForColumnChange,
     buildGridFieldSelectOptions,
     buildDataGridCommitChangeSet,
+    collectDataGridCellSelectionRowKeys,
 } from './DataGridCore';
 
 // Native scroll events can outlive a pointer gesture on macOS. Wait for a brief
@@ -875,6 +877,8 @@ const DataGrid: React.FC<DataGridProps> = ({
   // 批量编辑模式状态
   const [cellEditMode, setCellEditMode] = useState(false);
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
+  const [cellSelectionDeleteEligible, setCellSelectionDeleteEligible] = useState(false);
+  const cellSelectionSourceDataRef = useRef<Item[] | null>(null);
   const [copiedCellPatch, setCopiedCellPatch] = useState<{ sourceRowKey: string; values: Record<string, any> } | null>(null);
   const [copiedRowsForPaste, setCopiedRowsForPaste] = useState<Array<Record<string, any>>>([]);
 
@@ -1664,10 +1668,16 @@ const DataGrid: React.FC<DataGridProps> = ({
     });
   }, []);
 
+  const markCellSelectionDeleteEligible = useCallback((eligible: boolean) => {
+    cellSelectionSourceDataRef.current = eligible ? data : null;
+    setCellSelectionDeleteEligible(eligible);
+  }, [data]);
+
   const resetCellSelection = useCallback((clearState: boolean = true) => {
     if (clearState) {
       setSelectedCells(new Set());
     }
+    markCellSelectionDeleteEligible(false);
     currentSelectionRef.current = new Set();
     selectionStartRef.current = null;
     pendingCellSelectionStartRef.current = null;
@@ -1686,7 +1696,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       cellSelectionAutoScrollRafRef.current = null;
     }
     updateCellSelection(new Set());
-  }, [updateCellSelection]);
+  }, [markCellSelectionDeleteEligible, updateCellSelection]);
 
   const closeCellEditMode = useCallback(() => {
     setCellEditMode(false);
@@ -1713,8 +1723,17 @@ const DataGrid: React.FC<DataGridProps> = ({
     });
     currentSelectionRef.current = nextSelection;
     setSelectedCells(nextSelection);
+    markCellSelectionDeleteEligible(true);
     updateCellSelection(nextSelection);
-  }, [canModifyData, effectiveEditLocator, makeCellKey, resetCellSelection, rowKeyStr, updateCellSelection]);
+  }, [canModifyData, effectiveEditLocator, makeCellKey, markCellSelectionDeleteEligible, resetCellSelection, rowKeyStr, updateCellSelection]);
+
+  const previousSelectionSourceDataRef = useRef(data);
+  useEffect(() => {
+    if (previousSelectionSourceDataRef.current === data) return;
+    previousSelectionSourceDataRef.current = data;
+    setSelectedRowKeys([]);
+    resetCellSelection();
+  }, [data, resetCellSelection]);
 
   useEffect(() => {
     closeCellEditModeRef.current = closeCellEditMode;
@@ -1766,6 +1785,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     setCopiedCellPatch,
     setModifiedRows,
     setSelectedCells,
+    markCellSelectionDeleteEligible,
     splitCellKey,
     suppressCellSelectionClickRef,
     translateDataGrid,
@@ -1812,10 +1832,25 @@ const DataGrid: React.FC<DataGridProps> = ({
       setAutoCommitRemainingSeconds(null);
   }, []);
 
+  const selectedCellRowKeys = useMemo(
+      () => cellEditMode
+          && cellSelectionDeleteEligible
+          && cellSelectionSourceDataRef.current === data
+          ? collectDataGridCellSelectionRowKeys(selectedCells)
+          : [],
+      [cellEditMode, cellSelectionDeleteEligible, data, selectedCells],
+  );
+  const deleteTargetRowKeys = useMemo(
+      () => selectedRowKeys.length > 0
+          ? selectedRowKeys.map(key => rowKeyStr(key))
+          : selectedCellRowKeys,
+      [rowKeyStr, selectedCellRowKeys, selectedRowKeys],
+  );
+  const deleteTargetRowCount = deleteTargetRowKeys.length;
   const allSelectedAreDeleted = useMemo(() => {
-      if (selectedRowKeys.length === 0) return false;
-      return selectedRowKeys.every(key => deletedRowKeys.has(rowKeyStr(key)));
-  }, [selectedRowKeys, deletedRowKeys, rowKeyStr]);
+      if (deleteTargetRowKeys.length === 0) return false;
+      return deleteTargetRowKeys.every(key => deletedRowKeys.has(key));
+  }, [deleteTargetRowKeys, deletedRowKeys]);
 
   const addedRowKeySet = useMemo(() => {
       const next = new Set<string>();
@@ -2136,6 +2171,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       setDeletedRowKeys(new Set());
       setModifiedColumns({});
       setSelectedRowKeys([]);
+      resetCellSelection();
       setCopiedCellPatch(null);
       setCopiedRowsForPaste([]);
       closeRowEditor();
@@ -2159,6 +2195,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       currentConnConfig,
       dataSourceContextKey,
       isV2Ui,
+      resetCellSelection,
       resetDdlViewState,
       resolvedDdlTableName,
       viewMode,
@@ -3055,8 +3092,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const handleDeleteSelected = () => {
       const addedKeysToRemove: string[] = [];
       const baseKeysToDelete: string[] = [];
-      for (const key of selectedRowKeys) {
-          const keyStr = rowKeyStr(key);
+      for (const keyStr of deleteTargetRowKeys) {
           if (addedRowKeySet.has(keyStr)) {
               addedKeysToRemove.push(keyStr);
           } else if (!deletedRowKeys.has(keyStr)) {
@@ -3079,15 +3115,17 @@ const DataGrid: React.FC<DataGridProps> = ({
           });
       }
       setSelectedRowKeys([]);
+      if (cellEditMode) resetCellSelection();
   };
 
   const handleUndoDeleteSelected = () => {
       setDeletedRowKeys(prev => {
           const newDeleted = new Set(prev);
-          selectedRowKeys.forEach(key => newDeleted.delete(rowKeyStr(key)));
+          deleteTargetRowKeys.forEach(key => newDeleted.delete(key));
           return newDeleted;
       });
       setSelectedRowKeys([]);
+      if (cellEditMode) resetCellSelection();
   };
 
   const handlePreviewChanges = useCallback(async () => {
@@ -3914,6 +3952,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const focusPageFindMatch = useCallback((match: DataGridFindMatch) => {
       if (!match) return;
       const nextSelection = new Set([makeCellKey(match.rowKey, match.columnName)]);
+      markCellSelectionDeleteEligible(false);
       setSelectedCells(nextSelection);
       currentSelectionRef.current = nextSelection;
       selectionStartRef.current = {
@@ -4003,7 +4042,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               applyVisibleFocus();
           });
       });
-  }, [applyVirtualHorizontalOffset, enableVirtual, mergedDisplayData, pickVerticalScrollTarget, readVirtualHorizontalOffset, rowKeyStr, updateCellSelection, updateFocusedCell]);
+  }, [applyVirtualHorizontalOffset, enableVirtual, markCellSelectionDeleteEligible, mergedDisplayData, pickVerticalScrollTarget, readVirtualHorizontalOffset, rowKeyStr, updateCellSelection, updateFocusedCell]);
 
   const handleNavigatePageFind = useCallback((direction: DataGridFindNavigationDirection) => {
       const nextIndex = resolveDataGridFindNavigationIndex(activePageFindMatchIndex, pageFindMatches.length, direction);
@@ -4952,6 +4991,7 @@ const DataGrid: React.FC<DataGridProps> = ({
         dataContextValue,
         dataEditAutoCommitDelayMs,
         dataEditCommitMode,
+        deleteTargetRowCount,
         dataPanelDirtyRef,
         dataPanelIsJson,
         dataPanelOpen,
