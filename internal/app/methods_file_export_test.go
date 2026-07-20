@@ -8,12 +8,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
+	"GoNavi-Wails/internal/uievents"
 	"GoNavi-Wails/shared/i18n"
 	"github.com/xuri/excelize/v2"
 )
@@ -57,6 +60,21 @@ type fakeSQLDumpExportDB struct {
 	fakeExportQueryDB
 	tables    []string
 	createSQL string
+	createErr error
+}
+
+type captureExportProgressEmitter struct {
+	events []exportProgressPayload
+}
+
+func (e *captureExportProgressEmitter) Emit(name string, args ...any) {
+	if name != exportProgressEvent || len(args) == 0 {
+		return
+	}
+	payload, ok := args[0].(exportProgressPayload)
+	if ok {
+		e.events = append(e.events, payload)
+	}
 }
 
 func (f *fakeExportQueryDB) Connect(config connection.ConnectionConfig) error { return nil }
@@ -103,7 +121,7 @@ func (f *fakeSQLDumpExportDB) GetTables(dbName string) ([]string, error) {
 }
 
 func (f *fakeSQLDumpExportDB) GetCreateStatement(dbName, tableName string) (string, error) {
-	return f.createSQL, nil
+	return f.createSQL, f.createErr
 }
 
 func (f *fakeStreamExportDB) Query(query string) ([]map[string]interface{}, []string, error) {
@@ -1777,6 +1795,113 @@ func TestExportDatabaseSQLToFileDefaultOptionsDoNotEmitDrops(t *testing.T) {
 	createIndex := strings.Index(string(optInContent), "CREATE TABLE `users`")
 	if dropIndex < 0 || createIndex < 0 || dropIndex >= createIndex {
 		t.Fatalf("opt-in export must place DROP before CREATE: %s", optInContent)
+	}
+}
+
+func TestExportDatabaseSQLToFileReportsObjectProgress(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	fakeDB := &fakeSQLDumpExportDB{
+		tables:    []string{"users", "orders"},
+		createSQL: "CREATE TABLE `placeholder` (`id` BIGINT)",
+	}
+	newDatabaseFunc = func(string) (db.Database, error) {
+		return fakeDB, nil
+	}
+	emitter := &captureExportProgressEmitter{}
+	app := NewApp()
+	app.ctx = uievents.WithEmitter(context.Background(), emitter)
+	filePath := filepath.Join(t.TempDir(), "app_backup.sql")
+
+	result := app.exportDatabaseSQLToFile(
+		connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306},
+		"app",
+		false,
+		filePath,
+		ExportFileOptions{Format: "sql", JobID: "database-backup-job"},
+	)
+	if !result.Success {
+		t.Fatalf("database export failed: %+v", result)
+	}
+	if len(emitter.events) < 4 {
+		t.Fatalf("expected start/running/finalizing/done events, got %#v", emitter.events)
+	}
+	statuses := make([]string, 0, len(emitter.events))
+	for _, event := range emitter.events {
+		statuses = append(statuses, event.Status)
+		if event.JobID != "database-backup-job" {
+			t.Fatalf("unexpected progress job id: %#v", event)
+		}
+		if event.FilePath != filePath {
+			t.Fatalf("progress must expose selected backup path: %#v", event)
+		}
+	}
+	for _, want := range []string{"start", "running", "finalizing", "done"} {
+		if !slices.Contains(statuses, want) {
+			t.Fatalf("missing %q progress status in %v", want, statuses)
+		}
+	}
+	itemEvents := make([]exportProgressPayload, 0, 2)
+	for _, event := range emitter.events {
+		if event.Status == "running" && (strings.Contains(event.Stage, "users") || strings.Contains(event.Stage, "orders")) {
+			itemEvents = append(itemEvents, event)
+		}
+	}
+	if len(itemEvents) != 2 || itemEvents[0].Current != 0 || itemEvents[1].Current != 1 {
+		t.Fatalf("expected one running event per object with completed-object counts, got %#v", itemEvents)
+	}
+	last := emitter.events[len(emitter.events)-1]
+	if !last.TotalRowsKnown || last.Total != 2 || last.Current != 2 {
+		t.Fatalf("done progress must report all exported objects: %#v", last)
+	}
+}
+
+func TestExportDatabaseSQLToFilePreservesExistingBackupOnFailure(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	fakeDB := &fakeSQLDumpExportDB{
+		tables:    []string{"users"},
+		createErr: fmt.Errorf("forced create statement failure"),
+	}
+	newDatabaseFunc = func(string) (db.Database, error) {
+		return fakeDB, nil
+	}
+	directory := t.TempDir()
+	filePath := filepath.Join(directory, "app_backup.sql")
+	const previousBackup = "-- previous complete backup\n"
+	if err := os.WriteFile(filePath, []byte(previousBackup), 0o600); err != nil {
+		t.Fatalf("write previous backup: %v", err)
+	}
+
+	result := NewApp().exportDatabaseSQLToFile(
+		connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306},
+		"app",
+		false,
+		filePath,
+		ExportFileOptions{Format: "sql"},
+	)
+	if result.Success {
+		t.Fatalf("expected export failure, got %+v", result)
+	}
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("read preserved backup: %v", err)
+	}
+	if string(content) != previousBackup {
+		t.Fatalf("failed export must preserve previous backup, got %q", content)
+	}
+	temporaryFiles, err := filepath.Glob(filepath.Join(directory, ".gonavi-export-*.part"))
+	if err != nil {
+		t.Fatalf("glob temporary export files: %v", err)
+	}
+	if len(temporaryFiles) != 0 {
+		t.Fatalf("failed export must remove temporary files, got %v", temporaryFiles)
 	}
 }
 

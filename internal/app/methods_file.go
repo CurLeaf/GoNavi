@@ -2779,15 +2779,14 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 
 	if format == "sql" {
 		reporter.Start(a.appText("data_export.progress.stage.exporting_sql_file", nil))
-		f, err := os.Create(filename)
+		target, err := createAtomicExportTarget(filename)
 		if err != nil {
 			reporter.Error(0, err.Error())
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
-		defer f.Close()
+		defer target.abort()
 
-		w := bufio.NewWriterSize(f, 1024*1024)
-		defer w.Flush()
+		w := bufio.NewWriterSize(target.file, 1024*1024)
 
 		if err := writeSQLHeader(w, runConfig, dbName); err != nil {
 			reporter.Error(0, err.Error())
@@ -2816,6 +2815,14 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 		}
 
 		reporter.Finalizing(0)
+		if err := w.Flush(); err != nil {
+			reporter.Error(0, err.Error())
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+		if err := target.commit(); err != nil {
+			reporter.Error(0, err.Error())
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
 		reporter.Done(0)
 		maybeReleaseFileTransferMemory("export-table-sql-finished", 0, filename)
 		return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.export_completed", nil)}
@@ -2919,6 +2926,58 @@ func (a *App) exportTablesSQL(config connection.ConnectionConfig, dbName string,
 	)
 }
 
+type atomicExportTarget struct {
+	file       *os.File
+	tempPath   string
+	targetPath string
+	closed     bool
+	committed  bool
+}
+
+func createAtomicExportTarget(targetPath string) (*atomicExportTarget, error) {
+	temporary, err := os.CreateTemp(filepath.Dir(targetPath), ".gonavi-export-*.part")
+	if err != nil {
+		return nil, err
+	}
+	return &atomicExportTarget{
+		file:       temporary,
+		tempPath:   temporary.Name(),
+		targetPath: targetPath,
+	}, nil
+}
+
+func (target *atomicExportTarget) abort() {
+	if target == nil {
+		return
+	}
+	if !target.closed {
+		_ = target.file.Close()
+		target.closed = true
+	}
+	if !target.committed {
+		_ = os.Remove(target.tempPath)
+	}
+}
+
+func (target *atomicExportTarget) commit() error {
+	if target == nil || target.file == nil {
+		return errors.New("invalid atomic export target")
+	}
+	if err := target.file.Sync(); err != nil {
+		return err
+	}
+	closeErr := target.file.Close()
+	target.closed = true
+	if closeErr != nil {
+		return closeErr
+	}
+	if err := atomicReplaceSQLAuditFile(target.tempPath, target.targetPath); err != nil {
+		return err
+	}
+	target.committed = true
+	return nil
+}
+
 func (a *App) exportTablesSQLToFile(
 	config connection.ConnectionConfig,
 	dbName string,
@@ -2945,17 +3004,16 @@ func (a *App) exportTablesSQLToFile(
 	viewLookup := listViewNameLookup(dbInst, runConfig, dbName)
 	objects := buildExportObjectOrder(runConfig, dbName, normalizeExportNameList(tableNames), viewLookup, false)
 
-	f, err := os.Create(filename)
+	target, err := createAtomicExportTarget(filename)
 	if err != nil {
 		if reporter != nil {
 			reporter.Error(0, err.Error())
 		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	defer f.Close()
+	defer target.abort()
 
-	w := bufio.NewWriterSize(f, 1024*1024)
-	defer w.Flush()
+	w := bufio.NewWriterSize(target.file, 1024*1024)
 
 	if err := writeSQLHeader(w, runConfig, dbName); err != nil {
 		if reporter != nil {
@@ -2991,13 +3049,6 @@ func (a *App) exportTablesSQLToFile(
 			}
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
-		if reporter != nil {
-			reporter.ForceRunning(int64(index+1), a.appText("data_export.progress.stage.exporting_item_with_progress", map[string]any{
-				"name":    objectName,
-				"current": index + 1,
-				"total":   len(objects),
-			}))
-		}
 	}
 	if err := writeSQLFooter(w, runConfig); err != nil {
 		if reporter != nil {
@@ -3008,6 +3059,20 @@ func (a *App) exportTablesSQLToFile(
 
 	if reporter != nil {
 		reporter.Finalizing(int64(len(objects)))
+	}
+	if err := w.Flush(); err != nil {
+		if reporter != nil {
+			reporter.Error(int64(len(objects)), err.Error())
+		}
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if err := target.commit(); err != nil {
+		if reporter != nil {
+			reporter.Error(int64(len(objects)), err.Error())
+		}
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if reporter != nil {
 		reporter.Done(int64(len(objects)))
 	}
 	return connection.QueryResult{
@@ -3088,19 +3153,15 @@ func (a *App) ExportDatabasesSQLWithOptions(
 			}))
 		}
 		targetFile := filepath.Join(directory, buildDatabaseExportDefaultFilename(name, includeData))
-		result := a.exportDatabaseSQLToFile(config, name, includeData, targetFile, options)
+		innerOptions := options
+		innerOptions.JobID = ""
+		result := a.exportDatabaseSQLToFile(config, name, includeData, targetFile, innerOptions)
 		if !result.Success {
+			result.Message = fmt.Sprintf("%s: %s", targetFile, result.Message)
 			if reporter != nil {
 				reporter.Error(int64(index), result.Message)
 			}
 			return result
-		}
-		if reporter != nil {
-			reporter.ForceRunning(int64(index+1), a.appText("data_export.progress.stage.exporting_item_with_progress", map[string]any{
-				"name":    name,
-				"current": index + 1,
-				"total":   len(normalizedDbNames),
-			}))
 		}
 	}
 
@@ -3129,30 +3190,50 @@ func (a *App) exportDatabaseSQLToFile(
 	if safeDbName == "" {
 		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.database_name_required", nil)}
 	}
+	reporter := newExportProgressReporter(a, options, safeDbName, filename)
+	if reporter != nil {
+		reporter.Start(a.appText("data_export.progress.stage.preparing_export", nil))
+	}
 
 	runConfig := normalizeRunConfig(config, dbName)
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
+		if reporter != nil {
+			reporter.Error(0, err.Error())
+		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	tables, err := dbInst.GetTables(dbName)
 	if err != nil {
+		if reporter != nil {
+			reporter.Error(0, err.Error())
+		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	viewLookup := listViewNameLookup(dbInst, runConfig, dbName)
 	objects := buildExportObjectOrder(runConfig, dbName, tables, viewLookup, true)
+	if reporter != nil {
+		reporter.totalRows = int64(len(objects))
+		reporter.totalRowsKnown = true
+		reporter.ForceRunning(0, a.appText("data_export.progress.stage.exporting_sql_file", nil))
+	}
 
-	f, err := os.Create(filename)
+	target, err := createAtomicExportTarget(filename)
 	if err != nil {
+		if reporter != nil {
+			reporter.Error(0, err.Error())
+		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	defer f.Close()
+	defer target.abort()
 
-	w := bufio.NewWriterSize(f, 1024*1024)
-	defer w.Flush()
+	w := bufio.NewWriterSize(target.file, 1024*1024)
 
 	if err := writeSQLDatabaseBackupHeader(w, runConfig, dbName); err != nil {
+		if reporter != nil {
+			reporter.Error(0, err.Error())
+		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if err := writeSQLDropIfExistsPreamble(
@@ -3164,15 +3245,49 @@ func (a *App) exportDatabaseSQLToFile(
 		true,
 		options,
 	); err != nil {
+		if reporter != nil {
+			reporter.Error(0, err.Error())
+		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	for _, objectName := range objects {
+	for index, objectName := range objects {
+		if reporter != nil {
+			reporter.ForceRunning(int64(index), a.appText("data_export.progress.stage.exporting_item_with_progress", map[string]any{
+				"name":    objectName,
+				"current": index + 1,
+				"total":   len(objects),
+			}))
+		}
 		if err := dumpTableSQL(w, dbInst, runConfig, dbName, objectName, true, includeData, viewLookup); err != nil {
+			if reporter != nil {
+				reporter.Error(int64(index), err.Error())
+			}
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 	}
 	if err := writeSQLFooter(w, runConfig); err != nil {
+		if reporter != nil {
+			reporter.Error(int64(len(objects)), err.Error())
+		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if reporter != nil {
+		reporter.Finalizing(int64(len(objects)))
+	}
+	if err := w.Flush(); err != nil {
+		if reporter != nil {
+			reporter.Error(int64(len(objects)), err.Error())
+		}
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if err := target.commit(); err != nil {
+		if reporter != nil {
+			reporter.Error(int64(len(objects)), err.Error())
+		}
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if reporter != nil {
+		reporter.Done(int64(len(objects)))
 	}
 
 	return connection.QueryResult{
@@ -3222,15 +3337,25 @@ func (a *App) ExportSchemaSQLWithOptions(
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
+	reporter := newExportProgressReporter(a, options, safeDbName+"."+safeSchemaName, filename)
+	if reporter != nil {
+		reporter.Start(a.appText("data_export.progress.stage.preparing_export", nil))
+	}
 
 	runConfig := normalizeRunConfig(config, dbName)
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
+		if reporter != nil {
+			reporter.Error(0, err.Error())
+		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	tables, err := dbInst.GetTables(dbName)
 	if err != nil {
+		if reporter != nil {
+			reporter.Error(0, err.Error())
+		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	viewLookup := listViewNameLookup(dbInst, runConfig, dbName)
@@ -3238,19 +3363,33 @@ func (a *App) ExportSchemaSQLWithOptions(
 	filteredViews := filterExportViewLookupBySchema(runConfig, dbName, viewLookup, safeSchemaName)
 	objects := buildExportObjectOrder(runConfig, dbName, filteredTables, filteredViews, true)
 	if len(objects) == 0 {
-		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.schema_export_no_objects", map[string]any{"schema": safeSchemaName})}
+		message := a.appText("file.backend.error.schema_export_no_objects", map[string]any{"schema": safeSchemaName})
+		if reporter != nil {
+			reporter.Error(0, message)
+		}
+		return connection.QueryResult{Success: false, Message: message}
+	}
+	if reporter != nil {
+		reporter.totalRows = int64(len(objects))
+		reporter.totalRowsKnown = true
+		reporter.ForceRunning(0, a.appText("data_export.progress.stage.exporting_sql_file", nil))
 	}
 
-	f, err := os.Create(filename)
+	target, err := createAtomicExportTarget(filename)
 	if err != nil {
+		if reporter != nil {
+			reporter.Error(0, err.Error())
+		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	defer f.Close()
+	defer target.abort()
 
-	w := bufio.NewWriterSize(f, 1024*1024)
-	defer w.Flush()
+	w := bufio.NewWriterSize(target.file, 1024*1024)
 
 	if err := writeSQLSchemaExportHeader(w, runConfig, dbName, safeSchemaName); err != nil {
+		if reporter != nil {
+			reporter.Error(0, err.Error())
+		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if err := writeSQLDropIfExistsPreamble(
@@ -3262,18 +3401,58 @@ func (a *App) ExportSchemaSQLWithOptions(
 		true,
 		options,
 	); err != nil {
+		if reporter != nil {
+			reporter.Error(0, err.Error())
+		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	for _, objectName := range objects {
+	for index, objectName := range objects {
+		if reporter != nil {
+			reporter.ForceRunning(int64(index), a.appText("data_export.progress.stage.exporting_item_with_progress", map[string]any{
+				"name":    objectName,
+				"current": index + 1,
+				"total":   len(objects),
+			}))
+		}
 		if err := dumpTableSQL(w, dbInst, runConfig, dbName, objectName, true, includeData, filteredViews); err != nil {
+			if reporter != nil {
+				reporter.Error(int64(index), err.Error())
+			}
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 	}
 	if err := writeSQLFooter(w, runConfig); err != nil {
+		if reporter != nil {
+			reporter.Error(int64(len(objects)), err.Error())
+		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
+	if reporter != nil {
+		reporter.Finalizing(int64(len(objects)))
+	}
+	if err := w.Flush(); err != nil {
+		if reporter != nil {
+			reporter.Error(int64(len(objects)), err.Error())
+		}
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if err := target.commit(); err != nil {
+		if reporter != nil {
+			reporter.Error(int64(len(objects)), err.Error())
+		}
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if reporter != nil {
+		reporter.Done(int64(len(objects)))
+	}
 
-	return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.export_completed", nil)}
+	return connection.QueryResult{
+		Success: true,
+		Message: a.appText("file.backend.message.export_completed", nil),
+		Data: map[string]interface{}{
+			"filePath": filename,
+		},
+	}
 }
 
 type tableDataClearMode string
