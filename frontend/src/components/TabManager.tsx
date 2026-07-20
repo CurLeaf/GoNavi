@@ -521,7 +521,9 @@ const TAB_DRAG_INTERACTIVE_SELECTOR = [
   'select',
   '[contenteditable="true"]',
   '[role="button"]',
+  '[role="menuitem"]',
   '[data-tab-drag-ignore="true"]',
+  '.ant-dropdown-menu',
   '.ant-tabs-tab-remove',
   '.gn-v2-tab-close',
 ].join(', ');

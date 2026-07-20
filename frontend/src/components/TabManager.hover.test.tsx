@@ -68,10 +68,15 @@ describe('TabManager hover info', () => {
       closest: vi.fn((selector: string) =>
         selector.includes('.ant-tabs-tab-remove') ? { className: 'ant-tabs-tab-remove' } : null),
     } as unknown as EventTarget;
+    const contextMenuItem = {
+      closest: vi.fn((selector: string) =>
+        selector.includes('[role="menuitem"]') ? { role: 'menuitem' } : null),
+    } as unknown as EventTarget;
 
     expect(shouldActivateTabDragPointer({ button: 0, target: tabContent })).toBe(true);
     expect(shouldActivateTabDragPointer({ button: 0, target: closeIcon })).toBe(false);
     expect(shouldActivateTabDragPointer({ button: 0, target: legacyCloseIcon })).toBe(false);
+    expect(shouldActivateTabDragPointer({ button: 0, target: contextMenuItem })).toBe(false);
     expect(shouldActivateTabDragPointer({ button: 1, target: tabContent })).toBe(false);
     expect(shouldActivateTabDragPointer({ button: 2, target: tabContent })).toBe(false);
     expect(shouldActivateTabDragPointer({ button: 0, ctrlKey: true, target: tabContent })).toBe(false);
@@ -84,6 +89,10 @@ describe('TabManager hover info', () => {
     const tabContent = { closest: vi.fn(() => null) } as unknown as EventTarget;
     const closeIcon = {
       closest: vi.fn(() => ({ className: 'gn-v2-tab-close' })),
+    } as unknown as EventTarget;
+    const contextMenuItem = {
+      closest: vi.fn((selector: string) =>
+        selector.includes('[role="menuitem"]') ? { role: 'menuitem' } : null),
     } as unknown as EventTarget;
     const buildEvent = (overrides: Record<string, unknown> = {}) => ({
       button: 0,
@@ -102,6 +111,7 @@ describe('TabManager hover info', () => {
     setPointerCapture.mockClear();
     listener.mockClear();
     handleTabDragPointerDown(buildEvent({ target: closeIcon }), listener);
+    handleTabDragPointerDown(buildEvent({ target: contextMenuItem }), listener);
     handleTabDragPointerDown(buildEvent({ button: 2 }), listener);
     handleTabDragPointerDown(buildEvent({ ctrlKey: true }), listener);
     expect(setPointerCapture).not.toHaveBeenCalled();
