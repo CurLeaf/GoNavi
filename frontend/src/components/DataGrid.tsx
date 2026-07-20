@@ -54,7 +54,9 @@ import {
 } from './dataGridLayout';
 import {
     createDataGridIdleCommitScheduler,
+    createDataGridVisualFrameGuard,
     type DataGridIdleCommitScheduler,
+    type DataGridVisualFrameGuard,
 } from './dataGridVirtualScroll';
 import {
     buildCopyDeleteSQL,
@@ -845,7 +847,8 @@ const DataGrid: React.FC<DataGridProps> = ({
   const tableTargetSyncRafRef = useRef<number | null>(null);
   const tableHorizontalWheelRafRef = useRef<number | null>(null);
   const virtualHorizontalAlignmentRafRef = useRef<number | null>(null);
-  const virtualHorizontalPostCommitRafRef = useRef<number | null>(null);
+  const virtualHorizontalPostCommitFrameHandlerRef = useRef<(offset: number) => void>(() => {});
+  const virtualHorizontalPostCommitGuardRef = useRef<DataGridVisualFrameGuard<number> | null>(null);
   const virtualHorizontalPreviewActiveRef = useRef(false);
   const pendingTableHorizontalDeltaRef = useRef(0);
   const pendingTableTargetSyncSourceRef = useRef<HTMLElement | null>(null);
@@ -918,10 +921,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           cancelAnimationFrame(tableHorizontalWheelRafRef.current);
           tableHorizontalWheelRafRef.current = null;
       }
-      if (virtualHorizontalPostCommitRafRef.current !== null) {
-          cancelAnimationFrame(virtualHorizontalPostCommitRafRef.current);
-          virtualHorizontalPostCommitRafRef.current = null;
-      }
+      virtualHorizontalPostCommitGuardRef.current?.cancel();
       if (scrollSnapshotRafRef.current !== null) {
           cancelAnimationFrame(scrollSnapshotRafRef.current);
           scrollSnapshotRafRef.current = null;
@@ -3706,10 +3706,6 @@ const DataGrid: React.FC<DataGridProps> = ({
           return null;
       }
 
-      if (virtualHorizontalPostCommitRafRef.current !== null) {
-          cancelAnimationFrame(virtualHorizontalPostCommitRafRef.current);
-          virtualHorizontalPostCommitRafRef.current = null;
-      }
       virtualHorizontalPreviewActiveRef.current = true;
 
       const maxScroll = Math.max(0, tableScrollX - holderEl.clientWidth);
@@ -3717,6 +3713,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const currentOffset = Math.max(0, Math.abs(parseFloat(innerEl.style.marginLeft) || 0));
       const nextMarginLeft = `${-clampedOffset}px`;
       const scrollVar = `${clampedOffset}px`;
+      virtualHorizontalPostCommitGuardRef.current?.update(clampedOffset);
 
       if (innerEl.style.marginLeft !== nextMarginLeft) {
           innerEl.style.marginLeft = nextMarginLeft;
@@ -3744,22 +3741,41 @@ const DataGrid: React.FC<DataGridProps> = ({
       return { holderEl, clampedOffset, currentOffset };
   }, [resolveVirtualHorizontalElements, tableScrollX]);
 
-  const scheduleVirtualHorizontalPostCommit = useCallback((tableContainer: HTMLElement, committedOffset: number, syncSequence: number) => {
-      if (virtualHorizontalPostCommitRafRef.current !== null) {
-          cancelAnimationFrame(virtualHorizontalPostCommitRafRef.current);
-      }
-      virtualHorizontalPostCommitRafRef.current = requestAnimationFrame(() => {
-          virtualHorizontalPostCommitRafRef.current = null;
-          if (externalScrollSequenceRef.current !== syncSequence) return;
-          syncVirtualHorizontalVisualOffset(tableContainer, committedOffset);
-          virtualHorizontalPostCommitRafRef.current = requestAnimationFrame(() => {
-              virtualHorizontalPostCommitRafRef.current = null;
-              if (externalScrollSequenceRef.current !== syncSequence) return;
-              virtualHorizontalPreviewActiveRef.current = false;
-              horizontalSyncSourceRef.current = '';
+  virtualHorizontalPostCommitFrameHandlerRef.current = (offset) => {
+      const tableContainer = tableContainerRef.current;
+      if (!(tableContainer instanceof HTMLElement)) return;
+      syncVirtualHorizontalVisualOffset(tableContainer, offset);
+  };
+
+  const getVirtualHorizontalPostCommitGuard = useCallback(() => {
+      if (virtualHorizontalPostCommitGuardRef.current === null) {
+          virtualHorizontalPostCommitGuardRef.current = createDataGridVisualFrameGuard<number>({
+              onFrame: (offset) => virtualHorizontalPostCommitFrameHandlerRef.current(offset),
+              shouldContinue: () => (
+                  externalScrollbarDraggingRef.current
+                  || Date.now() < externalScrollInteractionUntilRef.current
+                  || !!externalIdleCommitSchedulerRef.current?.hasPending()
+                  || externalSyncRafRef.current !== null
+                  || externalScrollSettleRafRef.current !== null
+                  || pendingExternalScrollLeftRef.current !== null
+                  || tableHorizontalWheelRafRef.current !== null
+                  || Math.abs(pendingTableHorizontalDeltaRef.current) >= 0.5
+              ),
+              onStop: () => {
+                  virtualHorizontalPreviewActiveRef.current = false;
+                  horizontalSyncSourceRef.current = '';
+              },
           });
-      });
-  }, [syncVirtualHorizontalVisualOffset]);
+      }
+      return virtualHorizontalPostCommitGuardRef.current;
+  }, []);
+
+  const scheduleVirtualHorizontalPostCommit = useCallback((tableContainer: HTMLElement, committedOffset: number) => {
+      if (!tableContainer.isConnected) return;
+      const guard = getVirtualHorizontalPostCommitGuard();
+      guard.update(committedOffset);
+      guard.start();
+  }, [getVirtualHorizontalPostCommitGuard]);
 
   const applyVirtualHorizontalOffset = useCallback((
       tableContainer: HTMLElement,
@@ -3774,7 +3790,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const { holderEl, clampedOffset, currentOffset } = synced;
       const deltaX = clampedOffset - currentOffset;
       if (Math.abs(deltaX) < 0.5 && !options?.forceInternalScroll) {
-          scheduleVirtualHorizontalPostCommit(tableContainer, clampedOffset, externalScrollSequenceRef.current);
+          scheduleVirtualHorizontalPostCommit(tableContainer, clampedOffset);
           return true;
       }
 
@@ -3783,7 +3799,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           // 更新 rc-virtual-list 内部 offsetLeft
           tableInstance.scrollTo({ left: clampedOffset });
           lastCommittedVirtualHorizontalOffsetRef.current = clampedOffset;
-          scheduleVirtualHorizontalPostCommit(tableContainer, clampedOffset, externalScrollSequenceRef.current);
+          scheduleVirtualHorizontalPostCommit(tableContainer, clampedOffset);
           return true;
       }
 
@@ -3794,7 +3810,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           bubbles: true,
           cancelable: true,
       }));
-      scheduleVirtualHorizontalPostCommit(tableContainer, clampedOffset, externalScrollSequenceRef.current);
+      scheduleVirtualHorizontalPostCommit(tableContainer, clampedOffset);
       return true;
   }, [scheduleVirtualHorizontalPostCommit, syncVirtualHorizontalVisualOffset]);
 
@@ -4153,7 +4169,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               latestExternalScroll.scrollLeft = resolvedScrollLeft;
           }
           lastExternalScrollLeftRef.current = latestExternalScroll.scrollLeft;
-          if (virtualHorizontalPostCommitRafRef.current === null) {
+          if (!virtualHorizontalPostCommitGuardRef.current?.hasPending()) {
               virtualHorizontalPreviewActiveRef.current = false;
           }
           horizontalSyncSourceRef.current = '';
@@ -4263,10 +4279,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const handleExternalHorizontalScrollPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
       clearExternalScrollbarInteraction();
       externalScrollSequenceRef.current += 1;
-      if (virtualHorizontalPostCommitRafRef.current !== null) {
-          cancelAnimationFrame(virtualHorizontalPostCommitRafRef.current);
-          virtualHorizontalPostCommitRafRef.current = null;
-      }
+      virtualHorizontalPostCommitGuardRef.current?.cancel();
       externalScrollbarDraggingRef.current = true;
       horizontalSyncSourceRef.current = 'external';
       event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -4445,10 +4458,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               cancelAnimationFrame(externalScrollSettleRafRef.current);
               externalScrollSettleRafRef.current = null;
           }
-          if (virtualHorizontalPostCommitRafRef.current !== null) {
-              cancelAnimationFrame(virtualHorizontalPostCommitRafRef.current);
-              virtualHorizontalPostCommitRafRef.current = null;
-          }
+          virtualHorizontalPostCommitGuardRef.current?.cancel();
           pendingExternalScrollLeftRef.current = null;
           externalScrollbarDraggingRef.current = false;
           clearExternalScrollbarInteraction();

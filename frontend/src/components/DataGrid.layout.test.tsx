@@ -2673,8 +2673,10 @@ describe('DataGrid layout', () => {
     expect(source).toContain('const externalScrollbarDraggingRef = useRef(false);');
     expect(source).toContain('const EXTERNAL_HORIZONTAL_SCROLL_IDLE_SETTLE_MS = 80;');
     expect(source).toContain('const externalIdleCommitSchedulerRef = useRef<DataGridIdleCommitScheduler<number> | null>(null);');
+    expect(source).toContain('const virtualHorizontalPostCommitGuardRef = useRef<DataGridVisualFrameGuard<number> | null>(null);');
     expect(source).toContain('const externalScrollInteractionUntilRef = useRef(0);');
     expect(source).toContain('createDataGridIdleCommitScheduler<number>({');
+    expect(source).toContain('createDataGridVisualFrameGuard<number>({');
     expect(source).toContain('const isExternalScrollbarInteractionActive = useCallback(() => (');
     expect(source).toContain('const refreshExternalScrollbarInteraction = useCallback(() => {');
     expect(source).toContain('const scheduleVirtualHorizontalWheel = useCallback');
@@ -2688,6 +2690,7 @@ describe('DataGrid layout', () => {
     expect(source).not.toContain('tableInstance.scrollTo({ left: clampedOffset, top: holderEl.scrollTop });');
     expect(source).toContain("tableContainer.addEventListener('scroll', stopPreviewHeaderScroll, true);");
     expect(source).toContain("innerEl.style.setProperty('--gn-datagrid-h-scroll', scrollVar);");
+    expect(source).toContain('virtualHorizontalPostCommitGuardRef.current?.update(clampedOffset);');
     expect(source).not.toContain("tableContainer.style.setProperty('--gn-datagrid-h-scroll', scrollVar);");
     expect(source).not.toContain("holderEl.style.setProperty('--gn-datagrid-h-scroll', scrollVar);");
     expect(source).toContain('const requestedExternalScrollLeft = pendingExternalScrollLeftRef.current ?? latestExternalScroll.scrollLeft;');

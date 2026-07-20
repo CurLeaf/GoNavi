@@ -72,6 +72,22 @@ export interface DataGridIdleCommitScheduler<T> {
   hasPending: () => boolean;
 }
 
+export interface DataGridVisualFrameGuardOptions<T> {
+  onFrame: (value: T) => void;
+  shouldContinue?: () => boolean;
+  onStop?: () => void;
+  trailingFrameCount?: number;
+  requestFrame?: (callback: (timestamp: number) => void) => unknown;
+  cancelFrame?: (handle: unknown) => void;
+}
+
+export interface DataGridVisualFrameGuard<T> {
+  update: (value: T) => void;
+  start: () => boolean;
+  cancel: () => void;
+  hasPending: () => boolean;
+}
+
 const NO_PENDING_IDLE_COMMIT = Symbol('data-grid-no-pending-idle-commit');
 
 /**
@@ -145,6 +161,86 @@ export const createDataGridIdleCommitScheduler = <T>({
     },
     hasPending() {
       return pending !== NO_PENDING_IDLE_COMMIT;
+    },
+  };
+};
+
+const NO_VISUAL_FRAME_GUARD_VALUE = Symbol('data-grid-no-visual-frame-guard-value');
+
+/**
+ * Keeps reasserting the latest visual scroll offset while an async internal
+ * commit can still repaint an older offset into the DOM.
+ */
+export const createDataGridVisualFrameGuard = <T>({
+  onFrame,
+  shouldContinue = () => false,
+  onStop = () => {},
+  trailingFrameCount = 1,
+  requestFrame = (callback) => globalThis.requestAnimationFrame(callback),
+  cancelFrame = (handle) => globalThis.cancelAnimationFrame(handle as number),
+}: DataGridVisualFrameGuardOptions<T>): DataGridVisualFrameGuard<T> => {
+  const trailingFrames = Number.isFinite(trailingFrameCount)
+    ? Math.max(0, Math.floor(trailingFrameCount))
+    : 0;
+  let active = false;
+  let frame: unknown = null;
+  let frameToken = 0;
+  let remainingTrailingFrames = 0;
+  let latestValue: T | typeof NO_VISUAL_FRAME_GUARD_VALUE = NO_VISUAL_FRAME_GUARD_VALUE;
+
+  const armFrame = () => {
+    const token = ++frameToken;
+    frame = requestFrame(() => {
+      if (token !== frameToken) return;
+      frame = null;
+      if (latestValue === NO_VISUAL_FRAME_GUARD_VALUE) {
+        active = false;
+        return;
+      }
+
+      onFrame(latestValue);
+      if (shouldContinue()) {
+        remainingTrailingFrames = trailingFrames;
+        armFrame();
+        return;
+      }
+      if (remainingTrailingFrames > 0) {
+        remainingTrailingFrames -= 1;
+        armFrame();
+        return;
+      }
+      active = false;
+      onStop();
+    });
+  };
+
+  return {
+    update(value) {
+      latestValue = value;
+    },
+    start() {
+      if (latestValue === NO_VISUAL_FRAME_GUARD_VALUE) {
+        return false;
+      }
+      active = true;
+      remainingTrailingFrames = trailingFrames;
+      if (frame === null) {
+        armFrame();
+      }
+      return true;
+    },
+    cancel() {
+      active = false;
+      frameToken += 1;
+      if (frame !== null) {
+        cancelFrame(frame);
+        frame = null;
+      }
+      remainingTrailingFrames = 0;
+      latestValue = NO_VISUAL_FRAME_GUARD_VALUE;
+    },
+    hasPending() {
+      return active;
     },
   };
 };

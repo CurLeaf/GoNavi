@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import {
   calculateFixedVirtualRange,
   createDataGridIdleCommitScheduler,
+  createDataGridVisualFrameGuard,
+  type DataGridVisualFrameGuard,
 } from './dataGridVirtualScroll';
 
 describe('calculateFixedVirtualRange', () => {
@@ -228,5 +230,77 @@ describe('createDataGridIdleCommitScheduler', () => {
 
     callbacks[0]();
     expect(commits).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('createDataGridVisualFrameGuard', () => {
+  it('reasserts the latest preview instead of an older committed offset', () => {
+    const frames: Array<() => void> = [];
+    const appliedOffsets: number[] = [];
+    const pendingDuringFrame: boolean[] = [];
+    let interactionActive = true;
+    const stopped = vi.fn();
+    let guard: DataGridVisualFrameGuard<number>;
+    guard = createDataGridVisualFrameGuard<number>({
+      onFrame: (offset) => {
+        pendingDuringFrame.push(guard.hasPending());
+        appliedOffsets.push(offset);
+      },
+      shouldContinue: () => interactionActive,
+      onStop: stopped,
+      requestFrame: (callback) => {
+        frames.push(() => callback(0));
+        return frames.length;
+      },
+      cancelFrame: vi.fn(),
+    });
+
+    guard.update(320);
+    expect(guard.start()).toBe(true);
+    guard.update(960);
+    frames.shift()?.();
+
+    expect(appliedOffsets).toEqual([960]);
+    expect(guard.hasPending()).toBe(true);
+
+    guard.update(1_280);
+    frames.shift()?.();
+    expect(appliedOffsets).toEqual([960, 1_280]);
+
+    interactionActive = false;
+    frames.shift()?.();
+    frames.shift()?.();
+
+    expect(appliedOffsets).toEqual([960, 1_280, 1_280, 1_280]);
+    expect(pendingDuringFrame).toEqual([true, true, true, true]);
+    expect(stopped).toHaveBeenCalledTimes(1);
+    expect(guard.hasPending()).toBe(false);
+  });
+
+  it('invalidates a cancelled frame before a new guard run starts', () => {
+    const callbacks: Array<() => void> = [];
+    const appliedOffsets: number[] = [];
+    const cancelFrame = vi.fn();
+    const guard = createDataGridVisualFrameGuard<number>({
+      onFrame: (offset) => appliedOffsets.push(offset),
+      trailingFrameCount: 0,
+      requestFrame: (callback) => {
+        callbacks.push(() => callback(0));
+        return callbacks.length;
+      },
+      cancelFrame,
+    });
+
+    guard.update(240);
+    guard.start();
+    guard.cancel();
+    guard.update(720);
+    guard.start();
+    callbacks[0]();
+    callbacks[1]();
+
+    expect(cancelFrame).toHaveBeenCalledWith(1);
+    expect(appliedOffsets).toEqual([720]);
+    expect(guard.hasPending()).toBe(false);
   });
 });
