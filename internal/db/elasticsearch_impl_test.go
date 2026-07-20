@@ -105,7 +105,7 @@ func TestElasticsearchPing(t *testing.T) {
 	})
 }
 
-func TestElasticsearchConnectValidatesIndexListing(t *testing.T) {
+func TestElasticsearchConnectOnlyRequiresPing(t *testing.T) {
 	var aliasListingRequested atomic.Bool
 	server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -125,37 +125,28 @@ func TestElasticsearchConnectValidatesIndexListing(t *testing.T) {
 	}
 
 	db := &ElasticsearchDB{}
-	err := db.Connect(connection.ConnectionConfig{
+	if err := db.Connect(connection.ConnectionConfig{
 		Type:    "elasticsearch",
 		Host:    host,
 		Port:    port,
 		Timeout: 2,
-	})
-	if err == nil {
-		t.Fatal("Connect 应在索引枚举被拒绝时失败")
+	}); err != nil {
+		t.Fatalf("Connect 应只验证服务连通性，不应被索引枚举权限影响：%v", err)
 	}
-	if !aliasListingRequested.Load() {
-		t.Fatal("Connect 应使用轻量 alias 端点验证索引枚举能力")
-	}
-	if !strings.Contains(err.Error(), "获取索引列表失败") || !strings.Contains(err.Error(), "403") {
-		t.Fatalf("Connect 应返回索引枚举错误，实际：%v", err)
+	if aliasListingRequested.Load() {
+		t.Fatal("Connect 不应在连接测试阶段枚举全部索引")
 	}
 }
 
-func TestElasticsearchConnectAllowsEmptyCluster(t *testing.T) {
+func TestElasticsearchConnectRejectsFailedPing(t *testing.T) {
 	var aliasListingRequested atomic.Bool
 	server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodHead && r.URL.Path == "/":
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusServiceUnavailable)
 		case r.Method == http.MethodGet && r.URL.Path == "/*/_alias":
 			aliasListingRequested.Store(true)
-			query := r.URL.Query()
-			if query.Get("allow_no_indices") != "true" || query.Get("ignore_unavailable") != "true" {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			writeJSON(w, map[string]interface{}{})
+			w.WriteHeader(http.StatusOK)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -167,16 +158,17 @@ func TestElasticsearchConnectAllowsEmptyCluster(t *testing.T) {
 	}
 
 	db := &ElasticsearchDB{}
-	if err := db.Connect(connection.ConnectionConfig{
+	err := db.Connect(connection.ConnectionConfig{
 		Type:    "elasticsearch",
 		Host:    host,
 		Port:    port,
 		Timeout: 2,
-	}); err != nil {
-		t.Fatalf("Connect 应允许没有索引的空集群：%v", err)
+	})
+	if err == nil || !strings.Contains(err.Error(), "503") {
+		t.Fatalf("Connect 应保留 Ping 失败，实际：%v", err)
 	}
-	if !aliasListingRequested.Load() {
-		t.Fatal("Connect 应验证空集群的索引枚举能力")
+	if aliasListingRequested.Load() {
+		t.Fatal("Ping 失败后不应继续枚举索引")
 	}
 }
 
@@ -221,6 +213,30 @@ func TestElasticsearchGetDatabases(t *testing.T) {
 		}
 		if fullIndexDefinitionsRequested.Load() {
 			t.Fatal("GetDatabases 不应请求包含 settings/mappings 的完整索引定义")
+		}
+	})
+
+	t.Run("允许没有索引的空集群", func(t *testing.T) {
+		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet || r.URL.Path != "/*/_alias" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			query := r.URL.Query()
+			if query.Get("allow_no_indices") != "true" || query.Get("ignore_unavailable") != "true" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, map[string]interface{}{})
+		})
+
+		db := newTestESDB(t, server.URL, "")
+		databases, err := db.GetDatabases()
+		if err != nil {
+			t.Fatalf("GetDatabases 应允许没有索引的空集群：%v", err)
+		}
+		if len(databases) != 0 {
+			t.Fatalf("空集群应返回空索引列表，实际：%v", databases)
 		}
 	})
 

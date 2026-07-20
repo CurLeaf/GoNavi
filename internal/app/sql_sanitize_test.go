@@ -182,6 +182,19 @@ func TestIsReadOnlySQLQuery_TreatsMilvusJSONQueriesAsReadOnly(t *testing.T) {
 	}
 }
 
+func TestIsReadOnlySQLQuery_TreatsMilvusSelectPreviewsAsReadOnly(t *testing.T) {
+	for _, dbType := range []string{"milvus", "milvusdb", "milvus-db"} {
+		for _, query := range []string{
+			`SELECT * FROM "products" LIMIT 101 OFFSET 0`,
+			`SELECT COUNT(*) as total FROM "products"`,
+		} {
+			if !isReadOnlySQLQuery(dbType, query) {
+				t.Fatalf("Milvus SELECT preview should be read-only: dbType=%s query=%s", dbType, query)
+			}
+		}
+	}
+}
+
 func TestIsReadOnlySQLQuery_TreatsMilvusJSONWritesAsWrites(t *testing.T) {
 	for _, query := range []string{
 		`{"create_collection":"products","dimension":3}`,

@@ -559,8 +559,22 @@ func shouldRetryClickHouseHTTPCompatibility(err error) bool {
 		isClickHouseHTTPServerInfoFunctionUnsupported(err)
 }
 
+func isClickHouseNativeHandshakeTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	if !strings.Contains(text, "handshake") {
+		return false
+	}
+	return strings.Contains(text, "i/o timeout") ||
+		strings.Contains(text, "context deadline exceeded") ||
+		strings.Contains(text, "deadline exceeded")
+}
+
 func shouldTryNextClickHouseProtocol(protocol clickhouse.Protocol, err error) bool {
 	return isClickHouseProtocolMismatch(err) ||
+		(protocol == clickhouse.Native && isClickHouseNativeHandshakeTimeout(err)) ||
 		(protocol == clickhouse.HTTP && shouldRetryClickHouseHTTPCompatibility(err))
 }
 

@@ -242,6 +242,50 @@ describe('TableOverview metadata compatibility', () => {
     expect(renderedText).toContain('100%');
   });
 
+  it('loads milvus collections through DBGetTables instead of information_schema SQL', async () => {
+    storeState.connections = [
+      {
+        id: 'conn-1',
+        config: {
+          type: 'milvus',
+          host: '192.168.3.230',
+          port: 19530,
+          user: '',
+          password: '',
+          database: 'default',
+          useSSH: false,
+          ssh: { host: '', port: 22, user: '', password: '', keyPath: '' },
+        },
+      },
+    ];
+    backendApp.DBGetTables.mockResolvedValue({
+      success: true,
+      data: [
+        { Table: 'documents' },
+        { Table: 'embeddings' },
+      ],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<TableOverview tab={{
+        id: 'tab-1',
+        title: '表概览 - default',
+        type: 'table-overview',
+        connectionId: 'conn-1',
+        dbName: 'default',
+      } as any} />);
+    });
+    await flushPromises();
+
+    expect(backendApp.DBGetTables).toHaveBeenCalledWith(expect.any(Object), 'default');
+    expect(backendApp.DBQuery).not.toHaveBeenCalled();
+    expect(messageApi.error).not.toHaveBeenCalled();
+    const renderedText = collectText(renderer!.toJSON());
+    expect(renderedText).toContain('documents');
+    expect(renderedText).toContain('embeddings');
+  });
+
   it.each([
     { type: 'oracle', dbName: 'APP' },
     { type: 'trino', dbName: 'catalog' },

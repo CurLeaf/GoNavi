@@ -576,6 +576,22 @@ func TestClickHouseHTTPClientProtocolVersionUnsupportedEnablesCompatibilityRetry
 	}
 }
 
+func TestClickHouseNativeHandshakeTimeoutEnablesAutoProtocolFallback(t *testing.T) {
+	err := errors.New("handshake: failed to read packet from clickhouse.local:18123: read: i/o timeout")
+	if !isClickHouseNativeHandshakeTimeout(err) {
+		t.Fatal("expected Native handshake read timeout to be treated as an inconclusive protocol probe")
+	}
+	if !shouldTryNextClickHouseProtocol(clickhouse.Native, err) {
+		t.Fatal("expected Native handshake read timeout to permit HTTP fallback")
+	}
+	if shouldTryNextClickHouseProtocol(clickhouse.HTTP, err) {
+		t.Fatal("HTTP timeout should not be treated as a Native handshake fallback signal")
+	}
+	if isClickHouseNativeHandshakeTimeout(errors.New("dial tcp clickhouse.local:18123: i/o timeout")) {
+		t.Fatal("dial timeout without a completed connection should not be treated as a protocol probe")
+	}
+}
+
 func TestClickHouseProtocolFailureMessagesUseCurrentLanguage(t *testing.T) {
 	SetBackendLanguage(i18n.LanguageEnUS)
 	t.Cleanup(func() {
@@ -978,6 +994,100 @@ func TestClickHouseConnectFallsBackToLegacyHTTPForRevisionZeroServer(t *testing.
 			sawRevisionZeroHandshake,
 			sawLegacyJSONQuery,
 		)
+	}
+}
+
+func TestClickHouseConnectAutoFallsBackToHTTPAfterNativeHandshakeTimeout(t *testing.T) {
+	installClickHouseRuntimeMarkerForTest(t)
+
+	var sawHTTP atomic.Bool
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		sawHTTP.Store(true)
+
+		if r.URL.Query().Get("client_protocol_version") != "" {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, "Code: 115. DB::Exception: Unknown setting client_protocol_version. (UNKNOWN_SETTING)")
+			return
+		}
+
+		switch strings.TrimSpace(string(body)) {
+		case clickHouseServerHelloCompatQuery:
+			writeClickHouseRevisionZeroHelloBlock(t, w)
+		case "SELECT currentDatabase()":
+			_, _ = io.WriteString(w, "[\"currentDatabase()\"]\n[\"String\"]\n[\"default\"]\n")
+		default:
+			t.Errorf("unexpected ClickHouse query: %q", string(body))
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	server.Listener = &stallFirstReadListener{Listener: server.Listener}
+	server.Start()
+	defer server.Close()
+
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse ClickHouse test server URL: %v", err)
+	}
+	host, portText, err := net.SplitHostPort(serverURL.Host)
+	if err != nil {
+		t.Fatalf("split ClickHouse test server address: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse ClickHouse test server port: %v", err)
+	}
+
+	client := &ClickHouseDB{}
+	err = client.Connect(connection.ConnectionConfig{
+		Type:               "clickhouse",
+		Host:               host,
+		Port:               port,
+		Database:           "default",
+		User:               "default",
+		ClickHouseProtocol: clickHouseProtocolAuto,
+		Timeout:            1,
+	})
+	if err != nil {
+		t.Fatalf("Connect should try HTTP after a Native handshake timeout in auto mode: %v", err)
+	}
+	defer client.Close()
+	if !sawHTTP.Load() {
+		t.Fatal("expected HTTP fallback request after the Native handshake timeout")
+	}
+}
+
+type stallFirstReadListener struct {
+	net.Listener
+	accepted atomic.Int32
+}
+
+func (l *stallFirstReadListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	if l.accepted.Add(1) == 1 {
+		return &discardUntilPeerClosesConn{Conn: conn}, nil
+	}
+	return conn, nil
+}
+
+type discardUntilPeerClosesConn struct {
+	net.Conn
+}
+
+func (c *discardUntilPeerClosesConn) Read(_ []byte) (int, error) {
+	buffer := make([]byte, 4096)
+	for {
+		if _, err := c.Conn.Read(buffer); err != nil {
+			return 0, err
+		}
 	}
 }
 

@@ -871,6 +871,41 @@ func TestDBQueryWithCancelRoutesMilvusJSONSearchToQuery(t *testing.T) {
 	}
 }
 
+func TestDBQueryWithCancelRoutesMilvusSelectPreviewToQuery(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := `SELECT * FROM "products" LIMIT 101 OFFSET 0`
+	fakeDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {{"id": 1, "category": "book"}},
+		},
+		fieldMap: map[string][]string{
+			query: {"id", "category"},
+		},
+		queryErr: map[string]error{},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	result := app.DBQueryWithCancel(
+		connection.ConnectionConfig{Type: "milvus", Host: "127.0.0.1", Port: 19530},
+		"default",
+		query,
+		"milvus-select-preview-test",
+	)
+	if !result.Success {
+		t.Fatalf("expected Milvus SELECT preview success, got failure: %s", result.Message)
+	}
+	if fakeDB.queryCalls != 1 || fakeDB.execCalls != 0 {
+		t.Fatalf("expected query path only, queryCalls=%d execCalls=%d", fakeDB.queryCalls, fakeDB.execCalls)
+	}
+}
+
 func TestDBQueryWithCancelReturnsMessagesForSQLServerQuery(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {

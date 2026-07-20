@@ -102,13 +102,6 @@ func (e *ElasticsearchDB) Connect(config connection.ConnectionConfig) error {
 			lastErr = err
 			continue
 		}
-		if _, err := e.GetDatabases(); err != nil {
-			e.client = nil
-			logger.Warnf("Elasticsearch 索引枚举验证失败：%d/%d 模式=%s 错误=%v", idx+1, len(attempts), sslLabel, err)
-			lastErr = err
-			continue
-		}
-
 		logger.Infof("Elasticsearch 连接成功：%d/%d 模式=%s", idx+1, len(attempts), sslLabel)
 		if idx > 0 {
 			logger.Warnf("Elasticsearch SSL 优先连接失败，已回退至明文连接")

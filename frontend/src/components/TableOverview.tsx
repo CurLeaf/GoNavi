@@ -299,7 +299,14 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 useSSH: connection.config.useSSH || false,
                 ssh: connection.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' },
             };
-            if (metadataDialect === 'tdengine' || metadataDialect === 'sqlite' || metadataDialect === 'sqlite3') {
+            if (
+                metadataDialect === 'tdengine' ||
+                metadataDialect === 'sqlite' ||
+                metadataDialect === 'sqlite3' ||
+                metadataDialect === 'milvus' ||
+                metadataDialect === 'milvusdb' ||
+                metadataDialect === 'milvus-db'
+            ) {
                 const res = await DBGetTables(buildRpcConnectionConfig(config) as any, tab.dbName || '');
                 if (res.success && Array.isArray(res.data)) {
                     setTables(parseTableStats(metadataDialect, res.data));
