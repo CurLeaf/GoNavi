@@ -34,7 +34,7 @@ describe('about brand lockup', () => {
     const titlebarLogoStart = appSource.indexOf('src={resolveBrandTitlebarSrc(brandIconId)}');
     const titlebarLogoSnippet = appSource.slice(titlebarLogoStart, titlebarLogoStart + 640);
     expect(titlebarLogoSnippet).toContain("background: 'transparent'");
-    expect(readFileSync(defaultTitlebarMark)).not.toHaveLength(0);
+    expect(readFileSync(defaultTitlebarMark, 'base64')).not.toHaveLength(0);
   });
 
   it('keeps one shared lossless WebP asset for every selectable mascot', () => {
