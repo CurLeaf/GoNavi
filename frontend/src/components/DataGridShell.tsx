@@ -872,6 +872,8 @@ const renderDataTableView = () => (
             <div
                 ref={cellContextMenuPortalRef}
                 className="gn-v2-table-context-menu-portal"
+                data-gonavi-close-shortcut-guard="true"
+                data-gonavi-close-shortcut-blocks-background="true"
                 style={{
                     position: 'fixed',
                     left: cellContextMenu.x,

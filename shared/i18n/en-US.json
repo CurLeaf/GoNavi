@@ -2732,6 +2732,8 @@
   "app.shortcuts.action.duplicateCurrentLine.label": "Duplicate Current Line Below",
   "app.shortcuts.action.focusSidebarSearch.description": "Focus the left connection tree search box",
   "app.shortcuts.action.focusSidebarSearch.label": "Focus Sidebar Search",
+  "app.shortcuts.action.closeActiveTab.description": "Close the active result tab or workspace tab based on the current area",
+  "app.shortcuts.action.closeActiveTab.label": "Close Active Tab",
   "app.shortcuts.action.formatSql.description": "Format SQL in the current query editor",
   "app.shortcuts.action.formatSql.label": "Format SQL",
   "app.shortcuts.action.newConnection.description": "Create a new database, runtime, or other data source connection",

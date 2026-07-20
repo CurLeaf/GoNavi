@@ -269,6 +269,8 @@ describe("i18n catalog", () => {
 
   it("includes App shortcut modal keys required by every supported language", () => {
     const shortcutModalKeys = [
+      "app.shortcuts.action.closeActiveTab.description",
+      "app.shortcuts.action.closeActiveTab.label",
       "app.shortcuts.action.focusSidebarSearch.description",
       "app.shortcuts.action.focusSidebarSearch.label",
       "app.shortcuts.action.newConnection.description",

@@ -1,5 +1,5 @@
 import Modal from './common/ResizableDraggableModal';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Dropdown, message, Tabs, Tooltip } from 'antd';
 import { CloseOutlined, ConsoleSqlOutlined, DatabaseOutlined, FileTextOutlined, FolderOpenOutlined, HistoryOutlined, PlusOutlined, PushpinOutlined, RightOutlined, RobotOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import type { MenuProps, TabsProps } from 'antd';
@@ -29,6 +29,7 @@ import { clearSQLFileTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDra
 import { buildExternalSQLTabId } from '../utils/externalSqlTree';
 import { buildSQLFileExecutionWorkbenchTab } from '../utils/sqlFileExecutionTab';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
+import { CLOSE_ACTIVE_WORKSPACE_TAB_EVENT, resolveDockedActiveTabId } from '../utils/closeTabShortcut';
 import WorkbenchTabContent from './WorkbenchTabContent';
 import DetachDragPreview, {
   buildDetachDragPreviewState,
@@ -655,11 +656,8 @@ const TabManager: React.FC = React.memo(() => {
     });
   }, [tabs]);
   const dockedActiveTabId = useMemo(() => {
-    if (activeTabId && dockedTabs.some((tab) => tab.id === activeTabId)) {
-      return activeTabId;
-    }
-    return dockedTabs[0]?.id || null;
-  }, [activeTabId, dockedTabs]);
+    return resolveDockedActiveTabId(tabs, activeTabId, detachedWorkbenchWindows);
+  }, [activeTabId, detachedWorkbenchWindows, tabs]);
   const pendingCloseTabIdsRef = useRef<Set<string>>(new Set());
 
   const onChange = (newActiveKey: string) => {
@@ -810,6 +808,21 @@ const TabManager: React.FC = React.memo(() => {
       pendingCloseTabIdsRef.current.delete(dedupeKey);
     });
   }, [requestCloseSQLFileTabs, tabs]);
+
+  const requestCloseActiveWorkspaceTab = useCallback(() => {
+    if (!dockedActiveTabId) return;
+    closeTabsWithSQLFilePrompt(
+      [dockedActiveTabId],
+      () => closeTab(dockedActiveTabId),
+    );
+  }, [closeTab, closeTabsWithSQLFilePrompt, dockedActiveTabId]);
+
+  useEffect(() => {
+    window.addEventListener(CLOSE_ACTIVE_WORKSPACE_TAB_EVENT, requestCloseActiveWorkspaceTab);
+    return () => {
+      window.removeEventListener(CLOSE_ACTIVE_WORKSPACE_TAB_EVENT, requestCloseActiveWorkspaceTab);
+    };
+  }, [requestCloseActiveWorkspaceTab]);
 
   const onEdit = (targetKey: React.MouseEvent | React.KeyboardEvent | string, action: 'add' | 'remove') => {
     if (action === 'remove') {

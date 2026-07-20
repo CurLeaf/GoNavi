@@ -13,6 +13,7 @@ export type ShortcutAction =
   | 'sendAIChatMessage'
   | 'focusSidebarSearch'
   | 'newQueryTab'
+  | 'closeActiveTab'
   | 'switchToNextTab'
   | 'switchToPreviousTab'
   | 'newConnection'
@@ -114,6 +115,7 @@ export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'sendAIChatMessage',
   'focusSidebarSearch',
   'newQueryTab',
+  'closeActiveTab',
   'switchToNextTab',
   'switchToPreviousTab',
   'newConnection',
@@ -205,6 +207,12 @@ const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMet
   newQueryTab: {
     labelKey: 'app.shortcuts.action.newQueryTab.label',
     descriptionKey: 'app.shortcuts.action.newQueryTab.description',
+  },
+  closeActiveTab: {
+    labelKey: 'app.shortcuts.action.closeActiveTab.label',
+    descriptionKey: 'app.shortcuts.action.closeActiveTab.description',
+    scope: 'global',
+    allowInEditable: true,
   },
   switchToNextTab: {
     labelKey: 'app.shortcuts.action.switchToNextTab.label',
@@ -309,6 +317,10 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   newQueryTab: {
     mac: { combo: 'Meta+N', enabled: true },
     windows: { combo: 'Ctrl+N', enabled: true },
+  },
+  closeActiveTab: {
+    mac: { combo: 'Meta+W', enabled: true },
+    windows: { combo: 'Ctrl+W', enabled: true },
   },
   switchToNextTab: {
     mac: { combo: 'Ctrl+Tab', enabled: true },
@@ -467,12 +479,19 @@ const normalizeKeyboardEventCode = (
 };
 
 let globalImeCompositionActive = false;
+let globalShortcutCaptureActive = false;
 
 export const setGlobalImeCompositionActive = (active: boolean): void => {
   globalImeCompositionActive = active === true;
 };
 
 export const isGlobalImeCompositionActive = (): boolean => globalImeCompositionActive;
+
+export const setGlobalShortcutCaptureActive = (active: boolean): void => {
+  globalShortcutCaptureActive = active === true;
+};
+
+export const isGlobalShortcutCaptureActive = (): boolean => globalShortcutCaptureActive;
 
 type ImeCompositionEventTarget = Pick<Window, 'addEventListener' | 'removeEventListener'>;
 type ImeCompositionDocumentTarget = Pick<Document, 'addEventListener' | 'removeEventListener'> & {
@@ -604,10 +623,7 @@ const isUsableShortcutKey = (key: string): boolean => (
   && key !== 'Dead'
 );
 
-const eventToShortcutCandidates = (event: KeyboardEvent | ReactKeyboardEvent): string[] => {
-  if (isImeComposingKeyEvent(event)) {
-    return [];
-  }
+const eventToPhysicalShortcutCandidates = (event: KeyboardEvent | ReactKeyboardEvent): string[] => {
   const modifiers = resolveShortcutModifiersFromEvent(event);
   const candidates: string[] = [];
   const pushCandidate = (key: string) => {
@@ -636,14 +652,28 @@ const eventToShortcutCandidates = (event: KeyboardEvent | ReactKeyboardEvent): s
   return candidates;
 };
 
+const eventToShortcutCandidates = (event: KeyboardEvent | ReactKeyboardEvent): string[] => {
+  if (isImeComposingKeyEvent(event)) {
+    return [];
+  }
+  return eventToPhysicalShortcutCandidates(event);
+};
+
 export const eventToShortcut = (event: KeyboardEvent | ReactKeyboardEvent): string => {
   return eventToShortcutCandidates(event)[0] || '';
 };
 
 export const isShortcutMatch = (event: KeyboardEvent | ReactKeyboardEvent, combo: string): boolean => {
+  if (globalShortcutCaptureActive) return false;
   const expected = normalizeShortcutCombo(combo);
   if (!expected) return false;
   return eventToShortcutCandidates(event).includes(expected);
+};
+
+export const isShortcutPhysicalMatch = (event: KeyboardEvent | ReactKeyboardEvent, combo: string): boolean => {
+  const expected = normalizeShortcutCombo(combo);
+  if (!expected) return false;
+  return eventToPhysicalShortcutCandidates(event).includes(expected);
 };
 
 export const getShortcutPlatform = (isMacRuntime?: boolean): ShortcutPlatform => (
@@ -735,6 +765,10 @@ const sanitizeShortcutPlatformBinding = (
 export const sanitizeShortcutOptions = (value: unknown): ShortcutOptions => {
   const raw = (value && typeof value === 'object') ? value as Record<string, unknown> : {};
   const defaults = cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS);
+  const hasPersistedCloseActiveTab = Object.prototype.hasOwnProperty.call(raw, 'closeActiveTab');
+  const hasPersistedShortcutAction = SHORTCUT_ACTION_ORDER.some((action) => (
+    action !== 'closeActiveTab' && Object.prototype.hasOwnProperty.call(raw, action)
+  ));
 
   SHORTCUT_ACTION_ORDER.forEach((action) => {
     const actionRaw = raw[action];
@@ -754,6 +788,21 @@ export const sanitizeShortcutOptions = (value: unknown): ShortcutOptions => {
       windows: sanitizeShortcutPlatformBinding(action, 'windows', binding.windows, defaults[action].windows),
     };
   });
+
+  if (!hasPersistedCloseActiveTab && hasPersistedShortcutAction) {
+    (['mac', 'windows'] as const).forEach((platform) => {
+      const closeBinding = defaults.closeActiveTab[platform];
+      const closeCombo = normalizeShortcutCombo(closeBinding.combo);
+      const occupied = SHORTCUT_ACTION_ORDER.some((action) => {
+        if (action === 'closeActiveTab') return false;
+        const binding = defaults[action][platform];
+        return binding.enabled && normalizeShortcutCombo(binding.combo) === closeCombo;
+      });
+      if (occupied) {
+        defaults.closeActiveTab[platform] = { ...closeBinding, enabled: false };
+      }
+    });
+  }
 
   return defaults;
 };
@@ -861,7 +910,6 @@ const RESERVED_SHORTCUT_DEFINITIONS: ReservedShortcutDefinition[] = [
   // Browser / WebView built-in shortcuts
   { combo: 'Ctrl+S',           labelKey: 'app.shortcuts.reserved.browser_save',                 context: 'global' },
   { combo: 'Ctrl+P',           labelKey: 'app.shortcuts.reserved.browser_print',                context: 'global' },
-  { combo: 'Ctrl+W',           labelKey: 'app.shortcuts.reserved.browser_close_tab',            context: 'global' },
   { combo: 'Ctrl+T',           labelKey: 'app.shortcuts.reserved.browser_new_tab',              context: 'global' },
   { combo: 'Ctrl+N',           labelKey: 'app.shortcuts.reserved.browser_new_window',           context: 'global' },
   { combo: 'Ctrl+Shift+N',     labelKey: 'app.shortcuts.reserved.browser_new_incognito_window', context: 'global' },

@@ -37,6 +37,10 @@ import { isMacLikePlatform } from '../utils/appearance';
 import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
 import { buildMySQLCompatibleViewMetadataSqls, isSidebarViewTableType, normalizeSidebarViewName } from '../utils/sidebarMetadata';
 import { SIDEBAR_SQL_EDITOR_DRAG_MIME, decodeSidebarSqlEditorDragPayload, hasSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
+import {
+    CLOSE_ACTIVE_RESULT_TAB_EVENT,
+    type CloseActiveResultShortcutRequest,
+} from '../utils/closeTabShortcut';
 import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
 import { t as translate } from '../i18n';
 import { buildSqlAnalysisWorkbenchTab } from '../utils/sqlAnalysisTab';
@@ -75,6 +79,7 @@ import {
 } from '../utils/columnDefinition';
 import QueryEditorResultsPanel, {
     QUERY_EDITOR_SQL_LOG_TAB_KEY,
+    resolveEffectiveActiveResultKey,
     type QueryEditorResultSet,
 } from './QueryEditorResultsPanel';
 import ResultDiffWizard from './resultDiff/ResultDiffWizard';
@@ -1729,21 +1734,25 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   useEffect(() => {
       // Prefer remount session cache (detach/attach); otherwise follow tab draft flag.
       if (restoredResultSessionRef.current && restoredResultSessionRef.current.isResultPanelVisible !== undefined) {
-          setIsResultPanelVisible(restoredResultSessionRef.current.isResultPanelVisible === true);
+          const restoredVisible = restoredResultSessionRef.current.isResultPanelVisible === true;
+          isResultPanelVisibleRef.current = restoredVisible;
+          setIsResultPanelVisible(restoredVisible);
           return;
       }
-      setIsResultPanelVisible(tab.resultPanelVisible === true);
+      const restoredVisible = tab.resultPanelVisible === true;
+      isResultPanelVisibleRef.current = restoredVisible;
+      setIsResultPanelVisible(restoredVisible);
   }, [tab.id, tab.resultPanelVisible]);
   const updateResultPanelVisibility = useCallback((visible: boolean) => {
+      isResultPanelVisibleRef.current = visible;
       setIsResultPanelVisible(visible);
       updateQueryTabDraft(tab.id, { resultPanelVisible: visible });
   }, [tab.id, updateQueryTabDraft]);
   const toggleResultPanelVisibility = useCallback(() => {
-      setIsResultPanelVisible((previousVisible) => {
-          const nextVisible = !previousVisible;
-          updateQueryTabDraft(tab.id, { resultPanelVisible: nextVisible });
-          return nextVisible;
-      });
+      const nextVisible = !isResultPanelVisibleRef.current;
+      isResultPanelVisibleRef.current = nextVisible;
+      setIsResultPanelVisible(nextVisible);
+      updateQueryTabDraft(tab.id, { resultPanelVisible: nextVisible });
   }, [tab.id, updateQueryTabDraft]);
   const handleOpenEditorFind = useCallback(() => {
       const editor = editorRef.current;
@@ -8457,19 +8466,62 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   const handleCloseResult = (key: string) => {
       void cancelResultTotalCountRequests([key]);
-      setResultSets(prev => {
-          const idx = prev.findIndex(r => r.key === key);
-          if (idx < 0) return prev;
-          const next = prev.filter(r => r.key !== key);
+      const currentResultSets = resultSetsRef.current;
+      const idx = currentResultSets.findIndex(result => result.key === key);
+      if (idx < 0) return;
 
-          setActiveResultKey(prevActive => {
-              if (prevActive && prevActive !== key) return prevActive;
-              return next[idx]?.key || next[idx - 1]?.key || next[0]?.key || '';
-          });
+      const currentActiveKey = resolveEffectiveActiveResultKey(
+          currentResultSets,
+          activeResultKeyRef.current,
+          isV2Ui,
+      );
+      const nextResultSets = currentResultSets.filter(result => result.key !== key);
+      const nextActiveKey = currentActiveKey && currentActiveKey !== key
+          ? currentActiveKey
+          : nextResultSets[idx]?.key
+              || nextResultSets[idx - 1]?.key
+              || nextResultSets[0]?.key
+              || (isV2Ui ? QUERY_EDITOR_SQL_LOG_TAB_KEY : '');
 
-          return next;
-      });
+      resultSetsRef.current = nextResultSets;
+      activeResultKeyRef.current = nextActiveKey;
+      setResultSets(nextResultSets);
+      setActiveResultKey(nextActiveKey);
   };
+
+  useEffect(() => {
+      if (!isActive) return;
+
+      const handleCloseActiveResultTab = (event: Event) => {
+          const request = (event as CustomEvent<CloseActiveResultShortcutRequest>).detail;
+          if (!request || request.handled || request.targetTabId !== tab.id) return;
+          request.handled = true;
+          request.outcome = 'ignored';
+          if (!isResultPanelVisibleRef.current) return;
+
+          const effectiveActiveKey = resolveEffectiveActiveResultKey(
+              resultSetsRef.current,
+              activeResultKeyRef.current,
+              isV2Ui,
+          );
+          if (!effectiveActiveKey) return;
+
+          if (effectiveActiveKey === QUERY_EDITOR_SQL_LOG_TAB_KEY) {
+              updateResultPanelVisibility(false);
+              request.outcome = 'hidden';
+              return;
+          }
+          if (!resultSetsRef.current.some(result => result.key === effectiveActiveKey)) return;
+
+          handleCloseResult(effectiveActiveKey);
+          request.outcome = 'closed';
+      };
+
+      window.addEventListener(CLOSE_ACTIVE_RESULT_TAB_EVENT, handleCloseActiveResultTab);
+      return () => {
+          window.removeEventListener(CLOSE_ACTIVE_RESULT_TAB_EVENT, handleCloseActiveResultTab);
+      };
+  }, [isActive, isV2Ui, tab.id, updateResultPanelVisibility]);
 
   const replaceResultSetsAfterMenuClose = (next: ResultSet[], preferredKey?: string) => {
       const nextKeys = new Set(next.map((result) => result.key));

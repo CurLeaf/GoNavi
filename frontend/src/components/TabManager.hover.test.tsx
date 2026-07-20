@@ -130,6 +130,23 @@ describe('TabManager hover info', () => {
     expect(source).toContain('const TabManager: React.FC = React.memo(() => {');
   });
 
+  it('routes the workspace close command through the docked active tab close coordinator', () => {
+    const source = stripSourceComments(readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8'));
+    const handlerStart = source.indexOf('const requestCloseActiveWorkspaceTab = useCallback(() => {');
+    const handlerEnd = source.indexOf('\n  useEffect(() => {', handlerStart);
+    const handlerSource = source.slice(handlerStart, handlerEnd);
+
+    expect(handlerStart).toBeGreaterThan(-1);
+    expect(handlerEnd).toBeGreaterThan(handlerStart);
+    expect(source).toContain("import { CLOSE_ACTIVE_WORKSPACE_TAB_EVENT, resolveDockedActiveTabId } from '../utils/closeTabShortcut';");
+    expect(handlerSource).toContain('if (!dockedActiveTabId) return;');
+    expect(handlerSource).toContain('closeTabsWithSQLFilePrompt(\n      [dockedActiveTabId],\n      () => closeTab(dockedActiveTabId),');
+    expect(handlerSource).not.toContain('[activeTabId]');
+    expect(source).toContain('window.addEventListener(CLOSE_ACTIVE_WORKSPACE_TAB_EVENT, requestCloseActiveWorkspaceTab);');
+    expect(source).toContain('window.removeEventListener(CLOSE_ACTIVE_WORKSPACE_TAB_EVENT, requestCloseActiveWorkspaceTab);');
+    expect(source).not.toContain("window.addEventListener('keydown'");
+  });
+
   it('keeps the tab workbench as a full-height flex child in legacy and v2 UI', () => {
     const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
 

@@ -9,13 +9,21 @@ import type { SavedQuery, TabData } from '../types';
 import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
 import { formatSqlExecutionError } from '../utils/sqlErrorSemantics';
 import { clearQueryTabDraft, clearSQLFileTabDraft, getQueryTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
+import {
+  CLOSE_ACTIVE_RESULT_TAB_EVENT,
+  type CloseActiveResultShortcutRequest,
+} from '../utils/closeTabShortcut';
 import { normalizeQueryResultMessages } from './queryEditor/QueryEditorHelpers';
 import QueryEditor, {
   collectQueryEditorObjectDecorationCandidates,
   resolveQueryEditorNavigationDecorations,
   resolveQueryEditorNavigationTarget,
 } from './QueryEditor';
-import QueryEditorResultsPanel, { shouldActivateResultTabDetachPointer } from './QueryEditorResultsPanel';
+import QueryEditorResultsPanel, {
+  QUERY_EDITOR_SQL_LOG_TAB_KEY,
+  resolveEffectiveActiveResultKey,
+  shouldActivateResultTabDetachPointer,
+} from './QueryEditorResultsPanel';
 
 const storeState = vi.hoisted(() => ({
   connections: [
@@ -2055,7 +2063,7 @@ describe('QueryEditor external SQL save', () => {
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 3');
   });
 
-  it('renders V2 empty state copy for the active non-Chinese language', async () => {
+  it('renders the zero-count V2 SQL log tab for the active non-Chinese language', async () => {
     storeState.appearance.uiVersion = 'v2';
     storeState.languagePreference = 'en-US';
     setCurrentLanguage('en-US');
@@ -2066,10 +2074,15 @@ describe('QueryEditor external SQL save', () => {
     });
 
     const rendered = textContent(renderer!.toJSON());
-    expect(rendered).toContain('Awaiting SQL execution');
-    expect(rendered).toContain('Run a query to display results below in the new data grid.');
-    expect(rendered).not.toContain('等待执行 SQL');
-    expect(rendered).not.toContain('运行查询后，结果会在下方以新版数据网格展示。');
+    expect(rendered).toContain('Logs0');
+    expect(renderer!.root.findAll((node) => node.props?.['data-log-panel'] === 'true')).toHaveLength(1);
+    expect(renderer!.root.findAll((node) =>
+      node.props?.['data-tab-key'] === QUERY_EDITOR_SQL_LOG_TAB_KEY,
+    )).toHaveLength(1);
+    expect(rendered).not.toContain('日志0');
+    await act(async () => {
+      renderer!.unmount();
+    });
   });
 
   it('uses the last editor cursor position when the run button takes focus', async () => {
@@ -2965,6 +2978,102 @@ describe('QueryEditor external SQL save', () => {
     expect(dataGridState.latestProps?.data).toEqual(expect.arrayContaining([expect.objectContaining({ a: 1 })]));
   });
 
+  it('closes the final result and synchronously hides the log tab on the next command', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['a'], rows: [{ a: 1 }] }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'main', query: 'select 1 as a;' })} />);
+    });
+    await act(async () => {
+      await findButton(renderer, '运行').props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const closeRegistrations = (window.addEventListener as any).mock.calls
+      .filter(([eventName]: [string]) => eventName === CLOSE_ACTIVE_RESULT_TAB_EVENT);
+    expect(closeRegistrations).toHaveLength(1);
+    const closeListener = closeRegistrations[0][1] as EventListener;
+    (window.dispatchEvent as any).mockImplementation((event: Event) => {
+      closeListener(event);
+      return true;
+    });
+
+    let firstOutcome!: CloseActiveResultShortcutRequest;
+    let secondOutcome!: CloseActiveResultShortcutRequest;
+    act(() => {
+      const firstRequest: CloseActiveResultShortcutRequest = { targetTabId: 'tab-1', handled: false, outcome: 'ignored' };
+      window.dispatchEvent(new CustomEvent(CLOSE_ACTIVE_RESULT_TAB_EVENT, { detail: firstRequest }));
+      firstOutcome = { ...firstRequest };
+
+      const secondRequest: CloseActiveResultShortcutRequest = { targetTabId: 'tab-1', handled: false, outcome: 'ignored' };
+      window.dispatchEvent(new CustomEvent(CLOSE_ACTIVE_RESULT_TAB_EVENT, { detail: secondRequest }));
+      secondOutcome = { ...secondRequest };
+    });
+
+    expect(firstOutcome).toEqual({ targetTabId: 'tab-1', handled: true, outcome: 'closed' });
+    expect(secondOutcome).toEqual({ targetTabId: 'tab-1', handled: true, outcome: 'hidden' });
+    expect(renderer.root.findAll((node) =>
+      node.props?.['data-gonavi-close-shortcut-scope'] === 'result',
+    )).toHaveLength(0);
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
+  it('ignores result close commands for hidden, invalid, or inactive result targets', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    let hiddenRenderer!: ReactTestRenderer;
+    await act(async () => {
+      hiddenRenderer = create(<QueryEditor tab={createTab()} />);
+    });
+
+    const closeRegistrations = (window.addEventListener as any).mock.calls
+      .filter(([eventName]: [string]) => eventName === CLOSE_ACTIVE_RESULT_TAB_EVENT);
+    expect(closeRegistrations).toHaveLength(1);
+    const hiddenRequest: CloseActiveResultShortcutRequest = { targetTabId: 'tab-1', handled: false, outcome: 'ignored' };
+    closeRegistrations[0][1](new CustomEvent(CLOSE_ACTIVE_RESULT_TAB_EVENT, { detail: hiddenRequest }));
+    expect(hiddenRequest).toEqual({ targetTabId: 'tab-1', handled: true, outcome: 'ignored' });
+    const detachedRequest: CloseActiveResultShortcutRequest = { targetTabId: 'detached-tab', handled: false, outcome: 'ignored' };
+    closeRegistrations[0][1](new CustomEvent(CLOSE_ACTIVE_RESULT_TAB_EVENT, { detail: detachedRequest }));
+    expect(detachedRequest).toEqual({ targetTabId: 'detached-tab', handled: false, outcome: 'ignored' });
+    await act(async () => {
+      hiddenRenderer.unmount();
+    });
+
+    vi.mocked(window.addEventListener).mockClear();
+    storeState.appearance.uiVersion = 'legacy';
+    let invalidRenderer!: ReactTestRenderer;
+    await act(async () => {
+      invalidRenderer = create(<QueryEditor tab={createTab({ id: 'tab-invalid', resultPanelVisible: true })} />);
+    });
+    const invalidRegistrations = (window.addEventListener as any).mock.calls
+      .filter(([eventName]: [string]) => eventName === CLOSE_ACTIVE_RESULT_TAB_EVENT);
+    expect(invalidRegistrations).toHaveLength(1);
+    const invalidRequest: CloseActiveResultShortcutRequest = { targetTabId: 'tab-invalid', handled: false, outcome: 'ignored' };
+    invalidRegistrations[0][1](new CustomEvent(CLOSE_ACTIVE_RESULT_TAB_EVENT, { detail: invalidRequest }));
+    expect(invalidRequest).toEqual({ targetTabId: 'tab-invalid', handled: true, outcome: 'ignored' });
+    await act(async () => {
+      invalidRenderer.unmount();
+    });
+
+    vi.mocked(window.addEventListener).mockClear();
+    let inactiveRenderer!: ReactTestRenderer;
+    await act(async () => {
+      inactiveRenderer = create(<QueryEditor tab={createTab({ id: 'tab-2' })} isActive={false} />);
+    });
+    expect((window.addEventListener as any).mock.calls
+      .filter(([eventName]: [string]) => eventName === CLOSE_ACTIVE_RESULT_TAB_EVENT)).toHaveLength(0);
+    await act(async () => {
+      inactiveRenderer.unmount();
+    });
+  });
+
   it('replaces the current result when rerunning the same cursor SQL', async () => {
     backendApp.DBQueryMulti
       .mockResolvedValueOnce({
@@ -3188,7 +3297,8 @@ describe('QueryEditor external SQL save', () => {
     const editorSource = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
 
     expect(panelSource).toContain('QUERY_EDITOR_SQL_LOG_TAB_KEY');
-    expect(panelSource).toContain('const shouldShowSqlLogTab = isV2Ui && (sqlLogCount > 0 || activeResultKey === QUERY_EDITOR_SQL_LOG_TAB_KEY);');
+    expect(panelSource).toContain('const shouldShowSqlLogTab = isV2Ui;');
+    expect(panelSource).toContain('data-gonavi-close-shortcut-scope="result"');
     expect(panelSource).toContain('<LogPanel');
     expect(panelSource).toContain('variant="embedded"');
     expect(panelSource).toContain('executionError={executionError}');
@@ -3362,13 +3472,13 @@ describe('QueryEditor external SQL save', () => {
   });
 
   it('does not render the embedded sql execution log tab in legacy UI', () => {
-    const renderResultsPanel = (isV2Ui: boolean) => create(
+    const renderResultsPanel = (isV2Ui: boolean, sqlLogCount = 1) => create(
       <QueryEditorResultsPanel
         resultSets={[]}
         activeResultKey=""
         loading={false}
         executionError=""
-        sqlLogCount={1}
+        sqlLogCount={sqlLogCount}
         darkMode={false}
         isV2Ui={isV2Ui}
         currentDb="main"
@@ -3397,6 +3507,56 @@ describe('QueryEditor external SQL save', () => {
     expect(v2Renderer.root.findAll((node) => node.props?.['data-log-panel'] === 'true')).toHaveLength(1);
     expect(v2Renderer.root.findAll((node) => node.props?.['data-tab-key'] === '__gonavi_sql_execution_log__')).toHaveLength(1);
     v2Renderer.unmount();
+
+    const emptyV2Renderer = renderResultsPanel(true, 0);
+    expect(emptyV2Renderer.root.findAll((node) => node.props?.['data-log-panel'] === 'true')).toHaveLength(1);
+    expect(emptyV2Renderer.root.findAll((node) => node.props?.['data-tab-key'] === QUERY_EDITOR_SQL_LOG_TAB_KEY)).toHaveLength(1);
+    expect(emptyV2Renderer.root.findAll((node) =>
+      node.props?.['data-gonavi-close-shortcut-scope'] === 'result',
+    )).toHaveLength(1);
+    emptyV2Renderer.unmount();
+  });
+
+  it('uses the shared effective result key for stale-key rendering fallbacks', () => {
+    const resultSets = [{
+      key: 'result-1',
+      sql: 'select 1 as value',
+      rows: [{ value: 1 }],
+      columns: ['value'],
+      pkColumns: [],
+      readOnly: true,
+    }];
+    expect(resolveEffectiveActiveResultKey(resultSets, 'stale-result', true)).toBe('result-1');
+    expect(resolveEffectiveActiveResultKey([], 'stale-result', true)).toBe(QUERY_EDITOR_SQL_LOG_TAB_KEY);
+    expect(resolveEffectiveActiveResultKey([], 'stale-result', false)).toBe('');
+
+    const renderer = create(
+      <QueryEditorResultsPanel
+        resultSets={resultSets}
+        activeResultKey="stale-result"
+        loading={false}
+        executionError=""
+        sqlLogCount={0}
+        darkMode={false}
+        isV2Ui
+        currentDb="main"
+        currentConnectionId="conn-1"
+        toggleShortcutLabel=""
+        onActiveResultKeyChange={vi.fn()}
+        onHide={vi.fn()}
+        onCloseResult={vi.fn()}
+        onCloseOtherResultTabs={vi.fn()}
+        onCloseResultTabsToLeft={vi.fn()}
+        onCloseResultTabsToRight={vi.fn()}
+        onCloseAllResultTabs={vi.fn()}
+        onReloadResult={vi.fn()}
+        onResultPageChange={vi.fn()}
+        onResultSort={vi.fn()}
+        onDiagnoseExecutionError={vi.fn()}
+      />,
+    );
+    expect(dataGridState.latestProps?.data).toEqual([{ value: 1 }]);
+    renderer.unmount();
   });
 
   it('keeps the v2 query editor toolbar grouped and compact', () => {

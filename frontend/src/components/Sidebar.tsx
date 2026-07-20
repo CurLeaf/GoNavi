@@ -3349,6 +3349,8 @@ const Sidebar: React.FC<{
             <div
                 ref={contextMenuPortalRef}
                 className={`gn-v2-sidebar-context-menu-portal ${contextMenu.rootClassName || ''}`}
+                data-gonavi-close-shortcut-guard="true"
+                data-gonavi-close-shortcut-blocks-background="true"
                 style={{
                     position: 'fixed',
                     left: contextMenu.x,

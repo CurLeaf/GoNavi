@@ -18,10 +18,13 @@ import {
   getShortcutPrimaryModifierDisplayLabel,
   installGlobalImeCompositionTracking,
   isGlobalImeCompositionActive,
+  isGlobalShortcutCaptureActive,
   isImeComposingKeyEvent,
   isShortcutMatch,
+  isShortcutPhysicalMatch,
   resolveShortcutBinding,
   resolveShortcutDisplay,
+  setGlobalShortcutCaptureActive,
   setGlobalImeCompositionActive,
   sanitizeShortcutOptions,
   SHORTCUT_ACTION_META,
@@ -31,6 +34,7 @@ import type { ConflictInfo } from './shortcuts';
 beforeEach(() => {
   setCurrentLanguage('zh-CN');
   setGlobalImeCompositionActive(false);
+  setGlobalShortcutCaptureActive(false);
 });
 
 // ─── findReservedConflict ────────────────────────────────────────────
@@ -91,6 +95,10 @@ describe('findReservedConflicts', () => {
 
   it('returns empty array for non-reserved combo', () => {
     expect(findReservedConflicts('Ctrl+Shift+Q')).toEqual([]);
+  });
+
+  it('does not reserve Ctrl+W after the app takes ownership of close-tab', () => {
+    expect(findReservedConflicts('Ctrl+W')).toEqual([]);
   });
 
   it('preserves monacoCommandId in results', () => {
@@ -199,6 +207,49 @@ describe('RESERVED_SHORTCUTS', () => {
 });
 
 describe('IME shortcut guards', () => {
+  it('suppresses normal shortcut owners while the recorder is active', () => {
+    const event = {
+      key: 'w',
+      code: 'KeyW',
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+    } as KeyboardEvent;
+
+    setGlobalShortcutCaptureActive(true);
+    expect(isGlobalShortcutCaptureActive()).toBe(true);
+    expect(isShortcutMatch(event, 'Ctrl+W')).toBe(false);
+    expect(isShortcutPhysicalMatch(event, 'Ctrl+W')).toBe(true);
+  });
+
+  it('keeps a recorder registered after an existing owner safe from listener order', () => {
+    const target = new EventTarget();
+    const owner = vi.fn();
+    const recorder = vi.fn();
+    target.addEventListener('keydown', (rawEvent) => {
+      if (isShortcutMatch(rawEvent as KeyboardEvent, 'Ctrl+W')) owner();
+    });
+
+    setGlobalShortcutCaptureActive(true);
+    target.addEventListener('keydown', (rawEvent) => {
+      recorder(eventToShortcut(rawEvent as KeyboardEvent));
+    });
+    const event = new Event('keydown', { cancelable: true });
+    Object.defineProperties(event, {
+      key: { value: 'w' },
+      code: { value: 'KeyW' },
+      ctrlKey: { value: true },
+      metaKey: { value: false },
+      altKey: { value: false },
+      shiftKey: { value: false },
+    });
+    target.dispatchEvent(event);
+
+    expect(owner).not.toHaveBeenCalled();
+    expect(recorder).toHaveBeenCalledWith('Ctrl+W');
+  });
+
   it('tracks composition state through global listeners', () => {
     const windowListeners = new Map<string, EventListener[]>();
     const documentListeners = new Map<string, EventListener[]>();
@@ -265,6 +316,28 @@ describe('IME shortcut guards', () => {
     expect(isImeComposingKeyEvent(event)).toBe(true);
     expect(eventToShortcut(event)).toBe('');
     expect(isShortcutMatch(event, 'Ctrl+Enter')).toBe(false);
+  });
+
+  it('matches a physical shortcut during IME composition without changing the guarded matcher', () => {
+    const event = {
+      key: 'w',
+      code: 'KeyW',
+      keyCode: 229,
+      which: 229,
+      isComposing: true,
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      nativeEvent: {
+        isComposing: true,
+        keyCode: 229,
+        which: 229,
+      },
+    } as unknown as KeyboardEvent;
+
+    expect(isShortcutPhysicalMatch(event, 'Ctrl+W')).toBe(true);
+    expect(isShortcutMatch(event, 'Ctrl+W')).toBe(false);
   });
 
   it('matches modifier shortcuts from KeyboardEvent.code when WebView reports Process', () => {
@@ -368,6 +441,18 @@ describe('IME shortcut guards', () => {
 // ─── shortcut defaults ───────────────────────────────────────────────
 
 describe('shortcut defaults', () => {
+  it('registers close active tab as an editable global shortcut', () => {
+    expect(DEFAULT_SHORTCUT_OPTIONS.closeActiveTab).toEqual({
+      mac: { combo: 'Meta+W', enabled: true },
+      windows: { combo: 'Ctrl+W', enabled: true },
+    });
+    expect(SHORTCUT_ACTION_META.closeActiveTab).toMatchObject({
+      label: '关闭当前标签页',
+      scope: 'global',
+      allowInEditable: true,
+    });
+  });
+
   it('registers select current statement as a query editor shortcut', () => {
     expect(DEFAULT_SHORTCUT_OPTIONS.selectCurrentStatement).toEqual({
       mac: { combo: 'Meta+E', enabled: true },
@@ -518,6 +603,68 @@ describe('shortcut defaults', () => {
       windows: { combo: 'Ctrl+Shift+R', enabled: false },
     });
     expect(options.newQueryTab.windows.combo).toBe('Ctrl+N');
+    expect(options.closeActiveTab).toEqual({
+      mac: { combo: 'Meta+W', enabled: true },
+      windows: { combo: 'Ctrl+W', enabled: true },
+    });
+  });
+
+  it('keeps close active tab enabled for new and empty shortcut settings', () => {
+    expect(sanitizeShortcutOptions(undefined).closeActiveTab).toEqual(DEFAULT_SHORTCUT_OPTIONS.closeActiveTab);
+    expect(sanitizeShortcutOptions({}).closeActiveTab).toEqual(DEFAULT_SHORTCUT_OPTIONS.closeActiveTab);
+  });
+
+  it('disables only the conflicting close-tab platform while preserving current platform bindings', () => {
+    const options = sanitizeShortcutOptions({
+      saveQuery: {
+        mac: { combo: 'Meta+W', enabled: true },
+        windows: { combo: 'Ctrl+S', enabled: true },
+      },
+      toggleTheme: {
+        mac: { combo: 'Meta+Shift+D', enabled: true },
+        windows: { combo: 'Ctrl+W', enabled: true },
+      },
+    });
+
+    expect(options.saveQuery.mac).toEqual({ combo: 'Meta+W', enabled: true });
+    expect(options.toggleTheme.windows).toEqual({ combo: 'Ctrl+W', enabled: true });
+    expect(options.closeActiveTab).toEqual({
+      mac: { combo: 'Meta+W', enabled: false },
+      windows: { combo: 'Ctrl+W', enabled: false },
+    });
+  });
+
+  it('migrates legacy single-platform close-tab conflicts independently per platform', () => {
+    const options = sanitizeShortcutOptions({
+      saveQuery: { combo: 'Meta+W', enabled: true },
+    });
+
+    expect(options.saveQuery).toEqual({
+      mac: { combo: 'Meta+W', enabled: true },
+      windows: { combo: 'Meta+W', enabled: true },
+    });
+    expect(options.closeActiveTab).toEqual({
+      mac: { combo: 'Meta+W', enabled: false },
+      windows: { combo: 'Ctrl+W', enabled: true },
+    });
+  });
+
+  it('respects an existing close active tab binding during sanitization', () => {
+    const options = sanitizeShortcutOptions({
+      closeActiveTab: {
+        mac: { combo: 'Meta+Shift+W', enabled: false },
+        windows: { combo: 'Ctrl+Shift+W', enabled: true },
+      },
+      saveQuery: {
+        mac: { combo: 'Meta+W', enabled: true },
+        windows: { combo: 'Ctrl+W', enabled: true },
+      },
+    });
+
+    expect(options.closeActiveTab).toEqual({
+      mac: { combo: 'Meta+Shift+W', enabled: false },
+      windows: { combo: 'Ctrl+Shift+W', enabled: true },
+    });
   });
 
   it('sanitizes partial platform shortcut bindings without losing defaults', () => {

@@ -153,12 +153,23 @@ import {
   getShortcutPlatform,
   installGlobalImeCompositionTracking,
   isEditableElement,
+  isImeComposingKeyEvent,
   isShortcutMatch,
   normalizeShortcutCombo,
   resolveShortcutBinding,
+  setGlobalShortcutCaptureActive,
   splitConflictsByContext,
   type ConflictInfo,
 } from './utils/shortcuts';
+import {
+  dispatchCloseActiveResultTab,
+  dispatchCloseActiveWorkspaceTab,
+  isCloseShortcutInteractionBlocked,
+  resolveCloseShortcutKeydownDecision,
+  resolveCloseShortcutScopeFromTarget,
+  resolveDockedActiveTabId,
+  type CloseShortcutScope,
+} from './utils/closeTabShortcut';
 import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldResetWebViewZoomForScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowScaleFixReason, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
 import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
 import { resolveWailsWindowVisibleViewport } from './utils/wailsWindowViewport';
@@ -2870,9 +2881,14 @@ function App() {
   const [isLinuxCJKFontBannerDismissed, setIsLinuxCJKFontBannerDismissed] = useState(false);
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
+  const closeShortcutScopeRef = useRef<CloseShortcutScope>('workspace');
   const tabDisplaySettingsPanelRef = useRef<HTMLDivElement | null>(null);
   const [tabDisplaySettingsFocusRequest, setTabDisplaySettingsFocusRequest] = useState(0);
   const isThemeSettingsPaneOpen = activeSettingsCenterPane?.key === 'theme';
+  useEffect(() => {
+      setGlobalShortcutCaptureActive(Boolean(capturingShortcutAction));
+      return () => setGlobalShortcutCaptureActive(false);
+  }, [capturingShortcutAction]);
   useEffect(() => {
       const shouldLoadInstalledFonts =
           runtimePlatform === 'linux' || ((isThemeModalOpen || isThemeSettingsPaneOpen) && themeModalSection === 'appearance');
@@ -3868,8 +3884,72 @@ function App() {
   }, [isMacRuntime, useNativeMacWindowControls]);
 
   useEffect(() => {
+      const handleExplicitCloseShortcutScope = (event: Event) => {
+          const nextScope = resolveCloseShortcutScopeFromTarget(event.target);
+          if (nextScope) {
+              closeShortcutScopeRef.current = nextScope;
+          }
+      };
+
+      document.addEventListener('pointerdown', handleExplicitCloseShortcutScope, true);
+      document.addEventListener('focusin', handleExplicitCloseShortcutScope, true);
+      return () => {
+          document.removeEventListener('pointerdown', handleExplicitCloseShortcutScope, true);
+          document.removeEventListener('focusin', handleExplicitCloseShortcutScope, true);
+      };
+  }, []);
+
+  useEffect(() => {
       const handleGlobalShortcut = (event: KeyboardEvent) => {
+          // The recorder owns every key while it is active, including Cmd/Ctrl+W.
+          if (capturingShortcutAction) {
+              return;
+          }
+
+          const closeDecision = resolveCloseShortcutKeydownDecision({
+              event,
+              shortcutOptions,
+              platform: activeShortcutPlatform,
+              capturingShortcut: false,
+              imeComposing: isImeComposingKeyEvent(event),
+              interactionBlocked: isCloseShortcutInteractionBlocked(event.target, document),
+          });
+          if (closeDecision.preventDefault) {
+              event.preventDefault();
+          }
+          if (closeDecision.kind === 'consume') {
+              event.stopImmediatePropagation();
+              return;
+          }
+          if (closeDecision.kind === 'close') {
+              event.stopImmediatePropagation();
+              if (closeShortcutScopeRef.current === 'workspace') {
+                  dispatchCloseActiveWorkspaceTab();
+              } else if (closeShortcutScopeRef.current === 'result') {
+                  const currentState = useStore.getState();
+                  const targetTabId = resolveDockedActiveTabId(
+                      currentState.tabs,
+                      currentState.activeTabId,
+                      currentState.detachedWorkbenchWindows,
+                  );
+                  const outcome = dispatchCloseActiveResultTab(targetTabId);
+                  if (outcome === 'hidden') {
+                      closeShortcutScopeRef.current = 'blocked';
+                  }
+              }
+              return;
+          }
+
+          const delegatedAction = closeDecision.kind === 'delegate'
+              ? closeDecision.ownerAction
+              : null;
           const matchedAction = SHORTCUT_ACTION_ORDER.find((action) => {
+              if (action === 'closeActiveTab') {
+                  return false;
+              }
+              if (delegatedAction && action !== delegatedAction) {
+                  return false;
+              }
               const meta = SHORTCUT_ACTION_META[action];
               if (meta.scope && meta.scope !== 'global') {
                   return false;
@@ -3937,7 +4017,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleGlobalShortcut, true);
       };
-  }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleOpenToolCenterPane, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, selectPresetTheme, shortcutOptions, switchActiveTabByOffset, themeMode, toggleAIPanel, useNativeMacWindowControls]);
+  }, [activeShortcutPlatform, capturingShortcutAction, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleOpenToolCenterPane, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, selectPresetTheme, shortcutOptions, switchActiveTabByOffset, themeMode, toggleAIPanel, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!capturingShortcutAction) {
@@ -6789,7 +6869,7 @@ function App() {
             contextKey={customThemeStyleContextKey}
             onAntTokensChange={setComputedCustomThemeAntTokens}
         />
-        <Layout style={{
+        <Layout data-gonavi-close-shortcut-scope="workspace" style={{
             height: '100vh',
             overflow: 'hidden',
             display: 'flex',

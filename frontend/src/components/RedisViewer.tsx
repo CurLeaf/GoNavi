@@ -2521,6 +2521,8 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             {treeContextMenu && typeof document !== 'undefined' && createPortal((
                 <div
                     className={isV2Ui ? 'gn-v2-context-menu gn-v2-redis-context-menu' : undefined}
+                    data-gonavi-close-shortcut-guard="true"
+                    data-gonavi-close-shortcut-blocks-background="true"
                     style={{
                         position: 'fixed',
                         left: typeof window !== 'undefined' ? Math.min(treeContextMenu.x + 4, Math.max(16, window.innerWidth - 220)) : treeContextMenu.x,

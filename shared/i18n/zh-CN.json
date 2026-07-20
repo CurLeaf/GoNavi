@@ -2732,6 +2732,8 @@
   "app.shortcuts.action.duplicateCurrentLine.label": "复制当前行到下一行",
   "app.shortcuts.action.focusSidebarSearch.description": "定位到左侧连接树搜索框",
   "app.shortcuts.action.focusSidebarSearch.label": "聚焦侧边栏搜索",
+  "app.shortcuts.action.closeActiveTab.description": "根据当前活动区域关闭结果标签页或工作区标签页",
+  "app.shortcuts.action.closeActiveTab.label": "关闭当前标签页",
   "app.shortcuts.action.formatSql.description": "格式化当前查询编辑器中的 SQL",
   "app.shortcuts.action.formatSql.label": "美化 SQL",
   "app.shortcuts.action.newConnection.description": "创建新的数据库、运行时或其他数据源连接",

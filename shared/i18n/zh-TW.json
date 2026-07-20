@@ -2732,6 +2732,8 @@
   "app.shortcuts.action.duplicateCurrentLine.label": "複製目前行到下一行",
   "app.shortcuts.action.focusSidebarSearch.description": "定位到左側連線樹搜尋框",
   "app.shortcuts.action.focusSidebarSearch.label": "聚焦側邊欄搜尋",
+  "app.shortcuts.action.closeActiveTab.description": "依目前作用中的區域關閉結果標籤頁或工作區標籤頁",
+  "app.shortcuts.action.closeActiveTab.label": "關閉目前標籤頁",
   "app.shortcuts.action.formatSql.description": "格式化目前查詢編輯器中的 SQL",
   "app.shortcuts.action.formatSql.label": "美化 SQL",
   "app.shortcuts.action.newConnection.description": "建立新的資料庫、執行階段或其他資料來源連線",

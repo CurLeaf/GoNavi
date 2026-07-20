@@ -2732,6 +2732,8 @@
   "app.shortcuts.action.duplicateCurrentLine.label": "Aktuelle Zeile darunter duplizieren",
   "app.shortcuts.action.focusSidebarSearch.description": "Fokussiert das Suchfeld der linken Verbindungsstruktur",
   "app.shortcuts.action.focusSidebarSearch.label": "Sidebar-Suche fokussieren",
+  "app.shortcuts.action.closeActiveTab.description": "Aktiven Ergebnis- oder Arbeitsbereich-Tab abhängig vom aktuellen Bereich schließen",
+  "app.shortcuts.action.closeActiveTab.label": "Aktiven Tab schließen",
   "app.shortcuts.action.formatSql.description": "SQL im aktuellen Abfrageeditor formatieren",
   "app.shortcuts.action.formatSql.label": "SQL formatieren",
   "app.shortcuts.action.newConnection.description": "Neue Datenbank-, Runtime- oder andere Datenquellenverbindung erstellen",

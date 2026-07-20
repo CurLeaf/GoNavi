@@ -2732,6 +2732,8 @@
   "app.shortcuts.action.duplicateCurrentLine.label": "現在の行を下に複製",
   "app.shortcuts.action.focusSidebarSearch.description": "左側の接続ツリー検索ボックスにフォーカスします",
   "app.shortcuts.action.focusSidebarSearch.label": "サイドバー検索にフォーカス",
+  "app.shortcuts.action.closeActiveTab.description": "現在の領域に応じて、アクティブな結果タブまたはワークスペースタブを閉じます",
+  "app.shortcuts.action.closeActiveTab.label": "アクティブなタブを閉じる",
   "app.shortcuts.action.formatSql.description": "現在のクエリエディターの SQL を整形します",
   "app.shortcuts.action.formatSql.label": "SQL を整形",
   "app.shortcuts.action.newConnection.description": "新しいデータベース、ランタイム、またはその他のデータソース接続を作成します",

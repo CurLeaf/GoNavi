@@ -2732,6 +2732,8 @@
   "app.shortcuts.action.duplicateCurrentLine.label": "Дублировать текущую строку ниже",
   "app.shortcuts.action.focusSidebarSearch.description": "Перейти к полю поиска в левом дереве подключений",
   "app.shortcuts.action.focusSidebarSearch.label": "Фокус на поиске боковой панели",
+  "app.shortcuts.action.closeActiveTab.description": "Закрыть активную вкладку результатов или рабочего пространства в зависимости от текущей области",
+  "app.shortcuts.action.closeActiveTab.label": "Закрыть активную вкладку",
   "app.shortcuts.action.formatSql.description": "Форматировать SQL в текущем редакторе запросов",
   "app.shortcuts.action.formatSql.label": "Форматировать SQL",
   "app.shortcuts.action.newConnection.description": "Создать новое подключение к базе данных, runtime или другому источнику данных",

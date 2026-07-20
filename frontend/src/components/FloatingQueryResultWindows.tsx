@@ -242,6 +242,8 @@ const FloatingQueryResultWindows: React.FC = () => {
           <div
             key={windowState.id}
             className="gn-detached-result-window"
+            data-gonavi-close-shortcut-guard="true"
+            data-gonavi-close-shortcut-scope="blocked"
             style={{
               left: windowState.x,
               top: windowState.y,

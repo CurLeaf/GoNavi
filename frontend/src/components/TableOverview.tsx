@@ -1387,6 +1387,8 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 <div
                     ref={v2ContextMenuPortalRef}
                     className="gn-v2-table-overview-context-menu-portal gn-v2-table-context-menu-popup"
+                    data-gonavi-close-shortcut-guard="true"
+                    data-gonavi-close-shortcut-blocks-background="true"
                     style={{
                         position: 'fixed',
                         left: v2ContextMenu.x,

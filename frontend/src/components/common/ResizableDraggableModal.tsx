@@ -251,6 +251,8 @@ const DraggableResizableModalFrame: React.FC<DraggableResizableModalFrameProps> 
       data-resizing={isResizing ? 'true' : 'false'}
       data-has-resized-width={size.width ? 'true' : 'false'}
       data-has-resized-height={size.height ? 'true' : 'false'}
+      data-gonavi-close-shortcut-guard={active ? 'true' : undefined}
+      data-gonavi-close-shortcut-blocks-background={active ? 'true' : undefined}
       style={frameStyle}
     >
       {children}
@@ -299,6 +301,8 @@ const ResizableDraggableModalBase: React.FC<ResizableDraggableModalProps> = ({
           props.rootClassName,
           props.className,
         ].filter(Boolean).join(' ')}
+        data-gonavi-close-shortcut-guard="true"
+        data-gonavi-close-shortcut-blocks-background="true"
         style={props.style}
       >
         {props.title || props.closable !== false ? (

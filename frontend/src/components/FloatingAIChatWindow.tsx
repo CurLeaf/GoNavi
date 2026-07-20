@@ -227,6 +227,8 @@ const FloatingAIChatWindow: React.FC<FloatingAIChatWindowProps> = ({
 
       <div
         className="gn-detached-ai-chat-window"
+        data-gonavi-close-shortcut-guard="true"
+        data-gonavi-close-shortcut-scope="blocked"
         style={{
           left: bounds.x,
           top: bounds.y,

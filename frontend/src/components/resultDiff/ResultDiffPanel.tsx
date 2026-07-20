@@ -779,6 +779,8 @@ const ResultDiffPanel: React.FC<ResultDiffPanelProps> = ({
         `}</style>
         <div
           className="gn-result-diff-floating-window"
+          data-gonavi-close-shortcut-guard="true"
+          data-gonavi-close-shortcut-scope="blocked"
           style={{
             left: bounds.x,
             top: bounds.y,

@@ -307,6 +307,8 @@ const FloatingWorkbenchWindows: React.FC = () => {
         <div
           key={windowState.tabId}
           className={`gn-detached-window${isFocused ? ' is-focused' : ''}`}
+          data-gonavi-close-shortcut-guard="true"
+          data-gonavi-close-shortcut-scope="blocked"
           style={{
             left: windowState.x,
             top: windowState.y,

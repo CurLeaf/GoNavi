@@ -54,6 +54,20 @@ export type QueryEditorResultSet = {
     page?: QueryResultPaginationState & { loading?: boolean };
 };
 
+export const resolveEffectiveActiveResultKey = (
+    resultSets: Pick<QueryEditorResultSet, 'key'>[],
+    activeResultKey: string,
+    showSqlLogTab: boolean,
+): string => {
+    if (resultSets.some((result) => result.key === activeResultKey)) {
+        return activeResultKey;
+    }
+    if (showSqlLogTab && activeResultKey === QUERY_EDITOR_SQL_LOG_TAB_KEY) {
+        return QUERY_EDITOR_SQL_LOG_TAB_KEY;
+    }
+    return resultSets[0]?.key || (showSqlLogTab ? QUERY_EDITOR_SQL_LOG_TAB_KEY : '');
+};
+
 interface QueryEditorResultsPanelProps {
     resultSets: QueryEditorResultSet[];
     activeResultKey: string;
@@ -295,17 +309,16 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
         window.addEventListener('pointercancel', handleUp);
     }, [onOpenResultInWindow, resolveResultTabTitle]);
 
-    const shouldShowSqlLogTab = isV2Ui && (sqlLogCount > 0 || activeResultKey === QUERY_EDITOR_SQL_LOG_TAB_KEY);
+    const shouldShowSqlLogTab = isV2Ui;
     const logTabCountLabel = sqlLogCount > 999 ? '999+' : String(sqlLogCount);
     const hideTooltipTitle = toggleShortcutLabel
         ? t('query_editor.results_panel.tooltip.hide_with_shortcut', { shortcut: toggleShortcutLabel })
         : t('query_editor.results_panel.tooltip.hide');
-    const activeResultKeyExists = activeResultKey === QUERY_EDITOR_SQL_LOG_TAB_KEY
-        ? shouldShowSqlLogTab
-        : resultSets.some((result) => result.key === activeResultKey);
-    const resolvedActiveResultKey = activeResultKeyExists
-        ? activeResultKey
-        : resultSets[0]?.key || (shouldShowSqlLogTab ? QUERY_EDITOR_SQL_LOG_TAB_KEY : '');
+    const resolvedActiveResultKey = resolveEffectiveActiveResultKey(
+        resultSets,
+        activeResultKey,
+        shouldShowSqlLogTab,
+    );
 
     const handleMessageTextareaKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'a') {
@@ -643,7 +656,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
               .query-result-panel-hide { display: inline-flex; align-items: center; gap: 4px; }
               .query-result-panel-hide-compact { min-width: 28px; padding: 0 6px; justify-content: center; }
             `}</style>
-            <div className={isV2Ui ? 'gn-v2-query-results' : undefined} style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
+            <div data-gonavi-close-shortcut-scope="result" className={isV2Ui ? 'gn-v2-query-results' : undefined} style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
                 {tabItems.length > 0 ? (
                     <Tabs className="query-result-tabs" activeKey={resolvedActiveResultKey} onChange={onActiveResultKeyChange} animated={false} style={{ flex: 1, minHeight: 0 }} tabBarExtraContent={tabsExtraContent} items={tabItems} />
                 ) : executionError ? (
