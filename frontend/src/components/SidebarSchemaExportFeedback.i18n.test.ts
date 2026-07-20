@@ -2,21 +2,30 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(new URL('./sidebar/useSidebarBatchExport.ts', import.meta.url), 'utf8');
+const workbenchSource = readFileSync(new URL('./TableExportWorkbench.tsx', import.meta.url), 'utf8');
+const runnerSource = readFileSync(new URL('./useExportProgressRunner.ts', import.meta.url), 'utf8');
 const locales = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'] as const;
 const requiredKeys = [
   'sidebar.message.schema_export_target_missing',
-  'sidebar.message.exporting_schema_structure',
-  'sidebar.message.exporting_schema_backup',
-  'sidebar.message.export_success',
-  'sidebar.message.export_failed',
+  'data_export.message.already_running',
+  'data_export.message.export_success',
+  'data_export.message.export_failed',
 ] as const;
 
 const extractHandleExportSchemaBlock = (): string => {
   const start = source.indexOf('const handleExportSchemaSQL = async');
-  const end = source.indexOf('const handleExportTablesSQL = async', start);
+  const end = source.indexOf('const openBatchTableWorkbench = () =>', start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
   return source.slice(start, end);
+};
+
+const extractDirectSchemaExportBlock = (): string => {
+  const start = workbenchSource.indexOf('const handleStartDirectSchemaExport = async');
+  const end = workbenchSource.indexOf('const handleStartExport = async', start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return workbenchSource.slice(start, end);
 };
 
 const placeholders = (value: string): string[] => [...value.matchAll(/\{\{(\w+)\}\}/g)]
@@ -26,6 +35,7 @@ const placeholders = (value: string): string[] => [...value.matchAll(/\{\{(\w+)\
 describe('Sidebar schema export feedback i18n', () => {
   it('validates the target and routes schema SQL export into the background workbench', () => {
     const block = extractHandleExportSchemaBlock();
+    const executionBlock = extractDirectSchemaExportBlock();
 
     expect(block).toContain("t('sidebar.message.schema_export_target_missing')");
     expect(block).toContain('showSQLExportOptionsDialog()');
@@ -36,6 +46,14 @@ describe('Sidebar schema export feedback i18n', () => {
     expect(block).toContain("requestKey: createTableExportRequestKey('schema')");
     expect(block).not.toContain('ExportSchemaSQLWithOptions(');
     expect(block).not.toContain('message.loading(');
+    expect(executionBlock).toContain('await runExportWithProgress({');
+    expect(executionBlock).toContain('ExportSchemaSQLWithOptions(');
+    expect(executionBlock).toContain('buildRpcConnectionConfig(connectionConfig, { database: effectiveDbName })');
+    expect(executionBlock).toContain('includeData,');
+    expect(executionBlock).toContain('includeDropIfExists,');
+    expect(runnerSource).toContain("message.warning(t('data_export.message.already_running'))");
+    expect(runnerSource).toContain("message.success(t('data_export.message.export_success'))");
+    expect(runnerSource).toContain("message.error(t('data_export.message.export_failed', { error: result.message }))");
   });
 
   it('keeps schema export feedback keys available with stable placeholders', () => {
@@ -45,10 +63,9 @@ describe('Sidebar schema export feedback i18n', () => {
         expect(catalog[key], `${locale}:${key}`).toBeTruthy();
       });
       expect(placeholders(catalog['sidebar.message.schema_export_target_missing'])).toEqual([]);
-      expect(placeholders(catalog['sidebar.message.exporting_schema_structure'])).toEqual(['schema']);
-      expect(placeholders(catalog['sidebar.message.exporting_schema_backup'])).toEqual(['schema']);
-      expect(placeholders(catalog['sidebar.message.export_success'])).toEqual([]);
-      expect(placeholders(catalog['sidebar.message.export_failed'])).toEqual(['error']);
+      expect(placeholders(catalog['data_export.message.already_running'])).toEqual([]);
+      expect(placeholders(catalog['data_export.message.export_success'])).toEqual([]);
+      expect(placeholders(catalog['data_export.message.export_failed'])).toEqual(['error']);
     });
   });
 });

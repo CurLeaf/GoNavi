@@ -50,6 +50,7 @@ const getTabKindLabel = (tab: TabData): string => {
   if (tab.type === 'design') return t('tab_manager.kind_badge.design');
   if (tab.type === 'table-overview') return t('tab_manager.kind_badge.table_overview');
   if (tab.type === 'table-export') return t('tab_manager.kind_badge.table_export');
+  if (tab.type === 'data-import') return t('tab_manager.kind_badge.data_import');
   if (tab.type === 'data-sync') return t('app.tools.entry.sync.title');
   if (tab.type === 'sql-file-execution') return t('sidebar.sql_file_exec.title');
   if (tab.type === 'sql-analysis') return t('tab_manager.kind_badge.sql_analysis');
@@ -70,8 +71,12 @@ const getTabKindLabel = (tab: TabData): string => {
 };
 
 export const isBackgroundTaskWorkbenchTab = (tab: Pick<TabData, 'type'>): boolean => (
-  tab.type === 'table-export' || tab.type === 'data-sync'
+  tab.type === 'table-export' || tab.type === 'data-import' || tab.type === 'data-sync'
 );
+
+export const isRunningDataImportWorkbenchTab = (
+  tab: Pick<TabData, 'type' | 'dataImportRunning'>,
+): boolean => tab.type === 'data-import' && tab.dataImportRunning === true;
 
 export const TAB_WORKBENCH_CLASS_NAME = 'tab-workbench';
 
@@ -191,6 +196,7 @@ const getTabKindTooltipLabel = (tab: TabData): string => {
   if (tab.type === 'design') return t('tab_manager.hover.kind.design');
   if (tab.type === 'table-overview') return t('tab_manager.hover.kind.table_overview');
   if (tab.type === 'table-export') return t('tab_manager.hover.kind.table_export');
+  if (tab.type === 'data-import') return t('tab_manager.hover.kind.data_import');
   if (tab.type === 'data-sync') return t('app.tools.entry.sync.title');
   if (tab.type === 'sql-file-execution') return t('sidebar.sql_file_exec.title');
   if (tab.type === 'sql-analysis') return t('tab_manager.hover.kind.sql_analysis');
@@ -790,11 +796,17 @@ const TabManager: React.FC = React.memo(() => {
   const closeTabsWithSQLFilePrompt = useCallback((targetIds: string[], closeConfirmedTabs: () => void) => {
     const uniqueIds = Array.from(new Set(targetIds.map((id) => String(id || '').trim()).filter(Boolean)));
     if (uniqueIds.length === 0) return;
-    const dedupeKey = uniqueIds.slice().sort().join('\n');
+    const targetTabs = tabs.filter((tab) => uniqueIds.includes(tab.id));
+    const runningImportTabs = targetTabs.filter(isRunningDataImportWorkbenchTab);
+    if (runningImportTabs.length > 0) {
+      void message.warning(t('tab_manager.message.data_import_running_close_blocked'));
+    }
+    const closableTabs = targetTabs.filter((tab) => !isRunningDataImportWorkbenchTab(tab));
+    if (closableTabs.length === 0) return;
+    const dedupeKey = closableTabs.map((tab) => tab.id).sort().join('\n');
     if (pendingCloseTabIdsRef.current.has(dedupeKey)) return;
     pendingCloseTabIdsRef.current.add(dedupeKey);
-    const targetTabs = tabs.filter((tab) => uniqueIds.includes(tab.id));
-    void requestCloseSQLFileTabs(targetTabs, closeConfirmedTabs).finally(() => {
+    void requestCloseSQLFileTabs(closableTabs, closeConfirmedTabs).finally(() => {
       pendingCloseTabIdsRef.current.delete(dedupeKey);
     });
   }, [requestCloseSQLFileTabs, tabs]);

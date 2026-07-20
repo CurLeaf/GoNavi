@@ -4,6 +4,7 @@ import {
   FolderOpenOutlined,
   TableOutlined,
   DatabaseOutlined,
+  ImportOutlined,
   FileAddOutlined,
   AimOutlined,
   RobotOutlined,
@@ -26,6 +27,7 @@ export interface SidebarConnectionRailProps {
     newGroup: string;
     batchTables: string;
     batchDatabases: string;
+    dataImport: string;
     openExternalSqlFile: string;
     locateCurrentTable: string;
     locateCurrentTableUnavailable: string;
@@ -36,6 +38,7 @@ export interface SidebarConnectionRailProps {
     openCreateTagModal: () => void;
     openBatchTableExport: () => void;
     openBatchDatabaseExport: () => void;
+    openDataImport: () => void;
     openExternalSqlFile: () => void;
     locateActiveTab: () => void;
     toggleAI: () => void;
@@ -78,6 +81,17 @@ const SidebarConnectionRail: React.FC<SidebarConnectionRailProps> = ({ labels, h
           data-sidebar-batch-database-action="true"
         >
           <DatabaseOutlined />
+        </button>
+      </Tooltip>
+      <Tooltip title={labels.dataImport} placement="right">
+        <button
+          type="button"
+          className="gn-v2-rail-tool gn-v2-rail-action"
+          onClick={handlers.openDataImport}
+          aria-label={labels.dataImport}
+          data-sidebar-data-import-action="true"
+        >
+          <ImportOutlined />
         </button>
       </Tooltip>
       <Tooltip title={labels.openExternalSqlFile} placement="right">

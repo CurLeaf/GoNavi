@@ -1,24 +1,29 @@
 import React from 'react';
 import { readFileSync } from 'node:fs';
-import { Button, Select } from 'antd';
+import { Button, Modal, Select } from 'antd';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import TableExportWorkbench, {
   buildTableExportHistoryEntry,
+  resolveBatchWorkbenchObjects,
   resolveTableExportColumnNames,
 } from './TableExportWorkbench';
 import {
+  ClearTables,
   DBGetColumns,
   DBGetDatabases,
   DBGetTables,
+  DropDatabase,
+  DropTable,
   ExportDatabaseSQLWithOptions,
   ExportQueryWithOptions,
   ExportSchemaSQLWithOptions,
   ExportTableWithOptions,
   ExportTablesSQLWithOptions,
 } from '../../wailsjs/go/app/App';
+import { loadViews } from './sidebar/sidebarMetadataLoaders';
 import { setCurrentLanguage } from '../i18n';
 import type { ExportProgressState } from './useExportProgressRunner';
 import type { ExportProgressLogEntry } from './useExportProgressRunner';
@@ -26,6 +31,7 @@ import type { ExportProgressLogEntry } from './useExportProgressRunner';
 const mockUpsertTableExportHistory = vi.fn();
 const mockRunExportWithProgress = vi.fn();
 const mockAddTab = vi.fn();
+const mockAddSqlLog = vi.fn();
 const mockUseExportProgressRunner = vi.fn();
 const createMockStoreState = () => ({
   theme: 'light',
@@ -45,6 +51,7 @@ const createMockStoreState = () => ({
   tableExportHistories: {},
   upsertTableExportHistory: mockUpsertTableExportHistory,
   addTab: mockAddTab,
+  addSqlLog: mockAddSqlLog,
 });
 const createMockProgressRunnerState = (): ExportProgressState => ({
   open: true,
@@ -68,6 +75,22 @@ const createProgressRunnerState = (
   ...createMockProgressRunnerState(),
   ...overrides,
 });
+const createIdleProgressRunnerState = (): ExportProgressState => createProgressRunnerState({
+  open: false,
+  jobId: '',
+  title: '',
+  targetName: '',
+  format: '',
+  startedAt: 0,
+  finishedAt: 0,
+  status: 'idle',
+  stage: '',
+  current: 0,
+  total: 0,
+  totalRowsKnown: false,
+  filePath: '',
+  message: '',
+});
 
 let mockStoreState = createMockStoreState();
 let mockProgressRunnerState: ExportProgressState = createMockProgressRunnerState();
@@ -85,6 +108,12 @@ vi.mock('antd', async () => {
     Progress: component('mock-progress'),
     Select: component('mock-select'),
     Tooltip: component('mock-tooltip'),
+    Modal: { confirm: vi.fn() },
+    message: {
+      loading: vi.fn(() => vi.fn()),
+      success: vi.fn(),
+      error: vi.fn(),
+    },
     Typography: {
       Paragraph: component('mock-paragraph'),
       Text: component('mock-text'),
@@ -98,6 +127,7 @@ vi.mock('@ant-design/icons', async () => {
   const icon = () => createElement('mock-icon');
   return {
     ClockCircleOutlined: icon,
+    DeleteOutlined: icon,
     ExportOutlined: icon,
     ReloadOutlined: icon,
   };
@@ -108,15 +138,22 @@ vi.mock('../store', () => ({
 }));
 
 vi.mock('../../wailsjs/go/app/App', () => ({
+  ClearTables: vi.fn(),
   DBGetColumns: vi.fn(),
   DBGetDatabases: vi.fn(),
   DBGetTables: vi.fn(),
+  DropDatabase: vi.fn(),
+  DropTable: vi.fn(),
   ExportDatabaseSQLWithOptions: vi.fn(),
   ExportDatabasesSQLWithOptions: vi.fn(),
   ExportQueryWithOptions: vi.fn(),
   ExportSchemaSQLWithOptions: vi.fn(),
   ExportTableWithOptions: vi.fn(),
   ExportTablesSQLWithOptions: vi.fn(),
+}));
+
+vi.mock('./sidebar/sidebarMetadataLoaders', () => ({
+  loadViews: vi.fn(),
 }));
 
 vi.mock('./useExportProgressRunner', () => ({
@@ -138,11 +175,18 @@ describe('TableExportWorkbench', () => {
     mockUpsertTableExportHistory.mockReset();
     mockRunExportWithProgress.mockReset();
     mockAddTab.mockReset();
+    mockAddSqlLog.mockReset();
     mockUseExportProgressRunner.mockReset();
     mockProgressLogs = [];
     vi.mocked(DBGetColumns).mockReset();
     vi.mocked(DBGetDatabases).mockReset();
     vi.mocked(DBGetTables).mockReset();
+    vi.mocked(ClearTables).mockReset();
+    vi.mocked(DropDatabase).mockReset();
+    vi.mocked(DropTable).mockReset();
+    vi.mocked(Modal.confirm).mockReset();
+    vi.mocked(loadViews).mockReset();
+    vi.mocked(loadViews).mockResolvedValue({ views: [], supported: true });
     vi.mocked(ExportDatabaseSQLWithOptions).mockReset();
     vi.mocked(ExportQueryWithOptions).mockReset();
     vi.mocked(ExportSchemaSQLWithOptions).mockReset();
@@ -361,6 +405,322 @@ describe('TableExportWorkbench', () => {
       { name: 'display_name' },
       { name: '' },
     ])).toEqual(['id', 'display_name', 'created_at']);
+  });
+
+  it('keeps view metadata out of destructive table targets', () => {
+    expect(resolveBatchWorkbenchObjects(
+      [{ Name: 'users' }, { Name: 'reporting.active_users' }],
+      [{ schemaName: 'reporting', viewName: 'active_users' }],
+    )).toEqual([
+      { name: 'reporting.active_users', objectType: 'view' },
+      { name: 'users', objectType: 'table' },
+    ]);
+  });
+
+  it('keeps case-sensitive table identifiers as distinct batch targets', () => {
+    expect(resolveBatchWorkbenchObjects(
+      [{ Name: 'Foo' }, { Name: 'foo' }],
+      [],
+    )).toEqual([
+      { name: 'Foo', objectType: 'table' },
+      { name: 'foo', objectType: 'table' },
+    ]);
+  });
+
+  it('syncs manually selected batch connection and database into the existing tab', async () => {
+    mockProgressRunnerState = createIdleProgressRunnerState();
+    mockStoreState = {
+      ...createMockStoreState(),
+      connections: [
+        ...createMockStoreState().connections,
+        {
+          id: 'conn-2',
+          name: '分析库',
+          config: {
+            type: 'postgres',
+            host: 'analytics.local',
+            port: 5432,
+            user: 'postgres',
+            database: 'analytics',
+          },
+        },
+      ],
+    };
+    vi.mocked(DBGetDatabases).mockResolvedValue({
+      success: true,
+      data: [{ Database: 'SYS' }, { Database: 'analytics' }],
+    } as any);
+    vi.mocked(DBGetTables).mockResolvedValue({ success: true, data: [] } as any);
+
+    const tab = {
+      id: 'table-export-batch-tables-conn-1-SYS',
+      title: '批量处理表',
+      type: 'table-export' as const,
+      connectionId: 'conn-1',
+      dbName: 'SYS',
+      exportWorkbenchMode: 'batch-tables' as const,
+    };
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<TableExportWorkbench tab={tab} />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const connectionSelect = renderer.root.findAllByType(Select).find((node) => (
+      Array.isArray(node.props.options)
+      && node.props.options.some((option: { value?: string }) => option.value === 'conn-2')
+    ));
+    expect(connectionSelect).toBeDefined();
+    await act(async () => {
+      connectionSelect?.props.onChange('conn-2');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mockAddTab).toHaveBeenLastCalledWith(expect.objectContaining({
+      id: tab.id,
+      type: 'table-export',
+      exportWorkbenchMode: 'batch-tables',
+      connectionId: 'conn-2',
+      dbName: undefined,
+    }));
+
+    const databaseSelect = renderer.root.findAllByType(Select).find((node) => (
+      Array.isArray(node.props.options)
+      && node.props.options.some((option: { value?: string }) => option.value === 'analytics')
+      && !node.props.mode
+    ));
+    expect(databaseSelect).toBeDefined();
+    await act(async () => {
+      databaseSelect?.props.onChange('analytics');
+      await Promise.resolve();
+    });
+    expect(mockAddTab).toHaveBeenLastCalledWith(expect.objectContaining({
+      id: tab.id,
+      connectionId: 'conn-2',
+      dbName: 'analytics',
+    }));
+
+    renderer.unmount();
+  });
+
+  it('clears selected tables after confirmation and records the executed operation', async () => {
+    mockProgressRunnerState = createIdleProgressRunnerState();
+    vi.mocked(DBGetDatabases).mockResolvedValue({ success: true, data: [{ Database: 'SYS' }] } as any);
+    vi.mocked(DBGetTables).mockResolvedValue({ success: true, data: [{ Name: 'users' }] } as any);
+    vi.mocked(ClearTables).mockResolvedValue({
+      success: true,
+      message: 'ok',
+      data: { count: 1, executedSQLs: ['TRUNCATE TABLE users'] },
+    } as any);
+    vi.mocked(Modal.confirm).mockImplementation((options: any) => {
+      options.onOk?.();
+      return { destroy: vi.fn(), update: vi.fn() } as any;
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <TableExportWorkbench
+          tab={{
+            id: 'table-export-batch-tables-conn-1-SYS',
+            title: '批量处理表',
+            type: 'table-export',
+            connectionId: 'conn-1',
+            dbName: 'SYS',
+            exportWorkbenchMode: 'batch-tables',
+            tableExportInitialObjectNames: ['users'],
+          }}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const clearButton = renderer.root.findByProps({ 'data-batch-clear-tables': 'true' });
+    expect(clearButton.props.disabled).toBe(false);
+    await act(async () => {
+      clearButton.props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(ClearTables).toHaveBeenCalledWith(expect.objectContaining({ type: 'mysql' }), 'SYS', ['users']);
+    expect(mockAddSqlLog).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'success',
+      dbName: 'SYS',
+      affectedRows: 1,
+      sql: expect.stringContaining('TRUNCATE TABLE users'),
+    }));
+
+    renderer.unmount();
+  });
+
+  it('stops table deletion after a partial failure and retains unprocessed targets', async () => {
+    mockProgressRunnerState = createIdleProgressRunnerState();
+    vi.mocked(DBGetDatabases).mockResolvedValue({ success: true, data: [{ Database: 'SYS' }] } as any);
+    vi.mocked(DBGetTables).mockResolvedValue({
+      success: true,
+      data: [{ Name: 'alpha' }, { Name: 'beta' }, { Name: 'gamma' }],
+    } as any);
+    vi.mocked(DropTable)
+      .mockResolvedValueOnce({ success: true, message: 'ok' } as any)
+      .mockResolvedValueOnce({ success: false, message: 'blocked' } as any);
+    vi.mocked(Modal.confirm).mockImplementation((options: any) => {
+      options.onOk?.();
+      return { destroy: vi.fn(), update: vi.fn() } as any;
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <TableExportWorkbench
+          tab={{
+            id: 'table-export-batch-tables-conn-1-SYS',
+            title: '批量处理表',
+            type: 'table-export',
+            connectionId: 'conn-1',
+            dbName: 'SYS',
+            exportWorkbenchMode: 'batch-tables',
+            tableExportInitialObjectNames: ['alpha', 'beta', 'gamma'],
+          }}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const deleteButton = renderer.root.findByProps({ 'data-batch-delete-tables': 'true' });
+    expect(deleteButton.props.disabled).toBe(false);
+    await act(async () => {
+      deleteButton.props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(DropTable).toHaveBeenCalledTimes(2);
+    expect(DropTable).toHaveBeenNthCalledWith(1, expect.anything(), 'SYS', 'alpha');
+    expect(DropTable).toHaveBeenNthCalledWith(2, expect.anything(), 'SYS', 'beta');
+    expect(DropTable).not.toHaveBeenCalledWith(expect.anything(), 'SYS', 'gamma');
+    expect(mockAddSqlLog).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'error',
+      affectedRows: 1,
+      message: 'blocked',
+    }));
+    const objectSelect = renderer.root.findAllByType(Select).find((node) => node.props.mode === 'multiple');
+    expect(objectSelect?.props.value).toEqual(['beta', 'gamma']);
+
+    renderer.unmount();
+  });
+
+  it('never enables clear or delete table actions when only views are selected', async () => {
+    mockProgressRunnerState = createIdleProgressRunnerState();
+    vi.mocked(DBGetDatabases).mockResolvedValue({ success: true, data: [{ Database: 'SYS' }] } as any);
+    vi.mocked(DBGetTables).mockResolvedValue({
+      success: true,
+      data: [{ Name: 'reporting.active_users' }],
+    } as any);
+    vi.mocked(loadViews).mockResolvedValue({
+      views: [{ schemaName: 'reporting', viewName: 'active_users' }],
+      supported: true,
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <TableExportWorkbench
+          tab={{
+            id: 'table-export-batch-tables-conn-1-SYS',
+            title: '批量处理表',
+            type: 'table-export',
+            connectionId: 'conn-1',
+            dbName: 'SYS',
+            exportWorkbenchMode: 'batch-tables',
+            tableExportInitialObjectNames: ['reporting.active_users'],
+          }}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const clearButton = renderer.root.findByProps({ 'data-batch-clear-tables': 'true' });
+    const deleteButton = renderer.root.findByProps({ 'data-batch-delete-tables': 'true' });
+    expect(clearButton.props.disabled).toBe(true);
+    expect(deleteButton.props.disabled).toBe(true);
+    await act(async () => {
+      clearButton.props.onClick();
+      deleteButton.props.onClick();
+      await Promise.resolve();
+    });
+    expect(Modal.confirm).not.toHaveBeenCalled();
+    expect(ClearTables).not.toHaveBeenCalled();
+    expect(DropTable).not.toHaveBeenCalled();
+
+    renderer.unmount();
+  });
+
+  it('stops database deletion after a partial failure and retains unprocessed databases', async () => {
+    mockProgressRunnerState = createIdleProgressRunnerState();
+    vi.mocked(DBGetDatabases).mockResolvedValue({
+      success: true,
+      data: [{ Database: 'alpha' }, { Database: 'beta' }, { Database: 'gamma' }],
+    } as any);
+    vi.mocked(DropDatabase)
+      .mockResolvedValueOnce({ success: true, message: 'ok' } as any)
+      .mockResolvedValueOnce({ success: false, message: 'in use' } as any);
+    vi.mocked(Modal.confirm).mockImplementation((options: any) => {
+      options.onOk?.();
+      return { destroy: vi.fn(), update: vi.fn() } as any;
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <TableExportWorkbench
+          tab={{
+            id: 'table-export-batch-databases-conn-1',
+            title: '批量处理数据库',
+            type: 'table-export',
+            connectionId: 'conn-1',
+            exportWorkbenchMode: 'batch-databases',
+            tableExportInitialDatabaseNames: ['alpha', 'beta', 'gamma'],
+          }}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const deleteButton = renderer.root.findByProps({ 'data-batch-delete-databases': 'true' });
+    expect(deleteButton.props.disabled).toBe(false);
+    await act(async () => {
+      deleteButton.props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(DropDatabase).toHaveBeenCalledTimes(2);
+    expect(DropDatabase).toHaveBeenNthCalledWith(1, expect.anything(), 'alpha');
+    expect(DropDatabase).toHaveBeenNthCalledWith(2, expect.anything(), 'beta');
+    expect(DropDatabase).not.toHaveBeenCalledWith(expect.anything(), 'gamma');
+    expect(mockAddSqlLog).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'error',
+      affectedRows: 1,
+      message: 'in use',
+    }));
+    const databaseSelect = renderer.root.findAllByType(Select).find((node) => node.props.mode === 'multiple');
+    expect(databaseSelect?.props.value).toEqual(['beta', 'gamma']);
+
+    renderer.unmount();
   });
 
   it('loads selectable columns and sends the selection through both single-table export paths', () => {
@@ -663,17 +1023,40 @@ describe('TableExportWorkbench', () => {
       filePath: '',
       message: '',
     });
+    mockStoreState = {
+      ...createMockStoreState(),
+      connections: [
+        ...createMockStoreState().connections,
+        {
+          id: 'conn-2',
+          name: '分析库',
+          config: {
+            type: 'postgres',
+            host: 'analytics.local',
+            port: 5432,
+            user: 'postgres',
+            database: 'analytics',
+          },
+        },
+      ],
+    };
     vi.mocked(DBGetDatabases).mockResolvedValue({
       success: true,
       data: [{ Database: 'SYS' }, { Database: 'audit' }],
     } as any);
 
-    const buildTab = (requestKey: string, database: string, contentMode: 'schema' | 'backup', includeDropIfExists: boolean) => ({
+    const buildTab = (
+      requestKey: string,
+      database: string,
+      contentMode: 'schema' | 'backup',
+      includeDropIfExists: boolean,
+      connectionId: string,
+    ) => ({
       id: 'table-export-batch-databases-conn-1',
       title: '批量导出库',
       type: 'table-export' as const,
       exportWorkbenchMode: 'batch-databases' as const,
-      connectionId: 'conn-1',
+      connectionId,
       tableExportInitialDatabaseNames: [database],
       tableExportContentMode: contentMode,
       tableExportIncludeDropIfExists: includeDropIfExists,
@@ -682,13 +1065,13 @@ describe('TableExportWorkbench', () => {
 
     let renderer!: ReactTestRenderer;
     await act(async () => {
-      renderer = create(<TableExportWorkbench tab={buildTab('request-1', 'SYS', 'schema', false)} />);
+      renderer = create(<TableExportWorkbench tab={buildTab('request-1', 'SYS', 'schema', false, 'conn-2')} />);
       await Promise.resolve();
     });
     expect(mockRunExportWithProgress).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      renderer.update(<TableExportWorkbench tab={buildTab('request-2', 'audit', 'backup', true)} />);
+      renderer.update(<TableExportWorkbench tab={buildTab('request-2', 'audit', 'backup', true, 'conn-1')} />);
       await Promise.resolve();
     });
 
@@ -920,12 +1303,12 @@ describe('TableExportWorkbench', () => {
     expect(source).toContain('includeDropIfExists: includeSchema && includeDropIfExists');
     expect(source).toContain("t('data_export.sql_options.drop_if_exists.label')");
     expect(source).toContain("t('data_export.sql_options.drop_if_exists.description')");
-    expect(source).toContain("pointerEvents: isRunning ? 'none' : 'auto'");
-    expect(source).toContain('aria-disabled={isRunning}');
-    expect(source.match(/disabled=\{isRunning\}/g)?.length || 0).toBeGreaterThanOrEqual(10);
-    expect(source).toContain('disabled={isRunning || !selectedDbName}');
-    expect(source).toContain('disabled={isRunning || availableObjects.length === 0}');
-    expect(source).toContain('disabled={isRunning || availableDatabases.length === 0}');
+    expect(source).toContain("pointerEvents: isConfigurationLocked ? 'none' : 'auto'");
+    expect(source).toContain('aria-disabled={isConfigurationLocked}');
+    expect(source.match(/disabled=\{isConfigurationLocked\}/g)?.length || 0).toBeGreaterThanOrEqual(10);
+    expect(source).toContain('disabled={isConfigurationLocked || !selectedDbName}');
+    expect(source).toContain('disabled={isConfigurationLocked || availableObjects.length === 0}');
+    expect(source).toContain('disabled={isConfigurationLocked || availableDatabases.length === 0}');
   });
 
   it('prefers backend startedAt over a placeholder history timestamp for the same job', () => {

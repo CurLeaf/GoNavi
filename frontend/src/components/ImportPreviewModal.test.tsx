@@ -155,10 +155,14 @@ const textContent = (node: any): string => {
   return textContent(node.children || []);
 };
 
-const createImportPreviewTree = (filePath = "D:/imports/users.csv") => (
+const createImportPreviewTree = (
+  filePath = "D:/imports/users.csv",
+  presentation: "modal" | "embedded" = "modal",
+) => (
   <I18nProvider preference="en-US" onPreferenceChange={() => undefined}>
     <ImportPreviewModal
       visible
+      presentation={presentation}
       filePath={filePath}
       connectionId="conn-1"
       dbName="app"
@@ -169,10 +173,13 @@ const createImportPreviewTree = (filePath = "D:/imports/users.csv") => (
   </I18nProvider>
 );
 
-const renderImportPreview = async (filePath = "D:/imports/users.csv") => {
+const renderImportPreview = async (
+  filePath = "D:/imports/users.csv",
+  presentation: "modal" | "embedded" = "modal",
+) => {
   let renderer!: ReactTestRenderer;
   await act(async () => {
-    renderer = create(createImportPreviewTree(filePath));
+    renderer = create(createImportPreviewTree(filePath, presentation));
     await Promise.resolve();
     await Promise.resolve();
   });
@@ -233,6 +240,21 @@ describe("ImportPreviewModal i18n", () => {
     expect(renderedText).toContain("Start import");
     expect(renderedText).toContain("id");
     expect(renderedText).toContain("user_name");
+  });
+
+  it("renders the same preview and actions inside a workbench panel", async () => {
+    const renderer = await renderImportPreview("D:/imports/users.csv", "embedded");
+
+    expect(renderer.root.findByProps({
+      "data-import-preview-embedded": "true",
+    })).toBeDefined();
+    expect(renderer.root.findByProps({
+      "data-import-preview-embedded-footer": "true",
+    })).toBeDefined();
+    const renderedText = textContent(renderer.toJSON());
+    expect(renderedText).toContain("Import data preview");
+    expect(renderedText).toContain("Start import");
+    expect(renderedText).toContain("alice");
   });
 
   it("does not keep migrated Chinese UI literals in ImportPreviewModal source", () => {

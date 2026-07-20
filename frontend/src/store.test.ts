@@ -2385,6 +2385,118 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().activeTabId).toBe('table-export-conn-1-main-users');
   });
 
+  it('keeps a running data import tab until the foreground import finishes', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'query-1',
+      title: 'Query 1',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'main',
+    });
+    useStore.getState().addTab({
+      id: 'data-import-workbench',
+      title: 'Data import',
+      type: 'data-import',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'users',
+      dataImportRunning: true,
+    });
+    useStore.getState().addTab({
+      id: 'query-2',
+      title: 'Query 2',
+      type: 'query',
+      connectionId: 'conn-2',
+      dbName: 'analytics',
+    });
+
+    useStore.getState().closeTab('data-import-workbench');
+    expect(useStore.getState().tabs.map((tab) => tab.id)).toContain('data-import-workbench');
+
+    useStore.getState().closeTabsToLeft('query-2');
+    expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual([
+      'data-import-workbench',
+      'query-2',
+    ]);
+
+    useStore.getState().closeAllTabs();
+    expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual(['data-import-workbench']);
+    expect(useStore.getState().activeContext).toEqual({ connectionId: 'conn-1', dbName: 'main' });
+
+    useStore.getState().addTab({
+      ...useStore.getState().tabs[0],
+      dataImportRunning: false,
+    });
+    useStore.getState().closeAllTabs();
+    expect(useStore.getState().tabs).toEqual([]);
+  });
+
+  it('preserves a running data import when closing tabs by database or connection', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'data-import-workbench',
+      title: 'Data import',
+      type: 'data-import',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'users',
+      dataImportRunning: true,
+    });
+    useStore.getState().addTab({
+      id: 'table-users',
+      title: 'users',
+      type: 'table',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'users',
+    });
+
+    useStore.getState().closeTabsByDatabase('conn-1', 'main');
+    expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual(['data-import-workbench']);
+
+    useStore.getState().closeTabsByConnection('conn-1');
+    expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual(['data-import-workbench']);
+  });
+
+  it('preserves a running data import when closing right-side or other tabs', async () => {
+    const { useStore } = await importStore();
+    const addQuery = (id: string) => useStore.getState().addTab({
+      id,
+      title: id,
+      type: 'query',
+      connectionId: 'conn-2',
+      dbName: 'analytics',
+    });
+
+    addQuery('query-left');
+    useStore.getState().addTab({
+      id: 'data-import-workbench',
+      title: 'Data import',
+      type: 'data-import',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'users',
+      dataImportRunning: true,
+    });
+    addQuery('query-right');
+
+    useStore.getState().closeTabsToRight('query-left');
+    expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual([
+      'query-left',
+      'data-import-workbench',
+    ]);
+
+    addQuery('query-right');
+    useStore.getState().closeOtherTabs('query-left');
+    expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual([
+      'query-left',
+      'data-import-workbench',
+    ]);
+  });
+
   it('persists table export history across store reloads', async () => {
     const { useStore } = await importStore();
 

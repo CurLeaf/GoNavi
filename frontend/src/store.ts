@@ -2621,6 +2621,10 @@ const resolveActiveContextForTabId = (
   return fallbackContext;
 };
 
+const isRunningDataImportTab = (tab: TabData | undefined): boolean => (
+  tab?.type === "data-import" && tab.dataImportRunning === true
+);
+
 type SqlLogSanitizeOptions = {
   limit: number;
   sqlLength: number;
@@ -4048,6 +4052,9 @@ export const useStore = create<AppState>()(
       closeTab: (id) =>
         set((state) => {
           const closedTab = state.tabs.find((t) => t.id === id);
+          if (isRunningDataImportTab(closedTab)) {
+            return state;
+          }
           if (closedTab?.type === "query") {
             clearQueryTabDraft(closedTab.id);
             clearQueryEditorResultSession(id);
@@ -4093,15 +4100,19 @@ export const useStore = create<AppState>()(
               clearQueryTabDraft(tab.id);
               clearQueryEditorResultSession(tab.id);
             });
+          const newTabs = state.tabs.filter(
+            (tab) => tab.id === id || isRunningDataImportTab(tab),
+          );
+          const keptIds = new Set(newTabs.map((tab) => tab.id));
           return {
-            tabs: [keep],
+            tabs: newTabs,
             activeTabId: id,
             activeContext: resolveActiveContextFromTab(keep),
             detachedWorkbenchWindows: state.detachedWorkbenchWindows.filter(
-              (windowState) => windowState.tabId === id,
+              (windowState) => keptIds.has(windowState.tabId),
             ),
             detachedQueryResultWindows: state.detachedQueryResultWindows.filter(
-              (windowState) => windowState.sourceQueryTabId === id,
+              (windowState) => keptIds.has(windowState.sourceQueryTabId),
             ),
           };
         }),
@@ -4117,7 +4128,9 @@ export const useStore = create<AppState>()(
               clearQueryTabDraft(tab.id);
               clearQueryEditorResultSession(tab.id);
             });
-          const newTabs = state.tabs.slice(index);
+          const newTabs = state.tabs.filter(
+            (tab, tabIndex) => tabIndex >= index || isRunningDataImportTab(tab),
+          );
           const keptIds = new Set(newTabs.map((tab) => tab.id));
           const activeStillExists = state.activeTabId
             ? newTabs.some((t) => t.id === state.activeTabId)
@@ -4150,7 +4163,9 @@ export const useStore = create<AppState>()(
               clearQueryTabDraft(tab.id);
               clearQueryEditorResultSession(tab.id);
             });
-          const newTabs = state.tabs.slice(0, index + 1);
+          const newTabs = state.tabs.filter(
+            (tab, tabIndex) => tabIndex <= index || isRunningDataImportTab(tab),
+          );
           const keptIds = new Set(newTabs.map((tab) => tab.id));
           const activeStillExists = state.activeTabId
             ? newTabs.some((t) => t.id === state.activeTabId)
@@ -4187,7 +4202,10 @@ export const useStore = create<AppState>()(
               clearQueryEditorResultSession(tab.id);
             });
           const newTabs = state.tabs.filter(
-            (t) => String(t.connectionId || "").trim() !== targetConnectionId,
+            (tab) => (
+              isRunningDataImportTab(tab)
+              || String(tab.connectionId || "").trim() !== targetConnectionId
+            ),
           );
           const activeStillExists = state.activeTabId
             ? newTabs.some((t) => t.id === state.activeTabId)
@@ -4237,6 +4255,7 @@ export const useStore = create<AppState>()(
               clearQueryEditorResultSession(tab.id);
             });
           const newTabs = state.tabs.filter((tab) => {
+            if (isRunningDataImportTab(tab)) return true;
             const sameConnection =
               String(tab.connectionId || "").trim() === targetConnectionId;
             const sameDb = String(tab.dbName || "").trim() === targetDbName;
@@ -4301,12 +4320,28 @@ export const useStore = create<AppState>()(
               clearQueryTabDraft(tab.id);
               clearQueryEditorResultSession(tab.id);
             });
+          const newTabs = state.tabs.filter(isRunningDataImportTab);
+          const keptIds = new Set(newTabs.map((tab) => tab.id));
+          const activeStillExists = state.activeTabId
+            ? keptIds.has(state.activeTabId)
+            : false;
+          const nextActiveTabId = activeStillExists
+            ? state.activeTabId
+            : (newTabs[0]?.id || null);
           return {
-            tabs: [],
-            activeTabId: null,
-            activeContext: null,
-            detachedWorkbenchWindows: [],
-            detachedQueryResultWindows: [],
+            tabs: newTabs,
+            activeTabId: nextActiveTabId,
+            activeContext: resolveActiveContextForTabId(
+              newTabs,
+              nextActiveTabId,
+              null,
+            ),
+            detachedWorkbenchWindows: state.detachedWorkbenchWindows.filter(
+              (windowState) => keptIds.has(windowState.tabId),
+            ),
+            detachedQueryResultWindows: state.detachedQueryResultWindows.filter(
+              (windowState) => keptIds.has(windowState.sourceQueryTabId),
+            ),
           };
         }),
 

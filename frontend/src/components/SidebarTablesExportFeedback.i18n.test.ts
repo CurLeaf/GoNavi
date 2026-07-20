@@ -2,21 +2,30 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(new URL('./sidebar/useSidebarBatchExport.ts', import.meta.url), 'utf8');
+const workbenchSource = readFileSync(new URL('./TableExportWorkbench.tsx', import.meta.url), 'utf8');
+const runnerSource = readFileSync(new URL('./useExportProgressRunner.ts', import.meta.url), 'utf8');
 const locales = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'] as const;
 const requiredKeys = [
-  'sidebar.message.export_tables_same_database_required',
-  'sidebar.message.backing_up_selected_tables',
-  'sidebar.message.exporting_selected_table_schema',
-  'sidebar.message.export_success',
-  'sidebar.message.export_failed',
+  'sidebar.action.batch_tables',
+  'data_export.message.already_running',
+  'data_export.message.export_success',
+  'data_export.message.export_failed',
 ] as const;
 
 const extractHandleExportTablesBlock = (): string => {
-  const start = source.indexOf('const handleExportTablesSQL = async');
-  const end = source.indexOf('const openBatchOperationModal = async', start);
+  const start = source.indexOf('const openBatchTableWorkbench = () =>');
+  const end = source.indexOf('const openBatchDatabaseWorkbench = () =>', start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
   return source.slice(start, end);
+};
+
+const extractBatchTableExecutionBlock = (): string => {
+  const start = workbenchSource.indexOf('const handleStartBatchTablesExport = async');
+  const end = workbenchSource.indexOf('const handleStartBatchDatabasesExport = async', start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return workbenchSource.slice(start, end);
 };
 
 const placeholders = (value: string): string[] => [...value.matchAll(/\{\{(\w+)\}\}/g)]
@@ -24,18 +33,23 @@ const placeholders = (value: string): string[] => [...value.matchAll(/\{\{(\w+)\
   .sort();
 
 describe('Sidebar tables export feedback i18n', () => {
-  it('validates the selection and routes selected tables into the background workbench', () => {
+  it('opens the batch workbench immediately and delegates selected tables to its runner', () => {
     const block = extractHandleExportTablesBlock();
+    const executionBlock = extractBatchTableExecutionBlock();
 
-    expect(block).toContain("t('sidebar.message.export_tables_same_database_required')");
-    expect(block).toContain('showSQLExportOptionsDialog()');
+    expect(block).toContain('resolveBatchWorkbenchContext(selectedNodesRef.current, connections)');
     expect(block).toContain('addTab(buildBatchTableExportWorkbenchTab({');
-    expect(block).toContain('initialObjectNames: tableNames');
-    expect(block).toContain("contentMode: includeData ? 'backup' : 'schema'");
-    expect(block).toContain('includeDropIfExists: exportOptions.includeDropIfExists');
-    expect(block).toContain("requestKey: createTableExportRequestKey('tables')");
-    expect(block).not.toContain('ExportTablesSQLWithOptions(');
-    expect(block).not.toContain('message.loading(');
+    expect(block).toContain('connectionId,');
+    expect(block).toContain('dbName: dbName || undefined');
+    expect(block).toContain("title: t('sidebar.action.batch_tables')");
+    expect(block).not.toContain('requestKey:');
+    expect(executionBlock).toContain('selectedObjectNames.length === 0');
+    expect(executionBlock).toContain('await runExportWithProgress({');
+    expect(executionBlock).toContain('ExportTablesSQLWithOptions(');
+    expect(executionBlock).toContain('selectedObjectNames,');
+    expect(runnerSource).toContain("message.warning(t('data_export.message.already_running'))");
+    expect(runnerSource).toContain("message.success(t('data_export.message.export_success'))");
+    expect(runnerSource).toContain("message.error(t('data_export.message.export_failed', { error: result.message }))");
   });
 
   it('keeps tables export feedback keys available with stable placeholders', () => {
@@ -44,11 +58,10 @@ describe('Sidebar tables export feedback i18n', () => {
       requiredKeys.forEach((key) => {
         expect(catalog[key], `${locale}:${key}`).toBeTruthy();
       });
-      expect(placeholders(catalog['sidebar.message.export_tables_same_database_required'])).toEqual([]);
-      expect(placeholders(catalog['sidebar.message.backing_up_selected_tables'])).toEqual(['count']);
-      expect(placeholders(catalog['sidebar.message.exporting_selected_table_schema'])).toEqual(['count']);
-      expect(placeholders(catalog['sidebar.message.export_success'])).toEqual([]);
-      expect(placeholders(catalog['sidebar.message.export_failed'])).toEqual(['error']);
+      expect(placeholders(catalog['sidebar.action.batch_tables'])).toEqual([]);
+      expect(placeholders(catalog['data_export.message.already_running'])).toEqual([]);
+      expect(placeholders(catalog['data_export.message.export_success'])).toEqual([]);
+      expect(placeholders(catalog['data_export.message.export_failed'])).toEqual(['error']);
     });
   });
 });

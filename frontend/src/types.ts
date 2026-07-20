@@ -478,6 +478,7 @@ export interface TabData {
     | "package-def"
     | "table-overview"
     | "table-export"
+    | "data-import"
     | "jvm-overview"
     | "jvm-resource"
     | "jvm-audit"
@@ -523,6 +524,7 @@ export interface TabData {
   tableExportContentMode?: TableExportContentMode;
   tableExportIncludeDropIfExists?: boolean;
   tableExportRequestKey?: string;
+  dataImportRunning?: boolean;
   sqlFileExecutionRequestKey?: string;
   sqlFileExecutionFileSizeMB?: string;
   sqlAnalysisView?: "diagnose" | "slow-query";

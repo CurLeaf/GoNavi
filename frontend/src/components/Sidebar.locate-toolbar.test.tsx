@@ -971,14 +971,14 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain("t('sidebar.external_sql_modal.validation.directory_name_no_separator')");
   });
 
-  it('keeps the legacy sidebar toolbar on a stable five-column grid layout', () => {
+  it('keeps the legacy sidebar toolbar on a stable six-column grid layout', () => {
     const source = readSidebarSource();
     const markup = renderSidebarMarkup();
 
     expect(markup).toContain('data-sidebar-legacy-toolbar="true"');
     expect(markup).toContain('data-sidebar-legacy-toolbar-item="true"');
     expect(source).toContain("const legacyToolbarStyle: React.CSSProperties = {");
-    expect(source).toContain("gridTemplateColumns: 'repeat(5, minmax(0, 1fr))'");
+    expect(source).toContain("gridTemplateColumns: 'repeat(6, minmax(0, 1fr))'");
     expect(source).toContain("justifyItems: 'center'");
     expect(source).toContain("const legacyToolbarItemStyle: React.CSSProperties = {");
     expect(source).toContain("const legacyToolbarDisabledWrapStyle: React.CSSProperties = {");
@@ -1042,12 +1042,14 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('data-sidebar-create-group-action="true"');
     expect(markup).toContain('data-sidebar-batch-table-action="true"');
     expect(markup).toContain('data-sidebar-batch-database-action="true"');
-    expect(source).toContain('openBatchTableExport: () => openBatchOperationModal(),');
-    expect(source).toContain('openBatchDatabaseExport: () => openBatchDatabaseModal(),');
-    expect(source).toContain('onClick={() => openBatchOperationModal()}');
-    expect(source).toContain('onClick={() => openBatchDatabaseModal()}');
-    expect(source).not.toContain('openBatchTableExport: () => openBatchTableExportWorkbench()');
-    expect(source).not.toContain('openBatchDatabaseExport: () => openBatchDatabaseExportWorkbench()');
+    expect(markup).toContain('data-sidebar-data-import-action="true"');
+    expect(source).toContain('openBatchTableExport: openBatchTableWorkbench,');
+    expect(source).toContain('openBatchDatabaseExport: openBatchDatabaseWorkbench,');
+    expect(source).toContain('openDataImport: handleOpenDataImportWorkbench,');
+    expect(source).toContain('onClick={openBatchTableWorkbench}');
+    expect(source).toContain('onClick={openBatchDatabaseWorkbench}');
+    expect(source).not.toContain('openBatchOperationModal');
+    expect(source).not.toContain('openBatchDatabaseModal');
     expect(markup).toContain('data-sidebar-open-external-sql-file-action="true"');
     expect(markup).toContain('data-sidebar-locate-current-tab-action="true"');
     expect(markup).toContain('data-gonavi-new-query-action="true"');

@@ -21,6 +21,8 @@ interface ImportPreviewModalProps {
   tableName: string;
   onClose: () => void;
   onSuccess: () => void;
+  onImportingChange?: (importing: boolean) => void;
+  presentation?: "modal" | "embedded";
 }
 
 interface PreviewData {
@@ -53,6 +55,8 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
   tableName,
   onClose,
   onSuccess,
+  onImportingChange,
+  presentation = "modal",
 }) => {
   const i18n = useOptionalI18n();
   const t = i18n?.t ?? defaultTranslate;
@@ -116,6 +120,13 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
       };
     }
   }, [importing, previewData?.totalRows]);
+
+  useEffect(() => {
+    onImportingChange?.(importing);
+    return () => {
+      if (importing) onImportingChange?.(false);
+    };
+  }, [importing, onImportingChange]);
 
   const loadPreview = async (requestId: number) => {
     importRequestRef.current += 1;
@@ -296,36 +307,25 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
       ? Math.round((progress.current / progress.total) * 100)
       : 0;
 
-  return (
-    <Modal
-      title={t("import_preview.title")}
-      open={visible}
-      onCancel={() => {
-        if (!importing) onClose();
-      }}
-      closable={!importing}
-      maskClosable={!importing}
-      keyboard={!importing}
-      width={900}
-      footer={
-        importResult ? (
-          <Space>
-            <Button onClick={onClose}>{t("common.close")}</Button>
-          </Space>
-        ) : importing ? null : (
-          <Space>
-            <Button onClick={onClose}>{t("common.cancel")}</Button>
-            <Button
-              type="primary"
-              onClick={handleImport}
-              disabled={!previewData || loading || Boolean(mappingValidationError)}
-            >
-              {t("import_preview.action.start")}
-            </Button>
-          </Space>
-        )
-      }
-    >
+  const footer = importResult ? (
+    <Space>
+      <Button onClick={onClose}>{t("common.close")}</Button>
+    </Space>
+  ) : importing ? null : (
+    <Space>
+      <Button onClick={onClose}>{t("common.cancel")}</Button>
+      <Button
+        type="primary"
+        onClick={handleImport}
+        disabled={!previewData || loading || Boolean(mappingValidationError)}
+      >
+        {t("import_preview.action.start")}
+      </Button>
+    </Space>
+  );
+
+  const content = (
+    <>
       {error && (
         <Alert
           type="error"
@@ -532,6 +532,65 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
           )}
         </div>
       )}
+    </>
+  );
+
+  if (presentation === "embedded") {
+    if (!visible) return null;
+    return (
+      <section
+        data-import-preview-embedded="true"
+        style={{
+          display: "flex",
+          minWidth: 0,
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            marginBottom: 16,
+            fontSize: 15,
+            fontWeight: 600,
+          }}
+        >
+          {t("import_preview.title")}
+        </div>
+        <div style={{ minWidth: 0, overflow: "auto" }}>{content}</div>
+        {footer && (
+          <div
+            data-import-preview-embedded-footer="true"
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              marginTop: 16,
+              paddingTop: 16,
+              borderTop: darkMode
+                ? "1px solid rgba(255,255,255,0.08)"
+                : "1px solid rgba(15,23,42,0.08)",
+            }}
+          >
+            {footer}
+          </div>
+        )}
+      </section>
+    );
+  }
+
+  return (
+    <Modal
+      title={t("import_preview.title")}
+      open={visible}
+      onCancel={() => {
+        if (!importing) onClose();
+      }}
+      closable={!importing}
+      maskClosable={!importing}
+      keyboard={!importing}
+      width={900}
+      footer={footer}
+    >
+      {content}
     </Modal>
   );
 };

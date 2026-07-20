@@ -13,7 +13,6 @@ import {
 import {
   useSidebarBatchExport,
 } from './sidebar/useSidebarBatchExport';
-import { SidebarBatchExportModals } from './sidebar/SidebarBatchExportModals';
 import { SidebarEntityModals } from './sidebar/SidebarEntityModals';
 import { SavedQueryGroupModal } from './sidebar/SavedQueryGroupModal';
 import { renderSidebarV2TreeTitle } from './sidebar/SidebarTreeTitle';
@@ -93,6 +92,7 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Form, Popover, Radio
   FunctionOutlined,
   LinkOutlined,
   FileAddOutlined,
+  ImportOutlined,
   PlusOutlined,
   ReloadOutlined,
   SendOutlined,
@@ -152,6 +152,10 @@ import {
 } from '../utils/schemaVisibility';
 import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors } from '../utils/jvmSidebarActions';
+import {
+  DATA_IMPORT_WORKBENCH_TAB_ID,
+  resolveDataImportWorkbenchLaunchTab,
+} from '../utils/dataImportTab';
 import { useExportProgressDialog } from './ExportProgressModal';
 import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLRootNode, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
@@ -905,50 +909,14 @@ const Sidebar: React.FC<{
   const [createTagForm] = Form.useForm();
 
   const {
-      isBatchModalOpen,
-      setIsBatchModalOpen,
-      batchTables,
-      checkedTableKeys,
-      setCheckedTableKeys,
-      selectedConnection,
-      selectedDatabase,
-      availableDatabases,
-      batchFilterKeyword,
-      setBatchFilterKeyword,
-      batchFilterType,
-      setBatchFilterType,
-      batchSelectionScope,
-      setBatchSelectionScope,
-      filteredBatchObjects,
-      groupedBatchObjects,
-      selectionScopeTargetKeys,
-      isBatchDbModalOpen,
-      setIsBatchDbModalOpen,
-      batchDatabases,
-      checkedDbKeys,
-      setCheckedDbKeys,
-      selectedDbConnection,
       handleExportDatabaseSQL,
       handleExportSchemaSQL,
-      openBatchOperationModal,
-      handleConnectionChange,
-      handleDatabaseChange,
-      handleBatchExport,
-      handleBatchClear,
-      handleBatchDeleteTables,
-      handleCheckAll,
-      handleInvertSelection,
-      openBatchDatabaseModal,
-      handleDbConnectionChange,
-      handleBatchDbExport,
-      handleBatchDbDelete,
-      handleCheckAllDb,
-      handleInvertSelectionDb,
+      openBatchTableWorkbench,
+      openBatchDatabaseWorkbench,
   } = useSidebarBatchExport({
       connections,
       selectedNodesRef,
       addTab,
-      addSqlLog,
   });
   // Find in Database Modal
   const [findInDbContext, setFindInDbContext] = useState<{ open: boolean; connectionId: string; dbName: string }>({ open: false, connectionId: '', dbName: '' });
@@ -2513,7 +2481,7 @@ const Sidebar: React.FC<{
   const legacyToolbarStyle: React.CSSProperties = {
       padding: '6px 16px',
       display: 'grid',
-      gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+      gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
       gap: 8,
       alignItems: 'center',
       justifyItems: 'center',
@@ -2912,6 +2880,7 @@ const Sidebar: React.FC<{
   const v2NewGroupLabel = t('sidebar.action.new_group');
   const v2BatchTablesLabel = t('sidebar.action.batch_tables');
   const v2BatchDatabasesLabel = t('sidebar.action.batch_databases');
+  const v2DataImportLabel = t('sidebar.action.data_import');
   const v2OpenExternalSqlFileLabel = t('sidebar.sql_file_exec.title');
   const v2LocateCurrentTableLabel = t('sidebar.action.locate_current_table');
   const v2LocateCurrentTableUnavailableLabel = t('sidebar.message.locate_current_table_unavailable');
@@ -2922,6 +2891,33 @@ const Sidebar: React.FC<{
   const v2ConnectionActionsLabel = t('sidebar.active_connection.actions');
   const v2CommandSearchLabel = t('sidebar.command_search.label');
   const v2CommandSearchPlaceholder = t('sidebar.command_search.placeholder');
+
+  const handleOpenDataImportWorkbench = useCallback(() => {
+    const node = selectedNodesRef.current[0];
+    const activeTab = tabs.find((tab) => tab.id === activeTabId);
+    const nodeConnectionId = String(
+      node?.dataRef?.id || (node?.type === 'connection' ? node?.key : '') || '',
+    ).trim();
+    const connectionId = nodeConnectionId || String(activeContext?.connectionId || '').trim();
+    const dbName = String(
+      node?.type === 'database'
+        ? (node?.dataRef?.dbName || node?.title || '')
+        : node?.dataRef?.dbName || activeContext?.dbName || '',
+    ).trim();
+    const tableName = String(
+      node?.type === 'table'
+        ? (node?.dataRef?.tableName || node?.title || '')
+        : !node && activeTab?.type === 'table'
+          ? activeTab.tableName || ''
+          : '',
+    ).trim();
+
+    const existingImportTab = tabs.find((tab) => tab.id === DATA_IMPORT_WORKBENCH_TAB_ID);
+    addTab(resolveDataImportWorkbenchLaunchTab(
+      existingImportTab,
+      { connectionId, dbName, tableName },
+    ));
+  }, [activeContext?.connectionId, activeContext?.dbName, activeTabId, addTab, tabs]);
 
   const v2CommandSearchPanelProps: SidebarSearchPanelProps<V2CommandSearchItem> = {
     isOpen: isV2CommandSearchOpen,
@@ -2960,6 +2956,7 @@ const Sidebar: React.FC<{
       newGroup: v2NewGroupLabel,
       batchTables: v2BatchTablesLabel,
       batchDatabases: v2BatchDatabasesLabel,
+      dataImport: v2DataImportLabel,
       openExternalSqlFile: v2OpenExternalSqlFileLabel,
       locateCurrentTable: v2LocateCurrentTableLabel,
       locateCurrentTableUnavailable: v2LocateCurrentTableUnavailableLabel,
@@ -2968,8 +2965,9 @@ const Sidebar: React.FC<{
     },
     handlers: {
       openCreateTagModal: () => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); },
-      openBatchTableExport: () => openBatchOperationModal(),
-      openBatchDatabaseExport: () => openBatchDatabaseModal(),
+      openBatchTableExport: openBatchTableWorkbench,
+      openBatchDatabaseExport: openBatchDatabaseWorkbench,
+      openDataImport: handleOpenDataImportWorkbench,
       openExternalSqlFile: handleOpenSQLFileFromToolbar,
       locateActiveTab: handleLocateActiveTabInSidebar,
       toggleAI: onToggleAI ?? (() => {}),
@@ -3216,7 +3214,7 @@ const Sidebar: React.FC<{
                         icon={<TableOutlined />}
                         aria-label={t('sidebar.action.batch_tables')}
                         data-sidebar-batch-table-action="true"
-                        onClick={() => openBatchOperationModal()}
+                        onClick={openBatchTableWorkbench}
                         style={{ color: legacyToolbarButtonColor }}
                     />
                 </Tooltip>
@@ -3229,7 +3227,20 @@ const Sidebar: React.FC<{
                         icon={<DatabaseOutlined />}
                         aria-label={t('sidebar.action.batch_databases')}
                         data-sidebar-batch-database-action="true"
-                        onClick={() => openBatchDatabaseModal()}
+                        onClick={openBatchDatabaseWorkbench}
+                        style={{ color: legacyToolbarButtonColor }}
+                    />
+                </Tooltip>
+            </div>
+            <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
+                <Tooltip title={v2DataImportLabel}>
+                    <Button
+                        size="small"
+                        type="text"
+                        icon={<ImportOutlined />}
+                        aria-label={v2DataImportLabel}
+                        data-sidebar-data-import-action="true"
+                        onClick={handleOpenDataImportWorkbench}
                         style={{ color: legacyToolbarButtonColor }}
                     />
                 </Tooltip>
@@ -3511,59 +3522,6 @@ const Sidebar: React.FC<{
 
         <ExternalSQLFileModal {...externalSQLFileModalProps} />
 
-        <SidebarBatchExportModals
-            connections={connections}
-            modalPanelStyle={modalPanelStyle}
-            modalSectionStyle={modalSectionStyle}
-            modalScrollSectionStyle={modalScrollSectionStyle}
-            modalHintTextStyle={modalHintTextStyle}
-            darkMode={darkMode}
-            tableModalTitle={renderSidebarModalTitle(
-              <TableOutlined />,
-              t('sidebar.modal.batch_tables.title'),
-              t('sidebar.modal.batch_tables.description'),
-            )}
-            databaseModalTitle={renderSidebarModalTitle(
-              <DatabaseOutlined />,
-              t('sidebar.modal.batch_databases.title'),
-              t('sidebar.modal.batch_databases.description'),
-            )}
-            isBatchModalOpen={isBatchModalOpen}
-            setIsBatchModalOpen={setIsBatchModalOpen}
-            selectedConnection={selectedConnection}
-            selectedDatabase={selectedDatabase}
-            availableDatabases={availableDatabases}
-            batchTables={batchTables}
-            checkedTableKeys={checkedTableKeys}
-            setCheckedTableKeys={setCheckedTableKeys}
-            batchFilterKeyword={batchFilterKeyword}
-            setBatchFilterKeyword={setBatchFilterKeyword}
-            batchFilterType={batchFilterType}
-            setBatchFilterType={setBatchFilterType}
-            batchSelectionScope={batchSelectionScope}
-            setBatchSelectionScope={setBatchSelectionScope}
-            filteredBatchObjects={filteredBatchObjects}
-            groupedBatchObjects={groupedBatchObjects}
-            selectionScopeTargetKeys={selectionScopeTargetKeys}
-            handleConnectionChange={handleConnectionChange}
-            handleDatabaseChange={handleDatabaseChange}
-            handleBatchClear={handleBatchClear}
-            handleBatchDeleteTables={handleBatchDeleteTables}
-            handleBatchExport={handleBatchExport}
-            handleCheckAll={handleCheckAll}
-            handleInvertSelection={handleInvertSelection}
-            isBatchDbModalOpen={isBatchDbModalOpen}
-            setIsBatchDbModalOpen={setIsBatchDbModalOpen}
-            selectedDbConnection={selectedDbConnection}
-            batchDatabases={batchDatabases}
-            checkedDbKeys={checkedDbKeys}
-            setCheckedDbKeys={setCheckedDbKeys}
-            handleDbConnectionChange={handleDbConnectionChange}
-            handleBatchDbExport={handleBatchDbExport}
-            handleBatchDbDelete={handleBatchDbDelete}
-            handleCheckAllDb={handleCheckAllDb}
-            handleInvertSelectionDb={handleInvertSelectionDb}
-        />
         <FindInDatabaseModal
             open={findInDbContext.open}
             onClose={() => setFindInDbContext({ open: false, connectionId: '', dbName: '' })}
