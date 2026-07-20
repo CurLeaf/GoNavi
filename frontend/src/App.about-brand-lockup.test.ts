@@ -13,6 +13,9 @@ const brandIconsSource = readFileSync(
 const brandIconsDirectory = fileURLToPath(
   new globalThis.URL('../public/brand-icons/', import.meta.url),
 );
+const defaultTitlebarMark = fileURLToPath(
+  new globalThis.URL('../public/brand-marks/02-database-search-transparent.png', import.meta.url),
+);
 
 describe('about brand lockup', () => {
   it('uses a transparent lockup without a tile background on the about page', () => {
@@ -23,6 +26,15 @@ describe('about brand lockup', () => {
     const aboutLogoSnippet = appSource.slice(aboutLogoStart, aboutLogoStart + 640);
     expect(aboutLogoSnippet).toContain("background: 'transparent'");
     expect(aboutLogoSnippet).toContain("boxShadow: 'none'");
+  });
+
+  it('uses the transparent compact mark without a forced titlebar tile', () => {
+    expect(appSource).toContain('src={resolveBrandTitlebarSrc(brandIconId)}');
+
+    const titlebarLogoStart = appSource.indexOf('src={resolveBrandTitlebarSrc(brandIconId)}');
+    const titlebarLogoSnippet = appSource.slice(titlebarLogoStart, titlebarLogoStart + 640);
+    expect(titlebarLogoSnippet).toContain("background: 'transparent'");
+    expect(readFileSync(defaultTitlebarMark)).not.toHaveLength(0);
   });
 
   it('keeps one shared lossless WebP asset for every selectable mascot', () => {

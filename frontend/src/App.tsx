@@ -33,6 +33,7 @@ import {
   resolveBrandAboutSrc,
   resolveBrandDockSrc,
   resolveBrandIconSrc,
+  resolveBrandTitlebarSrc,
   type BrandIconId,
 } from './brand/brandIcons';
 import { composeMacOSDockIconBase64, shouldSyncMacOSDockIcon } from './brand/macDockIcon';
@@ -6908,7 +6909,7 @@ function App() {
           >
               <div style={{ display: 'flex', alignItems: 'center', gap: Math.max(6, Math.round(8 * effectiveUiScale)), fontWeight: 600, minWidth: 0 }}>
                   <img
-                    src={resolveBrandIconSrc(brandIconId)}
+                    src={resolveBrandTitlebarSrc(brandIconId)}
                     alt="GoNavi"
                     width={Math.max(24, Math.round(28 * effectiveUiScale))}
                     height={Math.max(24, Math.round(28 * effectiveUiScale))}
@@ -6919,7 +6920,7 @@ function App() {
                       objectFit: 'contain',
                       borderRadius: 8,
                       flexShrink: 0,
-                      background: '#fff',
+                      background: 'transparent',
                     }}
                   />
                   GoNavi

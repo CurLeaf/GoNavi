@@ -16,6 +16,7 @@ export type BrandIconDefinition = {
   titleZh: string;
   titleEn: string;
   iconPath: string;
+  titlebarPath?: string;
 };
 
 export const DEFAULT_BRAND_ICON_ID: BrandIconId = '02';
@@ -34,6 +35,7 @@ export const BRAND_ICONS: BrandIconDefinition[] = [
     titleZh: '搜库小狗',
     titleEn: 'Database search',
     iconPath: '/brand-icons/02-database-search.webp',
+    titlebarPath: '/brand-marks/02-database-search-transparent.png',
   },
   {
     id: '03',
@@ -117,6 +119,11 @@ export function resolveBrandFullSrc(id?: unknown): string {
 
 export function resolveBrandAboutSrc(id?: unknown): string {
   return resolveBrandIconSrc(id);
+}
+
+export function resolveBrandTitlebarSrc(id?: unknown): string {
+  const icon = resolveBrandIcon(id);
+  return icon.titlebarPath || icon.iconPath;
 }
 
 /** Dock uses the exact lossless WebP lockup rendered by BrandIconPicker. */
