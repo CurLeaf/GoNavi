@@ -550,19 +550,30 @@ describe('sqlStatementSelection', () => {
     });
   });
 
-  it('falls back to the current line when the cursor is not inside a statement', () => {
+  it('falls back to all SQL when the cursor is on a blank line between statements', () => {
     const sql = 'select 1;\n\n  select 2';
 
-    expect(resolveExecutableSql(sql, sql.indexOf('\n\n') + 1)).toBeNull();
+    expect(resolveExecutableSql(sql, sql.indexOf('\n\n') + 1)).toEqual({
+      sql,
+      source: 'all',
+    });
     expect(resolveExecutableSql(sql, sql.indexOf('  select 2'))).toEqual({
       sql: 'select 2',
       source: 'statement',
     });
   });
 
-  it('does not jump to the next statement when executing from blank space', () => {
-    const sql = 'select 1;\n\nselect 2;';
+  it('falls back to all SQL when the cursor is on a trailing blank line', () => {
+    const sql = 'select 1;\nselect 2;\n';
 
-    expect(resolveExecutableSql(sql, sql.indexOf('\n\n') + 1)).toBeNull();
+    expect(resolveExecutableSql(sql, sql.length)).toEqual({
+      sql,
+      source: 'all',
+    });
+  });
+
+  it('returns null for empty or comment-only SQL', () => {
+    expect(resolveExecutableSql('  \n\t  ', 0)).toBeNull();
+    expect(resolveExecutableSql('-- nothing to execute\n\n/* still nothing */', 3)).toBeNull();
   });
 });

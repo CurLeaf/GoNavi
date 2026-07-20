@@ -10042,7 +10042,7 @@ describe('QueryEditor external SQL save', () => {
     });
   });
 
-  it('shows "No executable SQL." in English when the cursor is on a blank line', async () => {
+  it('executes all SQL when the cursor is on a trailing blank line', async () => {
     storeState.languagePreference = 'en-US';
     setCurrentLanguage('en-US');
     backendApp.DBQueryMulti.mockResolvedValueOnce({
@@ -10054,7 +10054,7 @@ describe('QueryEditor external SQL save', () => {
     await act(async () => {
       renderer = create(<QueryEditor tab={createTab({
         dbName: 'main',
-        query: 'select 1 as a;\nselect 2 as b;\n\nselect 3 as c;',
+        query: 'select 1 as a;\nselect 2 as b;\nselect 3 as c;\n',
       })} />);
     });
 
@@ -10081,18 +10081,22 @@ describe('QueryEditor external SQL save', () => {
     expect(textContent(renderer!.toJSON())).toContain('Result 1');
     backendApp.DBQueryMulti.mockClear();
     messageApi.info.mockClear();
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['a'], rows: [{ a: 1 }] }],
+    });
 
-    editorState.position = { lineNumber: 3, column: 1 };
+    editorState.position = { lineNumber: 4, column: 1 };
     editorState.selection = {
-      startLineNumber: 3,
+      startLineNumber: 4,
       startColumn: 1,
-      endLineNumber: 3,
+      endLineNumber: 4,
       endColumn: 1,
-      positionLineNumber: 3,
+      positionLineNumber: 4,
       positionColumn: 1,
     };
     editorState.cursorPositionListeners.forEach((listener) => {
-      listener({ position: { lineNumber: 3, column: 1 } });
+      listener({ position: { lineNumber: 4, column: 1 } });
     });
 
     await act(async () => {
@@ -10105,8 +10109,12 @@ describe('QueryEditor external SQL save', () => {
       await Promise.resolve();
     });
 
-    expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
-    expect(messageApi.info).toHaveBeenCalledWith('No executable SQL.');
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledTimes(1);
+    const executedSql = String(backendApp.DBQueryMulti.mock.calls[0][2]);
+    expect(executedSql).toContain('select 1 as a');
+    expect(executedSql).toContain('select 2 as b');
+    expect(executedSql).toContain('select 3 as c');
+    expect(messageApi.info).not.toHaveBeenCalledWith('No executable SQL.');
     expect(messageApi.info).not.toHaveBeenCalledWith('没有可执行的 SQL。');
     expect(dataGridState.latestProps?.data).toEqual(expect.arrayContaining([expect.objectContaining({ a: 1 })]));
   });

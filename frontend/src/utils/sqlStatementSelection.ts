@@ -4,7 +4,7 @@ export interface SqlStatementRange {
   text: string;
 }
 
-export type SqlExecutionSelectionSource = 'selection' | 'statement' | 'line';
+export type SqlExecutionSelectionSource = 'selection' | 'statement' | 'line' | 'all';
 
 export interface SqlExecutionSelection {
   sql: string;
@@ -519,6 +519,9 @@ export const resolveExecutableSql = (
   const text = String(sql || '').replace(/\r\n/g, '\n');
   const offset = Math.max(0, Math.min(text.length, Number.isFinite(cursorOffset) ? cursorOffset : 0));
   const ranges = findSqlStatementRanges(text, dbType);
+  if (ranges.length === 0) {
+    return null;
+  }
   const statement = ranges.find((range) => offset >= range.start && offset <= range.end);
   if (statement?.text.trim()) {
     return { sql: statement.text, source: 'statement' };
@@ -546,5 +549,5 @@ export const resolveExecutableSql = (
     return { sql: line, source: 'line' };
   }
 
-  return null;
+  return { sql: String(sql || ''), source: 'all' };
 };

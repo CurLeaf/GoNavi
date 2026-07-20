@@ -90,6 +90,30 @@ const resolveVisibleQueryResultColumns = (columns: string[], globalHiddenColumns
     return visibleColumns.length > 0 || columns.length === 0 ? visibleColumns : columns;
 };
 
+const RESULT_TAB_DETACH_INTERACTIVE_SELECTOR = [
+    '.query-result-tab-close',
+    'button',
+    'a',
+    'input',
+    'textarea',
+    'select',
+    '[contenteditable="true"]',
+    '[role="button"]',
+    '[role="menuitem"]',
+    '.ant-dropdown-menu',
+].join(', ');
+
+export const shouldActivateResultTabDetachPointer = (event: {
+    button: number;
+    isPrimary?: boolean;
+    target: EventTarget | null;
+}): boolean => {
+    if (event.button !== 0 || event.isPrimary === false) return false;
+    const target = event.target as { closest?: (selector: string) => Element | null } | null;
+    return typeof target?.closest !== 'function'
+        || target.closest(RESULT_TAB_DETACH_INTERACTIVE_SELECTOR) === null;
+};
+
 const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     resultSets,
     activeResultKey,
@@ -145,11 +169,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     }, [resultSets, t]);
 
     const handleResultTabPointerDown = useCallback((event: React.PointerEvent<HTMLElement>, key: string) => {
-        if (!onOpenResultInWindow || event.button !== 0) return;
-        const target = event.target instanceof HTMLElement ? event.target : null;
-        if (target?.closest('.query-result-tab-close, button, a, input, textarea')) {
-            return;
-        }
+        if (!onOpenResultInWindow || !shouldActivateResultTabDetachPointer(event)) return;
         const title = resolveResultTabTitle(key);
         resultTabDragRef.current = {
             key,
@@ -435,6 +455,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                     <Tooltip title={t('query_editor.result.close')}>
                         <span
                             className="query-result-tab-close"
+                            onPointerDown={(event) => event.stopPropagation()}
                             onClick={(event) => {
                                 event.preventDefault();
                                 event.stopPropagation();
