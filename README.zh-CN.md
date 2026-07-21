@@ -10,7 +10,7 @@
 
 <p align="center">
   基于 <a href="https://wails.io">Wails</a>（Go）+ <a href="https://react.dev">React</a> 的跨平台数据库工作台。
-  桌面优先，MCP 原生，二进制约 <b>10MB</b> 量级。
+  桌面优先，MCP 原生，二进制约 <b>30MB</b> 量级。
 </p>
 
 <p align="center">
@@ -48,7 +48,7 @@
 | | 常见 Electron 客户端 | **GoNavi** |
 |---|---|---|
 | 运行时 | Chromium + Node | **Go + 系统 WebView** |
-| 体积 | 动辄数百 MB | **约 10MB 量级** |
+| 体积 | 动辄数百 MB | **约 30MB 量级** |
 | 启动 | 偏重 | **更快** |
 | 内存 | 基线高 | **更轻** |
 | AI / Agent | 外挂或缺失 | **MCP + 多模型一等公民** |

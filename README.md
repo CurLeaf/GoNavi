@@ -11,7 +11,7 @@
 <p align="center">
   A high-performance cross-platform database client built with
   <a href="https://wails.io">Wails</a> (Go) + <a href="https://react.dev">React</a>.
-  Desktop-first. MCP-ready. ~10MB class binaries.
+  Desktop-first. MCP-ready. ~30MB class binaries.
 </p>
 
 <p align="center">
@@ -49,7 +49,7 @@ Most database GUIs are Electron shells with megabytes of tax. GoNavi takes a dif
 | | Typical Electron client | **GoNavi** |
 |---|---|---|
 | Runtime | Chromium + Node | **Go + native WebView** |
-| Binary size | Hundreds of MB | **~10MB class** |
+| Binary size | Hundreds of MB | **~30MB class** |
 | Startup | Heavy | **Fast** |
 | Memory | High baseline | **Lean** |
 | AI / Agents | Bolt-on or absent | **First-class MCP + multi-provider AI** |
