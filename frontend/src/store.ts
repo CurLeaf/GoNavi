@@ -1,10 +1,5 @@
 import { create } from "zustand";
-import {
-  createJSONStorage,
-  persist,
-  type PersistStorage,
-  type StateStorage,
-} from "zustand/middleware";
+import { persist } from "zustand/middleware";
 import { isNativeDetachedWindowRoute } from "./utils/nativeDetachedWindowRoute";
 import {
   ConnectionConfig,
@@ -135,6 +130,7 @@ import {
 } from "./utils/connectionTypeCatalog";
 import { supportsSSLForType } from "./utils/connectionTypeCapabilities";
 import { normalizeDriverType } from "./utils/connectionDriverType";
+import { createDebouncedPersistStorage } from "./utils/debouncedPersistStorage";
 
 export type TableDoubleClickAction = "open-data" | "open-design";
 export type ThemeMode = "light" | "dark";
@@ -289,94 +285,6 @@ const resolveSavedQueryBackend = (): SavedQueryBackend | undefined => {
     return undefined;
   }
   return (window as unknown as { go?: { app?: { App?: SavedQueryBackend } } }).go?.app?.App;
-};
-
-const createDebouncedPersistStorage = <S>(
-  getStorage: () => StateStorage,
-  debounceMs = PERSIST_WRITE_DEBOUNCE_MS,
-): PersistStorage<S> | undefined => {
-  const baseStorage = createJSONStorage<S>(getStorage);
-  if (!baseStorage || isFrontendTestRuntime()) {
-    return baseStorage;
-  }
-
-  type PersistedValue = Parameters<PersistStorage<S>["setItem"]>[1];
-  let pendingWrite: { name: string; value: PersistedValue } | null = null;
-  let pendingTimer: number | null = null;
-  let listenersBound = false;
-  let pendingResolves: Array<() => void> = [];
-  let pendingRejects: Array<(error: unknown) => void> = [];
-
-  const settlePending = (error?: unknown) => {
-    const resolves = pendingResolves;
-    const rejects = pendingRejects;
-    pendingResolves = [];
-    pendingRejects = [];
-    if (error !== undefined) {
-      rejects.forEach((reject) => reject(error));
-      return;
-    }
-    resolves.forEach((resolve) => resolve());
-  };
-
-  const flushPendingWrite = async (): Promise<void> => {
-    if (pendingTimer !== null) {
-      window.clearTimeout(pendingTimer);
-      pendingTimer = null;
-    }
-    const nextWrite = pendingWrite;
-    pendingWrite = null;
-    if (!nextWrite) {
-      settlePending();
-      return;
-    }
-    try {
-      await baseStorage.setItem(nextWrite.name, nextWrite.value);
-      settlePending();
-    } catch (error) {
-      settlePending(error);
-      throw error;
-    }
-  };
-
-  const bindFlushListeners = () => {
-    if (listenersBound || typeof window === "undefined") {
-      return;
-    }
-    listenersBound = true;
-    const handleFlush = () => {
-      void flushPendingWrite();
-    };
-    window.addEventListener("pagehide", handleFlush, { capture: true });
-    window.addEventListener("beforeunload", handleFlush, { capture: true });
-  };
-
-  return {
-    getItem: baseStorage.getItem,
-    setItem: (name, value) => {
-      bindFlushListeners();
-      pendingWrite = { name, value };
-      if (pendingTimer !== null) {
-        window.clearTimeout(pendingTimer);
-      }
-      return new Promise<void>((resolve, reject) => {
-        pendingResolves.push(resolve);
-        pendingRejects.push(reject);
-        pendingTimer = window.setTimeout(() => {
-          void flushPendingWrite();
-        }, debounceMs);
-      });
-    },
-    removeItem: async (name) => {
-      pendingWrite = null;
-      if (pendingTimer !== null) {
-        window.clearTimeout(pendingTimer);
-        pendingTimer = null;
-      }
-      settlePending();
-      await baseStorage.removeItem(name);
-    },
-  };
 };
 
 const writePersistedStatePatch = (
@@ -3358,6 +3266,146 @@ export async function loadAISessionFromBackend(
   return false;
 }
 
+const PERSISTED_STATE_DEPENDENCY_KEYS = [
+  "tabs",
+  "activeTabId",
+  "connectionTags",
+  "sidebarRootOrder",
+  "externalSQLDirectories",
+  "recentConnectionTargets",
+  "recentSQLFiles",
+  "theme",
+  "themePreference",
+  "brandIconId",
+  "languagePreference",
+  "appearance",
+  "uiScale",
+  "fontSize",
+  "startupFullscreen",
+  "aiChatOpenMode",
+  "aiChatDetachedBoundsMemory",
+  "globalProxy",
+  "sqlFormatOptions",
+  "queryOptions",
+  "dataEditTransactionOptions",
+  "sqlEditorTransactionOptions",
+  "shortcutOptions",
+  "sqlLogs",
+  "tableExportHistories",
+  "sqlSnippets",
+  "tableAccessCount",
+  "tableSortPreference",
+  "tableColumnOrders",
+  "enableColumnOrderMemory",
+  "tablePinnedLeftColumns",
+  "tableHiddenColumns",
+  "enableHiddenColumnMemory",
+  "pinnedSidebarTables",
+  "windowBounds",
+  "windowState",
+  "sidebarWidth",
+  "connections",
+] as const satisfies readonly (keyof AppState)[];
+
+type PersistedStateProjectionSource = Pick<
+  AppState,
+  (typeof PERSISTED_STATE_DEPENDENCY_KEYS)[number]
+>;
+
+const buildPersistedStateProjection = (
+  state: PersistedStateProjectionSource,
+): AppState => {
+  const tabs = sanitizeQueryTabs(state.tabs);
+  const partialState: Partial<AppState> = {
+    tabs,
+    activeTabId: sanitizeActiveTabId(state.activeTabId, tabs),
+    connectionTags: state.connectionTags,
+    sidebarRootOrder: state.sidebarRootOrder,
+    externalSQLDirectories: state.externalSQLDirectories,
+    recentConnectionTargets: sanitizeRecentConnectionTargets(
+      state.recentConnectionTargets,
+    ),
+    recentSQLFiles: sanitizeRecentSQLFiles(state.recentSQLFiles),
+    theme: state.theme,
+    themePreference: state.themePreference,
+    brandIconId: sanitizeBrandIconIdLocal(state.brandIconId),
+    languagePreference: state.languagePreference,
+    appearance: state.appearance,
+    uiScale: state.uiScale,
+    fontSize: state.fontSize,
+    startupFullscreen: state.startupFullscreen,
+    aiChatOpenMode: sanitizeAIChatOpenMode(state.aiChatOpenMode),
+    aiChatDetachedBoundsMemory: sanitizeAIChatDetachedBoundsMemory(
+      state.aiChatDetachedBoundsMemory,
+    ),
+    globalProxy:
+      toTrimmedString(state.globalProxy.password) !== ""
+        ? { ...state.globalProxy }
+        : toPersistedGlobalProxy(state.globalProxy),
+    sqlFormatOptions: state.sqlFormatOptions,
+    queryOptions: state.queryOptions,
+    dataEditTransactionOptions: state.dataEditTransactionOptions,
+    sqlEditorTransactionOptions: state.sqlEditorTransactionOptions,
+    shortcutOptions: resolveShortcutOptionsForPersistence(state.shortcutOptions),
+    sqlLogs: sanitizePersistedSqlLogs(state.sqlLogs),
+    tableExportHistories: sanitizeTableExportHistories(
+      state.tableExportHistories,
+    ),
+    sqlSnippets: state.sqlSnippets,
+    tableAccessCount: state.tableAccessCount,
+    tableSortPreference: state.tableSortPreference,
+    tableColumnOrders: state.tableColumnOrders,
+    enableColumnOrderMemory: state.enableColumnOrderMemory,
+    tablePinnedLeftColumns: state.tablePinnedLeftColumns,
+    tableHiddenColumns: state.tableHiddenColumns,
+    enableHiddenColumnMemory: state.enableHiddenColumnMemory,
+    pinnedSidebarTables: state.pinnedSidebarTables,
+    windowBounds: state.windowBounds,
+    windowState: state.windowState,
+    sidebarWidth: state.sidebarWidth,
+  };
+
+  if (hasLegacyConnectionSecrets(state.connections)) {
+    partialState.connections = state.connections;
+  }
+
+  // AI 会话数据已迁移到后端文件持久化（~/.gonavi/sessions/），不再写入 localStorage
+  return partialState as AppState;
+};
+
+const createMemoizedPersistedStateProjection = () => {
+  let previousDependencies: unknown[] | null = null;
+  let previousProjection: AppState | null = null;
+
+  return (state: AppState): AppState => {
+    if (previousDependencies && previousProjection) {
+      let unchanged = true;
+      for (
+        let index = 0;
+        index < PERSISTED_STATE_DEPENDENCY_KEYS.length;
+        index += 1
+      ) {
+        const key = PERSISTED_STATE_DEPENDENCY_KEYS[index];
+        if (!Object.is(previousDependencies[index], state[key])) {
+          unchanged = false;
+          break;
+        }
+      }
+      if (unchanged) {
+        return previousProjection;
+      }
+    }
+
+    previousDependencies = PERSISTED_STATE_DEPENDENCY_KEYS.map(
+      (key) => state[key],
+    );
+    previousProjection = buildPersistedStateProjection(state);
+    return previousProjection;
+  };
+};
+
+const partializePersistedState = createMemoizedPersistedStateProjection();
+
 export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -5548,7 +5596,10 @@ export const useStore = create<AppState>()(
     }),
     {
       name: PERSIST_STORAGE_KEY, // name of the item in the storage (must be unique)
-      storage: createDebouncedPersistStorage(() => localStorage),
+      storage: createDebouncedPersistStorage(() => localStorage, {
+        debounceMs: PERSIST_WRITE_DEBOUNCE_MS,
+        enabled: !isFrontendTestRuntime(),
+      }),
       skipHydration: isNativeDetachedWindowRoute(),
       version: PERSIST_VERSION,
       migrate: (persistedState: unknown, version: number) => {
@@ -5774,64 +5825,7 @@ export const useStore = create<AppState>()(
           aiChatSessions: [],
         };
       },
-      partialize: (state) => {
-        const tabs = sanitizeQueryTabs(state.tabs);
-        const partialState: Partial<AppState> = {
-          tabs,
-          activeTabId: sanitizeActiveTabId(state.activeTabId, tabs),
-          connectionTags: state.connectionTags,
-          sidebarRootOrder: state.sidebarRootOrder,
-          externalSQLDirectories: state.externalSQLDirectories,
-          recentConnectionTargets: sanitizeRecentConnectionTargets(
-            state.recentConnectionTargets,
-          ),
-          recentSQLFiles: sanitizeRecentSQLFiles(state.recentSQLFiles),
-          theme: state.theme,
-          themePreference: state.themePreference,
-          brandIconId: sanitizeBrandIconIdLocal(state.brandIconId),
-          languagePreference: state.languagePreference,
-          appearance: state.appearance,
-          uiScale: state.uiScale,
-          fontSize: state.fontSize,
-          startupFullscreen: state.startupFullscreen,
-          aiChatOpenMode: sanitizeAIChatOpenMode(state.aiChatOpenMode),
-          aiChatDetachedBoundsMemory: sanitizeAIChatDetachedBoundsMemory(
-            state.aiChatDetachedBoundsMemory,
-          ),
-          globalProxy:
-            toTrimmedString(state.globalProxy.password) !== ""
-              ? { ...state.globalProxy }
-              : toPersistedGlobalProxy(state.globalProxy),
-          sqlFormatOptions: state.sqlFormatOptions,
-          queryOptions: state.queryOptions,
-          dataEditTransactionOptions: state.dataEditTransactionOptions,
-          sqlEditorTransactionOptions: state.sqlEditorTransactionOptions,
-          shortcutOptions: resolveShortcutOptionsForPersistence(state.shortcutOptions),
-          sqlLogs: sanitizePersistedSqlLogs(state.sqlLogs),
-          tableExportHistories: sanitizeTableExportHistories(
-            state.tableExportHistories,
-          ),
-          sqlSnippets: state.sqlSnippets,
-          tableAccessCount: state.tableAccessCount,
-          tableSortPreference: state.tableSortPreference,
-          tableColumnOrders: state.tableColumnOrders,
-          enableColumnOrderMemory: state.enableColumnOrderMemory,
-          tablePinnedLeftColumns: state.tablePinnedLeftColumns,
-          tableHiddenColumns: state.tableHiddenColumns,
-          enableHiddenColumnMemory: state.enableHiddenColumnMemory,
-          pinnedSidebarTables: state.pinnedSidebarTables,
-          windowBounds: state.windowBounds,
-          windowState: state.windowState,
-          sidebarWidth: state.sidebarWidth,
-        };
-
-        if (hasLegacyConnectionSecrets(state.connections)) {
-          partialState.connections = state.connections;
-        }
-
-        // AI 会话数据已迁移到后端文件持久化（~/.gonavi/sessions/），不再写入 localStorage
-        return partialState as AppState;
-      }, // Don't persist logs
+      partialize: partializePersistedState,
     },
   ),
 );

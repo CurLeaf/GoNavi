@@ -2996,3 +2996,109 @@ describe('store appearance persistence', () => {
       .toBe(body);
   });
 });
+
+describe('store persistence hot path', () => {
+  let storage: MemoryStorage;
+
+  beforeEach(() => {
+    storage = new MemoryStorage();
+    vi.stubGlobal('localStorage', storage);
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it('reuses the persisted projection across transient state updates', async () => {
+    const { useStore } = await importStore();
+    const partialize = useStore.persist.getOptions().partialize;
+    if (!partialize) {
+      throw new Error('expected store partialize option');
+    }
+    const state = useStore.getState();
+
+    const projections = Array.from({ length: 1_000 }, (_, index) =>
+      partialize({
+        ...state,
+        aiPanelVisible: index % 2 === 0,
+        jvmDiagnosticOutputs: {
+          [`diagnostic-${index}`]: [],
+        },
+      }),
+    );
+
+    expect(new Set(projections).size).toBe(1);
+  });
+
+  it('invalidates the persisted projection when a persisted field changes', async () => {
+    const { useStore } = await importStore();
+    const partialize = useStore.persist.getOptions().partialize;
+    if (!partialize) {
+      throw new Error('expected store partialize option');
+    }
+    const state = useStore.getState();
+
+    const initial = partialize(state) as Partial<typeof state>;
+    const transientOnly = partialize({
+      ...state,
+      aiPanelVisible: !state.aiPanelVisible,
+    }) as Partial<typeof state>;
+    const changedTheme = partialize({
+      ...state,
+      theme: state.theme === 'light' ? 'dark' : 'light',
+    }) as Partial<typeof state>;
+
+    expect(transientOnly).toBe(initial);
+    expect(changedTheme).not.toBe(initial);
+    expect(changedTheme.theme).not.toBe(initial.theme);
+  });
+
+  it('invalidates connection projection when legacy secrets appear or disappear', async () => {
+    const { useStore } = await importStore();
+    const partialize = useStore.persist.getOptions().partialize;
+    if (!partialize) {
+      throw new Error('expected store partialize option');
+    }
+    const state = useStore.getState();
+    const cleanState = { ...state, connections: [] };
+
+    const cleanProjection = partialize(cleanState) as Partial<typeof state>;
+    expect(Object.prototype.hasOwnProperty.call(cleanProjection, 'connections')).toBe(false);
+
+    const legacyConnections = [
+      {
+        id: 'legacy-secret',
+        name: 'Legacy Secret',
+        config: {
+          id: 'legacy-secret',
+          type: 'mysql',
+          host: '127.0.0.1',
+          port: 3306,
+          user: 'root',
+          password: 'secret',
+        },
+      },
+    ];
+    const legacyProjection = partialize({
+      ...cleanState,
+      connections: legacyConnections,
+    }) as Partial<typeof state>;
+
+    expect(legacyProjection).not.toBe(cleanProjection);
+    expect(legacyProjection.connections).toBe(legacyConnections);
+
+    const scrubbedConnections = legacyConnections.map((connection) => ({
+      ...connection,
+      config: { ...connection.config, password: '' },
+    }));
+    const scrubbedProjection = partialize({
+      ...cleanState,
+      connections: scrubbedConnections,
+    }) as Partial<typeof state>;
+
+    expect(scrubbedProjection).not.toBe(legacyProjection);
+    expect(Object.prototype.hasOwnProperty.call(scrubbedProjection, 'connections')).toBe(false);
+  });
+});
