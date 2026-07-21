@@ -689,6 +689,16 @@ describe('useAppUpdateManager', () => {
     expect(hook?.updateDownloadProgress.open).toBe(false);
     expect(hook?.updateDownloadProgress.percent).toBe(75);
 
+    act(() => {
+      hook?.showUpdateDownloadProgress();
+    });
+    expect(hook?.updateDownloadProgress.open).toBe(true);
+    expect(hook?.updateDownloadProgress.percent).toBe(75);
+
+    act(() => {
+      hook?.hideUpdateDownloadProgress();
+    });
+
     await act(async () => {
       resolveDownload?.({
         success: true,
@@ -699,5 +709,14 @@ describe('useAppUpdateManager', () => {
 
     expect(hook?.updateDownloadProgress.status).toBe('done');
     expect(hook?.updateDownloadProgress.open).toBe(false);
+
+    act(() => {
+      hook?.showUpdateDownloadProgress();
+    });
+    expect(hook?.updateDownloadProgress).toMatchObject({
+      open: true,
+      status: 'done',
+      percent: 100,
+    });
   });
 });

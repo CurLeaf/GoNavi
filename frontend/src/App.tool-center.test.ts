@@ -342,6 +342,17 @@ describe('settings center tool entries', () => {
     expect(appSource).not.toContain('{isSyncModalOpen && (');
   });
 
+  it('recreates the hidden download progress portal above dialogs opened later', () => {
+    const start = appSource.indexOf('title={updateDownloadProgress.version');
+    const end = appSource.indexOf('</Modal>', start);
+    const downloadProgressModalSource = appSource.slice(start, end);
+
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(downloadProgressModalSource).toContain('open={updateDownloadProgress.open}');
+    expect(downloadProgressModalSource).toContain('destroyOnHidden');
+  });
+
   it('loads editable connection details before opening the edit modal so stored secrets can be shown', () => {
     expect(appSource).toContain("typeof backendApp?.GetEditableSavedConnection === 'function'");
     expect(appSource).toContain('const editableConnection = await backendApp.GetEditableSavedConnection(conn.id);');

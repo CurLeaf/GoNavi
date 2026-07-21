@@ -8230,6 +8230,7 @@ function App() {
                   ? t('app.about.download_progress.title_with_version', { version: updateDownloadProgress.version })
                   : t('app.about.download_progress.title')}
               open={updateDownloadProgress.open}
+              destroyOnHidden
               closable
               maskClosable
               keyboard
