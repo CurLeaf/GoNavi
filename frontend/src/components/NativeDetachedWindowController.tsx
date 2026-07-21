@@ -457,12 +457,12 @@ const currentNativeWindowIds = (): Set<string> => {
   ]);
 };
 
-const readAIHostStateRefs = () => {
+export const readAIHostStateRefs = () => {
   const state = useStore.getState();
   return {
     activeContext: state.activeContext,
     activeTabId: state.activeTabId,
-    aiContextsFingerprint: JSON.stringify(state.aiContexts),
+    aiContexts: state.aiContexts,
     connections: state.connections,
     tabs: state.tabs,
   };
@@ -474,7 +474,7 @@ const areAIHostStateRefsEqual = (
 ): boolean => (
   left.activeContext === right.activeContext
   && left.activeTabId === right.activeTabId
-  && left.aiContextsFingerprint === right.aiContextsFingerprint
+  && left.aiContexts === right.aiContexts
   && left.connections === right.connections
   && left.tabs === right.tabs
 );
@@ -597,8 +597,8 @@ const NativeDetachedWindowController = ({
       }
       const nextAIHostStateRefs = readAIHostStateRefs();
       if (!areAIHostStateRefsEqual(previousAIHostStateRefs, nextAIHostStateRefs)) {
-        const aiContextsChanged = previousAIHostStateRefs.aiContextsFingerprint
-          !== nextAIHostStateRefs.aiContextsFingerprint;
+        const aiContextsChanged = previousAIHostStateRefs.aiContexts
+          !== nextAIHostStateRefs.aiContexts;
         previousAIHostStateRefs = nextAIHostStateRefs;
         scheduleAIHostStateSync(aiContextsChanged ? 0 : 100);
       }

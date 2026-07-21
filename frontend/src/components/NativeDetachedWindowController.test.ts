@@ -10,6 +10,7 @@ import {
 import { peekQueryEditorResultSession } from '../utils/queryEditorResultSessionCache';
 import {
   applyNativeDetachedWindowEvent,
+  readAIHostStateRefs,
   type NativeDetachedWindowEvent,
 } from './NativeDetachedWindowController';
 import NativeDetachedWindowController from './NativeDetachedWindowController';
@@ -526,6 +527,18 @@ describe('NativeDetachedWindowController', () => {
       action: 'open-ai-settings',
     }, 'ai-chat', { onOpenAISettings });
     expect(onOpenAISettings).toHaveBeenCalledOnce();
+  });
+
+  it('tracks AI context changes by immutable reference without serializing the context tree', () => {
+    const aiContexts = {
+      'conn-1:main': [{ dbName: 'main', tableName: 'users', ddl: 'create table users(id int)' }],
+    };
+    useStore.setState({ aiContexts });
+
+    const refs = readAIHostStateRefs();
+
+    expect(refs.aiContexts).toBe(aiContexts);
+    expect(refs).not.toHaveProperty('aiContextsFingerprint');
   });
 
   it('raises the main window without restoring a maximized window before opening settings', () => {
