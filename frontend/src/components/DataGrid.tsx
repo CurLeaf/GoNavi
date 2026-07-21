@@ -104,13 +104,12 @@ import {
 } from '../utils/dataGridWhereFilter';
 import {
     attachDataGridFindRenderVersion,
-    collectDataGridFindMatches,
+    collectDataGridFindResult,
     findDataGridTextRanges,
     hasDataGridFindRenderVersionChanged,
     normalizeDataGridFindQuery,
     resolveDataGridColumnQuickFindTarget,
     resolveDataGridFindNavigationIndex,
-    summarizeDataGridFindMatches,
     type DataGridFindMatch,
     type DataGridFindNavigationDirection,
 } from '../utils/dataGridFind';
@@ -428,8 +427,13 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [activePageFindMatchIndex, setActivePageFindMatchIndex] = useState(-1);
   const columnQuickFindHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deferredColumnQuickFindText = useDeferredValue(columnQuickFindText);
-  // 当前页查找需要即时反馈；否则清空输入框后高亮会继续停留一拍。
-  const normalizedPageFindText = useMemo(() => normalizeDataGridFindQuery(pageFindText), [pageFindText]);
+  const deferredPageFindText = useDeferredValue(pageFindText);
+  // 大结果集查找属于低优先级渲染；清空仍立即生效，避免旧高亮残留一拍。
+  const normalizedPageFindText = useMemo(() => (
+      normalizeDataGridFindQuery(pageFindText)
+          ? normalizeDataGridFindQuery(deferredPageFindText)
+          : ''
+  ), [deferredPageFindText, pageFindText]);
   const normalizedColumnQuickFindText = useMemo(
       () => normalizeDataGridFindQuery(deferredColumnQuickFindText),
       [deferredColumnQuickFindText],
@@ -2303,7 +2307,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
   }, [closeVirtualInlineEditor, currentConnConfig, dbType, form, handleCellSave, virtualEditingCell]);
 
-  const pageFindMatches = useMemo(() => collectDataGridFindMatches(
+  const pageFindResult = useMemo(() => collectDataGridFindResult(
       mergedDisplayData,
       displayColumnNames,
       normalizedPageFindText,
@@ -2314,17 +2318,8 @@ const DataGrid: React.FC<DataGridProps> = ({
       ),
       (row, rowIndex) => String(row?.[GONAVI_ROW_KEY] ?? `row-${rowIndex}`),
   ), [mergedDisplayData, displayColumnNames, normalizedPageFindText, columnMetaMap, columnMetaMapByLowerName, currentConnConfig]);
-
-  const pageFindSummary = useMemo(() => summarizeDataGridFindMatches(
-      mergedDisplayData,
-      displayColumnNames,
-      normalizedPageFindText,
-      (value, _row, columnName) => formatCellDisplayText(
-          value,
-          (columnMetaMap[columnName] || columnMetaMapByLowerName[columnName.toLowerCase()])?.type,
-          currentConnConfig,
-      ),
-  ), [mergedDisplayData, displayColumnNames, normalizedPageFindText, columnMetaMap, columnMetaMapByLowerName, currentConnConfig]);
+  const pageFindMatches = pageFindResult.matches;
+  const pageFindSummary = pageFindResult.summary;
 
   useEffect(() => {
       setActivePageFindMatchIndex(-1);

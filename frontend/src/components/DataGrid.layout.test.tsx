@@ -1118,8 +1118,10 @@ describe('DataGrid layout', () => {
     expect(pageFindSource).toContain("if (event.key === 'Escape')");
     expect(pageFindSource).toContain('onCancel();');
     expect(pageFindSource).toContain("textAlign: 'left'");
-    expect(dataGridSource).toContain("const normalizedPageFindText = useMemo(() => normalizeDataGridFindQuery(pageFindText), [pageFindText]);");
-    expect(dataGridSource).not.toContain("const normalizedPageFindText = useMemo(() => normalizeDataGridFindQuery(deferredPageFindText), [deferredPageFindText]);");
+    expect(dataGridSource).toContain('const deferredPageFindText = useDeferredValue(pageFindText);');
+    expect(dataGridSource).toMatch(/normalizeDataGridFindQuery\(pageFindText\)[\s\S]*?normalizeDataGridFindQuery\(deferredPageFindText\)[\s\S]*?: ''/);
+    expect(dataGridSource).toContain('collectDataGridFindResult(');
+    expect(dataGridSource).not.toContain('summarizeDataGridFindMatches(');
     expect(dataGridSource).toContain("if (event.key === 'Escape')");
     expect(dataGridSource).toContain('if (activeSelection.size === 0) {');
     expect(dataGridSource).toContain('closeCellEditMode();');
