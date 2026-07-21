@@ -6,6 +6,8 @@ const QUERY_TAB_DRAFT_SNAPSHOT_STORAGE_KEY = 'gonavi-query-tab-drafts-v1';
 const QUERY_TAB_DRAFT_SNAPSHOT_MAX_COUNT = 30;
 const QUERY_TAB_DRAFT_SNAPSHOT_MAX_TEXT_LENGTH = 1024 * 1024;
 const QUERY_TAB_DRAFT_SNAPSHOT_DEBOUNCE_MS = 160;
+const QUERY_TAB_DRAFT_SNAPSHOT_IDLE_TIMEOUT_MS = 1500;
+const QUERY_TAB_DRAFT_SNAPSHOT_FALLBACK_DELAY_MS = 500;
 
 type PersistedQueryTabDraftEntry = {
   tabId: string;
@@ -28,11 +30,17 @@ const persistedDrafts = new Map<string, PersistedQueryTabDraftEntry>();
 
 let persistedDraftsHydrated = false;
 let persistTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+let persistIdleCallback: number | null = null;
+let persistFallbackTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
+let persistedDraftRevision = 0;
+let flushedPersistedDraftRevision = 0;
 let flushListenersBound = false;
 
-const getWindowTimerApi = (): {
+const getWindowSchedulingApi = (): {
   setTimeout: typeof globalThis.setTimeout;
   clearTimeout: typeof globalThis.clearTimeout;
+  requestIdleCallback: typeof window.requestIdleCallback | null;
+  cancelIdleCallback: typeof window.cancelIdleCallback | null;
 } | null => {
   if (typeof window === 'undefined') {
     return null;
@@ -45,6 +53,12 @@ const getWindowTimerApi = (): {
   return {
     setTimeout: setTimeoutImpl,
     clearTimeout: clearTimeoutImpl,
+    requestIdleCallback: typeof window.requestIdleCallback === 'function'
+      ? window.requestIdleCallback.bind(window)
+      : null,
+    cancelIdleCallback: typeof window.cancelIdleCallback === 'function'
+      ? window.cancelIdleCallback.bind(window)
+      : null,
   };
 };
 
@@ -125,19 +139,37 @@ const ensurePersistedDraftsHydrated = (): void => {
   }
 };
 
-const flushPersistedDrafts = (): void => {
-  const timerApi = getWindowTimerApi();
-  if (persistTimer !== null && timerApi) {
-    timerApi.clearTimeout(persistTimer);
+const cancelScheduledPersistedDraftFlush = (): void => {
+  const schedulingApi = getWindowSchedulingApi();
+  if (persistTimer !== null && schedulingApi) {
+    schedulingApi.clearTimeout(persistTimer);
     persistTimer = null;
   }
+  if (persistFallbackTimer !== null && schedulingApi) {
+    schedulingApi.clearTimeout(persistFallbackTimer);
+    persistFallbackTimer = null;
+  }
+  if (persistIdleCallback !== null && schedulingApi?.cancelIdleCallback) {
+    schedulingApi.cancelIdleCallback(persistIdleCallback);
+    persistIdleCallback = null;
+  }
+};
+
+const flushPersistedDrafts = (): void => {
+  cancelScheduledPersistedDraftFlush();
+  if (flushedPersistedDraftRevision === persistedDraftRevision) {
+    return;
+  }
+  const revision = persistedDraftRevision;
   const storage = getDraftSnapshotStorage();
   if (!storage) {
+    flushedPersistedDraftRevision = revision;
     return;
   }
   try {
     if (persistedDrafts.size === 0) {
       storage.removeItem(QUERY_TAB_DRAFT_SNAPSHOT_STORAGE_KEY);
+      flushedPersistedDraftRevision = revision;
       return;
     }
     const payload = Array.from(persistedDrafts.values())
@@ -147,6 +179,7 @@ const flushPersistedDrafts = (): void => {
       QUERY_TAB_DRAFT_SNAPSHOT_STORAGE_KEY,
       JSON.stringify(payload),
     );
+    flushedPersistedDraftRevision = revision;
   } catch {
     // ignore storage quota or serialization failures
   }
@@ -174,16 +207,44 @@ const bindFlushListeners = (): void => {
 
 const schedulePersistedDraftFlush = (): void => {
   bindFlushListeners();
-  const timerApi = getWindowTimerApi();
-  if (!timerApi) {
+  persistedDraftRevision += 1;
+  const schedulingApi = getWindowSchedulingApi();
+  if (!schedulingApi) {
     flushPersistedDrafts();
     return;
   }
   if (persistTimer !== null) {
-    timerApi.clearTimeout(persistTimer);
+    schedulingApi.clearTimeout(persistTimer);
   }
-  persistTimer = timerApi.setTimeout(() => {
-    flushPersistedDrafts();
+  if (persistFallbackTimer !== null) {
+    schedulingApi.clearTimeout(persistFallbackTimer);
+    persistFallbackTimer = null;
+  }
+  if (persistIdleCallback !== null && schedulingApi.cancelIdleCallback) {
+    schedulingApi.cancelIdleCallback(persistIdleCallback);
+    persistIdleCallback = null;
+  }
+  persistTimer = schedulingApi.setTimeout(() => {
+    persistTimer = null;
+    // The snapshot can approach 30 MiB. Keep its JSON serialization and the
+    // synchronous localStorage write out of the editor's debounce callback.
+    if (schedulingApi.requestIdleCallback) {
+      if (persistIdleCallback !== null) {
+        return;
+      }
+      persistIdleCallback = schedulingApi.requestIdleCallback(() => {
+        persistIdleCallback = null;
+        if (persistTimer !== null) {
+          return;
+        }
+        flushPersistedDrafts();
+      }, { timeout: QUERY_TAB_DRAFT_SNAPSHOT_IDLE_TIMEOUT_MS });
+      return;
+    }
+    persistFallbackTimer = schedulingApi.setTimeout(() => {
+      persistFallbackTimer = null;
+      flushPersistedDrafts();
+    }, QUERY_TAB_DRAFT_SNAPSHOT_FALLBACK_DELAY_MS);
   }, QUERY_TAB_DRAFT_SNAPSHOT_DEBOUNCE_MS);
 };
 
@@ -279,6 +340,10 @@ export const getPersistedQueryTabDraftEntry = (
 export const listPersistedQueryTabDraftEntries = (): PersistedQueryTabDraftEntry[] => {
   ensurePersistedDraftsHydrated();
   return Array.from(persistedDrafts.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+};
+
+export const flushQueryTabDraftSnapshots = (): void => {
+  flushPersistedDrafts();
 };
 
 export const setSQLFileTabDraft = (tabId: string, content: string): void => {
