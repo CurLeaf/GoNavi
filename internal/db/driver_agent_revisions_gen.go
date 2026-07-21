@@ -23,7 +23,7 @@ func init() {
 		"tdengine":      "src-779b9b537f08856f",
 		"iotdb":         "src-7edea4aba8d4869e",
 		"clickhouse":    "src-d4150c3fb3d1313a",
-		"elasticsearch": "src-8086b38d85310b20",
+		"elasticsearch": "src-3dc1697786483347",
 		"trino":         "src-ba947f211ce7b19f",
 	}
 }

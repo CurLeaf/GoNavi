@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"GoNavi-Wails/internal/connection"
 
@@ -174,22 +175,28 @@ func TestElasticsearchConnectRejectsFailedPing(t *testing.T) {
 
 // TestElasticsearchGetDatabases 测试获取索引列表。
 func TestElasticsearchGetDatabases(t *testing.T) {
-	t.Run("使用轻量别名端点获取全部索引", func(t *testing.T) {
-		var fullIndexDefinitionsRequested atomic.Bool
+	t.Run("现代版本使用 CAT 全量通配获取全部索引", func(t *testing.T) {
+		var aliasListingRequested atomic.Bool
 		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodGet && r.URL.Path == "/*/_alias" {
-				writeJSON(w, map[string]interface{}{
-					"logs-2024": map[string]interface{}{"aliases": map[string]interface{}{}},
-					"users":     map[string]interface{}{"aliases": map[string]interface{}{}},
-					".security": map[string]interface{}{"aliases": map[string]interface{}{}},
-					".kibana_1": map[string]interface{}{"aliases": map[string]interface{}{}},
-					"products":  map[string]interface{}{"aliases": map[string]interface{}{}},
+			if r.Method == http.MethodGet && r.URL.Path == "/_cat/indices" {
+				query := r.URL.Query()
+				if query.Get("format") != "json" || query.Get("h") != "index" || query.Get("expand_wildcards") != "all" {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				writeJSON(w, []map[string]string{
+					{"index": "users"},
+					{"index": ".security"},
+					{"index": "logs-2024"},
+					{"index": "users"},
+					{"index": ".kibana_1"},
+					{"index": "products"},
 				})
 				return
 			}
-			if r.Method == http.MethodGet && r.URL.Path == "/*" {
-				fullIndexDefinitionsRequested.Store(true)
-				w.WriteHeader(http.StatusForbidden)
+			if r.Method == http.MethodGet && r.URL.Path == "/*/_alias" {
+				aliasListingRequested.Store(true)
+				w.WriteHeader(http.StatusGatewayTimeout)
 				return
 			}
 			w.WriteHeader(http.StatusNotFound)
@@ -201,7 +208,6 @@ func TestElasticsearchGetDatabases(t *testing.T) {
 			t.Fatalf("GetDatabases 失败：%v", err)
 		}
 
-		slices.Sort(databases)
 		expected := []string{".kibana_1", ".security", "logs-2024", "products", "users"}
 		if len(databases) != len(expected) {
 			t.Fatalf("期望 %d 个索引，实际 %d：%v", len(expected), len(databases), databases)
@@ -211,23 +217,59 @@ func TestElasticsearchGetDatabases(t *testing.T) {
 				t.Fatalf("索引 [%d] 期望 %q，实际 %q", i, name, databases[i])
 			}
 		}
-		if fullIndexDefinitionsRequested.Load() {
-			t.Fatal("GetDatabases 不应请求包含 settings/mappings 的完整索引定义")
+		if aliasListingRequested.Load() {
+			t.Fatal("CAT 端点成功时不应继续请求 Alias API")
+		}
+	})
+
+	t.Run("ES 7.3 拒绝全量通配参数后重试兼容 CAT 请求", func(t *testing.T) {
+		var catListingAttempts atomic.Int32
+		var aliasListingRequested atomic.Bool
+		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/_cat/indices":
+				catListingAttempts.Add(1)
+				query := r.URL.Query()
+				if query.Has("expand_wildcards") {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				if query.Get("format") != "json" || query.Get("h") != "index" {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				writeJSON(w, []map[string]string{{"index": "legacy-events"}})
+			case r.Method == http.MethodGet && r.URL.Path == "/*/_alias":
+				aliasListingRequested.Store(true)
+				w.WriteHeader(http.StatusGatewayTimeout)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		})
+
+		db := newTestESDB(t, server.URL, "")
+		databases, err := db.GetDatabases()
+		if err != nil {
+			t.Fatalf("GetDatabases 应兼容 ES 7.3 CAT 参数：%v", err)
+		}
+		if attempts := catListingAttempts.Load(); attempts != 2 {
+			t.Fatalf("期望先尝试现代 CAT 再重试兼容请求，实际请求 %d 次", attempts)
+		}
+		if aliasListingRequested.Load() {
+			t.Fatal("兼容 CAT 请求成功时不应回退 Alias API")
+		}
+		if !slices.Equal(databases, []string{"legacy-events"}) {
+			t.Fatalf("期望 [legacy-events]，实际 %v", databases)
 		}
 	})
 
 	t.Run("允许没有索引的空集群", func(t *testing.T) {
 		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodGet || r.URL.Path != "/*/_alias" {
+			if r.Method != http.MethodGet || r.URL.Path != "/_cat/indices" {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			query := r.URL.Query()
-			if query.Get("allow_no_indices") != "true" || query.Get("ignore_unavailable") != "true" {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			writeJSON(w, map[string]interface{}{})
+			writeJSON(w, []map[string]string{})
 		})
 
 		db := newTestESDB(t, server.URL, "")
@@ -237,6 +279,76 @@ func TestElasticsearchGetDatabases(t *testing.T) {
 		}
 		if len(databases) != 0 {
 			t.Fatalf("空集群应返回空索引列表，实际：%v", databases)
+		}
+	})
+
+	t.Run("CAT 端点不可用时回退到 Alias API", func(t *testing.T) {
+		var catListingRequested atomic.Bool
+		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/_cat/indices":
+				catListingRequested.Store(true)
+				w.WriteHeader(http.StatusForbidden)
+			case r.Method == http.MethodGet && r.URL.Path == "/*/_alias":
+				query := r.URL.Query()
+				if query.Get("allow_no_indices") != "true" || query.Get("ignore_unavailable") != "true" {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				writeJSON(w, map[string]interface{}{
+					"archive": map[string]interface{}{"aliases": map[string]interface{}{}},
+					"orders":  map[string]interface{}{"aliases": map[string]interface{}{}},
+				})
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		})
+
+		db := newTestESDB(t, server.URL, "")
+		databases, err := db.GetDatabases()
+		if err != nil {
+			t.Fatalf("GetDatabases 应在 CAT 被拒绝时回退：%v", err)
+		}
+		if !catListingRequested.Load() {
+			t.Fatal("GetDatabases 应先尝试 CAT 端点")
+		}
+		expected := []string{"archive", "orders"}
+		if !slices.Equal(databases, expected) {
+			t.Fatalf("期望 %v，实际 %v", expected, databases)
+		}
+	})
+
+	t.Run("CAT 超时后使用剩余预算回退到 Alias API", func(t *testing.T) {
+		var aliasListingRequested atomic.Bool
+		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/_cat/indices":
+				<-r.Context().Done()
+			case r.Method == http.MethodGet && r.URL.Path == "/*/_alias":
+				aliasListingRequested.Store(true)
+				writeJSON(w, map[string]interface{}{
+					"events": map[string]interface{}{"aliases": map[string]interface{}{}},
+				})
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		})
+
+		db := newTestESDB(t, server.URL, "")
+		db.indexListTimeout = 500 * time.Millisecond
+		started := time.Now()
+		databases, err := db.GetDatabases()
+		if err != nil {
+			t.Fatalf("GetDatabases 应在 CAT 超时后回退：%v", err)
+		}
+		if !aliasListingRequested.Load() {
+			t.Fatal("CAT 超时后应使用新的上下文请求 Alias API")
+		}
+		if !slices.Equal(databases, []string{"events"}) {
+			t.Fatalf("期望 [events]，实际 %v", databases)
+		}
+		if elapsed := time.Since(started); elapsed >= db.indexListTimeout {
+			t.Fatalf("回退不应耗尽总超时预算，实际耗时 %s", elapsed)
 		}
 	})
 
@@ -1098,6 +1210,14 @@ func TestESMockIntegration(t *testing.T) {
 		// Ping
 		case r.Method == http.MethodHead && path == "/":
 			w.WriteHeader(http.StatusOK)
+
+		// Cat.Indices — 仅返回索引名，兼容 ES 6/7/8。
+		case r.Method == http.MethodGet && path == "/_cat/indices":
+			writeJSON(w, []map[string]string{
+				{"index": "products"},
+				{"index": "orders"},
+				{"index": ".internal"},
+			})
 
 		// 完整索引定义响应可能过大，列表加载不应请求该端点。
 		case r.Method == http.MethodGet && path == "/*":

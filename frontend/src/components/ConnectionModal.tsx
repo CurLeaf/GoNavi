@@ -328,7 +328,8 @@ const ConnectionModal: React.FC<{
   onSaved?: (savedConnection: SavedConnection) => void | Promise<void>;
 }> = ({ open, onClose, initialValues, onOpenDriverManager, onSaved }) => {
   const [form] = Form.useForm();
-  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
   const [useSSL, setUseSSL] = useState(false);
   const [useSSH, setUseSSH] = useState(false);
   const [useProxy, setUseProxy] = useState(false);
@@ -374,6 +375,7 @@ const ConnectionModal: React.FC<{
   const [primaryPasswordVisible, setPrimaryPasswordVisible] = useState(false);
   const testInFlightRef = useRef(false);
   const testTimerRef = useRef<number | null>(null);
+  const testRunIdRef = useRef(0);
   const addConnection = useStore((state) => state.addConnection);
   const updateConnection = useStore((state) => state.updateConnection);
   const theme = useStore((state) => state.theme);
@@ -1325,8 +1327,10 @@ const ConnectionModal: React.FC<{
   };
 
   useEffect(() => {
+    testRunIdRef.current += 1;
     if (open) {
-      setLoading(false);
+      setSaving(false);
+      setTestingConnection(false);
       testInFlightRef.current = false;
       if (testTimerRef.current !== null) {
         window.clearTimeout(testTimerRef.current);
@@ -1664,6 +1668,7 @@ const ConnectionModal: React.FC<{
 
   useEffect(() => {
     return () => {
+      testRunIdRef.current += 1;
       if (testTimerRef.current !== null) {
         window.clearTimeout(testTimerRef.current);
         testTimerRef.current = null;
@@ -1687,7 +1692,7 @@ const ConnectionModal: React.FC<{
         );
         return;
       }
-      setLoading(true);
+      setSaving(true);
 
       const config = await buildConnectionConfig({
         values,
@@ -1745,12 +1750,12 @@ const ConnectionModal: React.FC<{
         ),
       );
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
   const requestTest = () => {
-    if (loading) return;
+    if (saving || testingConnection) return;
     if (testTimerRef.current !== null) return;
     testTimerRef.current = window.setTimeout(() => {
       testTimerRef.current = null;
@@ -1802,13 +1807,17 @@ const ConnectionModal: React.FC<{
   const handleTest = async () => {
     if (testInFlightRef.current) return;
     testInFlightRef.current = true;
+    const testRunId = ++testRunIdRef.current;
+    const isCurrentTestRun = () => testRunIdRef.current === testRunId;
     try {
       await form.validateFields();
+      if (!isCurrentTestRun()) return;
       const values = form.getFieldsValue(true);
       const unavailableReason = await resolveDriverUnavailableReason(
         values.type,
         values.driver,
       );
+      if (!isCurrentTestRun()) return;
       if (unavailableReason) {
         applyTestFailureFeedback({
           kind: "driver_unavailable",
@@ -1835,7 +1844,7 @@ const ConnectionModal: React.FC<{
         });
         return;
       }
-      setLoading(true);
+      setTestingConnection(true);
       setTestResult(null);
       const config = await buildConnectionConfig({
         values,
@@ -1843,6 +1852,7 @@ const ConnectionModal: React.FC<{
         initialValues,
         translate: t,
       });
+      if (!isCurrentTestRun()) return;
       if (initialValues?.id) {
         config.id = initialValues.id;
       }
@@ -1868,79 +1878,100 @@ const ConnectionModal: React.FC<{
         t("connection.modal.test.timeout", { seconds: timeoutSeconds }),
       );
 
+      if (!isCurrentTestRun()) return;
+
       if (res.success) {
         void message.destroy("connection-test-failure");
         setTestResult({ type: "success", message: res.message });
-        if (isRedisType) {
-          const dbRes = await withClientTimeout(
-            RedisGetDatabases(config as any),
-            rpcTimeoutMs,
-            t("connection.modal.test.redis_database_list_timeout", {
-              seconds: timeoutSeconds,
-            }),
-          );
-          if (dbRes.success) {
-            const supportedDbs = extractRedisDatabaseList(dbRes.data);
-            setRedisDbList(supportedDbs);
-            form.setFieldValue(
-              "includeRedisDatabases",
-              normalizeRedisDatabaseSelection(
-                form.getFieldValue("includeRedisDatabases"),
-                supportedDbs,
-              ),
-            );
-          } else {
-            setRedisDbList(
-              buildRedisDatabaseList(
-                config.redisDB,
-                form.getFieldValue("includeRedisDatabases"),
-              ),
-            );
-            message.warning(
-              t("connection.modal.test.redis_database_list_failure", {
-                detail: normalizeConnectionSecretErrorMessage(
-                  dbRes.message,
-                  t("connection.modal.error.unknown"),
-                ),
-              }),
-            );
-          }
-        } else if (!isJVMType) {
-          // Other databases: fetch database list
-          const dbRes = await withClientTimeout(
-            DBGetDatabases(dbTestConfig as any),
-            rpcTimeoutMs,
-            t("connection.modal.test.databaseListTimeout", {
-              seconds: timeoutSeconds,
-            }),
-          );
-          if (dbRes.success) {
-            const dbRows = Array.isArray(dbRes.data) ? dbRes.data : [];
-            const dbs = dbRows
-              .map((row: any) => row?.Database || row?.database)
-              .filter(
-                (name: any) => typeof name === "string" && name.trim() !== "",
+        void (async () => {
+          try {
+            if (isRedisType) {
+              const dbRes = await withClientTimeout(
+                RedisGetDatabases(config as any),
+                rpcTimeoutMs,
+                t("connection.modal.test.redis_database_list_timeout", {
+                  seconds: timeoutSeconds,
+                }),
               );
-            setDbList(dbs);
-            if (dbs.length === 0) {
-              message.warning(
-                values.type === "dameng"
-                  ? t("connection.modal.test.noVisibleSchema")
-                  : t("connection.modal.test.noVisibleDatabaseList"),
+              if (!isCurrentTestRun()) return;
+              if (dbRes.success) {
+                const supportedDbs = extractRedisDatabaseList(dbRes.data);
+                setRedisDbList(supportedDbs);
+                form.setFieldValue(
+                  "includeRedisDatabases",
+                  normalizeRedisDatabaseSelection(
+                    form.getFieldValue("includeRedisDatabases"),
+                    supportedDbs,
+                  ),
+                );
+              } else {
+                setRedisDbList(
+                  buildRedisDatabaseList(
+                    config.redisDB,
+                    form.getFieldValue("includeRedisDatabases"),
+                  ),
+                );
+                message.warning(
+                  t("connection.modal.test.redis_database_list_failure", {
+                    detail: normalizeConnectionSecretErrorMessage(
+                      dbRes.message,
+                      t("connection.modal.error.unknown"),
+                    ),
+                  }),
+                );
+              }
+            } else if (!isJVMType) {
+              const dbRes = await withClientTimeout(
+                DBGetDatabases(dbTestConfig as any),
+                rpcTimeoutMs,
+                t("connection.modal.test.databaseListTimeout", {
+                  seconds: timeoutSeconds,
+                }),
               );
+              if (!isCurrentTestRun()) return;
+              if (dbRes.success) {
+                const dbRows = Array.isArray(dbRes.data) ? dbRes.data : [];
+                const dbs = dbRows
+                  .map((row: any) => row?.Database || row?.database)
+                  .filter(
+                    (name: any) =>
+                      typeof name === "string" && name.trim() !== "",
+                  );
+                setDbList(dbs);
+                if (dbs.length === 0) {
+                  message.warning(
+                    values.type === "dameng"
+                      ? t("connection.modal.test.noVisibleSchema")
+                      : t("connection.modal.test.noVisibleDatabaseList"),
+                  );
+                }
+              } else {
+                setDbList([]);
+                message.warning(
+                  t("connection.modal.test.databaseListFailure", {
+                    detail: normalizeConnectionSecretErrorMessage(
+                      dbRes.message,
+                      t("connection.modal.error.unknown"),
+                    ),
+                  }),
+                );
+              }
             }
-          } else {
-            setDbList([]);
+          } catch (error: unknown) {
+            if (!isCurrentTestRun()) return;
+            const detail = normalizeConnectionSecretErrorMessage(
+              error instanceof Error ? error.message : String(error),
+              t("connection.modal.error.unknown"),
+            );
             message.warning(
-              t("connection.modal.test.databaseListFailure", {
-                detail: normalizeConnectionSecretErrorMessage(
-                  dbRes.message,
-                  t("connection.modal.error.unknown"),
-                ),
-              }),
+              isRedisType
+                ? t("connection.modal.test.redis_database_list_failure", {
+                    detail,
+                  })
+                : t("connection.modal.test.databaseListFailure", { detail }),
             );
           }
-        }
+        })();
       } else {
         applyTestFailureFeedback({
           kind: "runtime",
@@ -1949,6 +1980,7 @@ const ConnectionModal: React.FC<{
         });
       }
     } catch (e: unknown) {
+      if (!isCurrentTestRun()) return;
       if (e && typeof e === "object" && "errorFields" in e) {
         applyTestFailureFeedback({
           kind: "validation",
@@ -1968,8 +2000,10 @@ const ConnectionModal: React.FC<{
         fallbackKey: "connection.modal.test.fallback.unknownException",
       });
     } finally {
-      testInFlightRef.current = false;
-      setLoading(false);
+      if (isCurrentTestRun()) {
+        testInFlightRef.current = false;
+        setTestingConnection(false);
+      }
     }
   };
 
@@ -2708,8 +2742,8 @@ const ConnectionModal: React.FC<{
         <Space size={8} style={{ flexShrink: 0 }}>
           <Button
             key="test"
-            loading={loading}
-            disabled={operationBlocked}
+            loading={testingConnection}
+            disabled={operationBlocked || saving}
             onClick={requestTest}
           >
             {t("connection.action.test")}
@@ -2720,8 +2754,8 @@ const ConnectionModal: React.FC<{
           <Button
             key="submit"
             type="primary"
-            loading={loading}
-            disabled={operationBlocked}
+            loading={saving}
+            disabled={operationBlocked || testingConnection}
             onClick={handleOk}
           >
             {t("common.action.save")}
