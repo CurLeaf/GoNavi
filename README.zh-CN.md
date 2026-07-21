@@ -445,6 +445,18 @@ fc-cache -fv
 欢迎 Issue 与 PR。请从 **`dev`** 拉分支，并向 **`dev`** 提 PR。
 
 - [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)
+- 共建邀请：[Issue #671](https://github.com/Syngnat/GoNavi/issues/671)
+
+---
+
+## 💬 联系与反馈
+
+| 渠道 | 说明 |
+|---|---|
+| **GitHub Issues** | Bug、功能建议、文档问题优先在此提交，便于跟踪与复现 |
+| **微信** | `ygf1140302783`（备注「GoNavi」）— 可拉交流群，适合使用讨论与快速沟通 |
+
+> 技术问题尽量附版本号、系统与复现步骤；内网 Windows 启动白屏/闪退见 [WebView2 说明](https://github.com/Syngnat/GoNavi/issues/672)。
 
 ---
 

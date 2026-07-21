@@ -445,6 +445,18 @@ fc-cache -fv
 Issues and PRs welcome. Branch from **`dev`**, PR against **`dev`**.
 
 - [CONTRIBUTING.md](CONTRIBUTING.md)
+- Call for contributors: [Issue #671](https://github.com/Syngnat/GoNavi/issues/671)
+
+---
+
+## 💬 Contact & Feedback
+
+| Channel | Notes |
+|---|---|
+| **GitHub Issues** | Preferred for bugs, feature requests, and docs — easier to track and reproduce |
+| **WeChat** | `ygf1140302783` (note “GoNavi”) — maintainer can invite you to the community group for discussion |
+
+> For technical reports, include version, OS, and repro steps when possible. Windows blank/crash on intranet images: [WebView2 guide](https://github.com/Syngnat/GoNavi/issues/672).
 
 ---
 
