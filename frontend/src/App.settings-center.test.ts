@@ -168,7 +168,7 @@ describe('settings center layout', () => {
     expect(appSource).toContain("handleOpenSettingsCenterPane('about', 'about-go-navi')");
     expect(appSource).toContain("if (activeSettingsCenterPane.key === 'theme')");
     expect(appSource).toContain("if (activeSettingsCenterPane.key === 'ai')");
-    expect(appSource).toContain('<AISettingsContent');
+    expect(appSource).toContain('<LazyAISettingsContent');
     expect(appSource).toContain("if (activeSettingsCenterPane.key === 'about-go-navi')");
     expect(appSource).toContain('renderSettingsCenterAboutPane()');
   });

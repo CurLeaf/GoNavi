@@ -814,8 +814,8 @@ describe("i18n catalog", () => {
     );
     const aiPanelSource = sliceBetween(
       source,
-      "<AIPanelErrorBoundary",
-      "<AIChatPanel",
+      "key={aiPanelRenderNonce}",
+      "<LazyAIChatPanel",
     );
     const settingsToolsSource = sliceBetween(
       source,

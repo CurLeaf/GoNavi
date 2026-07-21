@@ -138,7 +138,7 @@ describe('settings center tool entries', () => {
     expect(appSource).toContain('ExportConnectionsPayload');
     expect(appSource).toContain('downloadBrowserTextFile');
     expect(appSource).toContain("__GONAVI_WEB_RUNTIME__?.buildType === 'web'");
-    expect(appSource).toContain('if (isWebRuntime) {\n                  return (');
+    expect(appSource).toMatch(/if \(isWebRuntime\) \{\r?\n\s+return \(/);
     expect(configGroupSource).toContain("key: 'data-root'");
     expect(configGroupSource).toContain("handleOpenToolCenterPane('config', 'data-root')");
     expect(appSource).toContain('...toolCenterGroups,');
@@ -366,7 +366,7 @@ describe('settings center tool entries', () => {
 
   it('loads editable AI provider details inside settings-center AI pane content', () => {
     // 聊天/入口打开 AI 配置走设置中心 AISettingsContent，不再挂独立 AISettingsModal
-    expect(appSource).toContain('<AISettingsContent');
+    expect(appSource).toContain('<LazyAISettingsContent');
     expect(appSource).toContain("activeSettingsCenterPane.key === 'ai'");
     expect(appSource).not.toContain('<AISettingsModal');
     const modalSource = readFileSync(new URL('./components/AISettingsModal.tsx', import.meta.url), 'utf8');

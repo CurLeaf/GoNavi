@@ -1,5 +1,5 @@
-import React, { useCallback, useRef } from 'react';
-import { Button } from 'antd';
+import React, { useCallback, useMemo, useRef } from 'react';
+import { Button, Spin } from 'antd';
 import { useStore } from '../store';
 import { t } from '../i18n';
 import {
@@ -10,8 +10,9 @@ import {
 } from '../utils/detachedWindow';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { hasNativeDetachedWindowManager } from '../utils/nativeDetachedWindowHost';
-import AIChatPanel from './AIChatPanel';
 import AIPanelErrorBoundary from './ai/AIPanelErrorBoundary';
+
+const createLazyAIChatPanel = () => React.lazy(() => import('./AIChatPanel'));
 
 type DragMode = 'move' | 'resize-e' | 'resize-s' | 'resize-se';
 
@@ -40,6 +41,7 @@ const FloatingAIChatWindow: React.FC<FloatingAIChatWindowProps> = ({
   const setAIPanelVisible = useStore((state) => state.setAIPanelVisible);
   const updateDetachedAIChatBounds = useStore((state) => state.updateDetachedAIChatBounds);
   const focusDetachedAIChatPanel = useStore((state) => state.focusDetachedAIChatPanel);
+  const LazyAIChatPanel = useMemo(createLazyAIChatPanel, [renderNonce]);
 
   const dragRef = useRef<{
     mode: DragMode;
@@ -257,18 +259,26 @@ const FloatingAIChatWindow: React.FC<FloatingAIChatWindowProps> = ({
               </div>
             )}
           >
-            <AIChatPanel
-              width={bounds.width}
-              darkMode={darkMode}
-              bgColor={bgColor}
-              overlayTheme={overlayTheme}
-              presentation="detached"
-              onClose={() => setAIPanelVisible(false)}
-              onOpenSettings={onOpenSettings}
-              onDetach={undefined}
-              onAttach={() => attachAIChatPanel()}
-              onWindowDragStart={(event) => startInteraction(event, 'move', bounds)}
-            />
+            <React.Suspense
+              fallback={(
+                <div style={{ height: '100%', display: 'grid', placeItems: 'center' }} aria-busy="true">
+                  <Spin />
+                </div>
+              )}
+            >
+              <LazyAIChatPanel
+                width={bounds.width}
+                darkMode={darkMode}
+                bgColor={bgColor}
+                overlayTheme={overlayTheme}
+                presentation="detached"
+                onClose={() => setAIPanelVisible(false)}
+                onOpenSettings={onOpenSettings}
+                onDetach={undefined}
+                onAttach={() => attachAIChatPanel()}
+                onWindowDragStart={(event) => startInteraction(event, 'move', bounds)}
+              />
+            </React.Suspense>
           </AIPanelErrorBoundary>
         </div>
         <div

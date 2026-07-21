@@ -19,8 +19,6 @@ import { type DataSyncEntryMode } from './components/dataSyncEntryMode';
 import DriverManagerModal from './components/DriverManagerModal';
 import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';
 import LogPanel from './components/LogPanel';
-import { AISettingsContent } from './components/AISettingsModal';
-import AIChatPanel from './components/AIChatPanel';
 import AIPanelErrorBoundary from './components/ai/AIPanelErrorBoundary';
 import SecurityUpdateBanner from './components/SecurityUpdateBanner';
 import SecurityUpdateIntroModal from './components/SecurityUpdateIntroModal';
@@ -215,6 +213,12 @@ import './App.css';
 import './v2-theme.css';
 import './styles/v2-theme-workbench.css';
 import './styles/v2-theme-ai.css';
+
+const createLazyAIChatPanel = () => React.lazy(() => import('./components/AIChatPanel'));
+const createLazyAISettingsContent = () => React.lazy(async () => {
+  const module = await import('./components/AISettingsModal');
+  return { default: module.AISettingsContent };
+});
 
 const { Sider, Content } = Layout;
 const MIN_UI_SCALE = 0.8;
@@ -1012,6 +1016,9 @@ function App() {
   const browserConnectionImportInputRef = useRef<HTMLInputElement>(null);
   const browserConnectionImportSourceGroupRef = useRef<ToolCenterGroupKey | undefined>(undefined);
   const [aiPanelRenderNonce, setAiPanelRenderNonce] = useState(0);
+  const [aiSettingsRenderNonce, setAiSettingsRenderNonce] = useState(0);
+  const LazyAIChatPanel = useMemo(createLazyAIChatPanel, [aiPanelRenderNonce]);
+  const LazyAISettingsContent = useMemo(createLazyAISettingsContent, [aiSettingsRenderNonce]);
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
   const aiPanelVisible = useStore(state => state.aiPanelVisible);
@@ -3702,6 +3709,10 @@ function App() {
 
   const handleRetryAIPanelRender = useCallback(() => {
       setAiPanelRenderNonce((current) => current + 1);
+  }, []);
+
+  const handleRetryAISettingsRender = useCallback(() => {
+      setAiSettingsRenderNonce((current) => current + 1);
   }, []);
 
   const handleWebLogout = useCallback(async () => {
@@ -6892,13 +6903,39 @@ function App() {
       if (activeSettingsCenterPane.key === 'ai') {
           return (
               <div style={{ height: '100%', minHeight: 0 }}>
-                  <AISettingsContent
-                    active={isSettingsModalOpen && activeSettingsCenterPane.key === 'ai'}
-                    darkMode={darkMode}
-                    overlayTheme={overlayTheme}
-                    focusProviderId={focusedAIProviderId}
-                    onBeforeExternalMCPUse={handlePrepareExternalMCPUse}
-                  />
+                  <AIPanelErrorBoundary
+                    key={`ai-settings-${aiSettingsRenderNonce}`}
+                    onError={handleAIPanelRenderError}
+                    fallback={(error) => (
+                      <Alert
+                        type="error"
+                        showIcon
+                        message={t('app.ai_panel.error.title')}
+                        description={error?.message || t('app.ai_panel.error.description')}
+                        action={(
+                          <Button size="small" onClick={handleRetryAISettingsRender}>
+                            {t('app.ai_panel.action.reload')}
+                          </Button>
+                        )}
+                      />
+                    )}
+                  >
+                    <React.Suspense
+                      fallback={(
+                        <div style={{ height: '100%', display: 'grid', placeItems: 'center' }} aria-busy="true">
+                          <Spin />
+                        </div>
+                      )}
+                    >
+                      <LazyAISettingsContent
+                        active={isSettingsModalOpen && activeSettingsCenterPane.key === 'ai'}
+                        darkMode={darkMode}
+                        overlayTheme={overlayTheme}
+                        focusProviderId={focusedAIProviderId}
+                        onBeforeExternalMCPUse={handlePrepareExternalMCPUse}
+                      />
+                    </React.Suspense>
+                  </AIPanelErrorBoundary>
               </div>
           );
       }
@@ -7315,18 +7352,35 @@ function App() {
                           </div>
                         )}
                       >
-                        <AIChatPanel
-                          width={aiPanelRenderWidth}
-                          darkMode={darkMode}
-                          bgColor={bgContent}
-                          presentation="dock"
-                          onClose={() => setAIPanelVisible(false)}
-                          onDetach={() => detachAIChatPanel()}
-                          onOpenSettings={() => {
-                            handleOpenAISettings();
-                          }}
-                          overlayTheme={overlayTheme}
-                        />
+                        <React.Suspense
+                          fallback={(
+                            <div
+                              style={{
+                                width: aiPanelRenderWidth,
+                                height: '100%',
+                                display: 'grid',
+                                placeItems: 'center',
+                                background: bgContent,
+                              }}
+                              aria-busy="true"
+                            >
+                              <Spin />
+                            </div>
+                          )}
+                        >
+                          <LazyAIChatPanel
+                            width={aiPanelRenderWidth}
+                            darkMode={darkMode}
+                            bgColor={bgContent}
+                            presentation="dock"
+                            onClose={() => setAIPanelVisible(false)}
+                            onDetach={() => detachAIChatPanel()}
+                            onOpenSettings={() => {
+                              handleOpenAISettings();
+                            }}
+                            overlayTheme={overlayTheme}
+                          />
+                        </React.Suspense>
                       </AIPanelErrorBoundary>
                       </div>
                   </div>
