@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync"
 
 	aiservice "GoNavi-Wails/internal/ai/service"
 	"GoNavi-Wails/internal/app"
@@ -26,6 +27,51 @@ import (
 )
 
 const nativeSelectCurrentLineEvent = "gonavi:native-select-current-line"
+const windowsMSISingleInstanceID = "CDD6BF2F-ED1E-4345-A0AB-DCDB7E15FB23"
+
+type primaryWindowActivator struct {
+	mu      sync.Mutex
+	ctx     context.Context
+	pending bool
+	show    func(context.Context)
+}
+
+func (a *primaryWindowActivator) requestActivation() {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	ctx := a.ctx
+	if ctx == nil {
+		a.pending = true
+		a.mu.Unlock()
+		return
+	}
+	show := a.show
+	a.mu.Unlock()
+	if show != nil {
+		show(ctx)
+	}
+}
+
+func (a *primaryWindowActivator) bindRuntimeContext(ctx context.Context) {
+	if a == nil || ctx == nil {
+		return
+	}
+	a.mu.Lock()
+	a.ctx = ctx
+	activatePending := a.pending
+	a.pending = false
+	show := a.show
+	a.mu.Unlock()
+	if activatePending && show != nil {
+		show(ctx)
+	}
+}
+
+func shouldEnableWindowsMSISingleInstance(goos string, executablePath string) bool {
+	return app.IsWindowsMSIInstallExecutable(goos, executablePath)
+}
 
 func main() {
 	// 大结果集导出（88W+ 行）时，JSON 编解码会产生 5-8 倍内存副本，
@@ -34,8 +80,28 @@ func main() {
 	// 代价是 CPU 开销略增，但导出/导入场景属 I/O 密集型，GC 开销可忽略。
 	debug.SetGCPercent(50)
 
+	executablePath, executableErr := os.Executable()
 	if runSpecialMode(os.Args[1:]) {
 		return
+	}
+	primaryActivator := &primaryWindowActivator{show: wailsRuntime.WindowShow}
+	if executableErr != nil {
+		logger.Warnf("检测 MSI 单实例模式失败：%v", executableErr)
+	} else if shouldEnableWindowsMSISingleInstance(runtime.GOOS, executablePath) {
+		releaseSingleInstance, isPrimary, err := acquireWindowsMSISingleInstance(
+			windowsMSISingleInstanceID,
+			primaryActivator.requestActivation,
+		)
+		if err != nil {
+			logger.Errorf("启用 MSI 单实例模式失败：%v", err)
+			return
+		}
+		if !isPrimary {
+			return
+		}
+		if releaseSingleInstance != nil {
+			defer releaseSingleInstance()
+		}
 	}
 
 	// Create an instance of the app structure
@@ -87,6 +153,7 @@ func main() {
 		Menu:             appMenu,
 		OnStartup: func(ctx context.Context) {
 			runtimeCtx = ctx
+			primaryActivator.bindRuntimeContext(ctx)
 			lifecycleCtx := ctx
 			if nativeWindowManager != nil {
 				if err := nativewindow.InitializeLifecycle(nativeWindowManager, ctx); err != nil {

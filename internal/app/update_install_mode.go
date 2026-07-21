@@ -31,6 +31,12 @@ func resolveCurrentUpdateInstallMode() updateInstallMode {
 	return resolveUpdateInstallModeForExecutable(runtime.GOOS, updateResolveInstallTarget())
 }
 
+// IsWindowsMSIInstallExecutable reports whether executablePath belongs to a
+// GoNavi MSI installation. The marker is packaged next to the stable MSI exe.
+func IsWindowsMSIInstallExecutable(goos string, executablePath string) bool {
+	return resolveUpdateInstallModeForExecutable(goos, executablePath) == updateInstallModeMSI
+}
+
 func resolveUpdateInstallModeForExecutable(goos string, executablePath string) updateInstallMode {
 	if !strings.EqualFold(strings.TrimSpace(goos), "windows") {
 		return updateInstallModeUnknown
