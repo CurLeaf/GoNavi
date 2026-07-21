@@ -459,11 +459,36 @@ describe('settings center tool entries', () => {
     expect(appSource).toContain('const unsubscribeHydration = useStore.persist.onFinishHydration(() => {');
     expect(appSource).toContain('scheduleWindowBoundsRepair();');
     expect(appSource).toContain('scheduleWindowStateSave(260);');
-    expect(appSource).toContain("window.addEventListener('resize', handleWindowRuntimeChange);");
-    expect(appSource).toContain("window.addEventListener('focus', handleWindowRuntimeChange);");
-    expect(appSource).toContain("window.addEventListener('pageshow', handleWindowRuntimeChange);");
-    expect(appSource).toContain("window.addEventListener('pagehide', handleWindowLifecycleFlush, { capture: true });");
-    expect(appSource).toContain("window.addEventListener('beforeunload', handleWindowLifecycleFlush, { capture: true });");
+    expect(appSource).toContain('const cleanupWindowActivityScheduler = installNativeWindowActivityScheduler({');
+    expect(appSource).toContain('fallbackIntervalMs: WINDOW_STATE_FALLBACK_INTERVAL_MS,');
+    expect(appSource).toContain('resize: handleWindowRuntimeChange,');
+    expect(appSource).toContain('focus: handleWindowRuntimeChange,');
+    expect(appSource).toContain('pageshow: handleWindowRuntimeChange,');
+    expect(appSource).toContain('pagehide: handleWindowLifecycleFlush,');
+    expect(appSource).toContain('beforeunload: handleWindowLifecycleFlush,');
+    expect(appSource).toContain('cleanupWindowActivityScheduler();');
+  });
+
+  it('keeps the resize minimise probe independent from DPR debounce and clears it on unmount', () => {
+    const scaleEffectStart = appSource.indexOf('let minimisedCheckTimer: number | null = null;');
+    const dprScheduleStart = appSource.indexOf('const scheduleDevicePixelRatioCheck = (trigger: WindowsScaleCheckTrigger) => {', scaleEffectStart);
+    const activationScheduleStart = appSource.indexOf('const scheduleActivationFix = () => {', dprScheduleStart);
+    const resizeHandlerStart = appSource.indexOf('const handleWindowResize = () => {', activationScheduleStart);
+    const startupFixStart = appSource.indexOf('// Windows 冷启动：', resizeHandlerStart);
+    const schedulerStart = appSource.indexOf('fallbackIntervalMs: WINDOWS_SCALE_FALLBACK_INTERVAL_MS,', startupFixStart);
+    const cleanupStart = appSource.indexOf('return () => {', schedulerStart);
+    const cleanupEnd = appSource.indexOf('cleanupWindowActivityScheduler();', cleanupStart);
+
+    expect([scaleEffectStart, dprScheduleStart, activationScheduleStart, resizeHandlerStart, startupFixStart, schedulerStart, cleanupStart, cleanupEnd]
+      .every((index) => index >= 0)).toBe(true);
+    expect(appSource.slice(dprScheduleStart, activationScheduleStart)).not.toContain('minimisedCheckTimer');
+    const resizeHandlerSource = appSource.slice(resizeHandlerStart, startupFixStart);
+    const minimiseProbeIndex = resizeHandlerSource.indexOf('rememberMinimisedStateSoon();');
+    const dprCheckIndex = resizeHandlerSource.indexOf("scheduleDevicePixelRatioCheck('resize');");
+    expect(minimiseProbeIndex).toBeGreaterThan(-1);
+    expect(dprCheckIndex).toBeGreaterThan(minimiseProbeIndex);
+    expect(appSource.slice(cleanupStart, cleanupEnd)).toContain('window.clearTimeout(minimisedCheckTimer);');
+    expect(appSource.slice(cleanupStart, cleanupEnd)).toContain('minimisedCheckTimer = null;');
   });
 
   it('clamps normal runtime window bounds back into the visible screen after display changes', () => {

@@ -171,7 +171,18 @@ import {
   resolveDockedActiveTabId,
   type CloseShortcutScope,
 } from './utils/closeTabShortcut';
-import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldResetWebViewZoomForScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowScaleFixReason, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
+import {
+  installNativeWindowActivityScheduler,
+  resolveTitleBarToggleIconKey,
+  resolveWindowsScaleCheckDelayMs,
+  shouldApplyWindowsScaleFix,
+  shouldResetWebViewZoomForScaleFix,
+  shouldToggleMaximisedWindowForScaleFix,
+  WINDOW_STATE_FALLBACK_INTERVAL_MS,
+  WINDOWS_SCALE_FALLBACK_INTERVAL_MS,
+  type WindowScaleFixReason,
+  type WindowsScaleCheckTrigger,
+} from './utils/windowStateUi';
 import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
 import { resolveWailsWindowVisibleViewport } from './utils/wailsWindowViewport';
 import {
@@ -1472,7 +1483,6 @@ function App() {
 
   // 定时保存窗口状态、尺寸与位置
   useEffect(() => {
-      const SAVE_INTERVAL_MS = 2000;
       let cancelled = false;
       let hydrated = useStore.persist.hasHydrated();
       let eventSaveTimer: number | null = null;
@@ -1645,15 +1655,22 @@ function App() {
           scheduleWindowStateSave(320);
       });
 
-      const timer = window.setInterval(() => {
-          void saveWindowState();
-      }, SAVE_INTERVAL_MS);
-      window.addEventListener('resize', handleWindowRuntimeChange);
-      window.addEventListener('focus', handleWindowRuntimeChange);
-      window.addEventListener('pageshow', handleWindowRuntimeChange);
-      window.addEventListener('pagehide', handleWindowLifecycleFlush, { capture: true });
-      window.addEventListener('beforeunload', handleWindowLifecycleFlush, { capture: true });
-      document.addEventListener('visibilitychange', handleVisibilityChange);
+      const cleanupWindowActivityScheduler = installNativeWindowActivityScheduler({
+          windowTarget: window,
+          documentTarget: document,
+          fallbackIntervalMs: WINDOW_STATE_FALLBACK_INTERVAL_MS,
+          onFallback: () => {
+              void saveWindowState();
+          },
+          handlers: {
+              resize: handleWindowRuntimeChange,
+              focus: handleWindowRuntimeChange,
+              pageshow: handleWindowRuntimeChange,
+              pagehide: handleWindowLifecycleFlush,
+              beforeunload: handleWindowLifecycleFlush,
+              visibilitychange: handleVisibilityChange,
+          },
+      });
       return () => {
           cancelled = true;
           if (eventSaveTimer !== null) {
@@ -1662,13 +1679,7 @@ function App() {
           if (boundsRepairTimer !== null) {
               window.clearTimeout(boundsRepairTimer);
           }
-          window.clearInterval(timer);
-          window.removeEventListener('resize', handleWindowRuntimeChange);
-          window.removeEventListener('focus', handleWindowRuntimeChange);
-          window.removeEventListener('pageshow', handleWindowRuntimeChange);
-          window.removeEventListener('pagehide', handleWindowLifecycleFlush, { capture: true });
-          window.removeEventListener('beforeunload', handleWindowLifecycleFlush, { capture: true });
-          document.removeEventListener('visibilitychange', handleVisibilityChange);
+          cleanupWindowActivityScheduler();
           unsubscribeHydration();
       };
   }, []);
@@ -1684,6 +1695,7 @@ function App() {
       let lastFixAt = 0;
       let activationTimer: number | null = null;
       let resizeTimer: number | null = null;
+      let minimisedCheckTimer: number | null = null;
       let minimisedSeen = false;
       let hiddenSeen = document.visibilityState === 'hidden';
 
@@ -1802,7 +1814,11 @@ function App() {
       };
 
       const rememberMinimisedStateSoon = () => {
-          window.setTimeout(() => {
+          if (minimisedCheckTimer !== null) {
+              window.clearTimeout(minimisedCheckTimer);
+          }
+          minimisedCheckTimer = window.setTimeout(() => {
+              minimisedCheckTimer = null;
               if (cancelled) return;
               void rememberMinimisedState();
           }, 120);
@@ -1895,10 +1911,6 @@ function App() {
           scheduleDevicePixelRatioCheck('resize');
       };
 
-      const pollTimer = window.setInterval(() => {
-          void rememberMinimisedState();
-          checkDevicePixelRatio();
-      }, 900);
       // Windows 冷启动：WebView2 首次布局常只铺满左上角一部分，任务栏恢复才会走 restore 修复。
       // 这里在启动后主动按 startup 原因做几次轻量 settle，避免用户必须双击任务栏。
       // 间隔需大于 fixWindowScaleIfNeeded 的 700ms 节流，确保多次都能真正执行。
@@ -1908,11 +1920,22 @@ function App() {
               void fixWindowScaleIfNeeded('startup');
           }, delayMs)
       ));
-      window.addEventListener('resize', handleWindowResize);
-      window.addEventListener('focus', handleWindowFocus);
-      window.addEventListener('blur', handleWindowBlur);
-      window.addEventListener('pageshow', handlePageShow);
-      document.addEventListener('visibilitychange', handleVisibilityChange);
+      const cleanupWindowActivityScheduler = installNativeWindowActivityScheduler({
+          windowTarget: window,
+          documentTarget: document,
+          fallbackIntervalMs: WINDOWS_SCALE_FALLBACK_INTERVAL_MS,
+          onFallback: () => {
+              void rememberMinimisedState();
+              checkDevicePixelRatio();
+          },
+          handlers: {
+              resize: handleWindowResize,
+              focus: handleWindowFocus,
+              blur: handleWindowBlur,
+              pageshow: handlePageShow,
+              visibilitychange: handleVisibilityChange,
+          },
+      });
 
       return () => {
           cancelled = true;
@@ -1922,15 +1945,14 @@ function App() {
           if (resizeTimer !== null) {
               window.clearTimeout(resizeTimer);
           }
+          if (minimisedCheckTimer !== null) {
+              window.clearTimeout(minimisedCheckTimer);
+              minimisedCheckTimer = null;
+          }
           for (const timer of startupLayoutFixTimers) {
               window.clearTimeout(timer);
           }
-          window.clearInterval(pollTimer);
-          window.removeEventListener('resize', handleWindowResize);
-          window.removeEventListener('focus', handleWindowFocus);
-          window.removeEventListener('blur', handleWindowBlur);
-          window.removeEventListener('pageshow', handlePageShow);
-          document.removeEventListener('visibilitychange', handleVisibilityChange);
+          cleanupWindowActivityScheduler();
       };
   }, []);
 
