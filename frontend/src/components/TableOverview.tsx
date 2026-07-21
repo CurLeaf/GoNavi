@@ -30,6 +30,7 @@ import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { extractTableNameFromMetadataRow } from '../utils/tableMetadataRows';
 import { V2TableContextMenuView, type V2TableContextMenuActionKey } from './V2TableContextMenu';
 import { showSQLExportOptionsDialog } from './SQLExportOptionsDialog';
+import { confirmCopyTable } from './tableCopyAction';
 
 interface TableOverviewProps {
     tab: TabData;
@@ -283,6 +284,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     );
     const schemaName = String((tab as any).schemaName || '').trim();
     const supportsDesignWrite = !getDataSourceCapabilities(connection?.config).forceReadOnlyStructureDesigner;
+    const supportsCopyTable = getDataSourceCapabilities(connection?.config).supportsCopyTable;
     const autoFetchVisible = useAutoFetchVisibility();
 
     const loadData = useCallback(async () => {
@@ -581,6 +583,24 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             }));
         }
     }, [t]);
+
+    const handleCopyTable = useCallback((tableName: string) => {
+        if (!supportsCopyTable) {
+            message.warning(t('table_copy.message.unsupported'));
+            return;
+        }
+        const config = buildConfig();
+        if (!config) return;
+        confirmCopyTable({
+            config: buildRpcConnectionConfig(config) as any,
+            dbName: tab.dbName || '',
+            sourceSchemaName: schemaName,
+            sourceTableName: tableName,
+            onSuccess: async () => {
+                await loadData();
+            },
+        });
+    }, [buildConfig, loadData, schemaName, supportsCopyTable, t, tab.dbName]);
 
     const openTableSQLExportWorkbench = useCallback(async (tableName: string, mode: 'backup' | 'dataOnly') => {
         const normalizedTableName = String(tableName || '').trim();
@@ -888,6 +908,9 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             case 'copy-structure':
                 void handleCopyStructure(tableName);
                 return;
+            case 'copy-table':
+                handleCopyTable(tableName);
+                return;
             case 'copy-insert':
                 void handleCopyTableAsInsert(tableName);
                 return;
@@ -923,6 +946,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         }
     }, [
         handleCopyStructure,
+        handleCopyTable,
         handleCopyTableAsInsert,
         handleCopyTableName,
         handleDeleteTable,
@@ -954,13 +978,14 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             }}
             isPinned={isOverviewTablePinned(pinnedSidebarTables, connection?.id, tab.dbName, schemaName, table.name)}
             supportsTruncate={allowTruncate}
+            supportsCopyTable={supportsCopyTable}
             supportsStarRocksRollup={metadataDialect === 'starrocks'}
             onAction={(action) => {
                 setV2ContextMenu(null);
                 handleV2TableContextMenuAction(table, action);
             }}
         />
-    ), [activeShortcutPlatform, allowTruncate, connection?.id, handleV2TableContextMenuAction, metadataDialect, pinnedSidebarTables, schemaName, tab.dbName]);
+    ), [activeShortcutPlatform, allowTruncate, connection?.id, handleV2TableContextMenuAction, metadataDialect, pinnedSidebarTables, schemaName, supportsCopyTable, tab.dbName]);
 
     const buildLegacyTableContextMenuItems = useCallback((table: TableStatRow): MenuProps['items'] => [
         { key: 'new-query', label: t('table_overview.menu.new_query'), icon: <ConsoleSqlOutlined />, onClick: () => openQueryForTable(table.name) },
@@ -973,6 +998,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         },
         { key: 'copy-table-name', label: t('table_overview.menu.copy_table_name'), icon: <CopyOutlined />, onClick: () => handleCopyTableName(table.name) },
         { key: 'copy-structure', label: t('table_overview.menu.copy_structure'), icon: <CopyOutlined />, onClick: () => handleCopyStructure(table.name) },
+        ...(supportsCopyTable ? [{ key: 'copy-table', label: t('table_copy.action.label'), icon: <CopyOutlined />, onClick: () => handleCopyTable(table.name) }] : []),
         { key: 'backup-table', label: t('table_overview.menu.backup_table_sql'), icon: <SaveOutlined />, onClick: () => openTableSQLExportWorkbench(table.name, 'backup') },
         { key: 'rename-table', label: t('table_overview.menu.rename_table'), icon: <EditOutlined />, onClick: () => handleRenameTable(table.name) },
         { key: 'danger-zone', label: t('table_overview.menu.danger_operations'), icon: <WarningOutlined />, children: [
@@ -985,6 +1011,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     ], [
         allowTruncate,
         handleCopyStructure,
+        handleCopyTable,
         handleCopyTableName,
         handleDeleteTable,
         handleRenameTable,
@@ -994,6 +1021,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         openQueryForTable,
         openTableSQLExportWorkbench,
         supportsDesignWrite,
+        supportsCopyTable,
         t,
     ]);
 

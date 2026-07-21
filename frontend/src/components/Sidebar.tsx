@@ -2247,6 +2247,7 @@ const Sidebar: React.FC<{
 
   const {
       handleCopyStructure,
+      handleCopyTable,
       handleCopyTableName,
       handleCopyDatabaseName,
       handleExport,
@@ -2403,6 +2404,7 @@ const Sidebar: React.FC<{
       openTableDdlInDesigner,
       openTableInERView,
       handleCopyTableName,
+      handleCopyTable,
       handleCopyDatabaseName,
       handleCopyStructure,
       handleCopyTableAsInsert,
@@ -2652,6 +2654,7 @@ const Sidebar: React.FC<{
     openDesign,
     openCreateStarRocksRollup,
     handleCopyTableName,
+    handleCopyTable,
     handleCopyStructure,
     handleExport,
     setRenameTableTarget,

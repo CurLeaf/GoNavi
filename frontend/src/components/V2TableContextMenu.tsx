@@ -49,6 +49,7 @@ export type V2TableContextMenuActionKey =
   | 'view-er'
   | 'copy-table-name'
   | 'copy-structure'
+  | 'copy-table'
   | 'copy-insert'
   | 'rename-table'
   | 'new-rollup'
@@ -167,6 +168,7 @@ export const V2TableContextMenuView: React.FC<{
   stats?: V2TableContextMenuStats;
   isPinned?: boolean;
   supportsTruncate?: boolean;
+  supportsCopyTable?: boolean;
   supportsStarRocksRollup?: boolean;
   supportsMessagePublish?: boolean;
   onAction?: (action: V2TableContextMenuActionKey) => void;
@@ -176,6 +178,7 @@ export const V2TableContextMenuView: React.FC<{
   stats,
   isPinned = false,
   supportsTruncate = true,
+  supportsCopyTable = false,
   supportsStarRocksRollup = false,
   supportsMessagePublish = false,
   onAction,
@@ -237,6 +240,7 @@ export const V2TableContextMenuView: React.FC<{
         {renderItems([
           { action: 'copy-table-name', icon: <CopyOutlined />, title: t('sidebar.v2_table_menu.copy_table_name'), kbd: primaryShortcut('C', shortcutPlatform) },
           { action: 'copy-structure', icon: <CopyOutlined />, title: `${t('sidebar.menu.copy_table_structure')} · DDL` },
+          ...(supportsCopyTable ? [{ action: 'copy-table' as const, icon: <CopyOutlined />, title: t('table_copy.action.label') }] : []),
           { action: 'copy-insert', icon: <CopyOutlined />, title: t('sidebar.v2_table_menu.copy_table_as_insert', { keyword: 'INSERT' }) },
         ])}
 

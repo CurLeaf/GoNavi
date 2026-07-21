@@ -139,6 +139,8 @@ var readOnlyConnectionActionTextKeys = map[string]string{
 	"connection.backend.action.drop_database":              "connection.backend.action.drop_database",
 	"重命名表":                                                 "connection.backend.action.rename_table",
 	"connection.backend.action.rename_table":               "connection.backend.action.rename_table",
+	"复制整表":                                                 "connection.backend.action.copy_table",
+	"connection.backend.action.copy_table":                 "connection.backend.action.copy_table",
 	"删除表":                                                  "connection.backend.action.drop_table",
 	"connection.backend.action.drop_table":                 "connection.backend.action.drop_table",
 	"删除视图":                                                 "connection.backend.action.drop_view",

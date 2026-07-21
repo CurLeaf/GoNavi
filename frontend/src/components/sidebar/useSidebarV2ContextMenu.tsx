@@ -278,6 +278,7 @@ export const useSidebarV2ContextMenu = ({
       const statsKey = getV2TableContextMenuStatsKey(node);
       const stats = v2TableContextMenuStats[statsKey];
       const isStarRocks = getMetadataDialect(node.dataRef as SavedConnection) === 'starrocks';
+      const supportsCopyTable = getDataSourceCapabilities(node.dataRef?.config).supportsCopyTable;
       const supportsMessagePublish = Boolean(resolveMessagePublishTarget(node));
       const isPinned = isSidebarTablePinned(
           pinnedSidebarTables,
@@ -293,6 +294,7 @@ export const useSidebarV2ContextMenu = ({
               stats={stats}
               isPinned={isPinned}
               supportsTruncate={supportsTableTruncateAction(node.dataRef?.config?.type, node.dataRef?.config?.driver)}
+              supportsCopyTable={supportsCopyTable}
               supportsStarRocksRollup={isStarRocks}
               supportsMessagePublish={supportsMessagePublish}
               onAction={(action) => {

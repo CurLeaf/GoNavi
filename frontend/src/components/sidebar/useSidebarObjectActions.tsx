@@ -14,6 +14,7 @@ import { buildStarRocksMaterializedViewPreviewSql } from '../tableDesignerSchema
 import type { ExportRunResult, RunExportWithProgressOptions } from '../useExportProgressRunner';
 import { getTableDataDangerActionMeta, type TableDataDangerActionKind } from '../tableDataDangerActions';
 import { showSQLExportOptionsDialog } from '../SQLExportOptionsDialog';
+import { confirmCopyTable } from '../tableCopyAction';
 import {
   buildDuckDBMacroDDL,
   escapeSQLLiteral,
@@ -235,6 +236,27 @@ export const useSidebarObjectActions = ({
     } catch (e: any) {
       message.error(t('sidebar.copy_object_name.failed', { label, error: e?.message || String(e) }));
     }
+  };
+
+  const handleCopyTable = (node: any) => {
+    const conn = node?.dataRef;
+    const tableName = String(conn?.tableName || node?.title || '').trim();
+    if (!conn || !tableName) return;
+    if (!getDataSourceCapabilities(conn.config).supportsCopyTable) {
+      message.warning(t('table_copy.message.unsupported'));
+      return;
+    }
+
+    const config = buildRuntimeConfig(conn, conn.dbName);
+    confirmCopyTable({
+      config: buildRpcConnectionConfig(config) as any,
+      dbName: String(conn.dbName || ''),
+      sourceSchemaName: String(conn.schemaName || ''),
+      sourceTableName: tableName,
+      onSuccess: async () => {
+        await loadTables(getDatabaseNodeRef(conn, conn.dbName));
+      },
+    });
   };
 
   const handleCopyDatabaseName = async (node: any) => {
@@ -1354,6 +1376,7 @@ export const useSidebarObjectActions = ({
 
   return {
     handleCopyStructure,
+    handleCopyTable,
     handleCopyTableName,
     handleCopyDatabaseName,
     handleExport,

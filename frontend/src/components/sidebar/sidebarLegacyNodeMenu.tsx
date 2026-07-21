@@ -185,6 +185,7 @@ export const buildSidebarLegacyNodeMenuItems = (
     openDesign,
     openCreateStarRocksRollup,
     handleCopyTableName,
+    handleCopyTable,
     handleCopyStructure,
     handleExport,
     setRenameTableTarget,
@@ -935,6 +936,7 @@ export const buildSidebarLegacyNodeMenuItems = (
         ];
     } else if (node.type === 'table') {
         const isStarRocks = getMetadataDialect(node.dataRef as SavedConnection) === 'starrocks';
+        const supportsCopyTable = getDataSourceCapabilities(node.dataRef?.config).supportsCopyTable;
         const messagePublishTarget = resolveMessagePublishTarget(node);
         return [
             {
@@ -987,6 +989,12 @@ export const buildSidebarLegacyNodeMenuItems = (
                 icon: <CopyOutlined />,
                 onClick: () => handleCopyStructure(node)
             },
+            ...(supportsCopyTable ? [{
+                key: 'copy-table',
+                label: t('table_copy.action.label'),
+                icon: <CopyOutlined />,
+                onClick: () => handleCopyTable(node)
+            }] : []),
             {
                 key: 'backup-table',
                 label: t('sidebar.menu.backup_table_sql'),

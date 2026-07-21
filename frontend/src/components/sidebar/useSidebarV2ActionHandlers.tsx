@@ -67,6 +67,7 @@ type UseSidebarV2ActionHandlersArgs = {
   openTableDdlInDesigner: (node: any) => void;
   openTableInERView: (node: any) => void;
   handleCopyTableName: (node: any) => Promise<void>;
+  handleCopyTable: (node: any) => void;
   handleCopyDatabaseName: (node: any) => Promise<void>;
   handleCopyStructure: (node: any) => Promise<void>;
   handleCopyTableAsInsert: (node: any) => Promise<void>;
@@ -131,6 +132,7 @@ export const useSidebarV2ActionHandlers = ({
   openTableDdlInDesigner,
   openTableInERView,
   handleCopyTableName,
+  handleCopyTable,
   handleCopyDatabaseName,
   handleCopyStructure,
   handleCopyTableAsInsert,
@@ -193,6 +195,9 @@ export const useSidebarV2ActionHandlers = ({
         return;
       case 'copy-structure':
         void handleCopyStructure(node);
+        return;
+      case 'copy-table':
+        handleCopyTable(node);
         return;
       case 'copy-insert':
         void handleCopyTableAsInsert(node);
