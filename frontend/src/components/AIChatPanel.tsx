@@ -9,6 +9,7 @@ import type {
     JVMDiagnosticPlanContext,
 } from '../types';
 import './AIChatPanel.css';
+import '../styles/v2-theme-ai.css';
 
 import { AIChatHeader } from './ai/AIChatHeader';
 import { AIChatInput } from './ai/AIChatInput';

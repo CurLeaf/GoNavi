@@ -473,6 +473,318 @@ func TestManagerRoutesCommandsAndAIStreamsToOnlyTheirTargetWindow(t *testing.T) 
 	}
 }
 
+func TestManagerHideIsIdempotentAndFocusAdvancesVisibilityRevision(t *testing.T) {
+	manager := newHTTPTestManager(t)
+	manager.windows["ai-chat"] = &windowEntry{
+		info: WindowInfo{
+			ID:     "ai-chat",
+			Kind:   "ai-chat",
+			X:      10,
+			Y:      20,
+			Width:  440,
+			Height: 720,
+		},
+	}
+	commands := make(chan childCommand, 3)
+	manager.emitToChild = func(targetID string, name string, args ...any) {
+		if targetID != "ai-chat" || name != CommandEventName {
+			t.Fatalf("unexpected target event %q %q", targetID, name)
+		}
+		commands <- args[0].(childCommand)
+	}
+
+	firstHide := manager.Hide("ai-chat")
+	if !firstHide.Success || firstHide.VisibilityRevision != 1 {
+		t.Fatalf("first Hide result = %#v", firstHide)
+	}
+	firstHideCommand := <-commands
+	if firstHideCommand.Action != "hide" ||
+		firstHideCommand.Payload.(visibilityCommandPayload).VisibilityRevision != 1 {
+		t.Fatalf("first hide command = %#v", firstHideCommand)
+	}
+
+	secondHide := manager.Hide("ai-chat")
+	if !secondHide.Success || secondHide.VisibilityRevision != 1 {
+		t.Fatalf("second Hide result = %#v", secondHide)
+	}
+	secondHideCommand := <-commands
+	if secondHideCommand.Action != "hide" ||
+		secondHideCommand.Payload.(visibilityCommandPayload).VisibilityRevision != 1 {
+		t.Fatalf("second hide command = %#v", secondHideCommand)
+	}
+
+	focus := manager.Focus("ai-chat")
+	if !focus.Success || focus.VisibilityRevision != 2 {
+		t.Fatalf("Focus result = %#v", focus)
+	}
+	focusCommand := <-commands
+	if focusCommand.Action != "focus" ||
+		focusCommand.Payload.(visibilityCommandPayload).VisibilityRevision != 2 {
+		t.Fatalf("focus command = %#v", focusCommand)
+	}
+	manager.mu.RLock()
+	hidden := manager.windows["ai-chat"].info.Hidden
+	manager.mu.RUnlock()
+	if hidden {
+		t.Fatal("focused window remained hidden in manager state")
+	}
+}
+
+func TestManagerReplaysLatestFocusUntilChildAcknowledgesIt(t *testing.T) {
+	manager := newHTTPTestManager(t)
+	manager.windows["ai-chat"] = &windowEntry{
+		info: WindowInfo{
+			ID:     "ai-chat",
+			Kind:   "ai-chat",
+			Hidden: true,
+		},
+		visibilityRevision: 1,
+	}
+	// Simulate a disconnected child: reliable SSE has no subscriber and the
+	// immediate delivery therefore disappears.
+	manager.emitToChild = func(string, string, ...any) {}
+
+	first := manager.Focus("ai-chat")
+	second := manager.Focus("ai-chat")
+	if !first.Success || first.VisibilityRevision != 2 ||
+		!second.Success || second.VisibilityRevision != 3 {
+		t.Fatalf("Focus results = %#v %#v", first, second)
+	}
+
+	replay := func() (*httptest.ResponseRecorder, childCommand) {
+		t.Helper()
+		request := authenticatedRequest(manager, http.MethodGet, CommandStatePath, "ai-chat", nil)
+		recorder := httptest.NewRecorder()
+		manager.authenticatedHandler().ServeHTTP(recorder, request)
+		var command childCommand
+		if recorder.Code == http.StatusOK {
+			if err := json.NewDecoder(recorder.Body).Decode(&command); err != nil {
+				t.Fatalf("decode command state: %v", err)
+			}
+		}
+		return recorder, command
+	}
+
+	recorder, command := replay()
+	if recorder.Code != http.StatusOK || command.Action != "focus" ||
+		positiveVisibilityRevision(command.Payload) != 3 {
+		t.Fatalf("pending focus replay = status %d command %#v", recorder.Code, command)
+	}
+
+	staleAck := strings.NewReader(`{"action":"ack-focus","visibilityRevision":2}`)
+	staleRequest := authenticatedRequest(manager, http.MethodPost, CommandStatePath, "ai-chat", staleAck)
+	staleRecorder := httptest.NewRecorder()
+	manager.authenticatedHandler().ServeHTTP(staleRecorder, staleRequest)
+	if staleRecorder.Code != http.StatusOK {
+		t.Fatalf("stale focus ack status = %d body=%s", staleRecorder.Code, staleRecorder.Body.String())
+	}
+	if recorder, command = replay(); recorder.Code != http.StatusOK ||
+		command.Action != "focus" || positiveVisibilityRevision(command.Payload) != 3 {
+		t.Fatalf("focus after stale ack = status %d command %#v", recorder.Code, command)
+	}
+
+	latestAck := strings.NewReader(`{"action":"ack-focus","visibilityRevision":3}`)
+	latestRequest := authenticatedRequest(manager, http.MethodPost, CommandStatePath, "ai-chat", latestAck)
+	latestRecorder := httptest.NewRecorder()
+	manager.authenticatedHandler().ServeHTTP(latestRecorder, latestRequest)
+	if latestRecorder.Code != http.StatusOK {
+		t.Fatalf("latest focus ack status = %d body=%s", latestRecorder.Code, latestRecorder.Body.String())
+	}
+	if recorder, _ = replay(); recorder.Code != http.StatusNoContent {
+		t.Fatalf("command state after focus ack = %d body=%s, want 204", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestManagerCommandStatePrioritizesHideAndCloseOverPendingFocus(t *testing.T) {
+	manager := newHTTPTestManager(t)
+	manager.windows["ai-chat"] = &windowEntry{
+		info:               WindowInfo{ID: "ai-chat", Kind: "ai-chat", Hidden: true},
+		visibilityRevision: 1,
+	}
+	manager.emitToChild = func(string, string, ...any) {}
+
+	if result := manager.Focus("ai-chat"); !result.Success {
+		t.Fatalf("Focus result = %#v", result)
+	}
+	if result := manager.Hide("ai-chat"); !result.Success {
+		t.Fatalf("Hide result = %#v", result)
+	}
+	request := authenticatedRequest(manager, http.MethodGet, CommandStatePath, "ai-chat", nil)
+	recorder := httptest.NewRecorder()
+	manager.authenticatedHandler().ServeHTTP(recorder, request)
+	var command childCommand
+	if err := json.NewDecoder(recorder.Body).Decode(&command); err != nil {
+		t.Fatalf("decode hidden command state: %v", err)
+	}
+	if recorder.Code != http.StatusOK || command.Action != "hide" {
+		t.Fatalf("hidden command state = status %d command %#v", recorder.Code, command)
+	}
+
+	if result := manager.Close("ai-chat"); !result.Success {
+		t.Fatalf("Close result = %#v", result)
+	}
+	request = authenticatedRequest(manager, http.MethodGet, CommandStatePath, "ai-chat", nil)
+	recorder = httptest.NewRecorder()
+	manager.authenticatedHandler().ServeHTTP(recorder, request)
+	if err := json.NewDecoder(recorder.Body).Decode(&command); err != nil {
+		t.Fatalf("decode closing command state: %v", err)
+	}
+	if recorder.Code != http.StatusOK || command.Action != "close" {
+		t.Fatalf("closing command state = status %d command %#v", recorder.Code, command)
+	}
+}
+
+func TestManagerFocusAndOpenRejectClosingWindowForRetry(t *testing.T) {
+	manager := newHTTPTestManager(t)
+	starter := &fakeProcessStarter{}
+	manager.started = true
+	manager.endpoint = "http://127.0.0.1:43119"
+	manager.starter = starter
+	manager.windows["ai-chat"] = &windowEntry{
+		info: WindowInfo{
+			ID:        "ai-chat",
+			Kind:      "ai-chat",
+			Title:     "Existing",
+			X:         10,
+			Y:         20,
+			Width:     440,
+			Height:    720,
+			Hidden:    true,
+			CloseSent: true,
+		},
+		payload:            map[string]any{"snapshot": "existing"},
+		visibilityRevision: 4,
+	}
+
+	for name, result := range map[string]OperationResult{
+		"focus": manager.Focus("ai-chat"),
+		"open": manager.Open(OpenRequest{
+			ID:      "ai-chat",
+			Kind:    "ai-chat",
+			Title:   "Replacement",
+			Payload: map[string]any{"snapshot": "replacement"},
+			X:       30,
+			Y:       40,
+			Width:   500,
+			Height:  800,
+		}),
+	} {
+		if result.Success || !strings.Contains(result.Message, "closing") ||
+			!strings.Contains(result.Message, "retry") {
+			t.Fatalf("%s result = %#v, want explicit retry failure", name, result)
+		}
+	}
+
+	manager.mu.RLock()
+	entry := manager.windows["ai-chat"]
+	payload := entry.payload.(map[string]any)["snapshot"]
+	info := entry.info
+	revision := entry.visibilityRevision
+	manager.mu.RUnlock()
+	if payload != "existing" || info.Title != "Existing" || info.X != 10 || info.Y != 20 ||
+		!info.Hidden || revision != 4 {
+		t.Fatalf("closing entry was mutated: info=%#v payload=%#v revision=%d", info, payload, revision)
+	}
+	starter.mu.Lock()
+	starts := len(starter.specs)
+	starter.mu.Unlock()
+	if starts != 0 {
+		t.Fatalf("closing entry spawned %d replacement processes, want 0", starts)
+	}
+}
+
+func TestHideActionParksWithoutCommittingTerminalState(t *testing.T) {
+	manager := newHTTPTestManager(t)
+	manager.windows["ai-chat"] = &windowEntry{
+		info: WindowInfo{ID: "ai-chat", Kind: "ai-chat", Ready: true},
+	}
+	events := make(chan Event, 2)
+	manager.runtimeCtx = context.Background()
+	manager.emitToWails = func(_ context.Context, name string, args ...any) {
+		if name == MainEventName && len(args) == 1 {
+			events <- args[0].(Event)
+		}
+	}
+
+	body := strings.NewReader(`{"action":"hide","payload":{"id":"ai-chat","kind":"ai-chat","revision":1}}`)
+	request := authenticatedRequest(manager, http.MethodPost, ActionPath, "ai-chat", body)
+	recorder := httptest.NewRecorder()
+	manager.authenticatedHandler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("hide status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var result OperationResult
+	if err := json.NewDecoder(recorder.Body).Decode(&result); err != nil {
+		t.Fatalf("decode hide result: %v", err)
+	}
+	if !result.Success || result.VisibilityRevision != 1 {
+		t.Fatalf("hide result = %#v", result)
+	}
+	event := receiveEvent(t, events)
+	if event.Action != "hide" || event.ID != "ai-chat" {
+		t.Fatalf("hide event = %#v", event)
+	}
+	payload := event.Payload.(map[string]any)
+	if payload["visibilityRevision"] != uint64(1) {
+		t.Fatalf("hide payload = %#v", payload)
+	}
+	manager.mu.RLock()
+	entry := manager.windows["ai-chat"]
+	hidden := entry.info.Hidden
+	closeSent := entry.info.CloseSent
+	exitReason := entry.exitReason
+	manager.mu.RUnlock()
+	if !hidden || closeSent || exitReason != "" {
+		t.Fatalf(
+			"parked state = hidden %v closeSent %v reason %q",
+			hidden,
+			closeSent,
+			exitReason,
+		)
+	}
+}
+
+func TestStaleHideActionCannotOverrideNewerFocus(t *testing.T) {
+	manager := newHTTPTestManager(t)
+	manager.windows["ai-chat"] = &windowEntry{
+		info:               WindowInfo{ID: "ai-chat", Kind: "ai-chat", Ready: true, Hidden: true},
+		visibilityRevision: 1,
+		actionRevision:     1,
+	}
+	events := make(chan Event, 1)
+	manager.runtimeCtx = context.Background()
+	manager.emitToWails = func(_ context.Context, name string, args ...any) {
+		if name == MainEventName && len(args) == 1 {
+			events <- args[0].(Event)
+		}
+	}
+
+	if result := manager.Focus("ai-chat"); !result.Success || result.VisibilityRevision != 2 {
+		t.Fatalf("Focus result = %#v", result)
+	}
+	body := strings.NewReader(
+		`{"action":"hide","payload":{"id":"ai-chat","kind":"ai-chat","revision":2,"visibilityRevision":1}}`,
+	)
+	request := authenticatedRequest(manager, http.MethodPost, ActionPath, "ai-chat", body)
+	recorder := httptest.NewRecorder()
+	manager.authenticatedHandler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("stale hide status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	event := receiveEvent(t, events)
+	if event.Action != "sync" {
+		t.Fatalf("stale hide event = %#v, want sync", event)
+	}
+	manager.mu.RLock()
+	entry := manager.windows["ai-chat"]
+	hidden := entry.info.Hidden
+	revision := entry.visibilityRevision
+	manager.mu.RUnlock()
+	if hidden || revision != 2 {
+		t.Fatalf("state after stale hide = hidden %v revision %d", hidden, revision)
+	}
+}
+
 func TestAuthenticatedHostStateEndpointReturnsRetainedSnapshot(t *testing.T) {
 	manager := newHTTPTestManager(t)
 	manager.windows["ai-chat"] = &windowEntry{

@@ -8,6 +8,7 @@ import {
   openNativeQueryResultWindow,
   openNativeWorkbenchTabWindow,
   forwardNativeDetachedHostEvent,
+  shouldApplyNativeDetachedHideRevision,
   syncNativeAIChatHostState,
   syncNativeDetachedShortcutOptions,
   type NativeDetachedWindowManager,
@@ -30,6 +31,7 @@ describe('nativeDetachedWindowHost', () => {
     manager = {
       Open: vi.fn().mockResolvedValue({ success: true }),
       Focus: vi.fn().mockResolvedValue({ success: true }),
+      Hide: vi.fn().mockResolvedValue({ success: true, visibilityRevision: 1 }),
       Close: vi.fn().mockResolvedValue({ success: true }),
       CloseAll: vi.fn().mockResolvedValue({ success: true }),
       SyncHostState: vi.fn().mockResolvedValue({ success: true }),
@@ -206,6 +208,77 @@ describe('nativeDetachedWindowHost', () => {
     }));
   });
 
+  it('builds the AI bootstrap from an explicit feature whitelist', async () => {
+    const originalTableColumnOrders = useStore.getState().tableColumnOrders;
+    useStore.setState({
+      aiPanelVisible: true,
+      tableColumnOrders: {
+        'unrelated-large-table-state': ['x'.repeat(256 * 1024)],
+      },
+    });
+
+    try {
+      await expect(openNativeAIChatWindow(undefined, manager)).resolves.toBe(true);
+
+      const request = vi.mocked(manager.Open).mock.calls[0]?.[0];
+      expect(request?.payload.storeState).toEqual(expect.objectContaining({
+        languagePreference: useStore.getState().languagePreference,
+        theme: useStore.getState().theme,
+        appearance: useStore.getState().appearance,
+        fontSize: useStore.getState().fontSize,
+        uiScale: useStore.getState().uiScale,
+        shortcutOptions: useStore.getState().shortcutOptions,
+        tabs: useStore.getState().tabs,
+        connections: useStore.getState().connections,
+        aiChatHistory: useStore.getState().aiChatHistory,
+        aiChatSessions: useStore.getState().aiChatSessions,
+        aiContexts: useStore.getState().aiContexts,
+        savedQueries: useStore.getState().savedQueries,
+        sqlSnippets: useStore.getState().sqlSnippets,
+        externalSQLDirectories: useStore.getState().externalSQLDirectories,
+        sqlEditorTransactionOptions: useStore.getState().sqlEditorTransactionOptions,
+      }));
+      expect(request?.payload.storeState).not.toHaveProperty('tableColumnOrders');
+      expect(request?.payload.storeState).not.toHaveProperty('tableExportHistories');
+      expect(request?.payload.storeState).not.toHaveProperty('recentSQLFiles');
+      expect(request?.payload.storeState).not.toHaveProperty('windowBounds');
+    } finally {
+      useStore.setState({ tableColumnOrders: originalTableColumnOrders });
+    }
+  });
+
+  it('reuses a parked AI child without building another native window', async () => {
+    const parkedBounds = { x: -1180, y: 70, width: 480, height: 700 };
+    useStore.setState({
+      aiPanelVisible: true,
+      detachedAIChatWindow: { ...parkedBounds, zIndex: 1201, coordinateSpace: 'screen' },
+      aiChatHistory: {
+        'session-warm': [{ id: 'message-warm', role: 'assistant', content: 'kept', timestamp: 1 }],
+      },
+      aiChatSessions: [{ id: 'session-warm', title: 'Warm', updatedAt: 1 }],
+      aiActiveSessionId: 'session-warm',
+    });
+    vi.mocked(manager.Focus).mockResolvedValueOnce({
+      success: true,
+      bounds: parkedBounds,
+      visibilityRevision: 4,
+    });
+
+    await expect(openNativeAIChatWindow(undefined, manager)).resolves.toBe(true);
+
+    expect(manager.Focus).toHaveBeenCalledOnce();
+    expect(manager.Focus).toHaveBeenCalledWith('ai-chat');
+    expect(manager.Open).not.toHaveBeenCalled();
+    expect(manager.SyncHostState).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'ai-chat',
+      storeState: expect.objectContaining({
+        shortcutOptions: useStore.getState().shortcutOptions,
+      }),
+    }));
+    expect(useStore.getState().aiChatHistory['session-warm'][0]?.content).toBe('kept');
+    expect(shouldApplyNativeDetachedHideRevision('ai-chat', 3)).toBe(false);
+  });
+
   it('resends the latest AI shortcut after native open completes', async () => {
     const initialShortcutOptions = useStore.getState().shortcutOptions;
     const latestShortcutOptions = {
@@ -234,7 +307,7 @@ describe('nativeDetachedWindowHost', () => {
       ));
     expect(shortcutSync).toEqual(expect.objectContaining({
       id: 'ai-chat',
-      storeState: { shortcutOptions: latestShortcutOptions },
+      storeState: expect.objectContaining({ shortcutOptions: latestShortcutOptions }),
     }));
   });
 
@@ -350,6 +423,10 @@ describe('nativeDetachedWindowHost', () => {
     vi.mocked(manager.Open).mockReturnValueOnce(new Promise((resolve) => {
       resolveOpen = resolve;
     }));
+    vi.mocked(manager.Focus).mockResolvedValueOnce({
+      success: false,
+      message: 'native window was not found',
+    });
     useStore.getState().detachAIChatPanel({ x: 120, y: 80, width: 440, height: 720 });
 
     const opening = openNativeAIChatWindow(undefined, manager);
@@ -361,7 +438,8 @@ describe('nativeDetachedWindowHost', () => {
     expect(useStore.getState().detachedAIChatWindow).toBeNull();
     expect(manager.Close).toHaveBeenCalledOnce();
     expect(manager.Close).toHaveBeenCalledWith('ai-chat');
-    expect(manager.Focus).not.toHaveBeenCalled();
+    expect(manager.Focus).toHaveBeenCalledOnce();
+    expect(manager.Focus).toHaveBeenCalledWith('ai-chat');
     expect(manager.SyncHostState).not.toHaveBeenCalled();
   });
 
@@ -370,6 +448,10 @@ describe('nativeDetachedWindowHost', () => {
     vi.mocked(manager.Open).mockReturnValueOnce(new Promise((resolve) => {
       resolveOpen = resolve;
     }));
+    vi.mocked(manager.Focus).mockResolvedValueOnce({
+      success: false,
+      message: 'native window was not found',
+    });
     useStore.getState().detachAIChatPanel({ x: 120, y: 80, width: 440, height: 720 });
 
     const opening = openNativeAIChatWindow(undefined, manager);
@@ -378,10 +460,11 @@ describe('nativeDetachedWindowHost', () => {
 
     await expect(opening).resolves.toBe(false);
     expect(useStore.getState().aiPanelVisible).toBe(false);
-    expect(useStore.getState().detachedAIChatWindow).toBeNull();
+    expect(useStore.getState().detachedAIChatWindow).not.toBeNull();
     expect(manager.Close).toHaveBeenCalledOnce();
     expect(manager.Close).toHaveBeenCalledWith('ai-chat');
-    expect(manager.Focus).not.toHaveBeenCalled();
+    expect(manager.Focus).toHaveBeenCalledOnce();
+    expect(manager.Focus).toHaveBeenCalledWith('ai-chat');
     expect(manager.SyncHostState).not.toHaveBeenCalled();
   });
 
@@ -427,10 +510,10 @@ describe('nativeDetachedWindowHost', () => {
         'ai-chat',
       ]);
     for (const [request] of vi.mocked(manager.SyncHostState!).mock.calls) {
-      expect(request).toEqual(expect.objectContaining({
-        revision: expect.any(Number),
-        storeState: { shortcutOptions },
-      }));
+      expect(request).toEqual(expect.objectContaining({ revision: expect.any(Number) }));
+      expect(request.storeState).toEqual(request.id === 'ai-chat'
+        ? expect.objectContaining({ shortcutOptions })
+        : { shortcutOptions });
     }
   });
 

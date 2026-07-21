@@ -1,6 +1,8 @@
 import React from 'react';
 import { Spin } from 'antd';
 import type { TabData } from '../types';
+import '../styles/v2-theme-workbench.css';
+
 const DataViewer = React.lazy(() => import('./DataViewer'));
 const QueryEditor = React.lazy(() => import('./QueryEditor'));
 const TableDesigner = React.lazy(() => import('./TableDesigner'));

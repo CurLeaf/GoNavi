@@ -14,7 +14,6 @@ import {
 } from './detachedWindow';
 import {
   buildNativeDetachedQueryResultPayload,
-  buildNativeDetachedAIChatPayload,
   buildNativeDetachedAIHostStoreSnapshot,
   buildNativeDetachedStoreSnapshot,
   buildNativeDetachedWorkbenchPayload,
@@ -30,6 +29,7 @@ export type NativeDetachedWindowOperationResult = {
   success: boolean;
   message?: string;
   id?: string;
+  visibilityRevision?: number;
   bounds?: Pick<DetachedWindowBounds, 'x' | 'y' | 'width' | 'height'>;
 };
 
@@ -47,6 +47,7 @@ export type NativeDetachedWindowOpenRequest = {
 export type NativeDetachedWindowManager = {
   Open: (request: NativeDetachedWindowOpenRequest) => Promise<NativeDetachedWindowOperationResult>;
   Focus: (id: string) => Promise<NativeDetachedWindowOperationResult>;
+  Hide?: (id: string) => Promise<NativeDetachedWindowOperationResult>;
   Close: (id: string) => Promise<NativeDetachedWindowOperationResult>;
   CloseAll: () => Promise<NativeDetachedWindowOperationResult>;
   SyncHostState?: (request: NativeDetachedHostStateRequest) => Promise<NativeDetachedWindowOperationResult>;
@@ -67,8 +68,88 @@ const openingWindows = new Map<string, Promise<boolean>>();
 const nativeHostStateRevisions = new Map<string, number>();
 const nativeHostStateQueues = new Map<string, Promise<boolean>>();
 const retainedNativeHostEvents = new Map<string, NativeDetachedHostEvent[]>();
+const nativeVisibilityRevisions = new Map<string, number>();
 let nativeHostEventSequence = 0;
 const NATIVE_HOST_EVENT_RETENTION_LIMIT = 64;
+
+// Keep cold AI startup bounded: detached AI only needs presentation settings,
+// live chat/session state, workspace context and the data exposed by its local
+// inspection tools. Provider/model/prompt configuration is loaded directly
+// from aiservice and refreshed through the retained config/provider events.
+const NATIVE_AI_CHAT_BOOTSTRAP_KEYS = [
+  'languagePreference',
+  'theme',
+  'appearance',
+  'fontSize',
+  'uiScale',
+  'shortcutOptions',
+  'activeContext',
+  'activeTabId',
+  'connections',
+  'tabs',
+  'sqlLogs',
+  'aiChatHistory',
+  'aiChatSessions',
+  'aiActiveSessionId',
+  'aiContexts',
+  'savedQueries',
+  'sqlSnippets',
+  'externalSQLDirectories',
+  'sqlEditorTransactionOptions',
+] as const;
+
+const buildNativeDetachedAIChatBootstrapPayload = (
+  state: object,
+): NativeDetachedWindowPayload => {
+  const source = state as Record<string, unknown>;
+  const selected: Record<string, unknown> = {};
+  for (const key of NATIVE_AI_CHAT_BOOTSTRAP_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) selected[key] = source[key];
+  }
+  return {
+    storeState: {
+      ...buildNativeDetachedStoreSnapshot(selected),
+      detachedWorkbenchWindows: [],
+      detachedQueryResultWindows: [],
+      detachedAIChatWindow: null,
+      sqlEditorPendingTransactions: {},
+      aiPanelVisible: true,
+      aiChatOpenMode: 'detached',
+    },
+  };
+};
+
+const normalizeNativeVisibilityRevision = (value: unknown): number => {
+  const revision = Math.trunc(Number(value));
+  return Number.isFinite(revision) && revision > 0 ? revision : 0;
+};
+
+export const recordNativeDetachedVisibilityRevision = (
+  windowId: string,
+  revisionValue: unknown,
+): number => {
+  const id = String(windowId || '').trim();
+  const revision = normalizeNativeVisibilityRevision(revisionValue);
+  if (!id || revision <= 0) return nativeVisibilityRevisions.get(id) || 0;
+  const current = nativeVisibilityRevisions.get(id) || 0;
+  if (revision > current) nativeVisibilityRevisions.set(id, revision);
+  return Math.max(current, revision);
+};
+
+export const shouldApplyNativeDetachedHideRevision = (
+  windowId: string,
+  revisionValue: unknown,
+): boolean => {
+  const id = String(windowId || '').trim();
+  const revision = normalizeNativeVisibilityRevision(revisionValue);
+  // Keep backward compatibility with older native runtimes that do not return
+  // visibility revisions.
+  if (!id || revision <= 0) return true;
+  const current = nativeVisibilityRevisions.get(id) || 0;
+  if (revision < current) return false;
+  nativeVisibilityRevisions.set(id, revision);
+  return true;
+};
 
 const nextNativeHostStateRevision = (id: string): number => {
   const previous = nativeHostStateRevisions.get(id) || Date.now();
@@ -104,6 +185,7 @@ export const clearNativeDetachedHostEvents = (windowId: string): void => {
   const id = String(windowId || '').trim();
   if (!id) return;
   retainedNativeHostEvents.delete(id);
+  nativeVisibilityRevisions.delete(id);
 };
 
 const syncNativeDetachedHostState = (
@@ -382,6 +464,33 @@ export const openNativeAIChatWindow = async (
 
   const windowId = 'ai-chat';
   const hadDetachedIntent = Boolean(state.detachedAIChatWindow);
+  if (hadDetachedIntent) {
+    const focused = await manager.Focus(windowId);
+    if (focused?.success) {
+      recordNativeDetachedVisibilityRevision(windowId, focused.visibilityRevision);
+      const latest = useStore.getState();
+      if (!latest.aiPanelVisible) {
+        await hideNativeDetachedWindowById(windowId, manager);
+        return false;
+      }
+      const focusedBounds = focused.bounds;
+      if (
+        focusedBounds
+        && [focusedBounds.x, focusedBounds.y, focusedBounds.width, focusedBounds.height]
+          .every(Number.isFinite)
+        && focusedBounds.width > 0
+        && focusedBounds.height > 0
+      ) {
+        latest.updateDetachedAIChatBounds({ ...focusedBounds, coordinateSpace: 'screen' });
+      }
+      try {
+        await refreshNativeAIChatWindow(manager);
+      } catch (error) {
+        console.warn('[Native Detached Window] Failed to refresh reused AI window', error);
+      }
+      return true;
+    }
+  }
   const remembered = state.aiChatDetachedBoundsMemory;
   const rememberedBounds = {
     ...(remembered?.coordinateSpace === 'screen'
@@ -397,7 +506,7 @@ export const openNativeAIChatWindow = async (
     kind: 'ai-chat',
     title: 'GoNavi AI',
     ...bounds,
-    payload: buildNativeDetachedAIChatPayload(state),
+    payload: buildNativeDetachedAIChatBootstrapPayload(state),
   }, (openedBounds) => {
     const latest = useStore.getState();
     if (!latest.aiPanelVisible || (hadDetachedIntent && !latest.detachedAIChatWindow)) {
@@ -417,21 +526,31 @@ export const openNativeAIChatWindow = async (
   });
   if (opened && typeof manager.SyncHostState === 'function') {
     try {
-      await syncNativeDetachedShortcutOptions(
-        [windowId],
-        useStore.getState().shortcutOptions,
-        manager,
-      );
-    } catch (error) {
-      console.warn('[Native Detached Window] Failed to send current shortcuts to AI window', error);
-    }
-    try {
-      await syncNativeAIChatHostState(manager);
+      await refreshNativeAIChatWindow(manager);
     } catch (error) {
       console.warn('[Native Detached Window] Failed to send initial AI host context', error);
     }
   }
   return opened;
+};
+
+const refreshNativeAIChatWindow = async (
+  manager: NativeDetachedWindowManager,
+): Promise<boolean> => {
+  if (typeof manager.SyncHostState !== 'function') return false;
+  retainNativeHostEvent('ai-chat', createNativeHostEvent(
+    'main',
+    'gonavi:ai:config-changed',
+  ));
+  const events = retainNativeHostEvent('ai-chat', createNativeHostEvent(
+    'main',
+    'gonavi:ai:provider-changed',
+  ));
+  return syncNativeDetachedHostState(
+    'ai-chat',
+    buildNativeDetachedAIHostStoreSnapshot(useStore.getState(), events),
+    manager,
+  );
 };
 
 export const syncNativeAIChatHostState = async (
@@ -459,9 +578,34 @@ export const syncNativeDetachedShortcutOptions = async (
   const ids = Array.from(new Set(
     Array.from(targetWindowIds, (id) => String(id || '').trim()).filter(Boolean),
   ));
-  const storeState = buildNativeDetachedStoreSnapshot({ shortcutOptions });
-  await Promise.all(ids.map((id) => syncNativeDetachedHostState(id, storeState, manager)));
+  const shortcutStoreState = buildNativeDetachedStoreSnapshot({ shortcutOptions });
+  await Promise.all(ids.map((id) => syncNativeDetachedHostState(
+    id,
+    id === 'ai-chat'
+      ? buildNativeDetachedAIHostStoreSnapshot(
+          { ...useStore.getState(), shortcutOptions },
+          retainedNativeHostEvents.get('ai-chat') || [],
+        )
+      : shortcutStoreState,
+    manager,
+  )));
   return true;
+};
+
+export const hideNativeDetachedWindowById = async (
+  id: string,
+  managerOverride?: NativeDetachedWindowManager,
+): Promise<void> => {
+  const manager = managerOverride ?? resolveNativeDetachedWindowManager();
+  if (!manager) return;
+  const targetID = String(id || '').trim();
+  const result = typeof manager.Hide === 'function'
+    ? await manager.Hide(targetID)
+    : await manager.Close(targetID);
+  recordNativeDetachedVisibilityRevision(targetID, result?.visibilityRevision);
+  if (!result?.success && result?.message) {
+    throw new Error(result.message);
+  }
 };
 
 export const closeNativeDetachedWindowById = async (id: string): Promise<void> => {

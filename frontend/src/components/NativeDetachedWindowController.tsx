@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-import { EventsOn, WindowShow } from '../../wailsjs/runtime';
+import { EventsOn, Show, WindowShow } from '../../wailsjs/runtime';
 import { type SqlLog, useStore } from '../store';
 import type { TabData } from '../types';
 import type { DetachedQueryResultWindow } from '../utils/detachedWindow';
@@ -9,6 +9,8 @@ import {
   closeNativeDetachedWindowById,
   forwardNativeDetachedHostEvent,
   hasNativeDetachedWindowManager,
+  hideNativeDetachedWindowById,
+  shouldApplyNativeDetachedHideRevision,
   syncNativeAIChatHostState,
   syncNativeDetachedShortcutOptions,
 } from '../utils/nativeDetachedWindowHost';
@@ -37,6 +39,7 @@ export type NativeDetachedWindowEvent = {
     | 'opened'
     | 'sync'
     | 'attach'
+    | 'hide'
     | 'close'
     | 'cancel-close'
     | 'open-ai-settings'
@@ -183,9 +186,10 @@ const restoreQueryResult = (windowId: string): void => {
 };
 
 const showMainWindow = (): void => {
-  if (typeof window !== 'undefined' && typeof (window as any).runtime?.WindowShow === 'function') {
-    void WindowShow();
-  }
+  if (typeof window === 'undefined') return;
+  const runtime = (window as any).runtime;
+  if (typeof runtime?.Show === 'function') Show();
+  if (typeof runtime?.WindowShow === 'function') WindowShow();
 };
 
 export const applyNativeDetachedWindowEvent = (
@@ -354,6 +358,13 @@ export const applyNativeDetachedWindowEvent = (
   }
 
   if (event.action === 'sync') return;
+  if (event.action === 'hide') {
+    if (event.kind === 'ai-chat') {
+      if (!shouldApplyNativeDetachedHideRevision(id, event.payload?.visibilityRevision)) return;
+      useStore.getState().setAIPanelVisible(false);
+    }
+    return;
+  }
   if (event.action === 'close') {
     clearNativeDetachedHostEvents(id);
     callbacks.workbenchStateSources?.delete(id);
@@ -381,13 +392,22 @@ export const applyNativeDetachedWindowEvent = (
     }
     if (event.payload?.exited === true) {
       if (stillDetached) {
-        useStore.getState().attachAIChatPanel();
-        showMainWindow();
+        if (useStore.getState().aiPanelVisible) {
+          useStore.getState().attachAIChatPanel();
+          showMainWindow();
+        } else {
+          useStore.setState({ detachedAIChatWindow: null });
+        }
       }
       return;
     }
     if (!stillDetached) return;
     useStore.getState().setAIPanelVisible(false);
+    if (event.action === 'close') {
+      // A real close discards the parked-process identity; only `hide` keeps it
+      // for the next warm reopen.
+      useStore.setState({ detachedAIChatWindow: null });
+    }
   } else if (event.kind === 'workbench') {
     const tabId = tab?.id || id.replace(/^workbench:/, '');
     const reason = String(event.payload?.reason || '').trim();
@@ -507,6 +527,7 @@ const NativeDetachedWindowController = ({
       });
     });
     let previousIds = currentNativeWindowIds();
+    let previousAIVisible = useStore.getState().aiPanelVisible;
     let previousAIHostStateRefs = readAIHostStateRefs();
     let previousShortcutOptions = useStore.getState().shortcutOptions;
     let aiHostSyncTimer: ReturnType<typeof setTimeout> | null = null;
@@ -522,10 +543,14 @@ const NativeDetachedWindowController = ({
     };
     if (!currentWindowId && useStore.getState().detachedAIChatWindow) {
       scheduleAIHostStateSync();
+      if (!previousAIVisible) {
+        void hideNativeDetachedWindowById('ai-chat').catch(() => undefined);
+      }
     }
     const unsubscribeStore = useStore.subscribe(() => {
+      const nextState = useStore.getState();
       const nextIds = currentNativeWindowIds();
-      const nextShortcutOptions = useStore.getState().shortcutOptions;
+      const nextShortcutOptions = nextState.shortcutOptions;
       const newlyOpenedIds = new Set<string>();
       const aiWindowJustOpened = !previousIds.has('ai-chat') && nextIds.has('ai-chat');
       for (const id of nextIds) {
@@ -547,6 +572,15 @@ const NativeDetachedWindowController = ({
         }
       }
       previousIds = nextIds;
+      if (
+        !currentWindowId
+        && previousAIVisible
+        && !nextState.aiPanelVisible
+        && nextState.detachedAIChatWindow
+      ) {
+        void hideNativeDetachedWindowById('ai-chat').catch(() => undefined);
+      }
+      previousAIVisible = nextState.aiPanelVisible;
       const shortcutOptionsChanged = nextShortcutOptions !== previousShortcutOptions;
       if (shortcutOptionsChanged) {
         previousShortcutOptions = nextShortcutOptions;

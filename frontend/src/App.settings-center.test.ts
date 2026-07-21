@@ -126,7 +126,7 @@ describe('settings center layout', () => {
     expect(openDetailsSource).toContain('setIsSettingsModalOpen(true);');
     expect(appSource).toContain("const detailsWereOpen = isSettingsModalOpen && activeSettingsCenterPane?.key === 'security-update';");
     expect(appSource.match(/<SecurityUpdateSettingsModal/g)?.length).toBe(1);
-    expect(appSource).toContain('<SecurityUpdateSettingsModal\n                    embedded');
+    expect(appSource).toMatch(/<SecurityUpdateSettingsModal\r?\n\s+embedded/);
     expect(appSource).not.toContain('isSecurityUpdateSettingsOpen');
     expect(appSource).not.toContain('setIsSecurityUpdateSettingsOpen');
   });
@@ -179,6 +179,19 @@ describe('settings center layout', () => {
     expect(appSource).toContain('setIsSettingsModalOpen(true)');
     expect(appSource).not.toContain('setIsAISettingsOpen(true)');
     expect(appSource).not.toContain('<AISettingsModal');
+  });
+
+  it('keeps the settings center above the in-webview detached AI fallback', () => {
+    const settingsModalStart = appSource.indexOf(
+      "title={renderUtilityModalTitle(<SettingOutlined />, t('app.settings.title')",
+    );
+    const settingsModalSource = appSource.slice(settingsModalStart, settingsModalStart + 900);
+
+    expect(settingsModalStart).toBeGreaterThan(-1);
+    expect(appSource).toContain('const SETTINGS_CENTER_MODAL_Z_INDEX = 10001;');
+    expect(appSource).toContain('const settingsCenterModalZIndex = Math.max(');
+    expect(appSource).toContain('Number.isFinite(detachedAIChatZIndex) ? detachedAIChatZIndex + 1');
+    expect(settingsModalSource).toContain('zIndex={settingsCenterModalZIndex}');
   });
 
   it('opens the about group directly instead of showing a one-item list', () => {

@@ -1694,6 +1694,7 @@ export namespace nativewindow {
 	    message?: string;
 	    id?: string;
 	    bounds?: WindowBounds;
+	    visibilityRevision?: number;
 
 	    static createFrom(source: any = {}) {
 	        return new OperationResult(source);
@@ -1705,6 +1706,7 @@ export namespace nativewindow {
 	        this.message = source["message"];
 	        this.id = source["id"];
 	        this.bounds = this.convertValues(source["bounds"], WindowBounds);
+	        this.visibilityRevision = source["visibilityRevision"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1738,6 +1740,7 @@ export namespace nativewindow {
 	    openedAt: number;
 	    ready: boolean;
 	    closeSent: boolean;
+	    hidden?: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new WindowInfo(source);
@@ -1756,6 +1759,7 @@ export namespace nativewindow {
 	        this.openedAt = source["openedAt"];
 	        this.ready = source["ready"];
 	        this.closeSent = source["closeSent"];
+	        this.hidden = source["hidden"];
 	    }
 	}
 

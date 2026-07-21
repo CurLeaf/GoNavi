@@ -202,12 +202,15 @@ import { useI18n } from './i18n/provider';
 import './App.css';
 import './v2-theme.css';
 import './styles/v2-theme-workbench.css';
+import './styles/v2-theme-ai.css';
 
 const { Sider, Content } = Layout;
 const MIN_UI_SCALE = 0.8;
 const MAX_UI_SCALE = 1.25;
 const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 20;
+// Keep the settings center above in-WebView detached windows and context menus.
+const SETTINGS_CENTER_MODAL_Z_INDEX = 10001;
 type ApplicationQuitConfirmedAction = () => Promise<boolean>;
 /** 设置页 Slider 底部预设刻度 */
 const UI_SCALE_SLIDER_MARKS: Record<number, string> = {
@@ -1003,6 +1006,11 @@ function App() {
   const detachedAIChatWindow = useStore(state => state.detachedAIChatWindow);
   const detachAIChatPanel = useStore(state => state.detachAIChatPanel);
   const aiChatDetached = Boolean(detachedAIChatWindow);
+  const detachedAIChatZIndex = Number(detachedAIChatWindow?.zIndex);
+  const settingsCenterModalZIndex = Math.max(
+    SETTINGS_CENTER_MODAL_Z_INDEX,
+    Number.isFinite(detachedAIChatZIndex) ? detachedAIChatZIndex + 1 : SETTINGS_CENTER_MODAL_Z_INDEX,
+  );
   const toggleAIPanel = useStore(state => state.toggleAIPanel);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   useEffect(() => {
@@ -7816,6 +7824,7 @@ function App() {
                 footer={null}
                 centered
                 width={1080}
+                zIndex={settingsCenterModalZIndex}
                 styles={{
                   content: toolCenterModalContentStyle,
                   header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },

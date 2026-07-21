@@ -8,6 +8,7 @@ import (
 func TestBuildDockMenuSnapshotIncludesOnlyCurrentReadyWindows(t *testing.T) {
 	windows := []WindowInfo{
 		{ID: "closing", Title: "Closing", PID: 42, OpenedAt: 1, Ready: true, CloseSent: true},
+		{ID: "hidden", Title: "Hidden", PID: 48, OpenedAt: 3, Ready: true, Hidden: true},
 		{ID: "not-ready", Title: "Starting", PID: 43, OpenedAt: 2},
 		{ID: " result-2 ", Title: " Result 2 ", PID: 44, OpenedAt: 40, Ready: true},
 		{ID: "workbench-1", Title: "Workbench", PID: 45, OpenedAt: 20, Ready: true},

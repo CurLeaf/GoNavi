@@ -14,6 +14,7 @@ func detachedRuntimeBridgeScript() string {
     || typeof bridge.WindowID !== 'function'
     || typeof bridge.OpenWindow !== 'function'
     || typeof bridge.FocusWindow !== 'function'
+    || typeof bridge.HideWindow !== 'function'
     || typeof bridge.CloseWindow !== 'function'
     || typeof bridge.CloseOwnedWindows !== 'function'
   ) {
@@ -40,6 +41,9 @@ func detachedRuntimeBridgeScript() string {
     },
     Focus: function (id) {
       return bridge.FocusWindow(String(id || ''));
+    },
+    Hide: function (id) {
+      return bridge.HideWindow(String(id || ''));
     },
     Close: function (id) {
       return bridge.CloseWindow(String(id || ''));
@@ -103,6 +107,15 @@ func detachedRuntimeBridgeScript() string {
       detail: { reason: String(reason || '') }
     }));
   };
+  var visibilityRevisionOf = function (command) {
+    var value = Number(command && command.payload && command.payload.visibilityRevision);
+    return Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0;
+  };
+  var requestGracefulHide = function (command) {
+    window.dispatchEvent(new CustomEvent('` + GracefulHideRequestEventName + `', {
+      detail: { visibilityRevision: visibilityRevisionOf(command) }
+    }));
+  };
 
   var runtime = window.runtime || {};
   if (typeof runtime.EventsOnMultiple === 'function') {
@@ -111,8 +124,14 @@ func detachedRuntimeBridgeScript() string {
         if (!command || String(command.id || '') !== windowID) return;
         if (command.action === 'close') {
           requestGracefulClose(command.reason);
-        } else if (command.action === 'focus' && control && typeof control.Focus === 'function') {
-          control.Focus();
+        } else if (command.action === 'hide') {
+          requestGracefulHide(command);
+        } else if (command.action === 'focus' && control) {
+          if (typeof control.FocusRevision === 'function') {
+            control.FocusRevision(visibilityRevisionOf(command));
+          } else if (typeof control.Focus === 'function') {
+            control.Focus();
+          }
         }
       });
     }, -1);

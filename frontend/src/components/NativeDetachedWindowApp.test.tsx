@@ -1119,6 +1119,229 @@ describe('NativeDetachedWindowApp', () => {
     }
   });
 
+  it('parks the AI child instead of terminating it when its close button is clicked', async () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const eventTarget = new EventTarget();
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: Object.assign(eventTarget, {
+        clearTimeout: globalThis.clearTimeout,
+        innerWidth: 440,
+        outerHeight: 720,
+        outerWidth: 440,
+        screenX: -1200,
+        screenY: 80,
+        setTimeout: globalThis.setTimeout,
+      }),
+    });
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      payload: { storeState: { appearance: { uiVersion: 'v2' }, theme: 'light' } },
+    };
+    const callOrder: string[] = [];
+    aiTerminalGuard.mockImplementationOnce(async () => {
+      callOrder.push('guard');
+      return true;
+    });
+    flushAIChatSessionPersistence.mockImplementationOnce(async () => {
+      callOrder.push('flush');
+    });
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      hide: vi.fn(async () => {
+        callOrder.push('hide');
+        return 9;
+      }),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+      hideCurrentWindow: vi.fn(async (revision: number) => {
+        callOrder.push(`hide-window:${revision}`);
+      }),
+    };
+
+    try {
+      let renderer: TestRenderer.ReactTestRenderer;
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+
+      await act(async () => {
+        renderer!.root.findByProps({ 'data-ai-chat-close': true }).props.onClick();
+        await flushEffects();
+        await flushEffects();
+      });
+
+      expect(callOrder).toEqual(['guard', 'flush', 'hide', 'hide-window:9']);
+      expect(client.close).not.toHaveBeenCalled();
+      expect(client.closeCurrentWindow).not.toHaveBeenCalled();
+      expect(renderer!.root.findByProps({ 'data-ai-chat-presentation': 'detached' })).toBeTruthy();
+      await act(async () => renderer!.unmount());
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('lets a graceful close preempt an in-flight AI hide', async () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const eventTarget = new EventTarget();
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: Object.assign(eventTarget, {
+        clearTimeout: globalThis.clearTimeout,
+        innerWidth: 440,
+        outerHeight: 720,
+        outerWidth: 440,
+        screenX: 120,
+        screenY: 80,
+        setTimeout: globalThis.setTimeout,
+      }),
+    });
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      payload: { storeState: { appearance: { uiVersion: 'v2' }, theme: 'light' } },
+    };
+    const callOrder: string[] = [];
+    let releaseHide: (() => void) | undefined;
+    let markHideStarted: (() => void) | undefined;
+    const hideStarted = new Promise<void>((resolve) => {
+      markHideStarted = resolve;
+    });
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      hide: vi.fn(async () => {
+        callOrder.push('hide-started');
+        markHideStarted?.();
+        return new Promise<number>((resolve) => {
+          releaseHide = () => resolve(15);
+        });
+      }),
+      close: vi.fn(async () => {
+        callOrder.push('close');
+      }),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => {
+        callOrder.push('close-window');
+      }),
+      hideCurrentWindow: vi.fn(async () => {
+        callOrder.push('hide-window');
+      }),
+    };
+
+    try {
+      let renderer: TestRenderer.ReactTestRenderer;
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+
+      await act(async () => {
+        renderer!.root.findByProps({ 'data-ai-chat-close': true }).props.onClick();
+        await flushEffects();
+      });
+      await hideStarted;
+
+      await act(async () => {
+        eventTarget.dispatchEvent(new Event('gonavi:native-detached-request-close'));
+        releaseHide?.();
+        await flushEffects();
+        await flushEffects();
+      });
+
+      expect(client.close).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'ai-chat',
+        kind: 'ai-chat',
+      }));
+      expect(client.hideCurrentWindow).not.toHaveBeenCalled();
+      expect(callOrder).toEqual(['hide-started', 'close', 'close-window']);
+      await act(async () => renderer!.unmount());
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('uses the host visibility revision when the main window requests an AI hide', async () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const eventTarget = new EventTarget();
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: Object.assign(eventTarget, {
+        clearTimeout: globalThis.clearTimeout,
+        innerWidth: 440,
+        outerHeight: 720,
+        outerWidth: 440,
+        screenX: 80,
+        screenY: 60,
+        setTimeout: globalThis.setTimeout,
+      }),
+    });
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      payload: { storeState: { appearance: { uiVersion: 'v2' }, theme: 'light' } },
+    };
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      hide: vi.fn(async () => 99),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+      hideCurrentWindow: vi.fn(async () => undefined),
+    };
+
+    try {
+      let renderer: TestRenderer.ReactTestRenderer;
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+      const hideEvent = new Event('gonavi:native-detached-request-hide');
+      Object.defineProperty(hideEvent, 'detail', { value: { visibilityRevision: 12 } });
+      await act(async () => {
+        eventTarget.dispatchEvent(hideEvent);
+        await flushEffects();
+        await flushEffects();
+      });
+
+      expect(client.sync).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'ai-chat',
+        kind: 'ai-chat',
+      }));
+      expect(client.hide).not.toHaveBeenCalled();
+      expect(client.hideCurrentWindow).toHaveBeenCalledWith(12);
+      await act(async () => renderer!.unmount());
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
   it('locks AI interactions while a native terminal handoff is waiting', async () => {
     let releaseGuard: (() => void) | undefined;
     aiTerminalGuard.mockImplementationOnce(() => new Promise<boolean>((resolve) => {

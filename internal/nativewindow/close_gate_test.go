@@ -16,6 +16,35 @@ func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) 
 	return f(request)
 }
 
+func TestBridgeHideActionDoesNotCommitTerminalState(t *testing.T) {
+	bridge := newBridge(ChildOptions{
+		ParentURL: "http://127.0.0.1:43119",
+		Token:     "test-token",
+		ID:        "ai-chat",
+		Kind:      "ai-chat",
+	})
+	bridge.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(
+				`{"success":true,"id":"ai-chat","visibilityRevision":1}`,
+			)),
+			Header: make(http.Header),
+		}, nil
+	})
+
+	result := bridge.Action("hide", map[string]any{"id": "ai-chat", "kind": "ai-chat"})
+	if !result.Success || result.VisibilityRevision != 1 {
+		t.Fatalf("hide Action result = %#v", result)
+	}
+	bridge.mu.Lock()
+	terminal := bridge.terminal
+	bridge.mu.Unlock()
+	if terminal != "" {
+		t.Fatalf("hide action committed terminal state %q", terminal)
+	}
+}
+
 func TestCloseGateVetoesAndRequestsFrontendUntilExitIsAllowed(t *testing.T) {
 	var gate closeGate
 

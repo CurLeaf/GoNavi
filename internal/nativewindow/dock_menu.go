@@ -92,7 +92,7 @@ func buildDockMenuSnapshot(windows []WindowInfo) []dockMenuWindow {
 	current := make([]WindowInfo, 0, len(windows))
 	for _, window := range windows {
 		window.ID = strings.TrimSpace(window.ID)
-		if window.ID == "" || !window.Ready || window.CloseSent {
+		if window.ID == "" || !window.Ready || window.CloseSent || window.Hidden {
 			continue
 		}
 		current = append(current, window)

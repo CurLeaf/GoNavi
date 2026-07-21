@@ -16,6 +16,8 @@ import {
   buildNativeDetachedWorkbenchMutableStoreSnapshot,
   buildNativeDetachedWorkbenchPayload,
   fetchNativeDetachedWindowBootstrap,
+  hideCurrentNativeDetachedWindow,
+  hideNativeDetachedWindow,
   hydrateNativeDetachedStore,
   isNativeDetachedWindow,
   mergeNativeDetachedAIContextsDelta,
@@ -581,6 +583,49 @@ describe('nativeDetachedWindowClient', () => {
         id: 'ai-chat',
         kind: 'ai-chat',
       });
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('returns the parent visibility revision when an AI child is hidden', async () => {
+    const action = vi.fn(async () => ({
+      success: true,
+      id: 'ai-chat',
+      visibilityRevision: 7,
+    }));
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { __GONAVI_DETACHED__: { action } },
+    });
+    try {
+      await expect(hideNativeDetachedWindow({ id: 'ai-chat', kind: 'ai-chat' }))
+        .resolves.toBe(7);
+      expect(action).toHaveBeenCalledWith('hide', { id: 'ai-chat', kind: 'ai-chat' });
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('passes the visibility revision to the native hide control', async () => {
+    const hide = vi.fn(async () => ({ success: true }));
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { go: { nativewindow: { Control: { Hide: hide } } } },
+    });
+    try {
+      await hideCurrentNativeDetachedWindow(11);
+      expect(hide).toHaveBeenCalledWith(11);
     } finally {
       if (previousWindowDescriptor) {
         Object.defineProperty(globalThis, 'window', previousWindowDescriptor);

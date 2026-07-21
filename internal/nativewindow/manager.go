@@ -48,19 +48,21 @@ type processExit struct {
 }
 
 type windowEntry struct {
-	info            WindowInfo
-	payload         any
-	hostState       HostStateRequest
-	ownerID         string
-	process         childProcess
-	exitReason      string
-	closeGeneration uint64
-	actionRevision  int64
-	ready           chan struct{}
-	done            chan processExit
-	readyOnce       sync.Once
-	doneOnce        sync.Once
-	acknowledged    bool
+	info                 WindowInfo
+	payload              any
+	hostState            HostStateRequest
+	ownerID              string
+	process              childProcess
+	exitReason           string
+	closeGeneration      uint64
+	visibilityRevision   uint64
+	pendingFocusRevision uint64
+	actionRevision       int64
+	ready                chan struct{}
+	done                 chan processExit
+	readyOnce            sync.Once
+	doneOnce             sync.Once
+	acknowledged         bool
 }
 
 // Manager owns the loopback bridge and the registry of detached Wails child
@@ -292,7 +294,20 @@ func (m *Manager) open(request OpenRequest, ownerID string) OperationResult {
 		m.mu.Unlock()
 		return operationFailure("native window manager is not running")
 	}
-	if _, exists := m.windows[request.ID]; exists {
+	if existing, exists := m.windows[request.ID]; exists {
+		if existing.info.CloseSent {
+			m.mu.Unlock()
+			return closingWindowRetryFailure(request.ID)
+		}
+		// A parked child keeps its WebView and React tree alive. Refresh the
+		// bootstrap snapshot and remembered geometry before raising it so a
+		// subsequent frontend resume can hydrate from the newest host state.
+		existing.payload = request.Payload
+		existing.info.Title = request.Title
+		existing.info.X = request.X
+		existing.info.Y = request.Y
+		existing.info.Width = request.Width
+		existing.info.Height = request.Height
 		m.mu.Unlock()
 		result := m.Focus(request.ID)
 		result.ID = request.ID
@@ -401,25 +416,93 @@ func (m *Manager) Focus(id string) OperationResult {
 		return operationFailure("native window manager is unavailable")
 	}
 	id = strings.TrimSpace(id)
-	m.mu.RLock()
+	m.mu.Lock()
 	entry, exists := m.windows[id]
-	var bounds *WindowBounds
-	if exists {
-		bounds = windowBoundsFromInfo(entry.info)
-	}
-	emitToChild := m.emitToChild
-	shared := m.shared
-	m.mu.RUnlock()
 	if !exists {
+		m.mu.Unlock()
 		return operationFailure("native window was not found")
 	}
-	command := childCommand{ID: id, Action: "focus"}
+	if entry.info.CloseSent {
+		m.mu.Unlock()
+		return closingWindowRetryFailure(id)
+	}
+	wasHidden := entry.info.Hidden
+	// Every explicit focus is a separately acknowledged visibility intent.
+	// Advancing even while already visible prevents an acknowledgement for an
+	// older focus from clearing a newer request that arrived during an SSE gap.
+	entry.visibilityRevision++
+	entry.info.Hidden = false
+	entry.pendingFocusRevision = entry.visibilityRevision
+	visibilityRevision := entry.visibilityRevision
+	bounds := windowBoundsFromInfo(entry.info)
+	emitToChild := m.emitToChild
+	shared := m.shared
+	m.mu.Unlock()
+	command := childCommand{
+		ID:      id,
+		Action:  "focus",
+		Payload: visibilityCommandPayload{VisibilityRevision: visibilityRevision},
+	}
 	if emitToChild != nil {
 		emitToChild(id, CommandEventName, command)
 	} else if shared != nil {
 		shared.EmitTo(id, CommandEventName, command)
 	}
-	return OperationResult{Success: true, ID: id, Bounds: bounds}
+	if wasHidden {
+		publishDetachedDockMenuSnapshot(m)
+	}
+	return OperationResult{
+		Success:            true,
+		ID:                 id,
+		Bounds:             bounds,
+		VisibilityRevision: visibilityRevision,
+	}
+}
+
+// Hide parks a detached child without terminating its process. Repeated hides
+// reuse the same visibility revision, while the next Focus advances it so a
+// delayed child-side hide cannot conceal a newly focused window.
+func (m *Manager) Hide(id string) OperationResult {
+	if m == nil {
+		return operationFailure("native window manager is unavailable")
+	}
+	id = strings.TrimSpace(id)
+	m.mu.Lock()
+	entry, exists := m.windows[id]
+	if !exists {
+		m.mu.Unlock()
+		return operationFailure("native window was not found")
+	}
+	if entry.info.CloseSent {
+		m.mu.Unlock()
+		return operationFailure("native window is closing")
+	}
+	if !entry.info.Hidden {
+		entry.visibilityRevision++
+		entry.info.Hidden = true
+	}
+	entry.pendingFocusRevision = 0
+	visibilityRevision := entry.visibilityRevision
+	emitToChild := m.emitToChild
+	shared := m.shared
+	m.mu.Unlock()
+
+	command := childCommand{
+		ID:      id,
+		Action:  "hide",
+		Payload: visibilityCommandPayload{VisibilityRevision: visibilityRevision},
+	}
+	if emitToChild != nil {
+		emitToChild(id, CommandEventName, command)
+	} else if shared != nil {
+		shared.EmitTo(id, CommandEventName, command)
+	}
+	publishDetachedDockMenuSnapshot(m)
+	return OperationResult{
+		Success:            true,
+		ID:                 id,
+		VisibilityRevision: visibilityRevision,
+	}
 }
 
 func windowBoundsFromRequest(request OpenRequest) *WindowBounds {
@@ -455,6 +538,7 @@ func (m *Manager) requestClose(id string, reason string) OperationResult {
 		entry.exitReason = reason
 	}
 	entry.info.CloseSent = true
+	entry.pendingFocusRevision = 0
 	entry.closeGeneration++
 	closeGeneration := entry.closeGeneration
 	process := entry.process
@@ -605,6 +689,10 @@ type hostStateInvalidationPayload struct {
 	Revision int64 `json:"revision"`
 }
 
+type visibilityCommandPayload struct {
+	VisibilityRevision uint64 `json:"visibilityRevision"`
+}
+
 func cloneHostStoreState(storeState map[string]any) (map[string]any, error) {
 	if storeState == nil {
 		return nil, fmt.Errorf("native host-state storeState is required")
@@ -743,6 +831,14 @@ func operationFailure(message string) OperationResult {
 	return OperationResult{Success: false, Message: message}
 }
 
+func closingWindowRetryFailure(id string) OperationResult {
+	return OperationResult{
+		Success: false,
+		ID:      strings.TrimSpace(id),
+		Message: "native window is closing; retry after it exits",
+	}
+}
+
 func validateOpenRequest(request OpenRequest) error {
 	if len(request.ID) > 256 || strings.ContainsAny(request.ID, "\r\n\x00") {
 		return fmt.Errorf("native window id is invalid")
@@ -769,6 +865,7 @@ func (m *Manager) shutdown() {
 		ids = append(ids, id)
 		entry.exitReason = ExitReasonParentShutdown
 		entry.info.CloseSent = true
+		entry.pendingFocusRevision = 0
 		entry.closeGeneration++
 	}
 	httpServer := m.httpServer
@@ -927,6 +1024,10 @@ func (m *Manager) handleHostState(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) handleCommandState(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		m.handleCommandStateAck(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -940,10 +1041,31 @@ func (m *Manager) handleCommandState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	closeSent := entry.info.CloseSent
+	hidden := entry.info.Hidden
+	visibilityRevision := entry.visibilityRevision
+	pendingFocusRevision := entry.pendingFocusRevision
 	reason := entry.exitReason
 	m.mu.RUnlock()
-	if !closeSent {
+	if !closeSent && !hidden && pendingFocusRevision == 0 {
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if hidden && !closeSent {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(childCommand{
+			ID:      id,
+			Action:  "hide",
+			Payload: visibilityCommandPayload{VisibilityRevision: visibilityRevision},
+		})
+		return
+	}
+	if !closeSent {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(childCommand{
+			ID:      id,
+			Action:  "focus",
+			Payload: visibilityCommandPayload{VisibilityRevision: pendingFocusRevision},
+		})
 		return
 	}
 	if strings.TrimSpace(reason) == "" {
@@ -954,6 +1076,51 @@ func (m *Manager) handleCommandState(w http.ResponseWriter, r *http.Request) {
 		ID:     id,
 		Action: "close",
 		Reason: reason,
+	})
+}
+
+type commandStateRequest struct {
+	Action             string `json:"action"`
+	VisibilityRevision uint64 `json:"visibilityRevision"`
+}
+
+func (m *Manager) handleCommandStateAck(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	var request commandStateRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+	if err := decoder.Decode(&request); err != nil {
+		http.Error(w, "invalid detached command acknowledgement", http.StatusBadRequest)
+		return
+	}
+	request.Action = strings.ToLower(strings.TrimSpace(request.Action))
+	if request.Action != "ack-focus" || request.VisibilityRevision == 0 {
+		http.Error(w, "invalid detached command acknowledgement", http.StatusBadRequest)
+		return
+	}
+
+	id := strings.TrimSpace(r.Header.Get(HeaderWindowID))
+	m.mu.Lock()
+	entry, exists := m.windows[id]
+	if !exists {
+		m.mu.Unlock()
+		http.Error(w, "unknown detached window", http.StatusNotFound)
+		return
+	}
+	message := ""
+	if entry.pendingFocusRevision == request.VisibilityRevision {
+		entry.pendingFocusRevision = 0
+	} else {
+		message = "stale focus acknowledgement ignored"
+	}
+	visibilityRevision := entry.visibilityRevision
+	m.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(OperationResult{
+		Success:            true,
+		ID:                 id,
+		Message:            message,
+		VisibilityRevision: visibilityRevision,
 	})
 }
 
@@ -971,7 +1138,7 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	request.Action = strings.ToLower(strings.TrimSpace(request.Action))
 	switch request.Action {
-	case "ready", "sync", "attach", "close", "cancel-close", "host-event", "open-ai-settings":
+	case "ready", "sync", "attach", "close", "hide", "cancel-close", "host-event", "open-ai-settings":
 	default:
 		http.Error(w, "unsupported detached action", http.StatusBadRequest)
 		return
@@ -988,17 +1155,21 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	if actionUsesRevision(request.Action) && revision > 0 {
 		if revision <= entry.actionRevision {
+			visibilityRevision := entry.visibilityRevision
 			m.mu.Unlock()
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			_ = json.NewEncoder(w).Encode(OperationResult{
-				Success: true,
-				ID:      id,
-				Message: "stale detached action ignored",
+				Success:            true,
+				ID:                 id,
+				Message:            "stale detached action ignored",
+				VisibilityRevision: visibilityRevision,
 			})
 			return
 		}
 		entry.actionRevision = revision
 	}
+	eventAction := request.Action
+	visibilityRevision := uint64(0)
 	if request.Action == "ready" {
 		entry.info.Ready = true
 		entry.readyOnce.Do(func() {
@@ -1008,15 +1179,39 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 		})
 	} else if request.Action == "attach" {
 		entry.exitReason = ExitReasonAttached
+		entry.pendingFocusRevision = 0
 	} else if request.Action == "close" && entry.exitReason == "" {
 		entry.exitReason = ExitReasonWindowClosed
+		entry.pendingFocusRevision = 0
+	} else if request.Action == "hide" {
+		requestedVisibilityRevision := positiveVisibilityRevision(request.Payload)
+		switch {
+		case requestedVisibilityRevision == 0:
+			if !entry.info.Hidden {
+				entry.visibilityRevision++
+				entry.info.Hidden = true
+			}
+			entry.pendingFocusRevision = 0
+			visibilityRevision = entry.visibilityRevision
+		case requestedVisibilityRevision < entry.visibilityRevision:
+			// Preserve the final child snapshot, but do not let an old hide
+			// transition close a window that the host has already focused again.
+			visibilityRevision = requestedVisibilityRevision
+			eventAction = "sync"
+		default:
+			entry.visibilityRevision = requestedVisibilityRevision
+			entry.info.Hidden = true
+			entry.pendingFocusRevision = 0
+			visibilityRevision = requestedVisibilityRevision
+		}
+		request.Payload = withVisibilityRevision(request.Payload, visibilityRevision)
 	} else if request.Action == "cancel-close" {
 		m.cancelCloseLocked(entry)
 	}
 	info := entry.info
 	ownerID := entry.ownerID
 	m.mu.Unlock()
-	if request.Action == "ready" || request.Action == "cancel-close" {
+	if request.Action == "ready" || request.Action == "hide" || request.Action == "cancel-close" {
 		publishDetachedDockMenuSnapshot(m)
 	}
 
@@ -1024,16 +1219,76 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 		m.emitDetached(Event{
 			ID:      info.ID,
 			Kind:    info.Kind,
-			Action:  request.Action,
+			Action:  eventAction,
 			Payload: withOwnerWindowID(request.Payload, ownerID),
 		})
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(OperationResult{Success: true, ID: id})
+	_ = json.NewEncoder(w).Encode(OperationResult{
+		Success:            true,
+		ID:                 id,
+		VisibilityRevision: visibilityRevision,
+	})
 }
 
 func actionUsesRevision(action string) bool {
-	return action == "sync" || action == "attach" || action == "close"
+	return action == "sync" || action == "attach" || action == "close" || action == "hide"
+}
+
+func positiveVisibilityRevision(payload any) uint64 {
+	switch typed := payload.(type) {
+	case visibilityCommandPayload:
+		return typed.VisibilityRevision
+	case *visibilityCommandPayload:
+		if typed != nil {
+			return typed.VisibilityRevision
+		}
+	}
+	record, ok := payload.(map[string]any)
+	if !ok {
+		return 0
+	}
+	return positiveUintRevision(record["visibilityRevision"])
+}
+
+func positiveUintRevision(value any) uint64 {
+	switch typed := value.(type) {
+	case float64:
+		if typed > 0 && typed <= 9_007_199_254_740_991 && math.Trunc(typed) == typed {
+			return uint64(typed)
+		}
+	case json.Number:
+		revision, err := typed.Int64()
+		if err == nil && revision > 0 {
+			return uint64(revision)
+		}
+	case uint64:
+		return typed
+	case uint:
+		return uint64(typed)
+	case int64:
+		if typed > 0 {
+			return uint64(typed)
+		}
+	case int:
+		if typed > 0 {
+			return uint64(typed)
+		}
+	}
+	return 0
+}
+
+func withVisibilityRevision(payload any, visibilityRevision uint64) any {
+	result := make(map[string]any)
+	if source, ok := payload.(map[string]any); ok {
+		for key, value := range source {
+			result[key] = value
+		}
+	} else if payload != nil {
+		result["value"] = payload
+	}
+	result["visibilityRevision"] = visibilityRevision
+	return result
 }
 
 func positiveActionRevision(payload any) int64 {
@@ -1105,6 +1360,12 @@ func (m *Manager) handleControl(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		result = m.Focus(request.ID)
+	case "hide":
+		if !m.ownsWindow(request.ID, ownerID) {
+			result = operationFailure("native window is not owned by this window")
+			break
+		}
+		result = m.Hide(request.ID)
 	case "close":
 		if !m.ownsWindow(request.ID, ownerID) {
 			result = operationFailure("native window is not owned by this window")

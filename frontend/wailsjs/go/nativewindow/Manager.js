@@ -18,6 +18,10 @@ export function Focus(arg1) {
   return window['go']['nativewindow']['Manager']['Focus'](arg1);
 }
 
+export function Hide(arg1) {
+  return window['go']['nativewindow']['Manager']['Hide'](arg1);
+}
+
 export function List() {
   return window['go']['nativewindow']['Manager']['List']();
 }

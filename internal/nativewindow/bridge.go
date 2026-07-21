@@ -43,14 +43,15 @@ type Bridge struct {
 	kind      string
 	client    *http.Client
 
-	mu          sync.Mutex
-	ctx         context.Context
-	cancel      context.CancelFunc
-	ready       bool
-	onReady     func() OperationResult
-	terminal    string
-	closeOnce   sync.Once
-	emitToWails func(context.Context, string, ...any)
+	mu                    sync.Mutex
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	ready                 bool
+	onReady               func() OperationResult
+	terminal              string
+	closeOnce             sync.Once
+	emitToWails           func(context.Context, string, ...any)
+	allowParentForeground func() error
 }
 
 func newBridge(options ChildOptions) *Bridge {
@@ -63,11 +64,12 @@ func newBridge(options ChildOptions) *Bridge {
 		ForceAttemptHTTP2: false,
 	}
 	return &Bridge{
-		parentURL: strings.TrimRight(options.ParentURL, "/"),
-		token:     options.Token,
-		windowID:  options.ID,
-		kind:      options.Kind,
-		client:    &http.Client{Transport: transport},
+		parentURL:             strings.TrimRight(options.ParentURL, "/"),
+		token:                 options.Token,
+		windowID:              options.ID,
+		kind:                  options.Kind,
+		client:                &http.Client{Transport: transport},
+		allowParentForeground: grantParentForegroundAccess,
 		emitToWails: func(ctx context.Context, name string, args ...any) {
 			wailsRuntime.EventsEmit(ctx, name, args...)
 		},
@@ -145,6 +147,10 @@ func (b *Bridge) FocusWindow(id string) OperationResult {
 	return b.control(controlRequest{Action: "focus", ID: id})
 }
 
+func (b *Bridge) HideWindow(id string) OperationResult {
+	return b.control(controlRequest{Action: "hide", ID: id})
+}
+
 func (b *Bridge) CloseWindow(id string) OperationResult {
 	return b.control(controlRequest{Action: "close", ID: id})
 }
@@ -171,14 +177,20 @@ func (b *Bridge) control(request controlRequest) OperationResult {
 	return result
 }
 
-// Action acknowledges child readiness or forwards sync, attach, or close state
-// to the main window.
+// Action acknowledges child readiness or forwards sync, hide, attach, or close
+// state to the main window.
 func (b *Bridge) Action(action string, payload any) OperationResult {
 	normalizedAction := strings.ToLower(strings.TrimSpace(action))
 	if normalizedAction == "ready" {
 		if result := b.presentFrontendReady(); !result.Success {
 			return result
 		}
+	}
+	if normalizedAction == "open-ai-settings" && b.allowParentForeground != nil {
+		// The detached child owns the current user interaction on Windows. Grant
+		// the parent permission immediately before it attempts to take focus. This
+		// is best-effort so an OS rejection never blocks the settings action itself.
+		_ = b.allowParentForeground()
 	}
 
 	var result OperationResult
@@ -410,10 +422,33 @@ func (b *Bridge) replayPendingCommand(ctx context.Context) error {
 	if status != http.StatusOK {
 		return fmt.Errorf("detached command-state replay failed with status %d", status)
 	}
-	if strings.TrimSpace(command.ID) != b.windowID || command.Action != "close" {
+	if strings.TrimSpace(command.ID) != b.windowID ||
+		(command.Action != "close" && command.Action != "hide" && command.Action != "focus") {
 		return fmt.Errorf("detached command-state replay is invalid")
 	}
+	visibilityRevision := positiveVisibilityRevision(command.Payload)
+	if command.Action == "focus" && visibilityRevision == 0 {
+		return fmt.Errorf("detached command-state focus revision is invalid")
+	}
 	b.emitRuntimeEvent(CommandEventName, command)
+	return nil
+}
+
+func (b *Bridge) acknowledgeFocus(ctx context.Context, visibilityRevision uint64) error {
+	if visibilityRevision == 0 {
+		return fmt.Errorf("detached focus acknowledgement revision is invalid")
+	}
+	var result OperationResult
+	status, err := b.doJSON(ctx, http.MethodPost, CommandStatePath, commandStateRequest{
+		Action:             "ack-focus",
+		VisibilityRevision: visibilityRevision,
+	}, &result)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK || !result.Success {
+		return fmt.Errorf("detached focus acknowledgement failed with status %d", status)
+	}
 	return nil
 }
 
@@ -492,12 +527,15 @@ type Control struct {
 	closeFallbackGeneration uint64
 	closeFallbackDelay      time.Duration
 	closeCommitted          bool
+	visibilityRevision      uint64
 	domReady                bool
 	frontendReady           bool
 	focusPending            bool
+	focusPendingRevision    uint64
 	visible                 bool
 	emitCommand             func(context.Context, childCommand)
 	showWindow              func(context.Context)
+	hideWindow              func(context.Context)
 	focusWindow             func(context.Context)
 	quit                    func(context.Context)
 }
@@ -511,6 +549,9 @@ func newControl(bridge *Bridge) *Control {
 		},
 		showWindow: func(ctx context.Context) {
 			wailsRuntime.WindowShow(ctx)
+		},
+		hideWindow: func(ctx context.Context) {
+			wailsRuntime.WindowHide(ctx)
 		},
 		focusWindow: func(ctx context.Context) {
 			wailsRuntime.WindowUnminimise(ctx)
@@ -586,7 +627,10 @@ func (c *Control) Present() OperationResult {
 	presentation := childWindowPresentation{ctx: c.ctx, show: c.showWindow}
 	if c.focusPending && c.focusWindow != nil {
 		c.focusPending = false
+		presentation.visibilityRevision = c.focusPendingRevision
+		c.focusPendingRevision = 0
 		presentation.focus = c.focusWindow
+		presentation.bridge = c.bridge
 	}
 	c.mu.Unlock()
 	presentation.run()
@@ -594,9 +638,11 @@ func (c *Control) Present() OperationResult {
 }
 
 type childWindowPresentation struct {
-	ctx   context.Context
-	show  func(context.Context)
-	focus func(context.Context)
+	ctx                context.Context
+	show               func(context.Context)
+	focus              func(context.Context)
+	bridge             *Bridge
+	visibilityRevision uint64
 }
 
 func (p childWindowPresentation) run() {
@@ -605,6 +651,12 @@ func (p childWindowPresentation) run() {
 	}
 	if p.focus != nil {
 		p.focus(p.ctx)
+		if p.bridge != nil && p.visibilityRevision > 0 {
+			// The parent must retain its pending focus until the native focus
+			// callback has actually run. A failed acknowledgement deliberately
+			// leaves that pending command available for the next SSE reconnect.
+			_ = p.bridge.acknowledgeFocus(p.ctx, p.visibilityRevision)
+		}
 	}
 }
 
@@ -616,7 +668,10 @@ func (c *Control) takeInitialPresentationLocked() childWindowPresentation {
 	presentation := childWindowPresentation{ctx: c.ctx, show: c.showWindow}
 	if c.focusPending && c.focusWindow != nil {
 		c.focusPending = false
+		presentation.visibilityRevision = c.focusPendingRevision
+		c.focusPendingRevision = 0
 		presentation.focus = c.focusWindow
+		presentation.bridge = c.bridge
 	}
 	return presentation
 }
@@ -641,6 +696,44 @@ func (c *Control) Close() OperationResult {
 	}
 	quit(ctx)
 	return OperationResult{Success: true}
+}
+
+// Hide parks this child window while keeping its process, WebView, and React
+// tree alive. Visibility revisions make the transition monotonic: a delayed
+// hide from an older close request cannot win over a newer host focus.
+func (c *Control) Hide(visibilityRevision uint64) OperationResult {
+	if c == nil {
+		return operationFailure("native window control is unavailable")
+	}
+	c.mu.Lock()
+	if visibilityRevision < c.visibilityRevision {
+		currentRevision := c.visibilityRevision
+		c.mu.Unlock()
+		return OperationResult{
+			Success:            true,
+			Message:            "stale native window hide ignored",
+			VisibilityRevision: currentRevision,
+		}
+	}
+	ctx := c.ctx
+	hide := c.hideWindow
+	if ctx == nil || hide == nil {
+		c.mu.Unlock()
+		return operationFailure("native window is not ready")
+	}
+	if c.closeCommitted {
+		c.mu.Unlock()
+		return operationFailure("native window close is already committed")
+	}
+	c.visibilityRevision = visibilityRevision
+	c.visible = false
+	c.focusPending = false
+	c.focusPendingRevision = 0
+	c.invalidateCloseFallbackLocked()
+	c.mu.Unlock()
+	c.closeGate.cancel()
+	hide(ctx)
+	return OperationResult{Success: true, VisibilityRevision: visibilityRevision}
 }
 
 // CancelClose keeps the child alive after a failed final frontend flush. It
@@ -746,7 +839,29 @@ func (c *Control) Focus() OperationResult {
 	if c == nil {
 		return operationFailure("native window control is unavailable")
 	}
+	c.mu.RLock()
+	visibilityRevision := c.visibilityRevision
+	c.mu.RUnlock()
+	return c.FocusRevision(visibilityRevision)
+}
+
+// FocusRevision raises the window only when the request is at least as new as
+// the last visibility transition observed by this child.
+func (c *Control) FocusRevision(visibilityRevision uint64) OperationResult {
+	if c == nil {
+		return operationFailure("native window control is unavailable")
+	}
 	c.mu.Lock()
+	if visibilityRevision < c.visibilityRevision {
+		currentRevision := c.visibilityRevision
+		c.mu.Unlock()
+		return OperationResult{
+			Success:            true,
+			Message:            "stale native window focus ignored",
+			VisibilityRevision: currentRevision,
+		}
+	}
+	c.visibilityRevision = visibilityRevision
 	ctx := c.ctx
 	focus := c.focusWindow
 	if ctx == nil || focus == nil {
@@ -755,12 +870,21 @@ func (c *Control) Focus() OperationResult {
 	}
 	if !c.visible {
 		c.focusPending = true
+		c.focusPendingRevision = visibilityRevision
 		presentation := c.takeInitialPresentationLocked()
 		c.mu.Unlock()
 		presentation.run()
-		return OperationResult{Success: true}
+		return OperationResult{Success: true, VisibilityRevision: visibilityRevision}
+	}
+	c.focusPending = false
+	c.focusPendingRevision = 0
+	presentation := childWindowPresentation{
+		ctx:                ctx,
+		focus:              focus,
+		bridge:             c.bridge,
+		visibilityRevision: visibilityRevision,
 	}
 	c.mu.Unlock()
-	focus(ctx)
-	return OperationResult{Success: true}
+	presentation.run()
+	return OperationResult{Success: true, VisibilityRevision: visibilityRevision}
 }

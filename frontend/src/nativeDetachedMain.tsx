@@ -3,7 +3,6 @@ import ReactDOM from 'react-dom/client';
 
 import './App.css';
 import './v2-theme.css';
-import './styles/v2-theme-workbench.css';
 
 import NativeDetachedWindowApp from './components/NativeDetachedWindowApp';
 import { setCurrentLanguage } from './i18n';

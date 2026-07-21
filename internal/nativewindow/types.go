@@ -25,6 +25,11 @@ const (
 	// GracefulCloseRequestEventName is dispatched inside a detached WebView so
 	// React can flush state before the native child process exits.
 	GracefulCloseRequestEventName = "gonavi:native-detached-request-close"
+	// GracefulHideRequestEventName asks an already-mounted detached frontend to
+	// flush its state before parking the native window without exiting its
+	// process. The visibility revision prevents a late hide from winning over a
+	// newer focus request.
+	GracefulHideRequestEventName = "gonavi:native-detached-request-hide"
 
 	ExitReasonRequested      = "requested"
 	ExitReasonWindowClosed   = "window-closed"
@@ -78,6 +83,7 @@ type WindowInfo struct {
 	OpenedAt  int64  `json:"openedAt"`
 	Ready     bool   `json:"ready"`
 	CloseSent bool   `json:"closeSent"`
+	Hidden    bool   `json:"hidden,omitempty"`
 }
 
 // Bootstrap is fetched by the child after Wails has installed its native
@@ -91,10 +97,11 @@ type Bootstrap struct {
 
 // OperationResult is returned by the Wails-bound Manager commands.
 type OperationResult struct {
-	Success bool          `json:"success"`
-	Message string        `json:"message,omitempty"`
-	ID      string        `json:"id,omitempty"`
-	Bounds  *WindowBounds `json:"bounds,omitempty"`
+	Success            bool          `json:"success"`
+	Message            string        `json:"message,omitempty"`
+	ID                 string        `json:"id,omitempty"`
+	Bounds             *WindowBounds `json:"bounds,omitempty"`
+	VisibilityRevision uint64        `json:"visibilityRevision,omitempty"`
 }
 
 // HostStateRequest carries main-window state that an active detached child

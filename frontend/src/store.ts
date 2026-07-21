@@ -5150,14 +5150,16 @@ export const useStore = create<AppState>()(
       toggleAIPanel: () =>
         set((state) => {
           const nextVisible = !state.aiPanelVisible;
-          // 关闭面板时一并收起独立窗，并记下尺寸
+          // 关闭独立 AI 面板时保留窗口意图和尺寸。桌面端会把原生子窗
+          // 隐藏保活，下一次打开可直接聚焦；浏览器浮窗也会被
+          // aiPanelVisible 门禁隐藏，不会继续占用界面。
           if (!nextVisible) {
             const memory = state.detachedAIChatWindow
               ? toAIChatDetachedBoundsMemory(state.detachedAIChatWindow)
               : state.aiChatDetachedBoundsMemory;
             return {
               aiPanelVisible: false,
-              detachedAIChatWindow: null,
+              detachedAIChatWindow: state.detachedAIChatWindow,
               aiChatDetachedBoundsMemory: memory,
             };
           }
@@ -5210,7 +5212,7 @@ export const useStore = create<AppState>()(
               : state.aiChatDetachedBoundsMemory;
             return {
               aiPanelVisible: false,
-              detachedAIChatWindow: null,
+              detachedAIChatWindow: state.detachedAIChatWindow,
               aiChatDetachedBoundsMemory: memory,
             };
           }

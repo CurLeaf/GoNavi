@@ -24,6 +24,8 @@ import {
   closeNativeDetachedWindow,
   fetchNativeDetachedWindowBootstrap,
   hydrateNativeDetachedStore,
+  hideCurrentNativeDetachedWindow,
+  hideNativeDetachedWindow,
   openNativeDetachedAISettings,
   presentCurrentNativeDetachedWindow,
   readyNativeDetachedWindow,
@@ -51,10 +53,9 @@ import {
   isShortcutMatch,
   resolveShortcutBinding,
 } from '../utils/shortcuts';
-import WorkbenchTabContent from './WorkbenchTabContent';
-
 const AIChatPanel = React.lazy(() => import('./AIChatPanel'));
 const DataGrid = React.lazy(() => import('./DataGrid'));
+const WorkbenchTabContent = React.lazy(() => import('./WorkbenchTabContent'));
 const NativeDetachedWindowController = React.lazy(
   () => import('./NativeDetachedWindowController'),
 );
@@ -88,11 +89,13 @@ type NativeDetachedWindowClient = {
   ready: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
   sync: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
   attach: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
+  hide?: (payload: NativeDetachedWindowActionPayload) => Promise<number>;
   close: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
   cancelCloseRequest?: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
   openAISettings: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
   hostEvent?: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
   closeCurrentWindow: () => Promise<void>;
+  hideCurrentWindow?: (visibilityRevision: number) => Promise<void>;
   cancelClose?: () => Promise<void>;
 };
 
@@ -102,11 +105,13 @@ const defaultClient: NativeDetachedWindowClient = {
   ready: readyNativeDetachedWindow,
   sync: syncNativeDetachedWindow,
   attach: attachNativeDetachedWindow,
+  hide: hideNativeDetachedWindow,
   close: closeNativeDetachedWindow,
   cancelCloseRequest: cancelNativeDetachedWindowClose,
   openAISettings: openNativeDetachedAISettings,
   hostEvent: sendNativeDetachedHostEvent,
   closeCurrentWindow: closeCurrentNativeDetachedWindow,
+  hideCurrentWindow: hideCurrentNativeDetachedWindow,
   cancelClose: cancelCurrentNativeDetachedWindowClose,
 };
 
@@ -305,9 +310,12 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
   const [contentReady, setContentReady] = useState(false);
   const [controllerEnabled, setControllerEnabled] = useState(false);
   const markContentReady = useCallback(() => setContentReady(true), []);
-  const [terminalAction, setTerminalAction] = useState<'attach' | 'close' | null>(null);
+  const [terminalAction, setTerminalAction] = useState<'attach' | 'hide' | 'close' | null>(null);
   const terminalActionStartedRef = useRef(false);
   const terminalActionRequestedRef = useRef(false);
+  const activeTerminalActionRef = useRef<'attach' | 'hide' | 'close' | null>(null);
+  const closePreemptionRequestedRef = useRef(false);
+  const hideVisibilityRevisionRef = useRef(0);
   const aiTerminalGuardRef = useRef<(() => Promise<boolean>) | null>(null);
   const resultSessionRef = useRef<QueryEditorResultSessionSnapshot | null>(null);
   const queryResultWindowRef = useRef<DetachedQueryResultWindow | null>(null);
@@ -680,9 +688,27 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
     };
   }, [bootstrap, scheduleSync]);
 
-  const requestTerminalAction = useCallback((action: 'attach' | 'close') => {
-    if (!bootstrap || terminalActionRequestedRef.current) return;
+  const requestTerminalAction = useCallback((
+    action: 'attach' | 'hide' | 'close',
+    visibilityRevision = 0,
+  ) => {
+    if (!bootstrap) return;
+    if (terminalActionRequestedRef.current) {
+      if (action === 'close' && activeTerminalActionRef.current === 'hide') {
+        closePreemptionRequestedRef.current = true;
+      }
+      return;
+    }
+    if (action === 'hide' && bootstrap.kind !== 'ai-chat') return;
     terminalActionRequestedRef.current = true;
+    activeTerminalActionRef.current = action;
+    closePreemptionRequestedRef.current = false;
+    const normalizedVisibilityRevision = Math.trunc(Number(visibilityRevision));
+    hideVisibilityRevisionRef.current = action === 'hide'
+      && Number.isFinite(normalizedVisibilityRevision)
+      && normalizedVisibilityRevision > 0
+      ? normalizedVisibilityRevision
+      : 0;
     if (syncTimerRef.current !== null) {
       clearTimeout(syncTimerRef.current);
       syncTimerRef.current = null;
@@ -701,14 +727,26 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const handleGracefulCloseRequest = () => requestTerminalAction('close');
+    const handleHideRequest = (event: Event) => requestTerminalAction(
+      'hide',
+      Number((event as CustomEvent<{ visibilityRevision?: unknown }>).detail?.visibilityRevision),
+    );
     window.addEventListener(
       'gonavi:native-detached-request-close',
       handleGracefulCloseRequest as EventListener,
+    );
+    window.addEventListener(
+      'gonavi:native-detached-request-hide',
+      handleHideRequest as EventListener,
     );
     return () => {
       window.removeEventListener(
         'gonavi:native-detached-request-close',
         handleGracefulCloseRequest as EventListener,
+      );
+      window.removeEventListener(
+        'gonavi:native-detached-request-hide',
+        handleHideRequest as EventListener,
       );
     };
   }, [requestTerminalAction]);
@@ -730,6 +768,26 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
       ? peekQueryEditorResultSession(bootstrap.payload.tab.id) || resultSessionRef.current
       : null;
     void (async () => {
+      let actionToRun = terminalAction;
+      let closeActionSubmitted = false;
+      const submitPreemptingClose = async () => {
+        const closeWorkbench = readWorkbenchSyncData();
+        await client.close(buildActionPayload(
+          bootstrap,
+          readCurrentTab(),
+          currentSession,
+          false,
+          readUnsyncedSqlLogs(),
+          nextActionRevision(),
+          closeWorkbench.workbenchState,
+          closeWorkbench.workbenchStateBase,
+          closeWorkbench.openedTabs,
+          sqlLogsClearPendingRef.current,
+          queryResultWindowRef.current,
+        ));
+        closeActionSubmitted = true;
+        actionToRun = 'close';
+      };
       try {
         await actionQueueRef.current;
         if (bootstrap.kind === 'ai-chat') {
@@ -739,7 +797,8 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
           }
           await flushAIChatSessionPersistence();
         }
-        if (terminalAction === 'attach' && bootstrap.kind === 'workbench') {
+        actionToRun = closePreemptionRequestedRef.current ? 'close' : terminalAction;
+        if (actionToRun === 'attach' && bootstrap.kind === 'workbench') {
           const finalSqlLogs = readUnsyncedSqlLogs();
           const clearSqlLogs = sqlLogsClearPendingRef.current;
           const finalWorkbench = readWorkbenchSyncData();
@@ -777,7 +836,7 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
           bootstrap,
           readCurrentTab(),
           currentSession,
-          terminalAction === 'attach',
+          actionToRun === 'attach',
           readUnsyncedSqlLogs(),
           nextActionRevision(),
           terminalWorkbench.workbenchState,
@@ -786,47 +845,113 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
           sqlLogsClearPendingRef.current,
           queryResultWindowRef.current,
         );
-        if (terminalAction === 'attach') {
+        if (actionToRun === 'attach') {
           await client.attach(payload);
+        } else if (actionToRun === 'hide') {
+          let visibilityRevision = hideVisibilityRevisionRef.current;
+          if (visibilityRevision > 0) {
+            await client.sync(payload);
+          } else {
+            if (!client.hide) throw new Error('Native detached hide action is unavailable');
+            visibilityRevision = await client.hide(payload);
+          }
+          if (closePreemptionRequestedRef.current) {
+            await submitPreemptingClose();
+          } else {
+            if (!client.hideCurrentWindow) {
+              throw new Error('Native detached hide control is unavailable');
+            }
+            await client.hideCurrentWindow(visibilityRevision);
+            if (closePreemptionRequestedRef.current) {
+              await submitPreemptingClose();
+            }
+          }
         } else {
           await client.close(payload);
+          closeActionSubmitted = true;
         }
       } catch (error) {
-        console.error(`[Native Detached Window] Failed to ${terminalAction}`, error);
-        const cancelWorkbench = readWorkbenchSyncData();
-        const cancelPayload = buildActionPayload(
-          bootstrap,
-          readCurrentTab(),
-          currentSession,
-          false,
-          readUnsyncedSqlLogs(),
-          nextActionRevision(),
-          cancelWorkbench.workbenchState,
-          cancelWorkbench.workbenchStateBase,
-          cancelWorkbench.openedTabs,
-          sqlLogsClearPendingRef.current,
-          queryResultWindowRef.current,
-        );
-        try {
-          await client.cancelCloseRequest?.(cancelPayload);
-        } catch (parentCancelError) {
-          console.error(
-            '[Native Detached Window] Failed to cancel parent close fallback',
-            parentCancelError,
-          );
+        console.error(`[Native Detached Window] Failed to ${actionToRun}`, error);
+        if (closePreemptionRequestedRef.current && !closeActionSubmitted) {
+          try {
+            await submitPreemptingClose();
+          } catch (closeError) {
+            console.error('[Native Detached Window] Failed to continue with requested close', closeError);
+          }
         }
-        try {
-          await client.cancelClose?.();
-        } catch (localCancelError) {
-          console.error(
-            '[Native Detached Window] Failed to cancel local close fallback',
-            localCancelError,
-          );
+        if (actionToRun === 'hide' && !closeActionSubmitted) {
+          const visibilityRevision = hideVisibilityRevisionRef.current;
+          if (visibilityRevision > 0) {
+            try {
+              await client.hideCurrentWindow?.(visibilityRevision);
+            } catch (localHideError) {
+              console.error('[Native Detached Window] Failed to apply requested hide', localHideError);
+            }
+          }
+          if (closePreemptionRequestedRef.current && !closeActionSubmitted) {
+            try {
+              await submitPreemptingClose();
+            } catch (closeError) {
+              console.error('[Native Detached Window] Failed to continue with requested close', closeError);
+            }
+          }
         }
+        if (actionToRun === 'hide' && !closeActionSubmitted) {
+          terminalActionStartedRef.current = false;
+          terminalActionRequestedRef.current = false;
+          activeTerminalActionRef.current = null;
+          closePreemptionRequestedRef.current = false;
+          hideVisibilityRevisionRef.current = 0;
+          setTerminalAction(null);
+          return;
+        }
+        if (!closeActionSubmitted) {
+          const cancelWorkbench = readWorkbenchSyncData();
+          const cancelPayload = buildActionPayload(
+            bootstrap,
+            readCurrentTab(),
+            currentSession,
+            false,
+            readUnsyncedSqlLogs(),
+            nextActionRevision(),
+            cancelWorkbench.workbenchState,
+            cancelWorkbench.workbenchStateBase,
+            cancelWorkbench.openedTabs,
+            sqlLogsClearPendingRef.current,
+            queryResultWindowRef.current,
+          );
+          try {
+            await client.cancelCloseRequest?.(cancelPayload);
+          } catch (parentCancelError) {
+            console.error(
+              '[Native Detached Window] Failed to cancel parent close fallback',
+              parentCancelError,
+            );
+          }
+          try {
+            await client.cancelClose?.();
+          } catch (localCancelError) {
+            console.error(
+              '[Native Detached Window] Failed to cancel local close fallback',
+              localCancelError,
+            );
+          }
+          terminalActionStartedRef.current = false;
+          terminalActionRequestedRef.current = false;
+          activeTerminalActionRef.current = null;
+          closePreemptionRequestedRef.current = false;
+          setTerminalAction(null);
+          setContentMounted(true);
+          return;
+        }
+      }
+      if (actionToRun === 'hide') {
         terminalActionStartedRef.current = false;
         terminalActionRequestedRef.current = false;
+        activeTerminalActionRef.current = null;
+        closePreemptionRequestedRef.current = false;
+        hideVisibilityRevisionRef.current = 0;
         setTerminalAction(null);
-        setContentMounted(true);
         return;
       }
       try {
@@ -847,6 +972,10 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
     readWorkbenchSyncData,
     terminalAction,
   ]);
+
+  const requestWindowClose = useCallback(() => {
+    requestTerminalAction(bootstrap?.kind === 'ai-chat' ? 'hide' : 'close');
+  }, [bootstrap?.kind, requestTerminalAction]);
 
   const chromeLabels = useMemo(() => ({
     attach: bootstrap?.kind === 'workbench'
@@ -1018,7 +1147,7 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
                 icon={<CloseOutlined />}
                 aria-label={chromeLabels.close}
                 disabled={!bootstrap || Boolean(terminalAction)}
-                onClick={() => requestTerminalAction('close')}
+                onClick={requestWindowClose}
               />
             </Tooltip>
           </div>
@@ -1036,7 +1165,7 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
                 bootstrap={bootstrap}
                 onContentReady={markContentReady}
                 onAttach={() => requestTerminalAction('attach')}
-                onClose={() => requestTerminalAction('close')}
+                onClose={requestWindowClose}
                 onOpenSettings={requestOpenAISettings}
                 onRegisterAITerminalGuard={(guard) => {
                   aiTerminalGuardRef.current = guard;

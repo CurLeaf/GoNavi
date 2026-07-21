@@ -10,6 +10,8 @@ export function CloseAll():Promise<nativewindow.OperationResult>;
 
 export function Focus(arg1:string):Promise<nativewindow.OperationResult>;
 
+export function Hide(arg1:string):Promise<nativewindow.OperationResult>;
+
 export function List():Promise<Array<nativewindow.WindowInfo>>;
 
 export function Open(arg1:nativewindow.OpenRequest):Promise<nativewindow.OperationResult>;

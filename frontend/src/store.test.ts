@@ -2193,9 +2193,21 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().detachedAIChatWindow?.height).toBe(560);
 
     useStore.getState().setAIPanelVisible(false);
-    expect(useStore.getState().detachedAIChatWindow).toBeNull();
+    expect(useStore.getState().detachedAIChatWindow).toEqual(expect.objectContaining({
+      width: 500,
+      height: 560,
+    }));
+    expect(useStore.getState().isAIChatDetached()).toBe(true);
     expect(useStore.getState().aiPanelVisible).toBe(false);
     expect(useStore.getState().aiChatDetachedBoundsMemory?.width).toBe(500);
+
+    useStore.getState().setAIChatOpenMode('detached');
+    useStore.getState().setAIPanelVisible(true);
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    expect(useStore.getState().detachedAIChatWindow).toEqual(expect.objectContaining({
+      width: 500,
+      height: 560,
+    }));
   });
 
   it('opens AI chat according to the configured default open mode', async () => {

@@ -2,8 +2,11 @@ package nativewindow
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -71,6 +74,152 @@ func TestDetachedChildShowsAfterReadyAndFocusesWithoutShowingAgain(t *testing.T)
 	}
 	if shows != 1 || focuses != 2 {
 		t.Fatalf("later presentation = show %d focus %d, want 1/2", shows, focuses)
+	}
+}
+
+func TestDetachedChildAcknowledgesFocusOnlyAfterDelayedPresentation(t *testing.T) {
+	bridge, control := newVisibilityTestChild()
+	ctx := context.Background()
+	InitializeControl(control, ctx)
+
+	steps := make([]string, 0, 4)
+	control.showWindow = func(context.Context) { steps = append(steps, "show") }
+	control.focusWindow = func(context.Context) { steps = append(steps, "focus") }
+	bridge.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Path {
+		case CommandStatePath:
+			var acknowledgement commandStateRequest
+			if err := json.NewDecoder(request.Body).Decode(&acknowledgement); err != nil {
+				return nil, err
+			}
+			steps = append(steps, "ack-focus")
+			if acknowledgement.Action != "ack-focus" || acknowledgement.VisibilityRevision != 7 {
+				t.Fatalf("focus acknowledgement = %#v", acknowledgement)
+			}
+		case ActionPath:
+			steps = append(steps, "post-ready")
+		}
+		return successfulVisibilityResponse(), nil
+	})
+
+	if result := control.FocusRevision(7); !result.Success {
+		t.Fatalf("pre-ready FocusRevision result = %#v", result)
+	}
+	if len(steps) != 0 {
+		t.Fatalf("pre-ready steps = %#v, want none", steps)
+	}
+	control.markDOMReady(ctx)
+	if len(steps) != 0 {
+		t.Fatalf("DOM-ready steps = %#v, want none before frontend presentation", steps)
+	}
+	if result := bridge.Action("ready", map[string]any{"id": "window-1"}); !result.Success {
+		t.Fatalf("ready Action result = %#v", result)
+	}
+	if got := strings.Join(steps, ","); got != "show,focus,ack-focus,post-ready" {
+		t.Fatalf("delayed focus sequence = %q", got)
+	}
+}
+
+func TestDetachedChildFailedFocusAcknowledgementLeavesParentPendingForRetry(t *testing.T) {
+	manager := newHTTPTestManager(t)
+	manager.windows["ai-chat"] = &windowEntry{
+		info:                 WindowInfo{ID: "ai-chat", Kind: "ai-chat", Ready: true},
+		visibilityRevision:   7,
+		pendingFocusRevision: 7,
+	}
+	bridge := newBridge(ChildOptions{
+		ParentURL: "http://127.0.0.1:43119",
+		Token:     manager.token,
+		ID:        "ai-chat",
+		Kind:      "ai-chat",
+	})
+	control := newControl(bridge)
+	ctx := context.Background()
+	InitializeControl(control, ctx)
+	control.showWindow = func(context.Context) {}
+	focuses := 0
+	control.focusWindow = func(context.Context) { focuses++ }
+	control.markDOMReady(ctx)
+	if result := control.markFrontendReady(); !result.Success {
+		t.Fatalf("markFrontendReady result = %#v", result)
+	}
+
+	failAcknowledgement := true
+	bridge.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if failAcknowledgement {
+			return nil, errors.New("temporary parent connection failure")
+		}
+		request.RemoteAddr = "127.0.0.1:51003"
+		recorder := httptest.NewRecorder()
+		manager.authenticatedHandler().ServeHTTP(recorder, request)
+		return recorder.Result(), nil
+	})
+
+	if result := control.FocusRevision(7); !result.Success {
+		t.Fatalf("FocusRevision with failed acknowledgement = %#v", result)
+	}
+	manager.mu.RLock()
+	pendingAfterFailure := manager.windows["ai-chat"].pendingFocusRevision
+	manager.mu.RUnlock()
+	if pendingAfterFailure != 7 {
+		t.Fatalf("pending focus after failed acknowledgement = %d, want 7", pendingAfterFailure)
+	}
+
+	failAcknowledgement = false
+	if result := control.FocusRevision(7); !result.Success {
+		t.Fatalf("FocusRevision retry result = %#v", result)
+	}
+	manager.mu.RLock()
+	pendingAfterRetry := manager.windows["ai-chat"].pendingFocusRevision
+	manager.mu.RUnlock()
+	if pendingAfterRetry != 0 || focuses != 2 {
+		t.Fatalf("retry state = pending %d focuses %d, want 0/2", pendingAfterRetry, focuses)
+	}
+}
+
+func TestDetachedChildIgnoresLateHideAfterNewerFocus(t *testing.T) {
+	bridge, control := newVisibilityTestChild()
+	ctx := context.Background()
+	InitializeControl(control, ctx)
+
+	shows := 0
+	hides := 0
+	focuses := 0
+	control.showWindow = func(context.Context) { shows++ }
+	control.hideWindow = func(context.Context) { hides++ }
+	control.focusWindow = func(context.Context) { focuses++ }
+	control.markDOMReady(ctx)
+	if result := bridge.Action("ready", map[string]any{"id": "window-1"}); !result.Success {
+		t.Fatalf("ready Action result = %#v", result)
+	}
+
+	if result := control.Hide(1); !result.Success || result.VisibilityRevision != 1 {
+		t.Fatalf("Hide result = %#v", result)
+	}
+	if hides != 1 {
+		t.Fatalf("hides after revision 1 = %d, want 1", hides)
+	}
+	if result := control.FocusRevision(2); !result.Success || result.VisibilityRevision != 2 {
+		t.Fatalf("FocusRevision result = %#v", result)
+	}
+	if shows != 2 || focuses != 1 {
+		t.Fatalf("presentation after focus = show %d focus %d, want 2/1", shows, focuses)
+	}
+
+	lateHide := control.Hide(1)
+	if !lateHide.Success || lateHide.VisibilityRevision != 2 ||
+		!strings.Contains(lateHide.Message, "stale") {
+		t.Fatalf("late Hide result = %#v", lateHide)
+	}
+	if hides != 1 {
+		t.Fatalf("late hide reached native window: hides = %d, want 1", hides)
+	}
+	control.mu.RLock()
+	visible := control.visible
+	revision := control.visibilityRevision
+	control.mu.RUnlock()
+	if !visible || revision != 2 {
+		t.Fatalf("final visibility state = visible %v revision %d", visible, revision)
 	}
 }
 

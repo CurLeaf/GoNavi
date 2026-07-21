@@ -28,11 +28,29 @@ func TestRuntimeExposesParentWindowManagerInsideDetachedChildren(t *testing.T) {
 		"Manager: parentWindowManager",
 		"bridge.OpenWindow(request || {})",
 		"bridge.FocusWindow",
+		"bridge.HideWindow",
 		"bridge.CloseWindow",
 	} {
 		if !strings.Contains(script, expected) {
 			t.Fatalf("runtime bridge is missing %q", expected)
 		}
+	}
+}
+
+func TestRuntimeRoutesRevisionedHideAndFocusCommands(t *testing.T) {
+	script := detachedRuntimeBridgeScript()
+	for _, expected := range []string{
+		GracefulHideRequestEventName,
+		"requestGracefulHide(command)",
+		"visibilityRevisionOf(command)",
+		"control.FocusRevision(visibilityRevisionOf(command))",
+	} {
+		if !strings.Contains(script, expected) {
+			t.Fatalf("runtime bridge is missing revisioned visibility marker %q", expected)
+		}
+	}
+	if strings.Contains(script, "control.Hide(") {
+		t.Fatal("runtime hide command bypasses the frontend state flush")
 	}
 }
 

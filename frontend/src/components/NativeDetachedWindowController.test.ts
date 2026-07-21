@@ -3,6 +3,10 @@ import TestRenderer, { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useStore } from '../store';
+import {
+  clearNativeDetachedHostEvents,
+  recordNativeDetachedVisibilityRevision,
+} from '../utils/nativeDetachedWindowHost';
 import { peekQueryEditorResultSession } from '../utils/queryEditorResultSessionCache';
 import {
   applyNativeDetachedWindowEvent,
@@ -20,6 +24,7 @@ const buildQueryTab = (id: string, query: string) => ({
 
 describe('NativeDetachedWindowController', () => {
   beforeEach(() => {
+    clearNativeDetachedHostEvents('ai-chat');
     useStore.setState({
       tabs: [buildQueryTab('query-a', 'select 1'), buildQueryTab('query-b', 'select 2')],
       activeTabId: 'query-a',
@@ -523,6 +528,43 @@ describe('NativeDetachedWindowController', () => {
     expect(onOpenAISettings).toHaveBeenCalledOnce();
   });
 
+  it('raises the main window without restoring a maximized window before opening settings', () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const calls: string[] = [];
+    const windowUnminimise = vi.fn(() => calls.push('unminimise-window'));
+    const show = vi.fn(() => calls.push('show-app'));
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        runtime: {
+          WindowUnminimise: windowUnminimise,
+          Show: show,
+          WindowShow: vi.fn(() => calls.push('show-window')),
+        },
+      },
+    });
+
+    try {
+      applyNativeDetachedWindowEvent({
+        id: 'ai-chat',
+        kind: 'ai-chat',
+        action: 'open-ai-settings',
+      }, undefined, {
+        onOpenAISettings: () => calls.push('open-settings'),
+      });
+
+      expect(windowUnminimise).not.toHaveBeenCalled();
+      expect(show).toHaveBeenCalledOnce();
+      expect(calls).toEqual(['show-app', 'show-window', 'open-settings']);
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
   it('reattaches, closes, and crash-recovers the native AI window', () => {
     useStore.setState({
       aiPanelVisible: true,
@@ -733,6 +775,73 @@ describe('NativeDetachedWindowController', () => {
     expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual(['query-a', 'query-b']);
     expect(useStore.getState().detachedWorkbenchWindows.map((item) => item.tabId)).toEqual(['query-b']);
     expect(useStore.getState().activeTabId).toBe('query-a');
+  });
+
+  it('parks a native AI child without discarding its detached identity', () => {
+    useStore.setState({
+      aiPanelVisible: true,
+      detachedAIChatWindow: { x: 20, y: 30, width: 440, height: 720, zIndex: 1203 },
+      aiChatHistory: {
+        'session-1': [{ id: 'message-1', role: 'assistant', content: 'kept', timestamp: 1 }],
+      },
+    });
+
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'hide',
+      payload: { visibilityRevision: 3 },
+    });
+
+    expect(useStore.getState().aiPanelVisible).toBe(false);
+    expect(useStore.getState().detachedAIChatWindow).toEqual(expect.objectContaining({
+      width: 440,
+      height: 720,
+    }));
+    expect(useStore.getState().aiChatHistory['session-1'][0]?.content).toBe('kept');
+  });
+
+  it('ignores a delayed hide event older than the latest native focus', () => {
+    useStore.setState({
+      aiPanelVisible: true,
+      detachedAIChatWindow: { x: 20, y: 30, width: 440, height: 720, zIndex: 1203 },
+    });
+    recordNativeDetachedVisibilityRevision('ai-chat', 7);
+
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'hide',
+      payload: { visibilityRevision: 6 },
+    });
+
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    expect(useStore.getState().detachedAIChatWindow).not.toBeNull();
+
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'hide',
+      payload: { visibilityRevision: 8 },
+    });
+    expect(useStore.getState().aiPanelVisible).toBe(false);
+  });
+
+  it('drops a parked AI identity when its child process exits', () => {
+    useStore.setState({
+      aiPanelVisible: false,
+      detachedAIChatWindow: { x: 20, y: 30, width: 440, height: 720, zIndex: 1203 },
+    });
+
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'close',
+      payload: { reason: 'process-error', exited: true },
+    });
+
+    expect(useStore.getState().aiPanelVisible).toBe(false);
+    expect(useStore.getState().detachedAIChatWindow).toBeNull();
   });
 
   it('closes only the tab whose native window sent an explicit close action', () => {

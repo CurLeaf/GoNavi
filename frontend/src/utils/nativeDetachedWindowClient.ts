@@ -37,6 +37,7 @@ export type NativeDetachedWindowAction =
   | 'ready'
   | 'sync'
   | 'attach'
+  | 'hide'
   | 'close'
   | 'cancel-close'
   | 'open-ai-settings'
@@ -105,6 +106,13 @@ export const buildNativeDetachedSyncStoreSnapshot = (
 export interface NativeDetachedWindowActionRequest {
   action: NativeDetachedWindowAction;
   payload: NativeDetachedWindowActionPayload;
+}
+
+export interface NativeDetachedWindowActionResult {
+  success: boolean;
+  message?: string;
+  id?: string;
+  visibilityRevision?: number;
 }
 
 export interface NativeDetachedHostStateCommand {
@@ -584,6 +592,7 @@ export const buildNativeDetachedAIHostStoreSnapshot = (
     activeTab,
     activeConnection,
     aiContexts: source.aiContexts,
+    shortcutOptions: source.shortcutOptions,
     ...(hostEvents.length > 0 ? { [NATIVE_DETACHED_HOST_EVENTS_KEY]: hostEvents } : {}),
   });
 };
@@ -871,7 +880,7 @@ export const postNativeDetachedWindowAction = async (
   action: NativeDetachedWindowAction,
   payload: NativeDetachedWindowActionPayload,
   fetchImpl?: FetchLike,
-): Promise<void> => {
+): Promise<NativeDetachedWindowActionResult> => {
   const nativeAction = !fetchImpl && typeof window !== 'undefined'
     ? (window as any).__GONAVI_DETACHED__?.action
     : undefined;
@@ -880,10 +889,17 @@ export const postNativeDetachedWindowAction = async (
     if (result?.success === false) {
       throw new Error(String(result.message || `Native detached ${action} failed`));
     }
-    return;
+    return {
+      success: result?.success !== false,
+      ...(result?.message ? { message: String(result.message) } : {}),
+      ...(result?.id ? { id: String(result.id) } : {}),
+      ...(Number.isFinite(Number(result?.visibilityRevision))
+        ? { visibilityRevision: Number(result.visibilityRevision) }
+        : {}),
+    };
   }
   const request = fetchImpl ?? fetch;
-  await requireSuccessfulResponse(await request(NATIVE_DETACHED_ACTION_URL, {
+  const response = await requireSuccessfulResponse(await request(NATIVE_DETACHED_ACTION_URL, {
     method: 'POST',
     credentials: 'same-origin',
     headers: {
@@ -892,42 +908,61 @@ export const postNativeDetachedWindowAction = async (
     },
     body: JSON.stringify({ action, payload } satisfies NativeDetachedWindowActionRequest),
   }));
+  const body = await response.text();
+  if (!body.trim()) return { success: true };
+  const result = JSON.parse(body) as NativeDetachedWindowActionResult;
+  if (result?.success === false) {
+    throw new Error(String(result.message || `Native detached ${action} failed`));
+  }
+  return result;
 };
 
 export const syncNativeDetachedWindow = (
   payload: NativeDetachedWindowActionPayload,
   fetchImpl?: FetchLike,
-): Promise<void> => postNativeDetachedWindowAction('sync', payload, fetchImpl);
+): Promise<void> => postNativeDetachedWindowAction('sync', payload, fetchImpl).then(() => undefined);
 
 export const readyNativeDetachedWindow = (
   payload: NativeDetachedWindowActionPayload,
   fetchImpl?: FetchLike,
-): Promise<void> => postNativeDetachedWindowAction('ready', payload, fetchImpl);
+): Promise<void> => postNativeDetachedWindowAction('ready', payload, fetchImpl).then(() => undefined);
 
 export const attachNativeDetachedWindow = (
   payload: NativeDetachedWindowActionPayload,
   fetchImpl?: FetchLike,
-): Promise<void> => postNativeDetachedWindowAction('attach', payload, fetchImpl);
+): Promise<void> => postNativeDetachedWindowAction('attach', payload, fetchImpl).then(() => undefined);
+
+export const hideNativeDetachedWindow = async (
+  payload: NativeDetachedWindowActionPayload,
+  fetchImpl?: FetchLike,
+): Promise<number> => {
+  const result = await postNativeDetachedWindowAction('hide', payload, fetchImpl);
+  const revision = Math.trunc(Number(result.visibilityRevision));
+  if (!Number.isFinite(revision) || revision <= 0) {
+    throw new Error('Native detached hide did not return a visibility revision');
+  }
+  return revision;
+};
 
 export const closeNativeDetachedWindow = (
   payload: NativeDetachedWindowActionPayload,
   fetchImpl?: FetchLike,
-): Promise<void> => postNativeDetachedWindowAction('close', payload, fetchImpl);
+): Promise<void> => postNativeDetachedWindowAction('close', payload, fetchImpl).then(() => undefined);
 
 export const cancelNativeDetachedWindowClose = (
   payload: NativeDetachedWindowActionPayload,
   fetchImpl?: FetchLike,
-): Promise<void> => postNativeDetachedWindowAction('cancel-close', payload, fetchImpl);
+): Promise<void> => postNativeDetachedWindowAction('cancel-close', payload, fetchImpl).then(() => undefined);
 
 export const openNativeDetachedAISettings = (
   payload: NativeDetachedWindowActionPayload,
   fetchImpl?: FetchLike,
-): Promise<void> => postNativeDetachedWindowAction('open-ai-settings', payload, fetchImpl);
+): Promise<void> => postNativeDetachedWindowAction('open-ai-settings', payload, fetchImpl).then(() => undefined);
 
 export const sendNativeDetachedHostEvent = (
   payload: NativeDetachedWindowActionPayload,
   fetchImpl?: FetchLike,
-): Promise<void> => postNativeDetachedWindowAction('host-event', payload, fetchImpl);
+): Promise<void> => postNativeDetachedWindowAction('host-event', payload, fetchImpl).then(() => undefined);
 
 export const presentCurrentNativeDetachedWindow = async (): Promise<void> => {
   const present = typeof window !== 'undefined'
@@ -950,6 +985,21 @@ export const closeCurrentNativeDetachedWindow = async (): Promise<void> => {
   }
   if (typeof window !== 'undefined' && typeof window.close === 'function') {
     window.close();
+  }
+};
+
+export const hideCurrentNativeDetachedWindow = async (
+  visibilityRevision: number,
+): Promise<void> => {
+  const nativeHide = typeof window !== 'undefined'
+    ? (window as any).go?.nativewindow?.Control?.Hide
+    : undefined;
+  if (typeof nativeHide !== 'function') {
+    throw new Error('Native detached hide control is unavailable');
+  }
+  const result = await nativeHide(Math.trunc(visibilityRevision));
+  if (result?.success === false) {
+    throw new Error(String(result.message || 'Failed to hide native detached window'));
   }
 };
 

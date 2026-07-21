@@ -30,6 +30,7 @@ import { useOptionalI18n } from '../i18n/provider';
 import type { ColumnDefinition, ForeignKeyDefinition, IndexDefinition } from '../types';
 import { v4 as generateUuid } from 'uuid';
 import 'react-resizable/css/styles.css';
+import '../styles/v2-theme-workbench.css';
 import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, hasExplicitSort, quoteIdentPart, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { isConnectionDataImportRestricted } from '../utils/connectionReadOnly';
