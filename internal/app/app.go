@@ -28,6 +28,7 @@ import (
 	syncbackend "GoNavi-Wails/internal/sync"
 	"GoNavi-Wails/shared/i18n"
 	"github.com/google/uuid"
+	"golang.org/x/sync/singleflight"
 )
 
 const dbCachePingInterval = 30 * time.Second
@@ -63,6 +64,51 @@ type cachedDatabase struct {
 	keepAliveInFlightRevision uint64
 }
 
+type connectionKeepAlivePolicy struct {
+	enabled  bool
+	interval time.Duration
+	sql      string
+	dbType   string
+}
+
+func resolveConnectionKeepAlivePolicy(config connection.ConnectionConfig) connectionKeepAlivePolicy {
+	enabled, interval := resolveConnectionKeepAliveSettings(config)
+	sql, dbType := resolveConnectionKeepAliveSQL(config)
+	return connectionKeepAlivePolicy{
+		enabled:  enabled,
+		interval: interval,
+		sql:      sql,
+		dbType:   dbType,
+	}
+}
+
+func (policy connectionKeepAlivePolicy) matches(entry cachedDatabase) bool {
+	return entry.keepAliveEnabled == policy.enabled &&
+		entry.keepAliveInterval == policy.interval &&
+		entry.keepAliveSQL == policy.sql &&
+		entry.keepAliveDBType == policy.dbType
+}
+
+func (policy connectionKeepAlivePolicy) apply(entry cachedDatabase, now time.Time) cachedDatabase {
+	if policy.matches(entry) {
+		return entry
+	}
+	wasKeepAliveEnabled := entry.keepAliveEnabled
+	entry.keepAliveRevision = nextConnectionKeepAliveRevision(entry.keepAliveRevision)
+	entry.keepAliveEnabled = policy.enabled
+	entry.keepAliveInterval = policy.interval
+	entry.keepAliveSQL = policy.sql
+	entry.keepAliveDBType = policy.dbType
+	if !policy.enabled {
+		entry.keepAliveInFlight = false
+		entry.keepAliveInFlightRevision = 0
+		entry.lastKeepAliveAt = time.Time{}
+	} else if !wasKeepAliveEnabled || entry.lastKeepAliveAt.IsZero() {
+		entry.lastKeepAliveAt = now
+	}
+	return entry
+}
+
 type cachedConnectFailure struct {
 	occurredAt time.Time
 	err        error
@@ -95,6 +141,7 @@ type App struct {
 	startedAt                     time.Time
 	dbCache                       map[string]cachedDatabase // Cache for DB connections
 	connectFailures               map[string]cachedConnectFailure
+	dbConnectGroup                singleflight.Group
 	mu                            sync.RWMutex // Mutex for cache access
 	updateMu                      sync.Mutex
 	updateState                   updateState
@@ -576,17 +623,17 @@ func (a *App) invalidateCachedDatabase(config connection.ConnectionConfig, reaso
 	shortKey := shortCacheKey(key)
 
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	entry, exists := a.dbCache[key]
 	if !exists || entry.inst == nil {
+		a.mu.Unlock()
 		return false
 	}
+	delete(a.dbCache, key)
+	a.mu.Unlock()
 
 	if closeErr := entry.inst.Close(); closeErr != nil {
 		logger.Error(closeErr, "关闭失效缓存连接失败：缓存Key=%s", shortKey)
 	}
-	delete(a.dbCache, key)
 	if reason != nil {
 		logger.Errorf("检测到连接失效，已清理缓存连接：%s 缓存Key=%s 原因=%s", formatConnSummary(effectiveConfig), shortKey, normalizeErrorMessage(reason))
 	} else {
@@ -911,12 +958,16 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 			reason = a.appText("driver_manager.backend.status.optional_disabled", map[string]any{"name": strings.TrimSpace(effectiveConfig.Type)})
 		}
 		// Best-effort cleanup: if cached instance exists for this exact config, close it.
+		var staleDatabase db.Database
 		a.mu.Lock()
 		if cur, exists := a.dbCache[key]; exists && cur.inst != nil {
-			_ = cur.inst.Close()
+			staleDatabase = cur.inst
 			delete(a.dbCache, key)
 		}
 		a.mu.Unlock()
+		if staleDatabase != nil {
+			_ = staleDatabase.Close()
+		}
 		return nil, withLogHint{err: fmt.Errorf("%s", reason), logPath: logger.Path()}
 	}
 
@@ -924,37 +975,11 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	entry, ok := a.dbCache[key]
 	a.mu.RUnlock()
 	if ok {
-		keepAliveEnabled, keepAliveInterval := resolveConnectionKeepAliveSettings(effectiveConfig)
-		keepAliveSQL, keepAliveDBType := resolveConnectionKeepAliveSQL(effectiveConfig)
-		if entry.keepAliveEnabled != keepAliveEnabled ||
-			entry.keepAliveInterval != keepAliveInterval ||
-			entry.keepAliveSQL != keepAliveSQL ||
-			entry.keepAliveDBType != keepAliveDBType {
-			a.mu.Lock()
-			if cur, exists := a.dbCache[key]; exists && cur.inst == entry.inst {
-				policyChanged := cur.keepAliveEnabled != keepAliveEnabled ||
-					cur.keepAliveInterval != keepAliveInterval ||
-					cur.keepAliveSQL != keepAliveSQL ||
-					cur.keepAliveDBType != keepAliveDBType
-				if policyChanged {
-					wasKeepAliveEnabled := cur.keepAliveEnabled
-					cur.keepAliveRevision = nextConnectionKeepAliveRevision(cur.keepAliveRevision)
-					cur.keepAliveEnabled = keepAliveEnabled
-					cur.keepAliveInterval = keepAliveInterval
-					cur.keepAliveSQL = keepAliveSQL
-					cur.keepAliveDBType = keepAliveDBType
-					if !keepAliveEnabled {
-						cur.keepAliveInFlight = false
-						cur.keepAliveInFlightRevision = 0
-						cur.lastKeepAliveAt = time.Time{}
-					} else if !wasKeepAliveEnabled || cur.lastKeepAliveAt.IsZero() {
-						cur.lastKeepAliveAt = time.Now()
-					}
-				}
-				a.dbCache[key] = cur
-				entry = cur
+		keepAlivePolicy := resolveConnectionKeepAlivePolicy(effectiveConfig)
+		if !keepAlivePolicy.matches(entry) {
+			if current, exists := a.applyCachedDatabaseKeepAlivePolicy(key, entry.inst, keepAlivePolicy, time.Now()); exists {
+				entry = current
 			}
-			a.mu.Unlock()
 		}
 		if isFileDB {
 			logger.Infof("命中文件库连接缓存：类型=%s 缓存Key=%s", strings.TrimSpace(effectiveConfig.Type), shortKey)
@@ -991,14 +1016,18 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 		}
 
 		// Ping failed: remove cached instance (best effort)
+		var staleDatabase db.Database
 		a.mu.Lock()
 		if cur, exists := a.dbCache[key]; exists && cur.inst == entry.inst {
-			if err := cur.inst.Close(); err != nil {
-				logger.Error(err, "关闭失效缓存连接失败：缓存Key=%s", shortKey)
-			}
+			staleDatabase = cur.inst
 			delete(a.dbCache, key)
 		}
 		a.mu.Unlock()
+		if staleDatabase != nil {
+			if err := staleDatabase.Close(); err != nil {
+				logger.Error(err, "关闭失效缓存连接失败：缓存Key=%s", shortKey)
+			}
+		}
 		if isFileDB {
 			logger.Infof("文件库缓存连接已剔除，准备新建连接：类型=%s 缓存Key=%s", strings.TrimSpace(effectiveConfig.Type), shortKey)
 		}
@@ -1006,20 +1035,59 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	if isFileDB {
 		logger.Infof("未命中文件库连接缓存，开始创建连接：类型=%s 缓存Key=%s", strings.TrimSpace(effectiveConfig.Type), shortKey)
 	}
-	if failure, remaining, ok := a.getCachedConnectFailureByKey(key); ok {
-		message := a.appText("db.backend.message.connect_failure_cooldown", map[string]any{
-			"remaining": formatConnectFailureCooldown(remaining),
-			"detail":    normalizeErrorMessage(unwrapLogHintError(failure.err)),
-		})
-		logger.Warnf("命中数据库连接失败冷却：%s 缓存Key=%s 剩余=%s 原因=%s",
-			formatConnSummary(effectiveConfig), shortKey, formatConnectFailureCooldown(remaining), normalizeErrorMessage(failure.err))
-		return nil, withLogHint{err: fmt.Errorf("%s", message), logPath: logger.Path()}
+	if failureErr := a.cachedConnectFailureError(effectiveConfig, key, "db.backend.message.connect_failure_cooldown"); failureErr != nil {
+		return nil, failureErr
+	}
+	value, err, _ := a.dbConnectGroup.Do(key, func() (any, error) {
+		return a.connectAndCacheDatabase(effectiveConfig, key, isFileDB)
+	})
+	if err != nil {
+		return nil, err
+	}
+	dbInst, ok := value.(db.Database)
+	if !ok || dbInst == nil {
+		return nil, fmt.Errorf("数据库连接缓存返回了无效实例")
+	}
+	a.applyCachedDatabaseKeepAlivePolicy(key, dbInst, resolveConnectionKeepAlivePolicy(effectiveConfig), time.Now())
+	return dbInst, nil
+}
+
+func (a *App) applyCachedDatabaseKeepAlivePolicy(key string, expectedInst db.Database, policy connectionKeepAlivePolicy, now time.Time) (cachedDatabase, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	entry, exists := a.dbCache[key]
+	if !exists || entry.inst == nil || entry.inst != expectedInst {
+		return cachedDatabase{}, false
+	}
+	if !policy.matches(entry) {
+		entry = policy.apply(entry, now)
+		a.dbCache[key] = entry
+	}
+	return entry, true
+}
+
+func (a *App) connectAndCacheDatabase(effectiveConfig connection.ConnectionConfig, initialKey string, isFileDB bool) (db.Database, error) {
+	key := initialKey
+	shortKey := shortenCacheKey(key)
+
+	// A caller can observe a cold cache immediately before another caller
+	// finishes its keyed connection flight. Recheck after becoming the leader so
+	// a completed flight can never be followed by a duplicate physical connect.
+	a.mu.RLock()
+	existing, exists := a.dbCache[key]
+	a.mu.RUnlock()
+	if exists && existing.inst != nil {
+		return existing.inst, nil
+	}
+
+	if failureErr := a.cachedConnectFailureError(effectiveConfig, key, "db.backend.message.connect_failure_cooldown"); failureErr != nil {
+		return nil, failureErr
 	}
 	if revisionErr := verifyDriverAgentRevisionFunc(effectiveConfig); revisionErr != nil {
 		return nil, withLogHint{err: revisionErr, logPath: logger.Path()}
 	}
 
-	initialKey := key
 	dbInst, connectedConfig, err := a.connectEffectiveDatabaseWithStartupRetry(effectiveConfig)
 	if err != nil {
 		retryInst, retryConfig, retryErr := a.retryConnectAfterMySQLMaxUserConnections(effectiveConfig, connectedConfig, err)
@@ -1038,30 +1106,11 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	a.clearConnectFailureByKey(key)
 
 	now := time.Now()
-	keepAliveEnabled, keepAliveInterval := resolveConnectionKeepAliveSettings(effectiveConfig)
-	keepAliveSQL, keepAliveDBType := resolveConnectionKeepAliveSQL(effectiveConfig)
+	keepAlivePolicy := resolveConnectionKeepAlivePolicy(effectiveConfig)
 
 	a.mu.Lock()
-	if existing, exists := a.dbCache[key]; exists && existing.inst != nil {
-		policyChanged := existing.keepAliveEnabled != keepAliveEnabled ||
-			existing.keepAliveInterval != keepAliveInterval ||
-			existing.keepAliveSQL != keepAliveSQL ||
-			existing.keepAliveDBType != keepAliveDBType
-		if policyChanged {
-			wasKeepAliveEnabled := existing.keepAliveEnabled
-			existing.keepAliveRevision = nextConnectionKeepAliveRevision(existing.keepAliveRevision)
-			existing.keepAliveEnabled = keepAliveEnabled
-			existing.keepAliveInterval = keepAliveInterval
-			existing.keepAliveSQL = keepAliveSQL
-			existing.keepAliveDBType = keepAliveDBType
-			if !keepAliveEnabled {
-				existing.keepAliveInFlight = false
-				existing.keepAliveInFlightRevision = 0
-				existing.lastKeepAliveAt = time.Time{}
-			} else if !wasKeepAliveEnabled || existing.lastKeepAliveAt.IsZero() {
-				existing.lastKeepAliveAt = now
-			}
-		}
+	if existing, exists = a.dbCache[key]; exists && existing.inst != nil {
+		existing = keepAlivePolicy.apply(existing, now)
 		a.dbCache[key] = existing
 		a.mu.Unlock()
 		// Prefer existing cached connection to avoid cache racing duplicates.
@@ -1076,16 +1125,30 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 		lastPing:          now,
 		lastKeepAliveAt:   now,
 		config:            normalizeCacheKeyConfig(effectiveConfig),
-		keepAliveEnabled:  keepAliveEnabled,
-		keepAliveInterval: keepAliveInterval,
-		keepAliveSQL:      keepAliveSQL,
-		keepAliveDBType:   keepAliveDBType,
+		keepAliveEnabled:  keepAlivePolicy.enabled,
+		keepAliveInterval: keepAlivePolicy.interval,
+		keepAliveSQL:      keepAlivePolicy.sql,
+		keepAliveDBType:   keepAlivePolicy.dbType,
 		keepAliveRevision: 1,
 	}
 	a.mu.Unlock()
 
 	logger.Infof("数据库连接成功并写入缓存：%s 缓存Key=%s", formatConnSummary(effectiveConfig), shortKey)
 	return dbInst, nil
+}
+
+func (a *App) cachedConnectFailureError(effectiveConfig connection.ConnectionConfig, key string, messageKey string) error {
+	failure, remaining, ok := a.getCachedConnectFailureByKey(key)
+	if !ok {
+		return nil
+	}
+	message := a.appText(messageKey, map[string]any{
+		"remaining": formatConnectFailureCooldown(remaining),
+		"detail":    normalizeErrorMessage(unwrapLogHintError(failure.err)),
+	})
+	logger.Warnf("命中数据库连接失败冷却：%s 缓存Key=%s 剩余=%s 原因=%s",
+		formatConnSummary(effectiveConfig), shortenCacheKey(key), formatConnectFailureCooldown(remaining), normalizeErrorMessage(failure.err))
+	return withLogHint{err: fmt.Errorf("%s", message), logPath: logger.Path()}
 }
 
 func (a *App) retryConnectAfterMySQLMaxUserConnections(rawConfig connection.ConnectionConfig, failedConfig connection.ConnectionConfig, err error) (db.Database, connection.ConnectionConfig, error) {
