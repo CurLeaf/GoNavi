@@ -44,6 +44,7 @@ import {
   shouldDetachTabByDrag,
 } from '../utils/detachedWindow';
 import { openNativeWorkbenchTabWindow } from '../utils/nativeDetachedWindowHost';
+import { useWorkbenchTabs } from '../hooks/useWorkbenchTabs';
 
 const getTabKindLabel = (tab: TabData): string => {
   if (tab.type === 'query') return t('tab_manager.kind_badge.query');
@@ -591,7 +592,7 @@ const DraggableTabNode: React.FC<DraggableTabNodeProps> = ({ node }) => {
 };
 
 const TabManager: React.FC = React.memo(() => {
-  const tabs = useStore(state => state.tabs);
+  const tabs = useWorkbenchTabs();
   const detachedWorkbenchWindows = useStore(state => state.detachedWorkbenchWindows);
   const connections = useStore(state => state.connections);
   const savedQueries = useStore(state => state.savedQueries);
@@ -694,7 +695,11 @@ const TabManager: React.FC = React.memo(() => {
           message.error(t('tab_manager.sql_file_close.read_failed_cancel_close', { detail: res.message || filePath }));
           return;
         }
-        const draft = getSQLFileTabDraft(tab.id, String(tab.query ?? ''));
+        const latestTab = useStore.getState().tabs.find((candidate) => candidate.id === tab.id);
+        const draft = getSQLFileTabDraft(
+          tab.id,
+          String(latestTab?.query ?? tab.query ?? ''),
+        );
         if (hasSQLFileTabUnsavedChanges({ ...tab, query: draft }, normalizeSQLFileReadContent(res.data))) {
           dirtyTabs.push({ tab, draft });
         }
@@ -794,7 +799,11 @@ const TabManager: React.FC = React.memo(() => {
   const closeTabsWithSQLFilePrompt = useCallback((targetIds: string[], closeConfirmedTabs: () => void) => {
     const uniqueIds = Array.from(new Set(targetIds.map((id) => String(id || '').trim()).filter(Boolean)));
     if (uniqueIds.length === 0) return;
-    const targetTabs = tabs.filter((tab) => uniqueIds.includes(tab.id));
+    const targetIdSet = new Set(uniqueIds);
+    // Query text is intentionally excluded from the chrome subscription. Resolve
+    // close/save candidates from the live store so SQL-file dirty checks never
+    // fall back to the render snapshot after an editor-only update.
+    const targetTabs = useStore.getState().tabs.filter((tab) => targetIdSet.has(tab.id));
     const runningImportTabs = targetTabs.filter(isRunningDataImportWorkbenchTab);
     if (runningImportTabs.length > 0) {
       void message.warning(t('tab_manager.message.data_import_running_close_blocked'));
@@ -807,7 +816,7 @@ const TabManager: React.FC = React.memo(() => {
     void requestCloseSQLFileTabs(closableTabs, closeConfirmedTabs).finally(() => {
       pendingCloseTabIdsRef.current.delete(dedupeKey);
     });
-  }, [requestCloseSQLFileTabs, tabs]);
+  }, [requestCloseSQLFileTabs]);
 
   const requestCloseActiveWorkspaceTab = useCallback(() => {
     if (!dockedActiveTabId) return;

@@ -8,6 +8,7 @@ import {
   recordNativeDetachedVisibilityRevision,
 } from '../utils/nativeDetachedWindowHost';
 import { peekQueryEditorResultSession } from '../utils/queryEditorResultSessionCache';
+import { clearQueryTabDraft, getQueryTabDraft } from '../utils/sqlFileTabDrafts';
 import {
   applyNativeDetachedWindowEvent,
   readAIHostStateRefs,
@@ -25,6 +26,8 @@ const buildQueryTab = (id: string, query: string) => ({
 
 describe('NativeDetachedWindowController', () => {
   beforeEach(() => {
+    clearQueryTabDraft('query-a');
+    clearQueryTabDraft('query-b');
     clearNativeDetachedHostEvents('ai-chat');
     useStore.setState({
       tabs: [buildQueryTab('query-a', 'select 1'), buildQueryTab('query-b', 'select 2')],
@@ -67,6 +70,7 @@ describe('NativeDetachedWindowController', () => {
     });
 
     expect(useStore.getState().tabs.find((tab) => tab.id === 'query-a')?.query).toBe('select 42');
+    expect(getQueryTabDraft('query-a')).toBe('select 42');
     expect(useStore.getState().tabs.find((tab) => tab.id === 'query-b')?.query).toBe('select 2');
     expect((useStore.getState().sqlEditorPendingTransactions['query-a'] as any)?.transactionId).toBe('tx-1');
     expect(peekQueryEditorResultSession('query-a')?.resultSets[0]?.rows).toEqual([{ value: 42 }]);

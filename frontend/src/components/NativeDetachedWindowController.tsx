@@ -29,6 +29,7 @@ import {
   saveQueryEditorResultSession,
   type QueryEditorResultSessionSnapshot,
 } from '../utils/queryEditorResultSessionCache';
+import { setQueryTabDraft, subscribeQueryTabDraftChanges } from '../utils/sqlFileTabDrafts';
 
 export const NATIVE_DETACHED_WINDOW_EVENT = 'gonavi:native-detached-event';
 
@@ -62,6 +63,9 @@ export type NativeDetachedWindowEvent = {
 };
 
 const replaceSyncedTab = (tab: TabData): void => {
+  if (tab.type === 'query' && typeof tab.query === 'string') {
+    setQueryTabDraft(tab.id, tab.query);
+  }
   useStore.setState((state) => {
     if (!state.tabs.some((item) => item.id === tab.id)) return state;
     return {
@@ -332,6 +336,9 @@ export const applyNativeDetachedWindowEvent = (
   if (event.kind === 'workbench' && Array.isArray(event.payload?.openedTabs)) {
     for (const openedTab of event.payload.openedTabs) {
       if (!openedTab || typeof openedTab !== 'object' || !String(openedTab.id || '').trim()) continue;
+      if (openedTab.type === 'query' && typeof openedTab.query === 'string') {
+        setQueryTabDraft(openedTab.id, openedTab.query);
+      }
       if (!useStore.getState().tabs.some((item) => item.id === openedTab.id)) {
         useStore.getState().addTab(openedTab);
       }
@@ -607,6 +614,9 @@ const NativeDetachedWindowController = ({
         aiHostSyncTimer = null;
       }
     });
+    const unsubscribeQueryDrafts = subscribeQueryTabDraftChanges((tabId) => {
+      if (tabId === useStore.getState().activeTabId) scheduleAIHostStateSync();
+    });
 
     const removeWindowEventListeners: Array<() => void> = [];
     if (!currentWindowId && typeof window !== 'undefined') {
@@ -682,6 +692,7 @@ const NativeDetachedWindowController = ({
     return () => {
       off();
       unsubscribeStore();
+      unsubscribeQueryDrafts();
       removeWindowEventListeners.forEach((remove) => remove());
       pendingLocalDispatchTimers.forEach((timer) => clearTimeout(timer));
       if (aiHostSyncTimer !== null) clearTimeout(aiHostSyncTimer);

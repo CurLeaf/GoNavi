@@ -123,6 +123,7 @@ import { supportsTableTruncateAction } from './tableDataDangerActions';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
+import { useWorkbenchTabs } from '../hooks/useWorkbenchTabs';
 import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { resolveDataSourceType } from '../utils/dataSourceCapabilities';
@@ -536,7 +537,7 @@ const Sidebar: React.FC<{
   const updateConnection = useStore(state => state.updateConnection);
   const addTab = useStore(state => state.addTab);
   const updateQueryTabDraft = useStore(state => state.updateQueryTabDraft);
-  const tabs = useStore(state => state.tabs);
+  const tabs = useWorkbenchTabs();
   const activeTabId = useStore(state => state.activeTabId);
   const setActiveContext = useStore(state => state.setActiveContext);
   const removeConnection = useStore(state => state.removeConnection);

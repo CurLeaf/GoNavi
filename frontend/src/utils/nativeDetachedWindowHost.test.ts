@@ -13,6 +13,7 @@ import {
   syncNativeDetachedShortcutOptions,
   type NativeDetachedWindowManager,
 } from './nativeDetachedWindowHost';
+import { clearQueryTabDraft, setQueryTabDraft } from './sqlFileTabDrafts';
 
 const buildTab = (id: string) => ({
   id,
@@ -51,6 +52,7 @@ describe('nativeDetachedWindowHost', () => {
   });
 
   afterEach(() => {
+    clearQueryTabDraft('query-1');
     vi.restoreAllMocks();
   });
 
@@ -161,6 +163,7 @@ describe('nativeDetachedWindowHost', () => {
   });
 
   it('opens AI chat as a native window and preserves its live conversation state', async () => {
+    setQueryTabDraft('query-1', 'select live AI context');
     useStore.setState({
       aiPanelVisible: true,
       aiChatHistory: {
@@ -194,6 +197,10 @@ describe('nativeDetachedWindowHost', () => {
           aiChatHistory: expect.objectContaining({
             'session-1': [expect.objectContaining({ content: 'hello' })],
           }),
+          tabs: [expect.objectContaining({
+            id: 'query-1',
+            query: 'select live AI context',
+          })],
         }),
       }),
     }));
@@ -203,7 +210,10 @@ describe('nativeDetachedWindowHost', () => {
       revision: expect.any(Number),
       storeState: expect.objectContaining({
         activeTabId: 'query-1',
-        activeTab: expect.objectContaining({ id: 'query-1' }),
+        activeTab: expect.objectContaining({
+          id: 'query-1',
+          query: 'select live AI context',
+        }),
       }),
     }));
   });

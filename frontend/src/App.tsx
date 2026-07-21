@@ -207,6 +207,7 @@ import { useAppUpdateManager } from './hooks/useAppUpdateManager';
 import { useAppLogPanelResize } from './hooks/useAppLogPanelResize';
 import { useAppSidebarResize } from './hooks/useAppSidebarResize';
 import { useAppUtilityStyles } from './hooks/useAppUtilityStyles';
+import { useWorkbenchTabs } from './hooks/useWorkbenchTabs';
 import { ApplyDataRootDirectory, CancelApplicationQuit, ForceQuitApplication, GetDataRootDirectoryInfo, GetSavedConnections, ListInstalledFontFamilies, OpenDataRootDirectory, SelectDataRootDirectory, SetApplicationBrandIcon, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import { getAntdLocale } from './i18n/frameworkLocale';
 import { useI18n } from './i18n/provider';
@@ -1980,7 +1981,7 @@ function App() {
   const addTab = useStore(state => state.addTab);
   const activeContext = useStore(state => state.activeContext);
   const connections = useStore(state => state.connections);
-  const tabs = useStore(state => state.tabs);
+  const tabs = useWorkbenchTabs();
   const activeTabId = useStore(state => state.activeTabId);
   const setActiveTab = useStore(state => state.setActiveTab);
   const savedQueries = useStore(state => state.savedQueries);
@@ -2535,7 +2536,11 @@ function App() {
 
       let targets;
       try {
-          targets = await collectApplicationQuitUnsavedSQLTargets(tabs, savedQueries);
+          const latestState = useStore.getState();
+          targets = await collectApplicationQuitUnsavedSQLTargets(
+              latestState.tabs,
+              latestState.savedQueries,
+          );
       } catch (error) {
           resetApplicationQuitRequest();
           message.error(t('app.quit.unsaved_sql.inspect_failed', {
@@ -2595,7 +2600,7 @@ function App() {
       });
       destroyConfirm = confirmRef.destroy;
       applicationQuitConfirmRef.current = confirmRef;
-  }, [forceQuitApplication, resetApplicationQuitRequest, saveQuery, savedQueries, t, tabs]);
+  }, [forceQuitApplication, resetApplicationQuitRequest, saveQuery, t]);
 
   const handleInstallUpdateRequest = useCallback(async () => {
       if (installMode === 'portable' || installMode === 'msi') {

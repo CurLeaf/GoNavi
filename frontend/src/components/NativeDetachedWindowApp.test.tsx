@@ -7,6 +7,7 @@ import type {
   NativeDetachedWindowActionPayload,
   NativeDetachedWindowBootstrap,
 } from '../utils/nativeDetachedWindowClient';
+import { clearQueryTabDraft, setQueryTabDraft } from '../utils/sqlFileTabDrafts';
 
 const { aiTerminalGuard, detachedResultRows, flushAIChatSessionPersistence } = vi.hoisted(() => ({
   aiTerminalGuard: vi.fn(async (): Promise<boolean> => true),
@@ -191,6 +192,7 @@ const flushEffects = async () => {
 
 describe('NativeDetachedWindowApp', () => {
   beforeEach(() => {
+    clearQueryTabDraft(queryTab.id);
     storeListeners.clear();
     runtimeEventListeners.clear();
     flushAIChatSessionPersistence.mockReset();
@@ -292,6 +294,7 @@ describe('NativeDetachedWindowApp', () => {
     const attachButton = renderer!.root.findByProps({
       'aria-label': 'tab_manager.detached.restore',
     });
+    setQueryTabDraft(queryTab.id, 'select live before attach');
     await act(async () => {
       attachButton.props.onClick();
       await flushEffects();
@@ -300,12 +303,18 @@ describe('NativeDetachedWindowApp', () => {
     expect(client.sync).toHaveBeenCalledWith(expect.objectContaining({
       id: bootstrap.id,
       kind: 'workbench',
-      tab: queryTab,
+      tab: expect.objectContaining({
+        id: queryTab.id,
+        query: 'select live before attach',
+      }),
     }));
     expect(client.attach).toHaveBeenCalledWith(expect.objectContaining({
       id: bootstrap.id,
       kind: 'workbench',
-      tab: queryTab,
+      tab: expect.objectContaining({
+        id: queryTab.id,
+        query: 'select live before attach',
+      }),
     }));
     const syncCalls = client.sync.mock.calls as unknown as Array<[NativeDetachedWindowActionPayload]>;
     const attachCalls = client.attach.mock.calls as unknown as Array<[NativeDetachedWindowActionPayload]>;
@@ -316,6 +325,8 @@ describe('NativeDetachedWindowApp', () => {
     expect(attachPayload!.revision!).toBeGreaterThan(finalSyncPayload!.revision!);
     expect(client.close).not.toHaveBeenCalled();
     expect(client.closeCurrentWindow).toHaveBeenCalledOnce();
+    await act(async () => renderer!.unmount());
+    clearQueryTabDraft(queryTab.id);
   });
 
   it('signals ready only after committed native content crosses a paint frame', async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { TabData } from '../types';
 import type { DetachedQueryResultWindow } from './detachedWindow';
@@ -25,6 +25,11 @@ import {
   openNativeDetachedAISettings,
   presentCurrentNativeDetachedWindow,
 } from './nativeDetachedWindowClient';
+import {
+  clearQueryTabDraft,
+  getQueryTabDraft,
+  setQueryTabDraft,
+} from './sqlFileTabDrafts';
 
 const queryTab: TabData = {
   id: 'query-1',
@@ -36,6 +41,31 @@ const queryTab: TabData = {
 };
 
 describe('nativeDetachedWindowClient', () => {
+  afterEach(() => {
+    clearQueryTabDraft('query-1');
+    clearQueryTabDraft('query-2');
+  });
+
+  it('uses the live editor draft in workbench and AI native snapshots', () => {
+    setQueryTabDraft(queryTab.id, 'select live draft');
+    const state = {
+      tabs: [queryTab],
+      activeTabId: queryTab.id,
+      connections: [],
+      activeContext: null,
+    };
+
+    const workbench = buildNativeDetachedWorkbenchPayload(state, queryTab);
+    const aiBootstrap = buildNativeDetachedAIChatPayload(state);
+    const aiHost = buildNativeDetachedAIHostStoreSnapshot(state);
+
+    expect(workbench.tab?.query).toBe('select live draft');
+    expect((workbench.storeState.tabs as TabData[])[0]?.query).toBe('select live draft');
+    expect((aiBootstrap.storeState.tabs as TabData[])[0]?.query).toBe('select live draft');
+    expect((aiHost.activeTab as TabData).query).toBe('select live draft');
+    expect(queryTab.query).toBe('select 1');
+  });
+
   it('builds a workbench payload without Zustand actions or nested functions', () => {
     const state = {
       tabs: [queryTab],
@@ -323,6 +353,7 @@ describe('nativeDetachedWindowClient', () => {
     });
     expect(revision).toBe(5);
     expect(childState.activeTabId).toBe('query-2');
+    expect(getQueryTabDraft('query-2')).toBe('select 1');
     expect(applyNativeDetachedHostStateCommand(childStore, 'ai-chat', revision, {
       id: 'ai-chat',
       action: 'sync-host-state',

@@ -1,6 +1,24 @@
 import type { TabData } from '../types';
 
 const drafts = new Map<string, string>();
+const draftChangeListeners = new Set<(tabId: string) => void>();
+
+export const subscribeQueryTabDraftChanges = (
+  listener: (tabId: string) => void,
+): (() => void) => {
+  draftChangeListeners.add(listener);
+  return () => draftChangeListeners.delete(listener);
+};
+
+const notifyQueryTabDraftChanged = (tabId: string): void => {
+  for (const listener of draftChangeListeners) {
+    try {
+      listener(tabId);
+    } catch {
+      // A snapshot observer must never interrupt the editor input path.
+    }
+  }
+};
 
 const QUERY_TAB_DRAFT_SNAPSHOT_STORAGE_KEY = 'gonavi-query-tab-drafts-v1';
 const QUERY_TAB_DRAFT_SNAPSHOT_MAX_COUNT = 30;
@@ -285,7 +303,10 @@ export const setQueryTabDraft = (tabId: string, content: string): void => {
   ensurePersistedDraftsHydrated();
   const id = toTabId(tabId);
   if (!id) return;
-  drafts.set(id, String(content ?? ''));
+  const nextContent = String(content ?? '');
+  if (drafts.has(id) && drafts.get(id) === nextContent) return;
+  drafts.set(id, nextContent);
+  notifyQueryTabDraftChanged(id);
 };
 
 export const getQueryTabDraft = (tabId: string, fallback = ''): string => {
@@ -301,10 +322,11 @@ export const clearQueryTabDraft = (tabId: string): void => {
   ensurePersistedDraftsHydrated();
   const id = toTabId(tabId);
   if (!id) return;
-  drafts.delete(id);
+  const draftChanged = drafts.delete(id);
   if (persistedDrafts.delete(id)) {
     schedulePersistedDraftFlush();
   }
+  if (draftChanged) notifyQueryTabDraftChanged(id);
 };
 
 export const hasQueryTabDraft = (tabId: string): boolean => {

@@ -47,6 +47,8 @@ import {
   type QueryEditorResultSessionSnapshot,
 } from '../utils/queryEditorResultSessionCache';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
+import { resolveLiveQueryTab, resolveLiveQueryTabs } from '../utils/liveQueryTabs';
+import { subscribeQueryTabDraftChanges } from '../utils/sqlFileTabDrafts';
 import {
   getShortcutPlatform,
   installGlobalImeCompositionTracking,
@@ -515,8 +517,10 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
   const readCurrentTab = useCallback((): TabData | undefined => {
     const bootstrapTab = bootstrap?.payload.tab;
     if (!bootstrapTab) return undefined;
-    return useStore.getState().tabs.find((item) => item.id === bootstrapTab.id)
-      || bootstrapTab;
+    return resolveLiveQueryTab(
+      useStore.getState().tabs.find((item) => item.id === bootstrapTab.id)
+        || bootstrapTab,
+    );
   }, [bootstrap]);
 
   const readUnsyncedSqlLogs = useCallback((): SqlLog[] => {
@@ -554,9 +558,9 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
       workbenchState,
       workbenchStateBase,
       openedTabs: bootstrap.kind === 'workbench'
-        ? state.tabs.filter(
-            (tab) => !syncedWorkbenchTabIdsRef.current.has(String(tab.id || '').trim()),
-          )
+        ? resolveLiveQueryTabs(state.tabs.filter(
+          (tab) => !syncedWorkbenchTabIdsRef.current.has(String(tab.id || '').trim()),
+        ))
         : [],
     };
   }, [bootstrap?.kind]);
@@ -678,9 +682,13 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
           },
         )
       : () => undefined;
+    const unsubscribeQueryDrafts = bootstrap.kind === 'workbench'
+      ? subscribeQueryTabDraftChanges(() => scheduleSync(false))
+      : () => undefined;
     return () => {
       unsubscribeStore();
       unsubscribeResultSession();
+      unsubscribeQueryDrafts();
       if (syncTimerRef.current !== null) {
         clearTimeout(syncTimerRef.current);
         syncTimerRef.current = null;

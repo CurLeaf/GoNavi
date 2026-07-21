@@ -16,6 +16,7 @@ import {
 } from '../utils/detachedWindow';
 import WorkbenchTabContent from './WorkbenchTabContent';
 import { hasNativeDetachedWindowManager } from '../utils/nativeDetachedWindowHost';
+import { useWorkbenchTabs } from '../hooks/useWorkbenchTabs';
 
 const getTabKindLabel = (type: string): string => {
   if (type === 'query') return t('tab_manager.kind_badge.query');
@@ -42,7 +43,7 @@ const getTabKindLabel = (type: string): string => {
 type DragMode = 'move' | 'resize-e' | 'resize-s' | 'resize-se';
 
 const FloatingWorkbenchWindows: React.FC = () => {
-  const tabs = useStore((state) => state.tabs);
+  const tabs = useWorkbenchTabs();
   const connections = useStore((state) => state.connections);
   const appearance = useStore((state) => state.appearance);
   const theme = useStore((state) => state.theme);

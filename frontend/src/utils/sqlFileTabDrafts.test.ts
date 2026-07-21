@@ -9,6 +9,7 @@ import {
   hasSQLFileTabDraft,
   setQueryTabDraft,
   setSQLFileTabDraft,
+  subscribeQueryTabDraftChanges,
 } from './sqlFileTabDrafts';
 
 class MemoryStorage implements Storage {
@@ -322,6 +323,23 @@ describe('sqlFileTabDrafts', () => {
     clearQueryTabDraft('query-tab-1');
 
     expect(hasQueryTabDraft('query-tab-1')).toBe(false);
+  });
+
+  it('notifies live snapshot consumers only when a draft actually changes', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeQueryTabDraftChanges(listener);
+
+    setQueryTabDraft('query-tab-1', 'select 1;');
+    setQueryTabDraft('query-tab-1', 'select 1;');
+    clearQueryTabDraft('query-tab-1');
+
+    expect(listener).toHaveBeenNthCalledWith(1, 'query-tab-1');
+    expect(listener).toHaveBeenNthCalledWith(2, 'query-tab-1');
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    unsubscribe();
+    setQueryTabDraft('query-tab-1', 'select 2;');
+    expect(listener).toHaveBeenCalledTimes(2);
   });
 
   it('stores external SQL file editor drafts outside the persisted tab state', () => {

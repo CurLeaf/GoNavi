@@ -46,6 +46,8 @@ import { useAIChatPlanContexts } from './ai/useAIChatPlanContexts';
 import { useAIChatSessionState } from './ai/useAIChatSessionState';
 import { useAIChatSessionTitleGenerator } from './ai/useAIChatSessionTitleGenerator';
 import { useAIChatLocalTools } from './ai/useAIChatLocalTools';
+import { useWorkbenchTabs } from '../hooks/useWorkbenchTabs';
+import { resolveLiveQueryTabs } from '../utils/liveQueryTabs';
 import { useI18n } from '../i18n/provider';
 import {
     coerceThinkingIntensityForProfile,
@@ -123,7 +125,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const activeContext = useStore(state => state.activeContext);
     const aiContexts = useStore(state => state.aiContexts);
     const connections = useStore(state => state.connections);
-    const tabs = useStore(state => state.tabs);
+    const tabs = useWorkbenchTabs();
     const activeTabId = useStore(state => state.activeTabId);
     const sqlLogs = useStore(state => state.sqlLogs);
     const setAIActiveSessionId = useStore(state => state.setAIActiveSessionId);
@@ -272,7 +274,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             activeContext,
             aiContexts,
             connections,
-            tabs,
+            tabs: resolveLiveQueryTabs(tabs),
             activeTabId,
             availableToolNames: availableTools.map((tool) => tool.function.name),
             skills,

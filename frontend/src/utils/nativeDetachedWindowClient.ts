@@ -5,6 +5,8 @@ import type {
 } from './detachedWindow';
 import type { QueryEditorResultSessionSnapshot } from './queryEditorResultSessionCache';
 import { isNativeDetachedWindowRoute } from './nativeDetachedWindowRoute';
+import { resolveLiveQueryTab, resolveLiveQueryTabs } from './liveQueryTabs';
+import { setQueryTabDraft } from './sqlFileTabDrafts';
 
 export const NATIVE_DETACHED_BOOTSTRAP_URL = '/__gonavi/detached/bootstrap';
 export const NATIVE_DETACHED_ACTION_URL = '/__gonavi/detached/action';
@@ -284,20 +286,21 @@ export const buildNativeDetachedWorkbenchPayload = (
   tab: TabData,
   resultSession?: QueryEditorResultSessionSnapshot | null,
 ): NativeDetachedWindowPayload => {
+  const liveTab = resolveLiveQueryTab(tab);
   const storeState = buildFilteredStoreSnapshot(state, WORKBENCH_BOOTSTRAP_OMITTED_KEYS);
   const source = state as Record<string, unknown>;
   const allPending = source.sqlEditorPendingTransactions;
   const pendingRecord = allPending && typeof allPending === 'object'
     ? allPending as Record<string, unknown>
     : {};
-  storeState.tabs = [tab];
-  storeState.activeTabId = tab.id;
+  storeState.tabs = [liveTab];
+  storeState.activeTabId = liveTab.id;
   storeState.detachedWorkbenchWindows = [];
   storeState.detachedQueryResultWindows = [];
   storeState.detachedAIChatWindow = null;
   storeState.sqlEditorPendingTransactions = buildNativeDetachedStoreSnapshot(
-    Object.prototype.hasOwnProperty.call(pendingRecord, tab.id)
-      ? { [tab.id]: pendingRecord[tab.id] }
+    Object.prototype.hasOwnProperty.call(pendingRecord, liveTab.id)
+      ? { [liveTab.id]: pendingRecord[liveTab.id] }
       : {},
   );
   storeState.aiContexts = buildNativeDetachedStoreSnapshot({
@@ -312,18 +315,18 @@ export const buildNativeDetachedWorkbenchPayload = (
     ? diagnosticOutputs as Record<string, unknown>
     : {};
   storeState.jvmDiagnosticDrafts = buildNativeDetachedStoreSnapshot(
-    Object.prototype.hasOwnProperty.call(diagnosticDraftRecord, tab.id)
-      ? { [tab.id]: diagnosticDraftRecord[tab.id] }
+    Object.prototype.hasOwnProperty.call(diagnosticDraftRecord, liveTab.id)
+      ? { [liveTab.id]: diagnosticDraftRecord[liveTab.id] }
       : {},
   );
   storeState.jvmDiagnosticOutputs = buildNativeDetachedStoreSnapshot(
-    Object.prototype.hasOwnProperty.call(diagnosticOutputRecord, tab.id)
-      ? { [tab.id]: diagnosticOutputRecord[tab.id] }
+    Object.prototype.hasOwnProperty.call(diagnosticOutputRecord, liveTab.id)
+      ? { [liveTab.id]: diagnosticOutputRecord[liveTab.id] }
       : {},
   );
   return {
     storeState,
-    tab,
+    tab: liveTab,
     resultSession: resultSession ?? null,
   };
 };
@@ -353,6 +356,12 @@ export const buildNativeDetachedAIChatPayload = (
   state: object,
 ): NativeDetachedWindowPayload => {
   const storeState = buildFilteredStoreSnapshot(state, AI_CHAT_BOOTSTRAP_OMITTED_KEYS);
+  const source = state as Record<string, unknown>;
+  if (Array.isArray(source.tabs)) {
+    storeState.tabs = buildNativeDetachedStoreSnapshot({
+      tabs: resolveLiveQueryTabs(source.tabs as TabData[]),
+    }).tabs ?? [];
+  }
   storeState.detachedWorkbenchWindows = [];
   storeState.detachedQueryResultWindows = [];
   storeState.detachedAIChatWindow = null;
@@ -567,8 +576,11 @@ export const buildNativeDetachedAIHostStoreSnapshot = (
   const activeTabId = typeof source.activeTabId === 'string' && source.activeTabId
     ? source.activeTabId
     : null;
-  const activeTabRecord = activeTabId
+  const storedActiveTab = activeTabId
     ? resolveArrayRecordById(source.tabs, activeTabId)
+    : null;
+  const activeTabRecord = storedActiveTab
+    ? resolveLiveQueryTab(storedActiveTab as unknown as TabData)
     : null;
   const activeTab = activeTabRecord && typeof activeTabRecord.query === 'string'
     && activeTabRecord.query.length > NATIVE_AI_HOST_QUERY_MAX_CHARS
@@ -800,6 +812,18 @@ export const applyNativeDetachedHostStateCommand = <TState extends object>(
     return currentRevision;
   }
   const safeSnapshot = buildNativeDetachedStoreSnapshot(command.payload.storeState);
+  const activeTab = safeSnapshot.activeTab;
+  if (
+    activeTab
+    && typeof activeTab === 'object'
+    && !Array.isArray(activeTab)
+    && (activeTab as Record<string, unknown>).type === 'query'
+    && typeof (activeTab as Record<string, unknown>).id === 'string'
+    && typeof (activeTab as Record<string, unknown>).query === 'string'
+  ) {
+    const queryTab = activeTab as Record<string, unknown>;
+    setQueryTabDraft(queryTab.id as string, queryTab.query as string);
+  }
   store.setState(applyNativeDetachedHostStateSync(
     store.getState(),
     safeSnapshot,

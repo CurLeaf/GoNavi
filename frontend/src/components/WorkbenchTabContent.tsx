@@ -1,6 +1,7 @@
 import React from 'react';
 import { Spin } from 'antd';
 import type { TabData } from '../types';
+import { useStore } from '../store';
 import '../styles/v2-theme-workbench.css';
 
 const DataViewer = React.lazy(() => import('./DataViewer'));
@@ -23,6 +24,25 @@ const JVMDiagnosticConsole = React.lazy(() => import('./JVMDiagnosticConsole'));
 const JVMMonitoringDashboard = React.lazy(() => import('./JVMMonitoringDashboard'));
 const SqlAnalysisWorkbench = React.lazy(() => import('./explain/SqlAnalysisWorkbench'));
 const SqlAuditWorkbench = React.lazy(() => import('./audit/SqlAuditWorkbench'));
+
+const QueryWorkbenchContent: React.FC<{ tab: TabData; isActive: boolean }> = React.memo(({
+  tab,
+  isActive,
+}) => {
+  // Keep the editor subscribed to its own live SQL while its TabManager/Floating
+  // host ignores query-only updates. Local typing remains contained here, and
+  // native/external query replacements still reach the editor.
+  const liveQuery = useStore((state) => (
+    state.tabs.find((candidate) => candidate.id === tab.id)?.query
+  ));
+  const liveTab = React.useMemo(
+    () => (Object.is(liveQuery, tab.query) ? tab : { ...tab, query: liveQuery }),
+    [liveQuery, tab],
+  );
+  return <QueryEditor tab={liveTab} isActive={isActive} />;
+});
+
+QueryWorkbenchContent.displayName = 'QueryWorkbenchContent';
 
 export const WORKBENCH_CONTENT_READY_FALLBACK_MS = 4_000;
 const WORKBENCH_PENDING_CONTENT_SELECTOR = '[data-monaco-editor-loading="true"]';
@@ -81,7 +101,7 @@ export const WorkbenchTabContent: React.FC<WorkbenchTabContentProps> = React.mem
 }) => {
   let content: React.ReactNode;
   if (tab.type === 'query') {
-    content = <QueryEditor tab={tab} isActive={isActive} />;
+    content = <QueryWorkbenchContent tab={tab} isActive={isActive} />;
   } else if (tab.type === 'table') {
     content = <DataViewer tab={tab} isActive={isActive} />;
   } else if (tab.type === 'design') {

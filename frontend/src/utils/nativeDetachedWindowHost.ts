@@ -24,6 +24,7 @@ import {
   type NativeDetachedWindowPayload,
 } from './nativeDetachedWindowClient';
 import { peekQueryEditorResultSession } from './queryEditorResultSessionCache';
+import { resolveLiveQueryTabs } from './liveQueryTabs';
 
 export type NativeDetachedWindowOperationResult = {
   success: boolean;
@@ -105,6 +106,9 @@ const buildNativeDetachedAIChatBootstrapPayload = (
   const selected: Record<string, unknown> = {};
   for (const key of NATIVE_AI_CHAT_BOOTSTRAP_KEYS) {
     if (Object.prototype.hasOwnProperty.call(source, key)) selected[key] = source[key];
+  }
+  if (Array.isArray(source.tabs)) {
+    selected.tabs = resolveLiveQueryTabs(source.tabs as TabData[]);
   }
   return {
     storeState: {
