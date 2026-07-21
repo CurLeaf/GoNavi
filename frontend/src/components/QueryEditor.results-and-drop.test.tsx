@@ -3848,6 +3848,56 @@ describe('QueryEditor external SQL save', () => {
     }));
   });
 
+  it('fetches database and completion metadata only for the active query tab', async () => {
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValue({
+      success: true,
+      data: [{ Database: 'main' }],
+    });
+    backendApp.DBGetTables.mockResolvedValue({
+      success: true,
+      data: [{ Tables_in_main: 'users' }],
+    });
+
+    const firstTab = createTab({ id: 'tab-1', query: 'SELECT * FROM users' });
+    const secondTab = createTab({ id: 'tab-2', query: 'SELECT * FROM orders' });
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(
+        <>
+          <QueryEditor key={firstTab.id} tab={firstTab} isActive />
+          <QueryEditor key={secondTab.id} tab={secondTab} isActive={false} />
+        </>,
+      );
+    });
+
+    await vi.waitFor(() => {
+      expect(backendApp.DBGetDatabases).toHaveBeenCalledTimes(1);
+      expect(backendApp.DBGetTables).toHaveBeenCalledTimes(1);
+      expect(backendApp.DBGetAllColumns).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      renderer.update(
+        <>
+          <QueryEditor key={firstTab.id} tab={firstTab} isActive={false} />
+          <QueryEditor key={secondTab.id} tab={secondTab} isActive />
+        </>,
+      );
+    });
+
+    await vi.waitFor(() => {
+      expect(backendApp.DBGetDatabases).toHaveBeenCalledTimes(2);
+      expect(backendApp.DBGetTables).toHaveBeenCalledTimes(2);
+      expect(backendApp.DBGetAllColumns).toHaveBeenCalledTimes(2);
+    });
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
   it('keeps object hyperlink tab opening tied to the dragged database after drop', async () => {
     const domListeners: Record<string, ((event?: any) => void)[]> = {};
     editorState.domNode = {

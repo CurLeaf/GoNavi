@@ -2825,10 +2825,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   // Fetch Database List
   useEffect(() => {
-      if (!autoFetchVisible) {
+      if (!isActive || !autoFetchVisible) {
           return;
       }
 
+      let cancelled = false;
       const fetchDbs = async () => {
           const conn = connections.find(c => c.id === currentConnectionId);
           if (!conn) return;
@@ -2843,6 +2844,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           };
 
           const res = await DBGetDatabases(buildRpcConnectionConfig(config) as any);
+          if (cancelled) return;
           if (res.success && Array.isArray(res.data)) {
               let dbs = res.data.map((row: any) => row.Database || row.database);
 
@@ -2877,11 +2879,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
       };
       void fetchDbs();
-  }, [autoFetchVisible, currentConnectionId, connections]);
+      return () => {
+          cancelled = true;
+      };
+  }, [autoFetchVisible, currentConnectionId, connections, isActive]);
 
   // Fetch Metadata for Autocomplete (Cross-database)
   useEffect(() => {
-      if (!autoFetchVisible || isObjectEditQueryTab) {
+      if (!isActive || !autoFetchVisible || isObjectEditQueryTab) {
           return;
       }
 
