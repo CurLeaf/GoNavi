@@ -515,6 +515,10 @@ func newControl(bridge *Bridge) *Control {
 		focusWindow: func(ctx context.Context) {
 			wailsRuntime.WindowUnminimise(ctx)
 			wailsRuntime.Show(ctx)
+			// Accessory applications do not reliably make their window key when
+			// only the application is activated. Explicitly order the detached
+			// window front after unhiding the process.
+			wailsRuntime.WindowShow(ctx)
 		},
 		quit: wailsRuntime.Quit,
 	}

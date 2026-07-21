@@ -1627,6 +1627,140 @@ export namespace jvm {
 
 }
 
+export namespace nativewindow {
+
+	export class HostStateRequest {
+	    id: string;
+	    revision: number;
+	    storeState: Record<string, any>;
+
+	    static createFrom(source: any = {}) {
+	        return new HostStateRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.revision = source["revision"];
+	        this.storeState = source["storeState"];
+	    }
+	}
+	export class OpenRequest {
+	    id?: string;
+	    kind: string;
+	    title: string;
+	    payload?: any;
+	    x: number;
+	    y: number;
+	    width: number;
+	    height: number;
+
+	    static createFrom(source: any = {}) {
+	        return new OpenRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.kind = source["kind"];
+	        this.title = source["title"];
+	        this.payload = source["payload"];
+	        this.x = source["x"];
+	        this.y = source["y"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	    }
+	}
+	export class WindowBounds {
+	    x: number;
+	    y: number;
+	    width: number;
+	    height: number;
+
+	    static createFrom(source: any = {}) {
+	        return new WindowBounds(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.x = source["x"];
+	        this.y = source["y"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	    }
+	}
+	export class OperationResult {
+	    success: boolean;
+	    message?: string;
+	    id?: string;
+	    bounds?: WindowBounds;
+
+	    static createFrom(source: any = {}) {
+	        return new OperationResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.success = source["success"];
+	        this.message = source["message"];
+	        this.id = source["id"];
+	        this.bounds = this.convertValues(source["bounds"], WindowBounds);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+	export class WindowInfo {
+	    id: string;
+	    kind: string;
+	    title: string;
+	    x: number;
+	    y: number;
+	    width: number;
+	    height: number;
+	    pid?: number;
+	    openedAt: number;
+	    ready: boolean;
+	    closeSent: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new WindowInfo(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.kind = source["kind"];
+	        this.title = source["title"];
+	        this.x = source["x"];
+	        this.y = source["y"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	        this.pid = source["pid"];
+	        this.openedAt = source["openedAt"];
+	        this.ready = source["ready"];
+	        this.closeSent = source["closeSent"];
+	    }
+	}
+
+}
+
 export namespace redis {
 	
 	export class ZSetMember {

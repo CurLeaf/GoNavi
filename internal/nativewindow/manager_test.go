@@ -48,10 +48,11 @@ type fakeChildProcess struct {
 }
 
 type readyBeforeReturnStarter struct {
-	manager *Manager
-	mu      sync.Mutex
-	nextPID int
-	started []*fakeChildProcess
+	manager         *Manager
+	mu              sync.Mutex
+	nextPID         int
+	started         []*fakeChildProcess
+	skipReadySignal bool
 }
 
 func (s *readyBeforeReturnStarter) Start(spec processSpec) (childProcess, error) {
@@ -70,7 +71,9 @@ func (s *readyBeforeReturnStarter) Start(spec processSpec) (childProcess, error)
 	entry := s.manager.windows[id]
 	if entry != nil {
 		entry.info.Ready = true
-		entry.readyOnce.Do(func() { close(entry.ready) })
+		if !s.skipReadySignal {
+			entry.readyOnce.Do(func() { close(entry.ready) })
+		}
 	}
 	s.manager.mu.Unlock()
 	return process, nil
@@ -192,8 +195,26 @@ func TestManagerOpenGeneratesUniqueIDsAndRegistersMultipleWindows(t *testing.T) 
 	if first.ID == "" || second.ID == "" || first.ID == second.ID {
 		t.Fatalf("expected unique generated IDs, got %q and %q", first.ID, second.ID)
 	}
-	if windows := manager.List(); len(windows) != 2 {
+	windows := manager.List()
+	if len(windows) != 2 {
 		t.Fatalf("registry size = %d, want 2", len(windows))
+	}
+	firstBounds := WindowBounds{X: -1920, Y: 40, Width: 1100, Height: 760}
+	if first.Bounds == nil || *first.Bounds != firstBounds {
+		t.Fatalf("first Open bounds = %#v, want %#v", first.Bounds, firstBounds)
+	}
+	var firstInfo *WindowInfo
+	for index := range windows {
+		if windows[index].ID == first.ID {
+			firstInfo = &windows[index]
+			break
+		}
+	}
+	if firstInfo == nil {
+		t.Fatalf("first window %q is missing from registry: %#v", first.ID, windows)
+	}
+	if got := *windowBoundsFromInfo(*firstInfo); got != firstBounds {
+		t.Fatalf("first registry bounds = %#v, want %#v", got, firstBounds)
 	}
 
 	starter.mu.Lock()
@@ -212,16 +233,76 @@ func TestManagerOpenGeneratesUniqueIDsAndRegistersMultipleWindows(t *testing.T) 
 	waitForRegistrySize(t, manager, 0)
 }
 
-func TestManagerOpenAcceptsReadyAtTimeoutBoundary(t *testing.T) {
+func TestManagerOpenUsesResolvedBoundsForChildRegistryAndResponse(t *testing.T) {
+	starter := &fakeProcessStarter{nextPID: 300}
+	corrected := WindowBounds{X: 563, Y: 182, Width: 921, Height: 812}
 	manager := &Manager{
-		token:       "test-token",
-		endpoint:    "http://127.0.0.1:43119",
-		started:     true,
-		windows:     make(map[string]*windowEntry),
-		executable:  "/tmp/GoNavi",
-		openTimeout: time.Nanosecond,
+		token:         "test-token",
+		endpoint:      "http://127.0.0.1:43119",
+		started:       true,
+		windows:       make(map[string]*windowEntry),
+		starter:       starter,
+		executable:    "/tmp/GoNavi",
+		openTimeout:   time.Second,
+		resolveBounds: func(WindowBounds) WindowBounds { return corrected },
 	}
-	starter := &readyBeforeReturnStarter{manager: manager, nextPID: 400}
+	starter.onStart = func(spec processSpec, _ *fakeChildProcess) {
+		id := environmentValue(spec.Env, envWindowID)
+		manager.mu.Lock()
+		entry := manager.windows[id]
+		if entry != nil {
+			entry.info.Ready = true
+			entry.readyOnce.Do(func() { close(entry.ready) })
+		}
+		manager.mu.Unlock()
+	}
+
+	result := manager.Open(OpenRequest{
+		ID: "ai-chat", Kind: "ai-chat", X: 0, Y: 1152, Width: 921, Height: 812,
+	})
+	if !result.Success || result.Bounds == nil || *result.Bounds != corrected {
+		t.Fatalf("Open result = %#v, want corrected bounds %#v", result, corrected)
+	}
+
+	starter.mu.Lock()
+	spec := starter.specs[0]
+	process := starter.processes[0]
+	starter.mu.Unlock()
+	if value := environmentValue(spec.Env, envX); value != "563" {
+		t.Fatalf("child x environment = %q, want 563", value)
+	}
+	if value := environmentValue(spec.Env, envY); value != "182" {
+		t.Fatalf("child y environment = %q, want 182", value)
+	}
+	if value := environmentValue(spec.Env, envWidth); value != "921" {
+		t.Fatalf("child width environment = %q, want 921", value)
+	}
+	if value := environmentValue(spec.Env, envHeight); value != "812" {
+		t.Fatalf("child height environment = %q, want 812", value)
+	}
+	windows := manager.List()
+	if len(windows) != 1 || windowBoundsFromInfo(windows[0]) == nil || *windowBoundsFromInfo(windows[0]) != corrected {
+		t.Fatalf("registered windows = %#v, want corrected bounds %#v", windows, corrected)
+	}
+
+	process.finish(nil)
+	waitForRegistrySize(t, manager, 0)
+}
+
+func TestManagerOpenAcceptsReadyAtTimeoutBoundary(t *testing.T) {
+	corrected := WindowBounds{X: -1520, Y: 80, Width: 920, Height: 700}
+	manager := &Manager{
+		token:         "test-token",
+		endpoint:      "http://127.0.0.1:43119",
+		started:       true,
+		windows:       make(map[string]*windowEntry),
+		executable:    "/tmp/GoNavi",
+		openTimeout:   time.Nanosecond,
+		resolveBounds: func(WindowBounds) WindowBounds { return corrected },
+	}
+	starter := &readyBeforeReturnStarter{
+		manager: manager, nextPID: 400, skipReadySignal: true,
+	}
 	manager.starter = starter
 
 	for attempt := 0; attempt < 64; attempt++ {
@@ -229,6 +310,9 @@ func TestManagerOpenAcceptsReadyAtTimeoutBoundary(t *testing.T) {
 		result := manager.Open(OpenRequest{ID: id, Kind: "workbench"})
 		if !result.Success {
 			t.Fatalf("Open attempt %d rejected an already-ready child: %#v", attempt, result)
+		}
+		if result.Bounds == nil || *result.Bounds != corrected {
+			t.Fatalf("Open attempt %d bounds = %#v, want %#v", attempt, result.Bounds, corrected)
 		}
 
 		starter.mu.Lock()
@@ -528,6 +612,14 @@ func TestChildControlOpensAndRoutesAnOwnedNativeWindow(t *testing.T) {
 	manager.endpoint = "http://127.0.0.1:43119"
 	manager.executable = "/tmp/GoNavi"
 	manager.openTimeout = time.Second
+	requestedBounds := WindowBounds{X: 2100, Y: -120, Width: 900, Height: 620}
+	correctedBounds := WindowBounds{X: 96, Y: 80, Width: 800, Height: 500}
+	manager.resolveBounds = func(bounds WindowBounds) WindowBounds {
+		if bounds != requestedBounds {
+			t.Fatalf("bounds resolver input = %#v, want %#v", bounds, requestedBounds)
+		}
+		return correctedBounds
+	}
 	manager.windows["workbench:query-a"] = &windowEntry{
 		info: WindowInfo{ID: "workbench:query-a", Kind: "workbench", Title: "SQL"},
 	}
@@ -565,7 +657,14 @@ func TestChildControlOpensAndRoutesAnOwnedNativeWindow(t *testing.T) {
           "height":620,
           "payload":{
             "storeState":{},
-            "resultWindow":{"id":"query-result:query-a:r1","sourceQueryTabId":"query-a"}
+            "resultWindow":{
+              "id":"query-result:query-a:r1",
+              "sourceQueryTabId":"query-a",
+              "x":2100,
+              "y":-120,
+              "width":900,
+              "height":620
+            }
           }
         }
       }`)
@@ -589,6 +688,19 @@ func TestChildControlOpensAndRoutesAnOwnedNativeWindow(t *testing.T) {
 	payload, ok := opened.Payload.(map[string]any)
 	if !ok || payload["ownerWindowId"] != "workbench:query-a" {
 		t.Fatalf("opened event owner metadata = %#v", opened.Payload)
+	}
+	resultWindow, ok := payload["resultWindow"].(map[string]any)
+	if !ok {
+		t.Fatalf("opened event result window = %#v, want structured payload", payload["resultWindow"])
+	}
+	if resultWindow["sourceQueryTabId"] != "query-a" {
+		t.Fatalf("opened event result window lost source metadata: %#v", resultWindow)
+	}
+	if resultWindow["x"] != correctedBounds.X ||
+		resultWindow["y"] != correctedBounds.Y ||
+		resultWindow["width"] != correctedBounds.Width ||
+		resultWindow["height"] != correctedBounds.Height {
+		t.Fatalf("opened event result bounds = %#v, want %#v", resultWindow, correctedBounds)
 	}
 
 	manager.windows["foreign-window"] = &windowEntry{

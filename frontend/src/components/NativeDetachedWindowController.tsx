@@ -10,6 +10,7 @@ import {
   forwardNativeDetachedHostEvent,
   hasNativeDetachedWindowManager,
   syncNativeAIChatHostState,
+  syncNativeDetachedShortcutOptions,
 } from '../utils/nativeDetachedWindowHost';
 import {
   advanceNativeDetachedStoreSource,
@@ -251,7 +252,16 @@ export const applyNativeDetachedWindowEvent = (
       && String(hostEvent.id || '').trim()
       && NATIVE_DETACHED_HOST_EVENT_NAMES.includes(hostEvent.name as NativeDetachedHostEventName)
     ) {
-      callbacks.onHostEvent?.(hostEvent);
+      if (hostEvent.name === 'gonavi:shortcut:toggle-ai-panel' && !localWindowId) {
+        const wasVisible = useStore.getState().aiPanelVisible;
+        useStore.getState().toggleAIPanel();
+        const next = useStore.getState();
+        if (!wasVisible && next.aiPanelVisible && !next.detachedAIChatWindow) {
+          showMainWindow();
+        }
+      } else if (hostEvent.name !== 'gonavi:shortcut:toggle-ai-panel') {
+        callbacks.onHostEvent?.(hostEvent);
+      }
     }
     return;
   }
@@ -498,6 +508,7 @@ const NativeDetachedWindowController = ({
     });
     let previousIds = currentNativeWindowIds();
     let previousAIHostStateRefs = readAIHostStateRefs();
+    let previousShortcutOptions = useStore.getState().shortcutOptions;
     let aiHostSyncTimer: ReturnType<typeof setTimeout> | null = null;
     const scheduleAIHostStateSync = (delay = 100) => {
       if (currentWindowId || !useStore.getState().detachedAIChatWindow) return;
@@ -514,8 +525,13 @@ const NativeDetachedWindowController = ({
     }
     const unsubscribeStore = useStore.subscribe(() => {
       const nextIds = currentNativeWindowIds();
+      const nextShortcutOptions = useStore.getState().shortcutOptions;
+      const newlyOpenedIds = new Set<string>();
       const aiWindowJustOpened = !previousIds.has('ai-chat') && nextIds.has('ai-chat');
       for (const id of nextIds) {
+        if (id !== 'ai-chat' && !previousIds.has(id)) {
+          newlyOpenedIds.add(id);
+        }
         if (id !== 'ai-chat' && !previousIds.has(id)) {
           workbenchStateSources.set(
             id,
@@ -531,6 +547,16 @@ const NativeDetachedWindowController = ({
         }
       }
       previousIds = nextIds;
+      const shortcutOptionsChanged = nextShortcutOptions !== previousShortcutOptions;
+      if (shortcutOptionsChanged) {
+        previousShortcutOptions = nextShortcutOptions;
+      }
+      const shortcutSyncTargets = shortcutOptionsChanged ? nextIds : newlyOpenedIds;
+      if (!currentWindowId && shortcutSyncTargets.size > 0) {
+        void syncNativeDetachedShortcutOptions(shortcutSyncTargets, nextShortcutOptions).catch((error) => {
+          console.warn('[Native Detached Window] Failed to sync shortcut options', error);
+        });
+      }
       if (aiWindowJustOpened) {
         aiContextSourceRef.current = useStore.getState().aiContexts;
         scheduleAIHostStateSync();

@@ -8,6 +8,66 @@ package nativewindow
 
 #import <Cocoa/Cocoa.h>
 #import <dispatch/dispatch.h>
+#import <objc/runtime.h>
+
+static IMP detachedOriginalSetActivationPolicy = NULL;
+static BOOL detachedAccessoryActivationPolicyGuardActive = NO;
+
+// Wails v2 requests Regular during applicationWillFinishLaunching. Intercept
+// the setter so the detached child never enters a Dock-visible policy. The
+// child owns this process, so the guard intentionally remains for its lifetime.
+static BOOL setDetachedGuardedActivationPolicy(
+    NSApplication *application,
+    SEL selector,
+    NSApplicationActivationPolicy requestedPolicy
+) {
+    (void)requestedPolicy;
+    if (detachedOriginalSetActivationPolicy == NULL) {
+        return NO;
+    }
+    BOOL (*originalImplementation)(id, SEL, NSApplicationActivationPolicy) =
+        (BOOL (*)(id, SEL, NSApplicationActivationPolicy))detachedOriginalSetActivationPolicy;
+    return originalImplementation(
+        application,
+        selector,
+        NSApplicationActivationPolicyAccessory
+    );
+}
+
+static void installDetachedAccessoryActivationPolicyGuard(void) {
+    @synchronized ([NSApplication class]) {
+        if (detachedAccessoryActivationPolicyGuardActive) {
+            return;
+        }
+        Method setter = class_getInstanceMethod(
+            [NSApplication class],
+            @selector(setActivationPolicy:)
+        );
+        if (setter == NULL) {
+            return;
+        }
+        detachedOriginalSetActivationPolicy = method_setImplementation(
+            setter,
+            (IMP)setDetachedGuardedActivationPolicy
+        );
+        detachedAccessoryActivationPolicyGuardActive =
+            detachedOriginalSetActivationPolicy != NULL;
+    }
+}
+
+static void prepareDetachedAccessoryActivationPolicy(void) {
+    installDetachedAccessoryActivationPolicyGuard();
+    if ([NSThread isMainThread]) {
+        [[NSApplication sharedApplication]
+            setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    }
+}
+
+static BOOL isDetachedAccessoryActivationPolicyGuardInstalled(void) {
+    @synchronized ([NSApplication class]) {
+        return detachedAccessoryActivationPolicyGuardActive;
+    }
+}
 
 static void applyDetachedAccessoryActivationPolicy(void *unused) {
     (void)unused;
@@ -25,6 +85,14 @@ static void setDetachedAccessoryActivationPolicy(void) {
 }
 */
 import "C"
+
+func prepareDetachedAccessoryActivationPolicy() {
+	C.prepareDetachedAccessoryActivationPolicy()
+}
+
+func detachedAccessoryActivationPolicyGuardInstalled() bool {
+	return bool(C.isDetachedAccessoryActivationPolicyGuardInstalled())
+}
 
 func setDetachedAccessoryActivationPolicy() {
 	C.setDetachedAccessoryActivationPolicy()

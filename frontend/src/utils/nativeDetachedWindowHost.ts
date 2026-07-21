@@ -30,6 +30,7 @@ export type NativeDetachedWindowOperationResult = {
   success: boolean;
   message?: string;
   id?: string;
+  bounds?: Pick<DetachedWindowBounds, 'x' | 'y' | 'width' | 'height'>;
 };
 
 export type NativeDetachedWindowOpenRequest = {
@@ -218,7 +219,7 @@ const focusExistingWindow = async (
 const openOnce = (
   manager: NativeDetachedWindowManager,
   request: NativeDetachedWindowOpenRequest,
-  afterOpen: () => boolean,
+  afterOpen: (bounds: Pick<DetachedWindowBounds, 'x' | 'y' | 'width' | 'height'>) => boolean,
   rollbackAfterExit: () => void,
 ): Promise<boolean> => {
   const existing = openingWindows.get(request.id);
@@ -231,7 +232,20 @@ const openOnce = (
   const opening = (async () => {
     const result = await manager.Open(request);
     assertOpened(result);
-    const opened = afterOpen();
+    const returnedBounds = result?.bounds;
+    const bounds = returnedBounds
+      && [returnedBounds.x, returnedBounds.y, returnedBounds.width, returnedBounds.height]
+        .every(Number.isFinite)
+      && returnedBounds.width > 0
+      && returnedBounds.height > 0
+      ? returnedBounds
+      : {
+          x: request.x,
+          y: request.y,
+          width: request.width,
+          height: request.height,
+        };
+    const opened = afterOpen(bounds);
     if (!opened) return false;
 
     // A child can acknowledge ready and exit before the Wails Open promise is
@@ -294,13 +308,13 @@ export const openNativeWorkbenchTabWindow = async (
       tab.type === 'query' ? peekQueryEditorResultSession(tab.id) : null,
     ),
   };
-  const opened = await openOnce(manager, request, () => {
+  const opened = await openOnce(manager, request, (openedBounds) => {
     const latest = useStore.getState();
     if (!latest.tabs.some((item) => item.id === id)) {
       void manager.Close(windowId);
       return false;
     }
-    latest.detachWorkbenchTab(id, preferred ?? bounds);
+    latest.detachWorkbenchTab(id, openedBounds);
     return true;
   }, () => {
     useStore.getState().attachWorkbenchTab(id);
@@ -342,13 +356,13 @@ export const openNativeQueryResultWindow = async (
       ...bounds,
       zIndex: Number(windowState.zIndex) || 1201,
     }),
-  }, () => {
+  }, (openedBounds) => {
     const latest = useStore.getState();
     if (!latest.tabs.some((tab) => tab.id === windowState.sourceQueryTabId)) {
       void manager.Close(id);
       return false;
     }
-    latest.detachQueryResultWindow({ ...windowState, ...bounds });
+    latest.detachQueryResultWindow({ ...windowState, ...openedBounds });
     return true;
   }, () => {
     useStore.getState().closeDetachedQueryResultWindow(id);
@@ -384,7 +398,7 @@ export const openNativeAIChatWindow = async (
     title: 'GoNavi AI',
     ...bounds,
     payload: buildNativeDetachedAIChatPayload(state),
-  }, () => {
+  }, (openedBounds) => {
     const latest = useStore.getState();
     if (!latest.aiPanelVisible || (hadDetachedIntent && !latest.detachedAIChatWindow)) {
       void manager.Close(windowId);
@@ -393,7 +407,7 @@ export const openNativeAIChatWindow = async (
     if (!latest.detachedAIChatWindow) {
       latest.detachAIChatPanel();
     }
-    latest.updateDetachedAIChatBounds({ ...bounds, coordinateSpace: 'screen' });
+    latest.updateDetachedAIChatBounds({ ...openedBounds, coordinateSpace: 'screen' });
     return true;
   }, () => {
     const latest = useStore.getState();
@@ -402,6 +416,15 @@ export const openNativeAIChatWindow = async (
     }
   });
   if (opened && typeof manager.SyncHostState === 'function') {
+    try {
+      await syncNativeDetachedShortcutOptions(
+        [windowId],
+        useStore.getState().shortcutOptions,
+        manager,
+      );
+    } catch (error) {
+      console.warn('[Native Detached Window] Failed to send current shortcuts to AI window', error);
+    }
     try {
       await syncNativeAIChatHostState(manager);
     } catch (error) {
@@ -424,6 +447,21 @@ export const syncNativeAIChatHostState = async (
     ),
     manager,
   );
+};
+
+export const syncNativeDetachedShortcutOptions = async (
+  targetWindowIds: Iterable<string>,
+  shortcutOptions: unknown,
+  managerOverride?: NativeDetachedWindowManager,
+): Promise<boolean> => {
+  const manager = managerOverride ?? resolveNativeDetachedWindowManager();
+  if (!manager || typeof manager.SyncHostState !== 'function') return false;
+  const ids = Array.from(new Set(
+    Array.from(targetWindowIds, (id) => String(id || '').trim()).filter(Boolean),
+  ));
+  const storeState = buildNativeDetachedStoreSnapshot({ shortcutOptions });
+  await Promise.all(ids.map((id) => syncNativeDetachedHostState(id, storeState, manager)));
+  return true;
 };
 
 export const closeNativeDetachedWindowById = async (id: string): Promise<void> => {

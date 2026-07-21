@@ -11,14 +11,14 @@ const (
 	HeaderToken    = "X-GoNavi-Detached-Token"
 	HeaderWindowID = "X-GoNavi-Detached-Window-ID"
 
-	BootstrapPath = "/__gonavi/detached/bootstrap"
-	ActionPath    = "/__gonavi/detached/action"
-	ControlPath   = "/__gonavi/detached/control"
-	HostStatePath = "/__gonavi/detached/host-state"
+	BootstrapPath    = "/__gonavi/detached/bootstrap"
+	ActionPath       = "/__gonavi/detached/action"
+	ControlPath      = "/__gonavi/detached/control"
+	HostStatePath    = "/__gonavi/detached/host-state"
 	CommandStatePath = "/__gonavi/detached/command-state"
-	RuntimePath   = "/__gonavi/detached-runtime.js"
-	InvokePath    = "/__gonavi/api/invoke"
-	EventsPath    = "/__gonavi/events"
+	RuntimePath      = "/__gonavi/detached-runtime.js"
+	InvokePath       = "/__gonavi/api/invoke"
+	EventsPath       = "/__gonavi/events"
 
 	MainEventName    = "gonavi:native-detached-event"
 	CommandEventName = "gonavi:native-detached-command"
@@ -38,8 +38,8 @@ const (
 	defaultWindowHeight = 720
 	// Detached query results can be substantially larger than ordinary RPC
 	// payloads. Keep one shared ceiling for child actions and parent responses.
-	maxDetachedJSONBytes int64 = 512 << 20
-	maxDetachedSSEEventBytes   = maxDetachedJSONBytes + (1 << 20)
+	maxDetachedJSONBytes     int64 = 512 << 20
+	maxDetachedSSEEventBytes       = maxDetachedJSONBytes + (1 << 20)
 )
 
 // OpenRequest describes one independently movable native window. X and Y use
@@ -53,6 +53,16 @@ type OpenRequest struct {
 	Y       int    `json:"y"`
 	Width   int    `json:"width"`
 	Height  int    `json:"height"`
+}
+
+// WindowBounds uses the browser/Wails virtual desktop coordinate system with
+// the primary display's top-left as the origin. Negative coordinates remain
+// valid for displays arranged to the left or above the primary display.
+type WindowBounds struct {
+	X      int `json:"x"`
+	Y      int `json:"y"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
 }
 
 // WindowInfo is the serialisable view of a registered child process.
@@ -81,9 +91,10 @@ type Bootstrap struct {
 
 // OperationResult is returned by the Wails-bound Manager commands.
 type OperationResult struct {
-	Success bool   `json:"success"`
-	Message string `json:"message,omitempty"`
-	ID      string `json:"id,omitempty"`
+	Success bool          `json:"success"`
+	Message string        `json:"message,omitempty"`
+	ID      string        `json:"id,omitempty"`
+	Bounds  *WindowBounds `json:"bounds,omitempty"`
 }
 
 // HostStateRequest carries main-window state that an active detached child

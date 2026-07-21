@@ -37,6 +37,7 @@ import {
   NATIVE_DETACHED_WINDOW_COMMAND_EVENT,
   type NativeDetachedHostStateCommand,
 } from '../utils/nativeDetachedWindowClient';
+import { isMacLikePlatform } from '../utils/appearance';
 import {
   peekQueryEditorResultSession,
   saveQueryEditorResultSession,
@@ -44,6 +45,12 @@ import {
   type QueryEditorResultSessionSnapshot,
 } from '../utils/queryEditorResultSessionCache';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
+import {
+  getShortcutPlatform,
+  installGlobalImeCompositionTracking,
+  isShortcutMatch,
+  resolveShortcutBinding,
+} from '../utils/shortcuts';
 import WorkbenchTabContent from './WorkbenchTabContent';
 
 const AIChatPanel = React.lazy(() => import('./AIChatPanel'));
@@ -323,6 +330,15 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
   const uiVersion = useStore((state) => state.appearance.uiVersion);
   const fontSize = useStore((state) => state.fontSize);
   const uiScale = useStore((state) => state.uiScale);
+  const shortcutOptions = useStore((state) => state.shortcutOptions);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    return installGlobalImeCompositionTracking(
+      window,
+      typeof document === 'undefined' ? null : document,
+    );
+  }, []);
 
   useEffect(() => {
     const persist = (useStore as any).persist;
@@ -431,6 +447,33 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
       eventNames.forEach((eventName) => window.removeEventListener(eventName, forwardToHost));
     };
   }, [bootstrap, client]);
+
+  useEffect(() => {
+    if (!bootstrap || typeof window === 'undefined' || !client.hostEvent) return undefined;
+    const platform = getShortcutPlatform(isMacLikePlatform());
+    const binding = resolveShortcutBinding(shortcutOptions, 'toggleAIPanel', platform);
+    if (!binding.enabled) return undefined;
+
+    const handleToggleAIShortcut = (event: KeyboardEvent) => {
+      if (!isShortcutMatch(event, binding.combo)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      hostEventSequenceRef.current += 1;
+      void client.hostEvent?.({
+        id: bootstrap.id,
+        kind: bootstrap.kind,
+        hostEvent: {
+          id: `${bootstrap.id}:${Date.now()}:${hostEventSequenceRef.current}`,
+          name: 'gonavi:shortcut:toggle-ai-panel',
+        },
+      }).catch((error) => {
+        console.warn('[Native Detached Window] Failed to forward AI shortcut to host', error);
+      });
+    };
+    const listenerOptions = { capture: true };
+    window.addEventListener('keydown', handleToggleAIShortcut, listenerOptions);
+    return () => window.removeEventListener('keydown', handleToggleAIShortcut, listenerOptions);
+  }, [bootstrap, client, shortcutOptions]);
 
   useEffect(() => {
     if (!bootstrap || !contentMounted || !contentReady) return undefined;

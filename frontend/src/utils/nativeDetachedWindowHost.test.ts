@@ -9,6 +9,7 @@ import {
   openNativeWorkbenchTabWindow,
   forwardNativeDetachedHostEvent,
   syncNativeAIChatHostState,
+  syncNativeDetachedShortcutOptions,
   type NativeDetachedWindowManager,
 } from './nativeDetachedWindowHost';
 
@@ -205,6 +206,145 @@ describe('nativeDetachedWindowHost', () => {
     }));
   });
 
+  it('resends the latest AI shortcut after native open completes', async () => {
+    const initialShortcutOptions = useStore.getState().shortcutOptions;
+    const latestShortcutOptions = {
+      ...initialShortcutOptions,
+      toggleAIPanel: {
+        ...initialShortcutOptions.toggleAIPanel,
+        mac: { combo: 'Meta+K', enabled: false },
+      },
+    };
+    useStore.setState({
+      aiPanelVisible: true,
+      detachedAIChatWindow: null,
+    });
+    vi.mocked(manager.Open).mockImplementationOnce(async () => {
+      useStore.setState({ shortcutOptions: latestShortcutOptions });
+      return { success: true };
+    });
+
+    await expect(openNativeAIChatWindow(undefined, manager)).resolves.toBe(true);
+
+    const shortcutSync = vi.mocked(manager.SyncHostState!).mock.calls
+      .map(([request]) => request)
+      .find((request) => Object.prototype.hasOwnProperty.call(
+        request.storeState,
+        'shortcutOptions',
+      ));
+    expect(shortcutSync).toEqual(expect.objectContaining({
+      id: 'ai-chat',
+      storeState: { shortcutOptions: latestShortcutOptions },
+    }));
+  });
+
+  it('stores the native bounds returned for every detached window kind', async () => {
+    const workbenchBounds = { x: 48, y: 44, width: 840, height: 520 };
+    const queryResultBounds = { x: 72, y: 64, width: 800, height: 500 };
+    const aiChatBounds = { x: 96, y: 80, width: 420, height: 620 };
+    useStore.setState({
+      aiPanelVisible: true,
+      detachedAIChatWindow: null,
+      aiChatDetachedBoundsMemory: {
+        x: 0,
+        y: 1152,
+        width: 921,
+        height: 812,
+        coordinateSpace: 'screen',
+      },
+    });
+    vi.mocked(manager.Open)
+      .mockResolvedValueOnce({ success: true, bounds: workbenchBounds })
+      .mockResolvedValueOnce({ success: true, bounds: queryResultBounds })
+      .mockResolvedValueOnce({ success: true, bounds: aiChatBounds });
+
+    await expect(openNativeWorkbenchTabWindow('query-1', {
+      x: -1600,
+      y: 120,
+      width: 960,
+      height: 640,
+    }, manager)).resolves.toBe(true);
+    await expect(openNativeQueryResultWindow({
+      id: 'query-result:query-1:returned-bounds',
+      sourceQueryTabId: 'query-1',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      title: 'Returned bounds',
+      x: 2100,
+      y: -240,
+      width: 960,
+      height: 640,
+      result: {
+        key: 'returned-bounds',
+        sql: 'select 42',
+        rows: [{ value: 42 }],
+        columns: ['value'],
+        pkColumns: [],
+        readOnly: true,
+      },
+    }, manager)).resolves.toBe(true);
+    await expect(openNativeAIChatWindow(undefined, manager)).resolves.toBe(true);
+
+    expect(useStore.getState().detachedWorkbenchWindows).toEqual([
+      expect.objectContaining({ tabId: 'query-1', ...workbenchBounds }),
+    ]);
+    expect(useStore.getState().detachedQueryResultWindows).toEqual([
+      expect.objectContaining({
+        id: 'query-result:query-1:returned-bounds',
+        ...queryResultBounds,
+      }),
+    ]);
+    expect(useStore.getState().detachedAIChatWindow).toEqual(expect.objectContaining(aiChatBounds));
+    expect(useStore.getState().aiChatDetachedBoundsMemory).toEqual({
+      ...aiChatBounds,
+      coordinateSpace: 'screen',
+    });
+  });
+
+  it('falls back to the requested bounds when native open returns no bounds', async () => {
+    const workbenchBounds = { x: 40, y: 36, width: 820, height: 510 };
+    const queryResultBounds = { x: 64, y: 52, width: 780, height: 480 };
+    const aiChatBounds = { x: 88, y: 72, width: 410, height: 600 };
+    useStore.setState({
+      aiPanelVisible: true,
+      detachedAIChatWindow: null,
+    });
+
+    await expect(openNativeWorkbenchTabWindow('query-1', workbenchBounds, manager)).resolves.toBe(true);
+    await expect(openNativeQueryResultWindow({
+      id: 'query-result:query-1:fallback-bounds',
+      sourceQueryTabId: 'query-1',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      title: 'Fallback bounds',
+      ...queryResultBounds,
+      result: {
+        key: 'fallback-bounds',
+        sql: 'select 42',
+        rows: [{ value: 42 }],
+        columns: ['value'],
+        pkColumns: [],
+        readOnly: true,
+      },
+    }, manager)).resolves.toBe(true);
+    await expect(openNativeAIChatWindow(aiChatBounds, manager)).resolves.toBe(true);
+
+    expect(useStore.getState().detachedWorkbenchWindows).toEqual([
+      expect.objectContaining({ tabId: 'query-1', ...workbenchBounds }),
+    ]);
+    expect(useStore.getState().detachedQueryResultWindows).toEqual([
+      expect.objectContaining({
+        id: 'query-result:query-1:fallback-bounds',
+        ...queryResultBounds,
+      }),
+    ]);
+    expect(useStore.getState().detachedAIChatWindow).toEqual(expect.objectContaining(aiChatBounds));
+    expect(useStore.getState().aiChatDetachedBoundsMemory).toEqual({
+      ...aiChatBounds,
+      coordinateSpace: 'screen',
+    });
+  });
+
   it('does not reopen AI chat when the user attaches it while native open is pending', async () => {
     let resolveOpen: ((value: { success: boolean }) => void) | undefined;
     vi.mocked(manager.Open).mockReturnValueOnce(new Promise((resolve) => {
@@ -263,6 +403,35 @@ describe('nativeDetachedWindowHost', () => {
         aiContexts: {},
       }),
     }));
+  });
+
+  it('pushes changed shortcut options to every detached window kind', async () => {
+    const shortcutOptions = {
+      toggleAIPanel: {
+        mac: { combo: 'Meta+K', enabled: false },
+        windows: { combo: 'Ctrl+K', enabled: false },
+      },
+    };
+
+    await expect(syncNativeDetachedShortcutOptions([
+      'workbench:query-1',
+      'query-result:query-1:r1',
+      'ai-chat',
+    ], shortcutOptions, manager)).resolves.toBe(true);
+
+    expect(manager.SyncHostState).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(manager.SyncHostState!).mock.calls.map(([request]) => request.id))
+      .toEqual([
+        'workbench:query-1',
+        'query-result:query-1:r1',
+        'ai-chat',
+      ]);
+    for (const [request] of vi.mocked(manager.SyncHostState!).mock.calls) {
+      expect(request).toEqual(expect.objectContaining({
+        revision: expect.any(Number),
+        storeState: { shortcutOptions },
+      }));
+    }
   });
 
   it('retains and serializes host events for a detached AI child', async () => {

@@ -1,3 +1,5 @@
+import React from 'react';
+import TestRenderer, { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useStore } from '../store';
@@ -6,6 +8,7 @@ import {
   applyNativeDetachedWindowEvent,
   type NativeDetachedWindowEvent,
 } from './NativeDetachedWindowController';
+import NativeDetachedWindowController from './NativeDetachedWindowController';
 
 const buildQueryTab = (id: string, query: string) => ({
   id,
@@ -292,6 +295,208 @@ describe('NativeDetachedWindowController', () => {
     applyNativeDetachedWindowEvent(event, 'ai-chat', { onHostEvent });
     expect(onHostEvent).toHaveBeenCalledOnce();
     expect(onHostEvent).toHaveBeenCalledWith(event.payload?.hostEvent);
+  });
+
+  it('toggles only the main-window AI panel for a shortcut forwarded by a result child', () => {
+    expect(useStore.getState().aiPanelVisible).toBe(false);
+
+    const event: NativeDetachedWindowEvent = {
+      id: 'query-result:query-a:r1',
+      kind: 'query-result',
+      action: 'host-event',
+      payload: {
+        ownerWindowId: 'workbench:query-a',
+        hostEvent: {
+          id: 'query-result:query-a:r1:shortcut-1',
+          name: 'gonavi:shortcut:toggle-ai-panel',
+        },
+      },
+    };
+
+    applyNativeDetachedWindowEvent(event, 'workbench:query-a');
+    expect(useStore.getState().aiPanelVisible).toBe(false);
+
+    applyNativeDetachedWindowEvent(event);
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+  });
+
+  it('shows the main window only when the shortcut opens docked AI', () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const windowShow = vi.fn();
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        innerHeight: 900,
+        innerWidth: 1200,
+        runtime: { WindowShow: windowShow },
+      },
+    });
+    const event: NativeDetachedWindowEvent = {
+      id: 'workbench:query-a',
+      kind: 'workbench',
+      action: 'host-event',
+      payload: {
+        hostEvent: {
+          id: 'workbench:query-a:shortcut-focus',
+          name: 'gonavi:shortcut:toggle-ai-panel',
+        },
+      },
+    };
+
+    try {
+      useStore.setState({
+        aiChatOpenMode: 'dock',
+        aiPanelVisible: false,
+        detachedAIChatWindow: null,
+      });
+      applyNativeDetachedWindowEvent(event);
+      expect(useStore.getState().aiPanelVisible).toBe(true);
+      expect(windowShow).toHaveBeenCalledOnce();
+
+      applyNativeDetachedWindowEvent(event);
+      expect(useStore.getState().aiPanelVisible).toBe(false);
+      expect(windowShow).toHaveBeenCalledOnce();
+
+      useStore.setState({ aiChatOpenMode: 'detached' });
+      applyNativeDetachedWindowEvent(event);
+      expect(useStore.getState().detachedAIChatWindow).not.toBeNull();
+      expect(windowShow).toHaveBeenCalledOnce();
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('syncs changed shortcut options to every current detached window', async () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const eventTarget = new EventTarget();
+    const manager = {
+      Open: vi.fn(async () => ({ success: true })),
+      Focus: vi.fn(async () => ({ success: true })),
+      Close: vi.fn(async () => ({ success: true })),
+      CloseAll: vi.fn(async () => ({ success: true })),
+      SyncHostState: vi.fn(async (_request: {
+        id: string;
+        revision: number;
+        storeState: Record<string, unknown>;
+      }) => ({ success: true })),
+    };
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: Object.assign(eventTarget, {
+        go: { nativewindow: { Manager: manager } },
+        runtime: {
+          EventsOnMultiple: vi.fn(() => vi.fn()),
+          WindowShow: vi.fn(),
+        },
+      }),
+    });
+    const resultWindow = {
+      id: 'query-result:query-a:r1',
+      sourceQueryTabId: 'query-a',
+      connectionId: 'conn-1',
+      title: 'Result 1',
+      x: 10,
+      y: 10,
+      width: 800,
+      height: 600,
+      zIndex: 1203,
+      result: {
+        key: 'r1',
+        sql: 'select 1',
+        rows: [],
+        columns: [],
+        pkColumns: [],
+        readOnly: true,
+      },
+    };
+    useStore.setState({
+      detachedWorkbenchWindows: [
+        { tabId: 'query-a', x: 10, y: 10, width: 800, height: 600, zIndex: 1201 },
+      ],
+      detachedQueryResultWindows: [resultWindow],
+      detachedAIChatWindow: { x: 20, y: 20, width: 440, height: 720, zIndex: 1202 },
+    });
+
+    let renderer: TestRenderer.ReactTestRenderer | undefined;
+    try {
+      await act(async () => {
+        renderer = TestRenderer.create(React.createElement(NativeDetachedWindowController));
+        await Promise.resolve();
+      });
+      const previousShortcutOptions = useStore.getState().shortcutOptions;
+      const shortcutOptions = {
+        ...previousShortcutOptions,
+        toggleAIPanel: {
+          ...previousShortcutOptions.toggleAIPanel,
+          mac: { combo: 'Meta+K', enabled: false },
+        },
+      };
+
+      await act(async () => {
+        useStore.setState({ shortcutOptions });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const shortcutSyncRequests = manager.SyncHostState.mock.calls
+        .map(([request]) => request)
+        .filter((request) => Object.prototype.hasOwnProperty.call(
+          request.storeState,
+          'shortcutOptions',
+        ));
+      expect(shortcutSyncRequests.map((request) => request.id)).toEqual([
+        'workbench:query-a',
+        'query-result:query-a:r1',
+        'ai-chat',
+      ]);
+      for (const request of shortcutSyncRequests) {
+        expect(request.storeState.shortcutOptions).toEqual(shortcutOptions);
+      }
+
+      manager.SyncHostState.mockClear();
+      await act(async () => {
+        useStore.setState({
+          detachedWorkbenchWindows: [
+            ...useStore.getState().detachedWorkbenchWindows,
+            { tabId: 'query-b', x: 30, y: 30, width: 800, height: 600, zIndex: 1204 },
+          ],
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(manager.SyncHostState).toHaveBeenCalledOnce();
+      expect(manager.SyncHostState).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'workbench:query-b',
+        storeState: { shortcutOptions },
+      }));
+
+      await act(async () => {
+        useStore.setState({ detachedAIChatWindow: null });
+        await Promise.resolve();
+      });
+      manager.SyncHostState.mockClear();
+      await act(async () => {
+        useStore.setState({
+          detachedAIChatWindow: { x: 40, y: 40, width: 440, height: 720, zIndex: 1205 },
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(manager.SyncHostState).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
   });
 
   it('routes AI settings requests to the main window without docking the child', () => {

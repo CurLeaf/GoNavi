@@ -2,4 +2,6 @@
 
 package nativewindow
 
+func prepareDetachedAccessoryActivationPolicy() {}
+
 func setDetachedAccessoryActivationPolicy() {}

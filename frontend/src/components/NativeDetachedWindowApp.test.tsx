@@ -62,9 +62,17 @@ const workbenchTabTypes: TabData['type'][] = [
 let storeState: Record<string, any>;
 const storeListeners = new Set<() => void>();
 
-vi.mock('../store', () => {
+vi.mock('../store', async () => {
+  const { useSyncExternalStore } = await import('react');
   const useStore = Object.assign(
-    (selector: (state: Record<string, any>) => unknown) => selector(storeState),
+    (selector: (state: Record<string, any>) => unknown) => useSyncExternalStore(
+      (listener) => {
+        storeListeners.add(listener);
+        return () => storeListeners.delete(listener);
+      },
+      () => selector(storeState),
+      () => selector(storeState),
+    ),
     {
       getState: () => storeState,
       setState: (nextState: Record<string, any> | ((state: Record<string, any>) => Record<string, any>)) => {
@@ -87,6 +95,14 @@ vi.mock('../i18n/provider', () => ({
 vi.mock('../i18n', () => ({
   t: (key: string) => key,
 }));
+
+vi.mock('../utils/appearance', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../utils/appearance')>();
+  return {
+    ...actual,
+    isMacLikePlatform: () => true,
+  };
+});
 
 vi.mock('antd', () => ({
   Button: ({ icon, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon?: React.ReactNode }) => (
@@ -195,6 +211,12 @@ describe('NativeDetachedWindowApp', () => {
       aiChatSessions: [],
       aiActiveSessionId: null,
       aiContexts: {},
+      shortcutOptions: {
+        toggleAIPanel: {
+          mac: { combo: 'Meta+J', enabled: true },
+          windows: { combo: 'Ctrl+J', enabled: true },
+        },
+      },
       updateQueryTabDraft: vi.fn(),
     };
   });
@@ -739,6 +761,283 @@ describe('NativeDetachedWindowApp', () => {
         renderer!.unmount();
       });
     } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it.each([
+    ['workbench', 'workbench:query-native-1', 'Meta+K', 'k', 'KeyK', true, false, false],
+    ['query-result', 'query-result:query-native-1:r1', 'Meta+J', 'j', 'KeyJ', true, false, false],
+    ['ai-chat', 'ai-chat', 'Meta+J', 'j', 'KeyJ', true, false, false],
+    ['workbench', 'workbench:query-native-disabled', 'Meta+J', 'j', 'KeyJ', false, false, false],
+    ['workbench', 'workbench:query-native-ime', 'Meta+J', 'j', 'KeyJ', true, true, false],
+    ['workbench', 'workbench:query-native-composition', 'Meta+J', 'j', 'KeyJ', true, false, true],
+  ] as const)(
+    'handles the configured AI shortcut in a detached %s window (%s)',
+    async (kind, id, combo, key, code, enabled, isComposing, compositionActive) => {
+      const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+      const eventTarget = new EventTarget();
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: Object.assign(eventTarget, {
+          clearTimeout: globalThis.clearTimeout,
+          innerWidth: 800,
+          outerHeight: 720,
+          outerWidth: 800,
+          screenX: 40,
+          screenY: 40,
+          setTimeout: globalThis.setTimeout,
+        }),
+      });
+      const shortcutOptions = {
+        toggleAIPanel: {
+          mac: { combo, enabled },
+          windows: { combo: 'Ctrl+J', enabled: true },
+        },
+      };
+      const bootstrap: NativeDetachedWindowBootstrap = {
+        id,
+        kind,
+        title: 'Detached window',
+        payload: {
+          storeState: {
+            appearance: { uiVersion: 'v2' },
+            theme: 'light',
+            shortcutOptions,
+            ...(kind === 'workbench' ? { tabs: [queryTab], activeTabId: queryTab.id } : {}),
+          },
+          ...(kind === 'workbench' ? { tab: queryTab } : {}),
+          ...(kind === 'query-result'
+            ? {
+                resultWindow: {
+                  id,
+                  sourceQueryTabId: queryTab.id,
+                  connectionId: queryTab.connectionId || '',
+                  dbName: queryTab.dbName,
+                  title: 'Result',
+                  x: 40,
+                  y: 40,
+                  width: 800,
+                  height: 720,
+                  zIndex: 1201,
+                  result: {
+                    key: 'result-1',
+                    sql: 'select 1',
+                    rows: [],
+                    columns: [],
+                    pkColumns: [],
+                    readOnly: true,
+                  },
+                },
+              }
+            : {}),
+        },
+      };
+      const client = {
+        load: vi.fn(async () => bootstrap),
+        present: vi.fn(async () => undefined),
+        ready: vi.fn(async () => undefined),
+        sync: vi.fn(async () => undefined),
+        attach: vi.fn(async () => undefined),
+        close: vi.fn(async () => undefined),
+        cancelCloseRequest: vi.fn(async () => undefined),
+        openAISettings: vi.fn(async () => undefined),
+        hostEvent: vi.fn(async () => undefined),
+        closeCurrentWindow: vi.fn(async () => undefined),
+      };
+
+      try {
+        let renderer: TestRenderer.ReactTestRenderer;
+        await act(async () => {
+          renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+          await flushEffects();
+        });
+
+        const event = new Event('keydown', { bubbles: true, cancelable: true });
+        Object.defineProperties(event, {
+          key: { value: key },
+          code: { value: code },
+          metaKey: { value: true },
+          ctrlKey: { value: false },
+          altKey: { value: false },
+          shiftKey: { value: false },
+          isComposing: { value: isComposing },
+        });
+        await act(async () => {
+          if (compositionActive) {
+            eventTarget.dispatchEvent(new Event('compositionstart'));
+          }
+          eventTarget.dispatchEvent(event);
+          await flushEffects();
+        });
+
+        const shouldHandle = enabled && !isComposing && !compositionActive;
+        expect(event.defaultPrevented).toBe(shouldHandle);
+        if (shouldHandle) {
+          expect(client.hostEvent).toHaveBeenCalledWith(expect.objectContaining({
+            id,
+            kind,
+            hostEvent: expect.objectContaining({
+              name: 'gonavi:shortcut:toggle-ai-panel',
+            }),
+          }));
+        } else {
+          expect(client.hostEvent).not.toHaveBeenCalled();
+        }
+        await act(async () => {
+          renderer!.unmount();
+        });
+      } finally {
+        if (previousWindowDescriptor) {
+          Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+        } else {
+          Reflect.deleteProperty(globalThis, 'window');
+        }
+      }
+    },
+  );
+
+  it('rebinds and disables the AI shortcut after a host-state sync', async () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const eventTarget = new EventTarget();
+    const addEventListener = vi.spyOn(eventTarget, 'addEventListener');
+    const removeEventListener = vi.spyOn(eventTarget, 'removeEventListener');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: Object.assign(eventTarget, {
+        clearTimeout: globalThis.clearTimeout,
+        innerWidth: 800,
+        outerHeight: 720,
+        outerWidth: 800,
+        screenX: 40,
+        screenY: 40,
+        setTimeout: globalThis.setTimeout,
+      }),
+    });
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'workbench:query-native-1',
+      kind: 'workbench',
+      title: queryTab.title,
+      payload: {
+        storeState: {
+          appearance: { uiVersion: 'v2' },
+          theme: 'light',
+          tabs: [queryTab],
+          activeTabId: queryTab.id,
+          shortcutOptions: {
+            toggleAIPanel: {
+              mac: { combo: 'Meta+J', enabled: true },
+              windows: { combo: 'Ctrl+J', enabled: true },
+            },
+          },
+        },
+        tab: queryTab,
+      },
+    };
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      present: vi.fn(async () => undefined),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      cancelCloseRequest: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      hostEvent: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+    };
+    const shortcutEvent = (key: string, code: string) => {
+      const event = new Event('keydown', { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        key: { value: key },
+        code: { value: code },
+        metaKey: { value: true },
+        ctrlKey: { value: false },
+        altKey: { value: false },
+        shiftKey: { value: false },
+        isComposing: { value: false },
+      });
+      return event;
+    };
+
+    let renderer: TestRenderer.ReactTestRenderer | undefined;
+    try {
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+      await act(async () => {
+        runtimeEventListeners.get('gonavi:native-detached-command')?.({
+          id: bootstrap.id,
+          action: 'sync-host-state',
+          payload: {
+            revision: 1,
+            storeState: {
+              shortcutOptions: {
+                toggleAIPanel: {
+                  mac: { combo: 'Meta+K', enabled: true },
+                  windows: { combo: 'Ctrl+K', enabled: true },
+                },
+              },
+            },
+          },
+        });
+        renderer?.update(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+      expect(storeState.shortcutOptions.toggleAIPanel.mac).toEqual({
+        combo: 'Meta+K',
+        enabled: true,
+      });
+      expect(addEventListener.mock.calls.filter(([name]) => name === 'keydown')).toHaveLength(2);
+      expect(removeEventListener.mock.calls.filter(([name]) => name === 'keydown')).toHaveLength(1);
+
+      const oldShortcut = shortcutEvent('j', 'KeyJ');
+      const reboundShortcut = shortcutEvent('k', 'KeyK');
+      await act(async () => {
+        eventTarget.dispatchEvent(oldShortcut);
+        eventTarget.dispatchEvent(reboundShortcut);
+        await flushEffects();
+      });
+      expect(oldShortcut.defaultPrevented).toBe(false);
+      expect(reboundShortcut.defaultPrevented).toBe(true);
+      expect(client.hostEvent).toHaveBeenCalledOnce();
+
+      await act(async () => {
+        runtimeEventListeners.get('gonavi:native-detached-command')?.({
+          id: bootstrap.id,
+          action: 'sync-host-state',
+          payload: {
+            revision: 2,
+            storeState: {
+              shortcutOptions: {
+                toggleAIPanel: {
+                  mac: { combo: 'Meta+K', enabled: false },
+                  windows: { combo: 'Ctrl+K', enabled: false },
+                },
+              },
+            },
+          },
+        });
+        renderer?.update(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+
+      const disabledShortcut = shortcutEvent('k', 'KeyK');
+      await act(async () => {
+        eventTarget.dispatchEvent(disabledShortcut);
+        await flushEffects();
+      });
+      expect(disabledShortcut.defaultPrevented).toBe(false);
+      expect(client.hostEvent).toHaveBeenCalledOnce();
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
       if (previousWindowDescriptor) {
         Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
       } else {

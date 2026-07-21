@@ -21,6 +21,7 @@ export const NATIVE_DETACHED_HOST_EVENT_NAMES = [
   'gonavi:insert-sql-to-tab',
   'gonavi:jvm-apply-ai-plan',
   'gonavi:jvm-apply-diagnostic-plan',
+  'gonavi:shortcut:toggle-ai-panel',
 ] as const;
 
 export type NativeDetachedHostEventName = typeof NATIVE_DETACHED_HOST_EVENT_NAMES[number];
@@ -714,6 +715,9 @@ export const applyNativeDetachedHostStateSync = <TState extends object>(
   }
   if (Object.prototype.hasOwnProperty.call(safe, 'activeTabId')) {
     hostStatePatch.activeTabId = safe.activeTabId ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(safe, 'shortcutOptions')) {
+    hostStatePatch.shortcutOptions = safe.shortcutOptions;
   }
   const next = mergeNativeDetachedStoreState(currentState, hostStatePatch) as Record<string, unknown>;
 

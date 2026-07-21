@@ -80,6 +80,7 @@ type Manager struct {
 
 	starter               processStarter
 	executable            string
+	resolveBounds         func(WindowBounds) WindowBounds
 	openTimeout           time.Duration
 	closeFallbackDelay    time.Duration
 	shutdownGracePeriod   time.Duration
@@ -108,12 +109,13 @@ func NewManager(assetFS fs.FS, app *appcore.App, ai *aiservice.Service) (*Manage
 	if err != nil {
 		return nil, fmt.Errorf("resolve executable failed: %w", err)
 	}
-	return &Manager{
+	manager := &Manager{
 		shared:              shared,
 		token:               token,
 		windows:             make(map[string]*windowEntry),
 		starter:             execProcessStarter{},
 		executable:          executable,
+		resolveBounds:       normalizeDetachedWindowBounds,
 		openTimeout:         defaultOpenReadyTimeout,
 		closeFallbackDelay:  defaultGracefulCloseTimeout,
 		shutdownGracePeriod: defaultGracefulCloseTimeout,
@@ -123,7 +125,9 @@ func NewManager(assetFS fs.FS, app *appcore.App, ai *aiservice.Service) (*Manage
 		emitToChildren:        shared.Emit,
 		emitToChild:           shared.EmitTo,
 		emitToChildBestEffort: shared.EmitToBestEffort,
-	}, nil
+	}
+	installDetachedDockMenu()
+	return manager, nil
 }
 
 func newBridgeToken() (string, error) {
@@ -189,6 +193,7 @@ func (m *Manager) initialize(ctx context.Context) error {
 	}
 	m.httpServer = httpServer
 	m.mu.Unlock()
+	registerDetachedDockMenuManager(m)
 
 	go func() {
 		_ = httpServer.Serve(listener)
@@ -265,6 +270,15 @@ func (m *Manager) open(request OpenRequest, ownerID string) OperationResult {
 		return operationFailure("native window manager is unavailable")
 	}
 	request = normalizeOpenRequest(request)
+	if m.resolveBounds != nil {
+		bounds := m.resolveBounds(WindowBounds{
+			X: request.X, Y: request.Y, Width: request.Width, Height: request.Height,
+		})
+		request.X = bounds.X
+		request.Y = bounds.Y
+		request.Width = bounds.Width
+		request.Height = bounds.Height
+	}
 	request.ID = strings.TrimSpace(request.ID)
 	if request.ID == "" {
 		request.ID = uuid.NewString()
@@ -323,6 +337,9 @@ func (m *Manager) open(request OpenRequest, ownerID string) OperationResult {
 	current.process = process
 	current.info.PID = process.PID()
 	m.mu.Unlock()
+	// A very fast child can acknowledge readiness before Start returns. Republish
+	// after recording its PID so the Dock menu can identify the frontmost child.
+	publishDetachedDockMenuSnapshot(m)
 
 	go m.watchProcess(request.ID, process)
 	timeout := m.openTimeout
@@ -342,7 +359,7 @@ func (m *Manager) open(request OpenRequest, ownerID string) OperationResult {
 		if !active {
 			return operationFailure("native window exited before it became ready")
 		}
-		return OperationResult{Success: true, ID: request.ID}
+		return OperationResult{Success: true, ID: request.ID, Bounds: windowBoundsFromRequest(request)}
 	case exit := <-entry.done:
 		message := "native window exited before it became ready"
 		if exit.err != nil {
@@ -355,7 +372,7 @@ func (m *Manager) open(request OpenRequest, ownerID string) OperationResult {
 		if active && current == entry && entry.info.Ready {
 			entry.acknowledged = true
 			m.mu.Unlock()
-			return OperationResult{Success: true, ID: request.ID}
+			return OperationResult{Success: true, ID: request.ID, Bounds: windowBoundsFromRequest(request)}
 		}
 		registered := active && current == entry
 		if registered {
@@ -385,7 +402,11 @@ func (m *Manager) Focus(id string) OperationResult {
 	}
 	id = strings.TrimSpace(id)
 	m.mu.RLock()
-	_, exists := m.windows[id]
+	entry, exists := m.windows[id]
+	var bounds *WindowBounds
+	if exists {
+		bounds = windowBoundsFromInfo(entry.info)
+	}
 	emitToChild := m.emitToChild
 	shared := m.shared
 	m.mu.RUnlock()
@@ -398,7 +419,15 @@ func (m *Manager) Focus(id string) OperationResult {
 	} else if shared != nil {
 		shared.EmitTo(id, CommandEventName, command)
 	}
-	return OperationResult{Success: true, ID: id}
+	return OperationResult{Success: true, ID: id, Bounds: bounds}
+}
+
+func windowBoundsFromRequest(request OpenRequest) *WindowBounds {
+	return &WindowBounds{X: request.X, Y: request.Y, Width: request.Width, Height: request.Height}
+}
+
+func windowBoundsFromInfo(info WindowInfo) *WindowBounds {
+	return &WindowBounds{X: info.X, Y: info.Y, Width: info.Width, Height: info.Height}
 }
 
 // Close requests a graceful child shutdown and force-kills it if the WebView is
@@ -436,6 +465,7 @@ func (m *Manager) requestClose(id string, reason string) OperationResult {
 		delay = defaultGracefulCloseTimeout
 	}
 	m.mu.Unlock()
+	publishDetachedDockMenuSnapshot(m)
 
 	// attach/close actions are emitted before their HTTP response is written.
 	// Do not race that response with a second close command: the child will quit
@@ -479,6 +509,7 @@ func (m *Manager) CancelClose(id string) OperationResult {
 	}
 	m.cancelCloseLocked(entry)
 	m.mu.Unlock()
+	publishDetachedDockMenuSnapshot(m)
 	return OperationResult{Success: true, ID: id}
 }
 
@@ -649,6 +680,7 @@ func (m *Manager) watchProcess(id string, process childProcess) {
 		}
 	})
 	m.mu.Unlock()
+	publishDetachedDockMenuSnapshot(m)
 	if !acknowledged {
 		return
 	}
@@ -725,6 +757,7 @@ func validateOpenRequest(request OpenRequest) error {
 }
 
 func (m *Manager) shutdown() {
+	unregisterDetachedDockMenuManager(m)
 	m.mu.Lock()
 	if m.closing {
 		m.mu.Unlock()
@@ -983,6 +1016,9 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 	info := entry.info
 	ownerID := entry.ownerID
 	m.mu.Unlock()
+	if request.Action == "ready" || request.Action == "cancel-close" {
+		publishDetachedDockMenuSnapshot(m)
+	}
 
 	if request.Action != "ready" {
 		m.emitDetached(Event{
@@ -1058,7 +1094,7 @@ func (m *Manager) handleControl(w http.ResponseWriter, r *http.Request) {
 				Kind:   normalizeOpenRequest(request.Request).Kind,
 				Action: "opened",
 				Payload: withOwnerWindowID(
-					openEventPayload(request.Request.Payload),
+					openEventPayload(request.Request.Payload, result.Bounds),
 					ownerID,
 				),
 			})
@@ -1091,7 +1127,7 @@ func (m *Manager) handleControl(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(result)
 }
 
-func openEventPayload(payload any) any {
+func openEventPayload(payload any, bounds *WindowBounds) any {
 	source, ok := payload.(map[string]any)
 	if !ok {
 		return nil
@@ -1099,6 +1135,19 @@ func openEventPayload(payload any) any {
 	result := make(map[string]any, 2)
 	for _, key := range []string{"tab", "resultWindow"} {
 		if value, exists := source[key]; exists {
+			if key == "resultWindow" && bounds != nil {
+				if resultWindow, ok := value.(map[string]any); ok {
+					corrected := make(map[string]any, len(resultWindow)+4)
+					for field, fieldValue := range resultWindow {
+						corrected[field] = fieldValue
+					}
+					corrected["x"] = bounds.X
+					corrected["y"] = bounds.Y
+					corrected["width"] = bounds.Width
+					corrected["height"] = bounds.Height
+					value = corrected
+				}
+			}
 			result[key] = value
 		}
 	}

@@ -329,6 +329,47 @@ describe('nativeDetachedWindowClient', () => {
     expect(childState.activeTabId).toBe('query-2');
   });
 
+  it('applies shortcut options from a newer host-state revision', () => {
+    let childState = {
+      shortcutOptions: {
+        toggleAIPanel: {
+          mac: { combo: 'Meta+J', enabled: true },
+          windows: { combo: 'Ctrl+J', enabled: true },
+        },
+      },
+      closeTab: vi.fn(),
+    };
+    const childStore = {
+      getState: () => childState,
+      setState: (nextState: typeof childState) => {
+        childState = nextState;
+      },
+    };
+
+    const revision = applyNativeDetachedHostStateCommand(childStore, 'workbench:query-1', 2, {
+      id: 'workbench:query-1',
+      action: 'sync-host-state',
+      payload: {
+        revision: 3,
+        storeState: {
+          shortcutOptions: {
+            toggleAIPanel: {
+              mac: { combo: 'Meta+K', enabled: false },
+              windows: { combo: 'Ctrl+K', enabled: false },
+            },
+          },
+        },
+      },
+    });
+
+    expect(revision).toBe(3);
+    expect(childState.shortcutOptions.toggleAIPanel.mac).toEqual({
+      combo: 'Meta+K',
+      enabled: false,
+    });
+    expect(childState.closeTab).toBeTypeOf('function');
+  });
+
   it('bounds oversized active SQL before sending it over the native event stream', () => {
     const snapshot = buildNativeDetachedAIHostStoreSnapshot({
       activeTabId: queryTab.id,

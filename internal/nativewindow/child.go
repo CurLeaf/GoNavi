@@ -135,7 +135,7 @@ func RunChild(parentCtx context.Context, assetFS fs.FS, args []string) error {
 	control := newControl(bridge)
 	bridge.setReadyHandler(control.markFrontendReady)
 	minWidth, minHeight := detachedWindowMinimumSize(childOptions.Kind)
-	err = wails.Run(&options.App{
+	err = runDetachedChildApplication(&options.App{
 		Title:       childOptions.Title,
 		Width:       childOptions.Width,
 		Height:      childOptions.Height,
@@ -183,8 +183,13 @@ func RunChild(parentCtx context.Context, assetFS fs.FS, args []string) error {
 			bridge.stop()
 		},
 		Bind: []interface{}{control, bridge},
-	})
+	}, wails.Run)
 	return err
+}
+
+func runDetachedChildApplication(app *options.App, runner func(*options.App) error) error {
+	prepareDetachedAccessoryActivationPolicy()
+	return runner(app)
 }
 
 func detachedWindowMinimumSize(kind string) (width int, height int) {
