@@ -29,6 +29,16 @@ describe('AIMCPClientSelectorPanel', () => {
             clientCommand: 'openclaw',
             message: 'OpenClaw 通常部署在云端 Linux；请通过远程 MCP 桥接接入 Windows GoNavi。',
           },
+          {
+            client: 'opencode',
+            displayName: 'OpenCode',
+            installMode: 'auto',
+            installed: false,
+            matchesCurrent: false,
+            clientDetected: false,
+            clientCommand: 'opencode',
+            message: '未检测到 OpenCode 用户级 GoNavi MCP 配置',
+          },
         ]}
         selectedClient="openclaw"
         darkMode={false}
@@ -47,6 +57,7 @@ describe('AIMCPClientSelectorPanel', () => {
     expect(markup).toContain('Connected');
     expect(markup).toContain('OpenClaw');
     expect(markup).toContain('Remote bridge');
+    expect(markup).toContain('OpenCode');
     expect(markup).toContain('Selected. The remote connection guide will be copied');
     expect(markup).toContain('cloud Agents');
   });

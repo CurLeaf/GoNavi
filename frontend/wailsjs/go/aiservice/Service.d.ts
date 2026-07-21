@@ -58,6 +58,8 @@ export function AIInstallClaudeCodeMCP():Promise<ai.MCPClientInstallResult>;
 
 export function AIInstallCodexMCP():Promise<ai.MCPClientInstallResult>;
 
+export function AIInstallOpenCodeMCP():Promise<ai.MCPClientInstallResult>;
+
 export function AIListMCPTools():Promise<Array<ai.MCPToolDescriptor>>;
 
 export function AIListModels():Promise<Record<string, any>>;

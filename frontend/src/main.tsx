@@ -104,6 +104,19 @@ if (
             command: 'C:/Old/GoNavi.exe',
             args: ['mcp-server'],
         },
+        {
+            client: 'opencode',
+            displayName: 'OpenCode',
+            installMode: 'auto',
+            installed: false,
+            matchesCurrent: false,
+            clientDetected: false,
+            clientCommand: 'opencode',
+            message: t('app.browser_mock.mcp_client.opencode.not_detected'),
+            configPath: 'C:/Users/mock/.config/opencode/opencode.json',
+            command: 'C:/Program Files/GoNavi/GoNavi.exe',
+            args: ['mcp-server'],
+        },
     ];
     let mockSkills: any[] = [];
     let mockGlobalProxy: any = { enabled: false, type: 'socks5', host: '', port: 1080, user: '', password: '', hasPassword: false };
@@ -758,6 +771,26 @@ if (
                         client: 'codex',
                         message: t('app.browser_mock.mcp_client.codex.installed'),
                         configPath: 'C:/Users/mock/.codex/config.toml',
+                        command: 'C:/Program Files/GoNavi/GoNavi.exe',
+                        args: ['mcp-server'],
+                    };
+                },
+                AIInstallOpenCodeMCP: async () => {
+                    mockMCPClientStatuses = mockMCPClientStatuses.map((item) => item.client === 'opencode'
+                        ? {
+                            ...item,
+                            installed: true,
+                            matchesCurrent: true,
+                            message: t('app.browser_mock.mcp_client.opencode.installed'),
+                            command: 'C:/Program Files/GoNavi/GoNavi.exe',
+                            args: ['mcp-server'],
+                        }
+                        : item);
+                    return {
+                        success: true,
+                        client: 'opencode',
+                        message: t('app.browser_mock.mcp_client.opencode.installed'),
+                        configPath: 'C:/Users/mock/.config/opencode/opencode.json',
                         command: 'C:/Program Files/GoNavi/GoNavi.exe',
                         args: ['mcp-server'],
                     };

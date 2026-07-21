@@ -114,6 +114,10 @@ export function AIInstallCodexMCP() {
   return window['go']['aiservice']['Service']['AIInstallCodexMCP']();
 }
 
+export function AIInstallOpenCodeMCP() {
+  return window['go']['aiservice']['Service']['AIInstallOpenCodeMCP']();
+}
+
 export function AIListMCPTools() {
   return window['go']['aiservice']['Service']['AIListMCPTools']();
 }

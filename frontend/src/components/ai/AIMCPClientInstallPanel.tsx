@@ -87,13 +87,13 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
           <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
             {copy(
               'ai_chat.mcp_client.install.intro.title',
-              'This connects GoNavi MCP to Claude Code / Codex / OpenClaw / Hermans for external tool calls. It is not installing a plugin into GoNavi itself.',
+              'This connects GoNavi MCP to Claude Code / Codex / OpenCode / OpenClaw / Hermans for external tool calls. It is not installing a plugin into GoNavi itself.',
             )}
           </div>
           <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
             {copy(
               'ai_chat.mcp_client.install.intro.description',
-              'Claude Code and Codex write local user-level MCP config. Cloud Agents such as OpenClaw and Hermans use remote connection guidance so database passwords are not copied to the cloud.',
+              'Claude Code, Codex, and OpenCode write local user-level MCP config. Cloud Agents such as OpenClaw and Hermans use remote connection guidance so database passwords are not copied to the cloud.',
             )}
           </div>
         </div>

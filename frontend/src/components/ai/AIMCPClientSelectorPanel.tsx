@@ -32,7 +32,7 @@ const MCP_CLIENT_INSTALL_STEPS = [
     titleKey: 'ai_chat.mcp_client.install.selector.step.target.title',
     titleFallback: 'Choose target client',
     detailKey: 'ai_chat.mcp_client.install.selector.step.target.detail',
-    detailFallback: 'Local Claude/Codex can be installed automatically. OpenClaw/Hermans use remote connection guidance.',
+    detailFallback: 'Local Claude/Codex/OpenCode can be installed automatically. OpenClaw/Hermans use remote connection guidance.',
   },
   {
     step: '2',
