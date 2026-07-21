@@ -63,9 +63,11 @@ static void prepareDetachedAccessoryActivationPolicy(void) {
     }
 }
 
-static BOOL isDetachedAccessoryActivationPolicyGuardInstalled(void) {
+// Cocoa BOOL maps to different cgo types on Intel and Apple Silicon. Normalise
+// the bridge result to int so the Go side remains portable across both targets.
+static int isDetachedAccessoryActivationPolicyGuardInstalled(void) {
     @synchronized ([NSApplication class]) {
-        return detachedAccessoryActivationPolicyGuardActive;
+        return detachedAccessoryActivationPolicyGuardActive ? 1 : 0;
     }
 }
 
@@ -91,7 +93,7 @@ func prepareDetachedAccessoryActivationPolicy() {
 }
 
 func detachedAccessoryActivationPolicyGuardInstalled() bool {
-	return bool(C.isDetachedAccessoryActivationPolicyGuardInstalled())
+	return C.isDetachedAccessoryActivationPolicyGuardInstalled() != 0
 }
 
 func setDetachedAccessoryActivationPolicy() {
