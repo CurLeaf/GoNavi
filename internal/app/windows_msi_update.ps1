@@ -6,6 +6,8 @@ $StagedDir = $env:GONAVI_UPDATE_STAGED_DIR
 $LogPath = $env:GONAVI_UPDATE_LOG_PATH
 $MSILogPath = $env:GONAVI_UPDATE_MSI_LOG_PATH
 $MSIExecPath = $env:GONAVI_UPDATE_MSIEXEC_PATH
+$MaintenanceEventName = $env:GONAVI_UPDATE_MAINTENANCE_EVENT_NAME
+$HandoffEventName = $env:GONAVI_UPDATE_HANDOFF_EVENT_NAME
 $HostProcessId = 0
 $HostExited = $false
 $InstallSucceeded = $false
@@ -13,6 +15,9 @@ $LaunchSucceeded = $false
 $DesktopShortcutDirectories = @()
 $DesktopShortcutState = $null
 $DesktopShortcutInstallValue = '1'
+$MaintenanceEvent = $null
+$HandoffEvent = $null
+$MaintenanceLockReleased = $false
 
 function Write-UpdateLog {
     param([string]$Message)
@@ -25,6 +30,25 @@ function Write-UpdateLog {
         Add-Content -LiteralPath $LogPath -Value "[$timestamp] $Message" -Encoding UTF8
     } catch {
         # Logging must never hide the original updater error.
+    }
+}
+
+function Release-UpdateMaintenanceLock {
+    if ($MaintenanceLockReleased) {
+        return $true
+    }
+    try {
+        if ($null -eq $MaintenanceEvent) {
+            $script:MaintenanceLockReleased = $true
+            return $true
+        }
+        $script:MaintenanceEvent.Dispose()
+        $script:MaintenanceEvent = $null
+        $script:MaintenanceLockReleased = $true
+        return $true
+    } catch {
+        Write-UpdateLog ("maintenance lock release failed: " + $_.Exception.Message)
+        return $false
     }
 }
 function Quote-NativeArgument {
@@ -49,7 +73,7 @@ function Remove-UpdateArtifact {
 }
 
 try {
-    foreach ($requiredPath in @($Source, $Target, $StagedDir, $LogPath, $MSILogPath, $MSIExecPath)) {
+    foreach ($requiredPath in @($Source, $Target, $StagedDir, $LogPath, $MSILogPath, $MSIExecPath, $MaintenanceEventName, $HandoffEventName)) {
         if ([string]::IsNullOrWhiteSpace($requiredPath)) {
             throw 'missing required MSI updater path'
         }
@@ -72,6 +96,11 @@ try {
         throw 'target directory does not exist'
     }
 
+    $MaintenanceEvent = [Threading.EventWaitHandle]::OpenExisting($MaintenanceEventName)
+    $HandoffEvent = [Threading.EventWaitHandle]::OpenExisting($HandoffEventName)
+    [void]$HandoffEvent.Set()
+    $HandoffEvent.Dispose()
+    $HandoffEvent = $null
     Write-UpdateLog 'MSI updater started'
     $waitedSeconds = 0
     while (Get-Process -Id $HostProcessId -ErrorAction SilentlyContinue) {
@@ -123,6 +152,9 @@ try {
         throw 'desktop shortcut state could not be restored'
     }
     [void](Repair-LegacyGoNaviTaskbarPins -TargetPath $Target)
+    if (-not (Release-UpdateMaintenanceLock)) {
+        throw 'update maintenance lock could not be released before relaunch'
+    }
     Write-UpdateLog ("launching installed application: " + $Target)
     $NewProcess = Start-Process -FilePath $Target -WorkingDirectory $TargetDir -PassThru -ErrorAction Stop
     Start-Sleep -Milliseconds 1500
@@ -158,7 +190,8 @@ try {
         [void](Remove-GoNaviDesktopShortcutsForTarget -TargetPath $Target -DesktopDirectories $DesktopShortcutDirectories)
     }
     [void](Restore-GoNaviDesktopShortcutState -State $DesktopShortcutState)
-    if ($HostExited -and -not $LaunchSucceeded -and (Test-Path -LiteralPath $Target -PathType Leaf)) {
+    [void](Release-UpdateMaintenanceLock)
+    if ($HostExited -and -not $LaunchSucceeded -and $MaintenanceLockReleased -and (Test-Path -LiteralPath $Target -PathType Leaf)) {
         try {
             $TargetDir = [IO.Path]::GetDirectoryName($Target)
             Start-Process -FilePath $Target -WorkingDirectory $TargetDir -ErrorAction Stop | Out-Null

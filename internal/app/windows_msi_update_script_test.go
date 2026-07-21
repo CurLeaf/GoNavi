@@ -28,6 +28,10 @@ func TestBuildWindowsMSIUpdatePowerShellScriptInstallsRelaunchesAndCleans(t *tes
 		`$InstallerExitCode -notin @(0, 1641, 3010)`,
 		`if (-not (Restore-GoNaviDesktopShortcutState -State $DesktopShortcutState -OnlyForeign))`,
 		`Repair-LegacyGoNaviTaskbarPins -TargetPath $Target`,
+		`function Release-UpdateMaintenanceLock`,
+		`[Threading.EventWaitHandle]::OpenExisting($MaintenanceEventName)`,
+		`[void]$HandoffEvent.Set()`,
+		`update maintenance lock could not be released before relaunch`,
 		`Start-Process -FilePath $Target -WorkingDirectory $TargetDir`,
 		`Remove-UpdateArtifact $Source`,
 		`MSI package retained for manual install`,
@@ -47,9 +51,13 @@ func TestBuildWindowsMSIUpdatePowerShellScriptInstallsRelaunchesAndCleans(t *tes
 		t.Fatalf("desktop shortcut state must be captured before MSI starts\n%s", script)
 	}
 	repairIndex := strings.Index(script, `Repair-LegacyGoNaviTaskbarPins -TargetPath $Target`)
+	releaseIndex := strings.Index(script, `if (-not (Release-UpdateMaintenanceLock))`)
 	relaunchIndex := strings.Index(script, `Start-Process -FilePath $Target -WorkingDirectory $TargetDir`)
 	if repairIndex < installerIndex || repairIndex > relaunchIndex {
 		t.Fatalf("legacy taskbar pins must be repaired after install and before relaunch\n%s", script)
+	}
+	if releaseIndex < repairIndex || releaseIndex > relaunchIndex {
+		t.Fatalf("maintenance lock must be released after install repair and before relaunch\n%s", script)
 	}
 	for _, r := range script {
 		if r > 0x7f {
@@ -60,23 +68,27 @@ func TestBuildWindowsMSIUpdatePowerShellScriptInstallsRelaunchesAndCleans(t *tes
 
 func TestBuildWindowsMSILaunchCommandPreservesPathsInEnvironment(t *testing.T) {
 	context := windowsMSIUpdateLaunchContext{
-		SourcePath:  `C:\Users\tester\AppData\Local\GoNavi 100%\GoNavi-Installer.msi`,
-		TargetPath:  `D:\software ! 100% & portable\GoNavi.exe`,
-		StagedDir:   `C:\Users\tester\AppData\Local\GoNavi 100%\stage`,
-		LogPath:     `C:\Users\tester\AppData\Local\GoNavi 100%\stage\update.log`,
-		MSILogPath:  `C:\Users\tester\AppData\Local\GoNavi 100%\stage\msi.log`,
-		MSIExecPath: `C:\Windows\System32\msiexec.exe`,
-		PID:         12345,
+		SourcePath:           `C:\Users\tester\AppData\Local\GoNavi 100%\GoNavi-Installer.msi`,
+		TargetPath:           `D:\software ! 100% & portable\GoNavi.exe`,
+		StagedDir:            `C:\Users\tester\AppData\Local\GoNavi 100%\stage`,
+		LogPath:              `C:\Users\tester\AppData\Local\GoNavi 100%\stage\update.log`,
+		MSILogPath:           `C:\Users\tester\AppData\Local\GoNavi 100%\stage\msi.log`,
+		MSIExecPath:          `C:\Windows\System32\msiexec.exe`,
+		MaintenanceEventName: `Global\GoNavi-Update-Test`,
+		HandoffEventName:     `Local\GoNavi-Update-Handoff-Test`,
+		PID:                  12345,
 	}
 	cmd := buildWindowsMSILaunchCommand(filepath.Join(context.StagedDir, "update-msi.ps1"), context)
 	want := map[string]string{
-		"GONAVI_UPDATE_SOURCE":       context.SourcePath,
-		"GONAVI_UPDATE_TARGET":       context.TargetPath,
-		"GONAVI_UPDATE_STAGED_DIR":   context.StagedDir,
-		"GONAVI_UPDATE_LOG_PATH":     context.LogPath,
-		"GONAVI_UPDATE_MSI_LOG_PATH": context.MSILogPath,
-		"GONAVI_UPDATE_MSIEXEC_PATH": context.MSIExecPath,
-		"GONAVI_UPDATE_PID":          "12345",
+		"GONAVI_UPDATE_SOURCE":                 context.SourcePath,
+		"GONAVI_UPDATE_TARGET":                 context.TargetPath,
+		"GONAVI_UPDATE_STAGED_DIR":             context.StagedDir,
+		"GONAVI_UPDATE_LOG_PATH":               context.LogPath,
+		"GONAVI_UPDATE_MSI_LOG_PATH":           context.MSILogPath,
+		"GONAVI_UPDATE_MSIEXEC_PATH":           context.MSIExecPath,
+		"GONAVI_UPDATE_MAINTENANCE_EVENT_NAME": context.MaintenanceEventName,
+		"GONAVI_UPDATE_HANDOFF_EVENT_NAME":     context.HandoffEventName,
+		"GONAVI_UPDATE_PID":                    "12345",
 	}
 	got := make(map[string]string, len(want))
 	for _, item := range cmd.Env {

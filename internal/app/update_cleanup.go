@@ -11,7 +11,7 @@ import (
 	"GoNavi-Wails/internal/logger"
 )
 
-func launchWindowsMSIUpdate(staged *stagedUpdate, targetExe string, pid int) error {
+func launchWindowsMSIUpdate(staged *stagedUpdate, targetExe string, pid int, waitForHandoff func() error) error {
 	if staged == nil {
 		return localizedUpdateError{key: "app.update.backend.message.no_downloaded_package"}
 	}
@@ -48,18 +48,32 @@ func launchWindowsMSIUpdate(staged *stagedUpdate, targetExe string, pid int) err
 	}
 	msiExecPath := resolveWindowsMSIExecPath(os.Getenv)
 	context := windowsMSIUpdateLaunchContext{
-		SourcePath:  staged.FilePath,
-		TargetPath:  strings.TrimSpace(targetExe),
-		StagedDir:   staged.StagedDir,
-		LogPath:     staged.InstallLogPath,
-		MSILogPath:  msiLogPath,
-		MSIExecPath: msiExecPath,
-		PID:         pid,
+		SourcePath:           staged.FilePath,
+		TargetPath:           strings.TrimSpace(targetExe),
+		StagedDir:            staged.StagedDir,
+		LogPath:              staged.InstallLogPath,
+		MSILogPath:           msiLogPath,
+		MSIExecPath:          msiExecPath,
+		MaintenanceEventName: staged.MaintenanceEventName,
+		HandoffEventName:     staged.UpdateHandoffEventName,
+		PID:                  pid,
 	}
 	logger.Infof("启动 Windows MSI 更新器：target=%s script=%s log=%s msi_log=%s package=%s", targetExe, scriptPath, staged.InstallLogPath, msiLogPath, staged.FilePath)
 	cmd := buildWindowsMSILaunchCommand(scriptPath, context)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start Windows MSI updater: %w", err)
+	}
+	if waitForHandoff != nil {
+		if err := waitForHandoff(); err != nil {
+			if cmd.Process != nil {
+				if killErr := cmd.Process.Kill(); killErr == nil {
+					_, _ = cmd.Process.Wait()
+				} else {
+					_ = cmd.Process.Release()
+				}
+			}
+			return err
+		}
 	}
 	if cmd.Process != nil {
 		if err := cmd.Process.Release(); err != nil {
@@ -81,7 +95,7 @@ func resolveWindowsMSIExecPath(getenv func(string) string) string {
 	return filepath.Join(`C:\Windows`, "System32", "msiexec.exe")
 }
 
-func launchWindowsUpdateWithCleanup(staged *stagedUpdate, targetExe string, pid int) error {
+func launchWindowsUpdateWithCleanup(staged *stagedUpdate, targetExe string, pid int, waitForHandoff func() error) error {
 	if staged == nil {
 		return localizedUpdateError{key: "app.update.backend.message.no_downloaded_package"}
 	}
@@ -118,17 +132,31 @@ func launchWindowsUpdateWithCleanup(staged *stagedUpdate, targetExe string, pid 
 	}
 
 	launchContext := windowsUpdateLaunchContext{
-		SourcePath:        staged.FilePath,
-		TargetPath:        finalTargetExe,
-		CurrentTargetPath: currentTargetExe,
-		StagedDir:         staged.StagedDir,
-		LogPath:           staged.InstallLogPath,
-		PID:               pid,
+		SourcePath:           staged.FilePath,
+		TargetPath:           finalTargetExe,
+		CurrentTargetPath:    currentTargetExe,
+		StagedDir:            staged.StagedDir,
+		LogPath:              staged.InstallLogPath,
+		MaintenanceEventName: staged.MaintenanceEventName,
+		HandoffEventName:     staged.UpdateHandoffEventName,
+		PID:                  pid,
 	}
 	logger.Infof("启动 Windows PowerShell 更新器：current=%s target=%s script=%s log=%s", currentTargetExe, finalTargetExe, scriptPath, staged.InstallLogPath)
 	cmd := buildWindowsLaunchCommand(scriptPath, launchContext)
 	if err := cmd.Start(); err != nil {
 		return err
+	}
+	if waitForHandoff != nil {
+		if err := waitForHandoff(); err != nil {
+			if cmd.Process != nil {
+				if killErr := cmd.Process.Kill(); killErr == nil {
+					_, _ = cmd.Process.Wait()
+				} else {
+					_ = cmd.Process.Release()
+				}
+			}
+			return err
+		}
 	}
 	if cmd.Process != nil {
 		if err := cmd.Process.Release(); err != nil {

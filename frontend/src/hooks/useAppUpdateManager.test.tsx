@@ -297,10 +297,11 @@ describe('useAppUpdateManager', () => {
       await hook?.checkForUpdates(false);
     });
     await act(async () => {
-      await hook?.handleInstallFromProgress();
+      await hook?.handleInstallFromProgress(true);
     });
 
     expect(backendApp.InstallUpdateAndRestart).toHaveBeenCalledTimes(1);
+    expect(backendApp.InstallUpdateAndRestart).toHaveBeenCalledWith(true);
     expect(hook?.updateInstallAction).toBe('launch-installer');
     expect(hook?.updateDownloadProgress.message).toBe('app.about.download_progress.installer_started');
   });
@@ -330,6 +331,7 @@ describe('useAppUpdateManager', () => {
     });
 
     expect(backendApp.InstallUpdateAndRestart).toHaveBeenCalledTimes(1);
+    expect(backendApp.InstallUpdateAndRestart).toHaveBeenCalledWith(false);
     expect(backendApp.OpenDownloadedUpdateDirectory).not.toHaveBeenCalled();
   });
 

@@ -384,7 +384,7 @@ export const useAppUpdateManager = ({
   const canShowProgressEntry = (isLatestUpdateDownloaded || isBackgroundProgressForLatestUpdate)
     && updateInstallTriggeredVersionRef.current !== (lastUpdateKey || null);
 
-  const handleInstallFromProgress = useCallback(async (): Promise<boolean> => {
+  const handleInstallFromProgress = useCallback(async (closeAllWindowsInstancesConfirmed = false): Promise<boolean> => {
     const canInstall = updateDownloadProgress.status === 'done'
       || (Boolean(lastUpdateInfo?.hasUpdate) && (Boolean(lastUpdateInfo?.downloaded) || updateDownloadedVersionRef.current === lastUpdateKey));
     if (!canInstall) {
@@ -404,7 +404,7 @@ export const useAppUpdateManager = ({
     }));
     let res: any = null;
     try {
-      res = await (window as any).go?.app?.App?.InstallUpdateAndRestart?.();
+      res = await (window as any).go?.app?.App?.InstallUpdateAndRestart?.(closeAllWindowsInstancesConfirmed);
     } catch (error: any) {
       res = { success: false, message: error?.message || t('common.unknown') };
     }

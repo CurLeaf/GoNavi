@@ -659,7 +659,7 @@ func TestInstallUpdateAndRestartFailsBeforeLaunchWhenWindowsTargetDirIsNotWritab
 		return nil
 	}
 
-	result := app.InstallUpdateAndRestart()
+	result := app.InstallUpdateAndRestart(true)
 	if result.Success {
 		t.Fatalf("expected InstallUpdateAndRestart to fail, got %#v", result)
 	}
@@ -711,7 +711,7 @@ func TestInstallUpdateAndRestartMSISkipsPortableTargetWriteProbe(t *testing.T) {
 		return errors.New("stop after MSI launcher reached")
 	}
 
-	result := app.InstallUpdateAndRestart()
+	result := app.InstallUpdateAndRestart(true)
 	if result.Success {
 		t.Fatalf("expected injected launcher error, got %#v", result)
 	}

@@ -14,13 +14,15 @@ var windowsMSIUpdatePowerShellScript string
 var windowsShortcutRepairPowerShellScript string
 
 type windowsMSIUpdateLaunchContext struct {
-	SourcePath  string
-	TargetPath  string
-	StagedDir   string
-	LogPath     string
-	MSILogPath  string
-	MSIExecPath string
-	PID         int
+	SourcePath           string
+	TargetPath           string
+	StagedDir            string
+	LogPath              string
+	MSILogPath           string
+	MSIExecPath          string
+	MaintenanceEventName string
+	HandoffEventName     string
+	PID                  int
 }
 
 func buildWindowsMSIUpdatePowerShellScript() string {
@@ -47,6 +49,8 @@ func buildWindowsMSILaunchCommand(scriptPath string, context windowsMSIUpdateLau
 		"GONAVI_UPDATE_LOG_PATH="+context.LogPath,
 		"GONAVI_UPDATE_MSI_LOG_PATH="+context.MSILogPath,
 		"GONAVI_UPDATE_MSIEXEC_PATH="+context.MSIExecPath,
+		"GONAVI_UPDATE_MAINTENANCE_EVENT_NAME="+context.MaintenanceEventName,
+		"GONAVI_UPDATE_HANDOFF_EVENT_NAME="+context.HandoffEventName,
 		"GONAVI_UPDATE_PID="+strconv.Itoa(context.PID),
 	)
 	configureWindowsUpdateCommand(cmd)

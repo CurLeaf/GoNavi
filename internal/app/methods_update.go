@@ -55,6 +55,8 @@ var (
 	updateResolveInstallMode        = resolveCurrentUpdateInstallMode
 	updateLaunchInstallScript       = launchUpdateScript
 	updateFindOtherWindowsInstances = findOtherWindowsUpdateInstances
+	updateCloseWindowsInstances     = closeWindowsUpdateInstances
+	updateAcquireWindowsMaintenance = acquireWindowsUpdateMaintenance
 	updateQuitSleep                 = time.Sleep
 	updateExitProcess               = os.Exit
 )
@@ -115,15 +117,17 @@ type updateDownloadProgressPayload struct {
 }
 
 type stagedUpdate struct {
-	Channel        updateChannel
-	Version        string
-	AssetName      string
-	FilePath       string
-	StagedDir      string
-	InstallLogPath string
-	InstallMode    updateInstallMode
-	PackageType    updatePackageType
-	AutoRelaunch   bool
+	Channel                updateChannel
+	Version                string
+	AssetName              string
+	FilePath               string
+	StagedDir              string
+	InstallLogPath         string
+	InstallMode            updateInstallMode
+	PackageType            updatePackageType
+	AutoRelaunch           bool
+	MaintenanceEventName   string
+	UpdateHandoffEventName string
 }
 
 type updatePathCandidate struct {
@@ -286,7 +290,7 @@ func (a *App) DownloadUpdate() connection.QueryResult {
 	return result
 }
 
-func (a *App) InstallUpdateAndRestart() connection.QueryResult {
+func (a *App) InstallUpdateAndRestart(closeAllWindowsInstancesConfirmed bool) connection.QueryResult {
 	a.updateMu.Lock()
 	staged := a.updateState.staged
 	if staged != nil && strings.TrimSpace(staged.InstallLogPath) == "" {
@@ -304,9 +308,35 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 			}),
 		}
 	}
+	if windowsUpdateCloseConfirmationRequired(stdRuntime.GOOS, closeAllWindowsInstancesConfirmed) {
+		return connection.QueryResult{
+			Success: false,
+			Message: a.appText("app.update.backend.message.install_launch_failed", map[string]any{
+				"detail": a.appText("app.update.backend.error.close_instances_confirmation_required", nil),
+			}),
+			Data: map[string]any{
+				"requiresCloseConfirmation": true,
+			},
+		}
+	}
 
 	if stdRuntime.GOOS == "windows" {
 		installTarget := updateResolveInstallTarget()
+		maintenanceLease, err := updateAcquireWindowsMaintenance(installTarget)
+		if err != nil {
+			return connection.QueryResult{
+				Success: false,
+				Message: a.appText("app.update.backend.message.install_launch_failed", map[string]any{
+					"detail": a.appText("app.update.backend.error.maintenance_lock_failed", map[string]any{"detail": err.Error()}),
+				}),
+			}
+		}
+		defer func() {
+			if maintenanceLease.Release != nil {
+				maintenanceLease.Release()
+			}
+		}()
+		staged.MaintenanceEventName = maintenanceLease.Name
 		if staged.InstallMode == updateInstallModePortable {
 			if err := ensureWindowsUpdateTargetWritable(installTarget); err != nil {
 				return connection.QueryResult{
@@ -319,27 +349,21 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 		}
 
 		finalTarget := resolveWindowsUpdateFinalTargetPath(installTarget, staged.FilePath)
-		otherInstances, err := updateFindOtherWindowsInstances([]string{installTarget, finalTarget}, os.Getpid())
+		closedPIDs, err := closeOtherWindowsUpdateInstancesForInstall([]string{installTarget, finalTarget}, os.Getpid())
 		if err != nil {
+			logger.Warnf("关闭 Windows 更新相关实例失败 current=%s target=%s pids=%v error=%v", installTarget, finalTarget, closedPIDs, err)
 			return connection.QueryResult{
 				Success: false,
 				Message: a.appText("app.update.backend.message.install_launch_failed", map[string]any{
-					"detail": err.Error(),
-				}),
-			}
-		}
-		if len(otherInstances) > 0 {
-			runningPIDs := otherWindowsUpdateProcessIDs(otherInstances)
-			logger.Warnf("阻止 Windows 更新：检测到其他实例 current=%s target=%s pids=%v", installTarget, finalTarget, runningPIDs)
-			return connection.QueryResult{
-				Success: false,
-				Message: a.appText("app.update.backend.message.install_launch_failed", map[string]any{
-					"detail": a.appText("app.update.backend.error.other_instances_running", nil),
+					"detail": a.appText("app.update.backend.error.close_instances_failed", map[string]any{"detail": err.Error()}),
 				}),
 				Data: map[string]any{
-					"runningPids": runningPIDs,
+					"runningPids": closedPIDs,
 				},
 			}
+		}
+		if len(closedPIDs) > 0 {
+			logger.Infof("Windows 更新已关闭其他 GoNavi 实例 current=%s target=%s pids=%v", installTarget, finalTarget, closedPIDs)
 		}
 	}
 
@@ -364,7 +388,6 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 			},
 		}
 	}
-
 	go a.quitForUpdate()
 
 	msg := a.appText("app.update.backend.message.install_started", nil)
@@ -1721,10 +1744,19 @@ func launchUpdateScript(staged *stagedUpdate) error {
 }
 
 func launchWindowsUpdate(staged *stagedUpdate, targetExe string, pid int) error {
-	if staged != nil && staged.InstallMode == updateInstallModeMSI && staged.PackageType == updatePackageTypeMSI {
-		return launchWindowsMSIUpdate(staged, targetExe, pid)
+	if staged == nil {
+		return localizedUpdateError{key: "app.update.backend.message.no_downloaded_package"}
 	}
-	return launchWindowsUpdateWithCleanup(staged, targetExe, pid)
+	handoff, err := prepareWindowsUpdateHandoff()
+	if err != nil {
+		return err
+	}
+	defer handoff.Close()
+	staged.UpdateHandoffEventName = handoff.Name
+	if staged != nil && staged.InstallMode == updateInstallModeMSI && staged.PackageType == updatePackageTypeMSI {
+		return launchWindowsMSIUpdate(staged, targetExe, pid, handoff.Wait)
+	}
+	return launchWindowsUpdateWithCleanup(staged, targetExe, pid, handoff.Wait)
 }
 
 func launchMacUpdate(staged *stagedUpdate, targetExe string, pid int) error {
@@ -1795,6 +1827,8 @@ func buildWindowsLaunchCommand(scriptPath string, context windowsUpdateLaunchCon
 		"GONAVI_UPDATE_CURRENT_TARGET="+context.CurrentTargetPath,
 		"GONAVI_UPDATE_STAGED_DIR="+context.StagedDir,
 		"GONAVI_UPDATE_LOG_PATH="+context.LogPath,
+		"GONAVI_UPDATE_MAINTENANCE_EVENT_NAME="+context.MaintenanceEventName,
+		"GONAVI_UPDATE_HANDOFF_EVENT_NAME="+context.HandoffEventName,
 		"GONAVI_UPDATE_PID="+strconv.Itoa(context.PID),
 	)
 	configureWindowsUpdateCommand(cmd)

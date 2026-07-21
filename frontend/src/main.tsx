@@ -569,7 +569,7 @@ if (
                 RenameSQLDirectory: async (directoryPath: string, name: string) => ({ success: true, data: { directoryPath: `${directoryPath.replace(/[\\/][^\\/]*$/, '')}/${name}`, name } }),
                 WriteSQLFile: async (_filePath: string, _content: string) => ({ success: true }),
                 ExportSQLFile: async (_defaultName: string, _content: string) => ({ success: false, message: t('app.browser_mock.export_sql_unsupported') }),
-                InstallUpdateAndRestart: async () => ({ success: false }),
+                InstallUpdateAndRestart: async (_closeAllWindowsInstancesConfirmed: boolean) => ({ success: false }),
                 ImportConfigFile: async () => ({ success: false, message: '已取消' }),
                 ImportConnectionsPayload: async (raw: string, _password?: string) => {
                     try {

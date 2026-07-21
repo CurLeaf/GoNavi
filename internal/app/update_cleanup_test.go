@@ -181,10 +181,14 @@ func TestBuildWindowsPowerShellScriptRelaunchesBeforeDeletingFallbacks(t *testin
 	script := buildWindowsPowerShellScript()
 
 	startIdx := strings.Index(script, `$NewProcess = Start-Process -FilePath $Target`)
+	releaseIdx := strings.Index(script, `if (-not (Release-UpdateMaintenanceLock))`)
 	deleteCurrentIdx := strings.Index(script, `Remove-UpdateArtifact $CurrentTarget`)
 	deleteSourceIdx := strings.Index(script, `Remove-UpdateArtifact $Source`)
-	if startIdx < 0 || deleteCurrentIdx < 0 || deleteSourceIdx < 0 {
-		t.Fatalf("expected relaunch and cleanup commands in script (start=%d current=%d source=%d)\n%s", startIdx, deleteCurrentIdx, deleteSourceIdx, script)
+	if releaseIdx < 0 || startIdx < 0 || deleteCurrentIdx < 0 || deleteSourceIdx < 0 {
+		t.Fatalf("expected maintenance release, relaunch and cleanup commands in script (release=%d start=%d current=%d source=%d)\n%s", releaseIdx, startIdx, deleteCurrentIdx, deleteSourceIdx, script)
+	}
+	if releaseIdx > startIdx {
+		t.Fatalf("maintenance lock must be released immediately before relaunch (release=%d start=%d)\n%s", releaseIdx, startIdx, script)
 	}
 	if deleteCurrentIdx < startIdx || deleteSourceIdx < startIdx {
 		t.Fatalf("fallback files must be deleted only after relaunch (start=%d current=%d source=%d)\n%s", startIdx, deleteCurrentIdx, deleteSourceIdx, script)
@@ -193,22 +197,26 @@ func TestBuildWindowsPowerShellScriptRelaunchesBeforeDeletingFallbacks(t *testin
 
 func TestBuildWindowsLaunchCommandPreservesSpecialPathsInEnvironment(t *testing.T) {
 	context := windowsUpdateLaunchContext{
-		SourcePath:        `C:\Users\tester\AppData\Local\Temp\GoNavi %TEMP%\GoNavi-0.8.5-Windows-Amd64.exe`,
-		TargetPath:        `D:\软件 ! 100% & (便携版)\O'Brien\GoNavi.exe`,
-		CurrentTargetPath: `D:\软件 ! 100% & (便携版)\O'Brien\GoNavi-dev-f930ffe.exe`,
-		StagedDir:         `C:\Users\tester\AppData\Local\Temp\GoNavi %TEMP%\stage`,
-		LogPath:           `C:\Users\tester\AppData\Local\Temp\GoNavi %TEMP%\stage\update.log`,
-		PID:               12345,
+		SourcePath:           `C:\Users\tester\AppData\Local\Temp\GoNavi %TEMP%\GoNavi-0.8.5-Windows-Amd64.exe`,
+		TargetPath:           `D:\软件 ! 100% & (便携版)\O'Brien\GoNavi.exe`,
+		CurrentTargetPath:    `D:\软件 ! 100% & (便携版)\O'Brien\GoNavi-dev-f930ffe.exe`,
+		StagedDir:            `C:\Users\tester\AppData\Local\Temp\GoNavi %TEMP%\stage`,
+		LogPath:              `C:\Users\tester\AppData\Local\Temp\GoNavi %TEMP%\stage\update.log`,
+		MaintenanceEventName: `Global\GoNavi-Update-Test`,
+		HandoffEventName:     `Local\GoNavi-Update-Handoff-Test`,
+		PID:                  12345,
 	}
 	cmd := buildWindowsLaunchCommand(filepath.Join(context.StagedDir, "update.ps1"), context)
 
 	wantEnvironment := map[string]string{
-		"GONAVI_UPDATE_SOURCE":         context.SourcePath,
-		"GONAVI_UPDATE_TARGET":         context.TargetPath,
-		"GONAVI_UPDATE_CURRENT_TARGET": context.CurrentTargetPath,
-		"GONAVI_UPDATE_STAGED_DIR":     context.StagedDir,
-		"GONAVI_UPDATE_LOG_PATH":       context.LogPath,
-		"GONAVI_UPDATE_PID":            "12345",
+		"GONAVI_UPDATE_SOURCE":                 context.SourcePath,
+		"GONAVI_UPDATE_TARGET":                 context.TargetPath,
+		"GONAVI_UPDATE_CURRENT_TARGET":         context.CurrentTargetPath,
+		"GONAVI_UPDATE_STAGED_DIR":             context.StagedDir,
+		"GONAVI_UPDATE_LOG_PATH":               context.LogPath,
+		"GONAVI_UPDATE_MAINTENANCE_EVENT_NAME": context.MaintenanceEventName,
+		"GONAVI_UPDATE_HANDOFF_EVENT_NAME":     context.HandoffEventName,
+		"GONAVI_UPDATE_PID":                    "12345",
 	}
 	gotEnvironment := make(map[string]string, len(wantEnvironment))
 	for _, item := range cmd.Env {

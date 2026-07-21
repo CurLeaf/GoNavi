@@ -222,7 +222,7 @@ export function ImportSavedQueries(arg1:connection.SavedQueryImportPayload):Prom
 
 export function InstallLocalDriverPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
-export function InstallUpdateAndRestart():Promise<connection.QueryResult>;
+export function InstallUpdateAndRestart(arg1:boolean):Promise<connection.QueryResult>;
 
 export function JVMApplyChange(arg1:connection.ConnectionConfig,arg2:jvm.ChangeRequest):Promise<connection.QueryResult>;
 

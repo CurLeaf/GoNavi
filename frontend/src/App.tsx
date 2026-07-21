@@ -2568,8 +2568,23 @@ function App() {
   }, [forceQuitApplication, resetApplicationQuitRequest, saveQuery, savedQueries, t, tabs]);
 
   const handleInstallUpdateRequest = useCallback(async () => {
-      await handleApplicationQuitRequest(handleInstallFromProgress);
-  }, [handleApplicationQuitRequest, handleInstallFromProgress]);
+      if (installMode === 'portable' || installMode === 'msi') {
+          Modal.confirm({
+              title: t('app.about.update_install_confirm.close_instances_title'),
+              content: t('app.about.update_install_confirm.close_instances_content'),
+              okText: t('app.about.update_install_confirm.close_instances_ok'),
+              cancelText: t('common.cancel'),
+              closable: true,
+              maskClosable: false,
+              okButtonProps: { danger: true, type: 'primary' },
+              onOk: async () => {
+                  await handleApplicationQuitRequest(() => handleInstallFromProgress(true));
+              },
+          });
+          return;
+      }
+      await handleApplicationQuitRequest(() => handleInstallFromProgress(false));
+  }, [handleApplicationQuitRequest, handleInstallFromProgress, installMode, t]);
 
   useEffect(() => {
       const offBeforeClose = EventsOn('app:before-close-request', () => {
