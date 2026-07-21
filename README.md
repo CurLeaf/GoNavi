@@ -324,6 +324,80 @@ Notes auto-generated from merged PRs via `.github/release.yaml`.
 ## 🛠 Troubleshooting
 
 <details>
+<summary><b>Windows: missing Microsoft Edge WebView2 Runtime (common on intranet images)</b></summary>
+
+The GoNavi desktop app on Windows depends on the **Microsoft Edge WebView2 Runtime** (a system component, not full Chrome).  
+Some intranet / thin / Server / LTSC images ship without it. Symptoms:
+
+- Process exits immediately, blank/white window
+- Errors about missing WebView2 / WebView2 Runtime
+- Installer blocked by AV or group policy
+
+### 1. Check whether Runtime is installed
+
+In **PowerShell**:
+
+```powershell
+# Common Evergreen install path (64-bit Windows)
+Test-Path "${env:ProgramFiles(x86)}\Microsoft\EdgeWebView\Application"
+
+# Registry (a `pv` version usually means installed)
+Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" `
+  -ErrorAction SilentlyContinue |
+  Select-Object pv, name
+```
+
+If the path is missing and registry has no `pv`, install the Runtime.
+
+### 2. Online install (simplest)
+
+1. Open the official download page:  
+   [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)
+2. Download the **Evergreen Bootstrapper** (small; needs network during install)
+3. Run as Administrator, then **restart GoNavi**
+
+### 3. Offline / intranet: Standalone installer (recommended for IT)
+
+The Bootstrapper fails on fully air-gapped machines. Use the **Evergreen Standalone Installer** instead:
+
+1. On a machine with internet, download the matching architecture package, e.g.:
+   - `MicrosoftEdgeWebView2RuntimeInstallerX64.exe` (most 64-bit PCs)
+   - `…X86.exe` / `…ARM64.exe` as needed
+2. Copy the installer into the intranet (USB, software center, share)
+3. Install **as Administrator** on the target PC:
+
+```powershell
+# Interactive
+.\MicrosoftEdgeWebView2RuntimeInstallerX64.exe
+
+# Silent (batch / SCCM friendly)
+.\MicrosoftEdgeWebView2RuntimeInstallerX64.exe /silent /install
+```
+
+4. Start GoNavi again. If it still fails, sign out or reboot Windows once.
+
+### 4. Group policy / locked-down PCs
+
+- Needs local admin, or IT push via SCCM / software center  
+- Ensure policies do not block Edge/WebView2 install or updates  
+- Enterprises may pin a [Fixed Version](https://developer.microsoft.com/microsoft-edge/webview2/) Runtime (most users should prefer Evergreen)
+
+### 5. Temporary workaround: Web Server mode
+
+If the desktop WebView cannot be installed yet, run the experimental Web Server and use a normal browser:
+
+```powershell
+.\GoNavi.exe web-server --addr 127.0.0.1:34116
+```
+
+Open `http://127.0.0.1:34116`. See the **Web Server** section above.  
+Do **not** expose an unhardened Web endpoint to the public internet.
+
+Tracker / discussion: [#672](https://github.com/Syngnat/GoNavi/issues/672).
+
+</details>
+
+<details>
 <summary><b>macOS: “App is damaged and can’t be opened”</b></summary>
 
 Without Apple notarization, Gatekeeper may block the app:

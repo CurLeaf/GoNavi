@@ -323,6 +323,81 @@ Release 说明按 `.github/release.yaml` 从已合并 PR 生成。
 ## 🛠 常见问题
 
 <details>
+<summary><b>Windows：缺少 Microsoft Edge WebView2 运行时（内网常见）</b></summary>
+
+GoNavi 桌面版在 Windows 上依赖 **Microsoft Edge WebView2 Runtime**（系统级组件，不是完整 Chrome）。  
+部分内网 / 精简镜像 / Windows Server / LTSC 机器未预装，会出现：
+
+- 双击后窗口一闪即关、白屏、空白窗口
+- 提示找不到 WebView2 / WebView2 Runtime
+- 杀软或组策略拦截了运行时安装
+
+### 1. 先确认是否已安装
+
+在 **PowerShell** 中执行：
+
+```powershell
+# Evergreen Runtime 常见安装目录（64 位系统）
+Test-Path "${env:ProgramFiles(x86)}\Microsoft\EdgeWebView\Application"
+
+# 注册表（有显示名称通常表示已安装）
+Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" `
+  -ErrorAction SilentlyContinue |
+  Select-Object pv, name
+```
+
+若路径不存在且注册表无 `pv` 版本号，需要安装运行时。
+
+### 2. 有外网：在线安装（最简单）
+
+1. 打开微软官方下载页：  
+   [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)
+2. 下载 **Evergreen Bootstrapper**（体积小，安装时联网拉完整运行时）
+3. 右键「以管理员身份运行」安装完成后，**重新打开 GoNavi**
+
+### 3. 内网 / 离线：独立安装包（推荐企业分发）
+
+Bootstrapper 在完全断网环境会失败。请改用 **Evergreen Standalone Installer**：
+
+1. 在一台能上网的电脑打开同一下载页，下载对应架构的独立安装包，例如：
+   - `MicrosoftEdgeWebView2RuntimeInstallerX64.exe`（绝大多数 64 位 Windows）
+   - `…X86.exe` / `…ARM64.exe`（按机器架构选择）
+2. 将安装包拷贝到内网（U 盘、软件中心、文件共享均可）
+3. 在目标机 **管理员权限** 安装：
+
+```powershell
+# 交互安装
+.\MicrosoftEdgeWebView2RuntimeInstallerX64.exe
+
+# 静默安装（便于 IT 批量推送）
+.\MicrosoftEdgeWebView2RuntimeInstallerX64.exe /silent /install
+```
+
+4. 安装完成后重新启动 GoNavi。若仍异常，注销/重启一次 Windows 再试。
+
+### 4. 组策略 / 权限受限时
+
+- 需要本地管理员或由 IT 通过 SCCM / 软件中心推送 Standalone 安装包  
+- 确认未禁用 Edge / WebView2 相关更新与安装策略  
+- 企业可固定使用 [Fixed Version](https://developer.microsoft.com/microsoft-edge/webview2/) 运行时并由管理员统一维护（一般用户优先 Evergreen）
+
+### 5. 临时绕过：Web Server 模式（仍需能跑 GoNavi 后端）
+
+若桌面 WebView 短期无法装上，可在本机用浏览器访问实验性 Web Server（**不是**把桌面窗口容器化）：
+
+```powershell
+# 以发布包中的可执行文件为例
+.\GoNavi.exe web-server --addr 127.0.0.1:34116
+```
+
+浏览器打开 `http://127.0.0.1:34116`。详见上文「Web Server」章节。  
+注意：未加固的 Web 入口不要直接暴露到公网。
+
+更多说明与反馈入口见 Issue：[#672](https://github.com/Syngnat/GoNavi/issues/672)。
+
+</details>
+
+<details>
 <summary><b>macOS：提示「应用已损坏，无法打开」</b></summary>
 
 未做 Apple Notarization 时，Gatekeeper 可能拦截：
