@@ -3252,6 +3252,230 @@ describe('QueryEditor external SQL save', () => {
     });
   });
 
+  it('keeps large table and referenced-column completion within a bounded candidate budget', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'main';
+    const noisyTableRows = Array.from({ length: 2_000 }, (_, index) => ({
+      Tables_in_main: `archive_entity_${String(index).padStart(4, '0')}`,
+    }));
+    const noisyColumnRows = Array.from({ length: 2_000 }, (_, index) => ({
+      tableName: 'users',
+      name: `column_${String(index).padStart(4, '0')}`,
+      type: 'varchar(64)',
+    }));
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { Tables_in_main: 'users' },
+        ...noisyTableRows,
+        { Tables_in_main: 'entity_primary' },
+        { Tables_in_main: 'entity' },
+      ],
+    });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({
+      success: true,
+      data: [
+        ...noisyColumnRows,
+        { tableName: 'users', name: 'column_primary', type: 'varchar(64)' },
+        { tableName: 'users', name: 'column', type: 'varchar(64)' },
+      ],
+    });
+
+    editorState.value = 'SELECT * FROM entity';
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      for (let index = 0; index < 8; index += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    const sqlProvider = findSqlCompletionProvider();
+    expect(sqlProvider).toBeTruthy();
+
+    const tableItems = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: editorState.value.length + 1 },
+    );
+    const tableLabels = tableItems.suggestions.map((item: any) => item.label);
+    expect(tableLabels).toHaveLength(200);
+    expect(tableLabels.slice(0, 2)).toEqual(['entity', 'entity_primary']);
+
+    editorState.value = 'SELECT * FROM users WHERE column';
+    const columnItems = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: editorState.value.length + 1 },
+    );
+    const columnLabels = columnItems.suggestions.map((item: any) => item.label);
+    expect(columnLabels).toHaveLength(200);
+    expect(columnLabels).toContain('COLUMN');
+    expect(columnLabels).toContain('column');
+    expect(columnLabels.indexOf('column')).toBeLessThan(columnLabels.indexOf('column_0000'));
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
+  it('keeps a late current-database column when other-database candidates fill the budget first', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({
+      success: true,
+      data: [{ Database: 'main' }, { Database: 'otherdb' }],
+    });
+    backendApp.DBGetTables.mockImplementation(async (_config: any, dbName: string) => ({
+      success: true,
+      data: dbName === 'main'
+        ? [{ Tables_in_main: 'local_table' }]
+        : [{ Tables_in_otherdb: 'remote_table' }],
+    }));
+    backendApp.DBGetAllColumns.mockImplementation(async (_config: any, dbName: string) => ({
+      success: true,
+      data: dbName === 'otherdb'
+        ? Array.from({ length: 200 }, (_, index) => ({
+            tableName: 'remote_table',
+            name: `col_other_${String(index).padStart(3, '0')}`,
+            type: 'varchar(64)',
+          }))
+        : [],
+    }));
+    backendApp.DBGetColumns.mockImplementation(async (_config: any, dbName: string, tableName: string) => ({
+      success: true,
+      data: dbName === 'main' && tableName === 'local_table'
+        ? [{ name: 'col_current_late', type: 'varchar(64)' }]
+        : [],
+    }));
+
+    editorState.value = [
+      'SELECT r.col_other_000',
+      'FROM otherdb.remote_table r',
+      'JOIN main.local_table l ON r.id = l.id',
+      'WHERE col',
+    ].join('\n');
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      for (let index = 0; index < 16; index += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    const sqlProvider = findSqlCompletionProvider();
+    expect(sqlProvider).toBeTruthy();
+
+    const completionItems = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 4, column: 'WHERE col'.length + 1 },
+    );
+    const labels = completionItems.suggestions.map((item: any) => item.label);
+
+    expect(backendApp.DBGetColumns).toHaveBeenCalledWith(expect.anything(), 'main', 'local_table');
+    expect(labels).toHaveLength(200);
+    expect(labels).toContain('col_current_late');
+    expect(labels.indexOf('col_current_late')).toBeLessThan(labels.indexOf('col_other_000'));
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
+  it('keeps final sortText ordering when an other-database exact match follows 200 current-database prefixes', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({
+      success: true,
+      data: [{ Database: 'main' }, { Database: 'otherdb' }],
+    });
+    backendApp.DBGetTables.mockImplementation(async (_config: any, dbName: string) => ({
+      success: true,
+      data: dbName === 'main'
+        ? Array.from({ length: 200 }, (_, index) => ({
+            Tables_in_main: `tar_current_${String(index).padStart(3, '0')}`,
+          }))
+        : [{ Tables_in_otherdb: 'seed' }, { Tables_in_otherdb: 'tar' }],
+    }));
+    backendApp.DBGetAllColumns.mockResolvedValue({ success: true, data: [] });
+
+    editorState.value = 'SELECT * FROM otherdb.seed;\nSELECT tar';
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      for (let index = 0; index < 16; index += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    const sqlProvider = findSqlCompletionProvider();
+    expect(sqlProvider).toBeTruthy();
+
+    const completionItems = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 2, column: 'SELECT tar'.length + 1 },
+    );
+    const labels = completionItems.suggestions.map((item: any) => item.label);
+
+    expect(labels).toHaveLength(200);
+    expect(labels).not.toContain('otherdb.tar');
+    expect(labels[0]).toBe('tar_current_000');
+    expect(labels[199]).toBe('tar_current_199');
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
+  it('returns no completion for an unmatched known schema qualifier instead of leaking global objects', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'postgres';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { Table: 'dbo.users' },
+        { Table: 'sales.zzz_candidate' },
+        { Table: 'zzz_global' },
+      ],
+    });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+
+    editorState.value = 'SELECT * FROM dbo.zzz';
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      for (let index = 0; index < 12; index += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    const sqlProvider = findSqlCompletionProvider();
+    expect(sqlProvider).toBeTruthy();
+
+    const completionItems = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: editorState.value.length + 1 },
+    );
+
+    expect(completionItems.suggestions).toEqual([]);
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
   it('resolves database and table targets for ctrl/cmd navigation', () => {
     const tables = [
       { dbName: 'main', tableName: 'users' },

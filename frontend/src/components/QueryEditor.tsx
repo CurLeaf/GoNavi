@@ -110,6 +110,7 @@ import {
     type QueryEditorNavigationTarget,
     type QueryStatementPlan,
     QUERY_EDITOR_HOVER_DELAY_MS,
+    QUERY_EDITOR_COMPLETION_SUGGESTION_LIMIT,
     QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH,
     QUERY_EDITOR_OBJECT_DECORATION_MAX_TEXT_LENGTH,
     QUERY_EDITOR_PERSISTED_DRAFT_MAX_TEXT_LENGTH,
@@ -118,6 +119,8 @@ import {
     QUERY_EDITOR_SQL_THREE_PART_COMPLETION_REGEX,
     appendCommentToDetail,
     areSqlStatementListsEqual,
+    buildBoundedQueryEditorCompletionSuggestions,
+    createBoundedQueryEditorCompletionCandidateBatch,
     buildCompletionDocumentation,
     buildColumnCompletionDetail,
     buildColumnCompletionDocumentation,
@@ -136,7 +139,9 @@ import {
     clearQueryEditorObjectDecorations,
     collectQueryEditorObjectDecorationCandidates,
     collectQueryEditorReferencedDatabaseNames,
+    findCompletionTablesByDatabase,
     getCaseInsensitiveValue,
+    getCompletionTableSchemaCounts,
     getFirstRowValue,
     getNormalizedPositionAtOffset,
     hasQueryEditorCtrlMetaModifier,
@@ -158,6 +163,7 @@ import {
     queryCompletionMetadataRowsBySpecs,
     readSidebarSqlDropText,
     matchLeadingSelectTableReference,
+    materializeBoundedQueryEditorCompletionBatches,
     resolveNewQueryDefaultTemplate,
     resolveEventTargetNode,
     resolveNextResultSetIndex,
@@ -170,6 +176,7 @@ import {
     resolveQueryEditorHoverTarget,
     resolveQueryEditorNavigationDecorations,
     resolveQueryEditorNavigationTarget,
+    rankQueryEditorCompletionCandidate,
     resolveQueryLocatorPlan,
     rewriteLeadingSelectTableReference,
     selectUnqualifiedCompletionSynonyms,
@@ -5290,19 +5297,21 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       return createEmptySqlCompletionResult();
                   }
 
-                  const filtered = colPrefix
-                      ? cols.filter(c => (c.name || '').toLowerCase().startsWith(colPrefix))
-                      : cols;
-
-                  const suggestions = filtered.map(c => ({
-                      label: c.name,
-                      kind: monaco.languages.CompletionItemKind.Field,
-                      insertText: quoteCompletionPart(c.name),
-                      detail: buildColumnCompletionDetail(c),
-                      documentation: buildColumnCompletionDocumentation(c),
-                      range,
-                      sortText: '0' + c.name
-                  }));
+                  const suggestions = buildBoundedQueryEditorCompletionSuggestions({
+                      candidates: cols,
+                      prefix: colPrefix,
+                      getMatchRank: (column, prefix) => rankQueryEditorCompletionCandidate(prefix, [column.name], false),
+                      getSelectionKey: (column) => '0' + column.name,
+                      buildSuggestion: (column) => ({
+                          label: column.name,
+                          kind: monaco.languages.CompletionItemKind.Field,
+                          insertText: quoteCompletionPart(column.name),
+                          detail: buildColumnCompletionDetail(column),
+                          documentation: buildColumnCompletionDocumentation(column),
+                          range,
+                          sortText: '0' + column.name,
+                      }),
+                  });
                   return { suggestions };
               }
 
@@ -5317,138 +5326,192 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   const visibleDbs = sharedVisibleDbs;
                   if (visibleDbs.some(db => db.toLowerCase() === qualifierLower)) {
                       // qualifier 是数据库名，提示该库的表
-                      let tables = sharedTablesData.filter(t =>
-                          (t.dbName || '').toLowerCase() === qualifierLower
-                      );
+                      let tables = findCompletionTablesByDatabase(sharedTablesData, qualifier);
                       if (tables.length === 0) {
                           tables = await getLazyTablesByDB(qualifier);
                           if (isSqlCompletionRequestCancelled(token)) {
                               return createEmptySqlCompletionResult();
                           }
                       }
-                      const filtered = prefix
-                          ? tables.filter(t => {
-                              const suggestionMeta = buildDbQualifiedTableSuggestionMeta(t.dbName || qualifier, t.tableName || '');
-                              return String(suggestionMeta.displayName || '').toLowerCase().startsWith(prefix)
-                                  || String(t.tableName || '').toLowerCase().startsWith(prefix);
-                          })
-                          : tables;
-
-                      const suggestions = filtered.map(t => {
-                          const suggestionMeta = buildDbQualifiedTableSuggestionMeta(t.dbName || qualifier, t.tableName || '');
-                          return {
-                          label: suggestionMeta.displayName,
-                          kind: monaco.languages.CompletionItemKind.Class,
-                          insertText: suggestionMeta.insertText,
-                          detail: appendCommentToDetail(`${translate('query_editor.object_info.table')} (${t.dbName})`, t.comment),
-                          documentation: buildCompletionDocumentation(t.comment),
-                          range,
-                          sortText: '0' + suggestionMeta.displayName
-                      };
+                      const tableBatch = createBoundedQueryEditorCompletionCandidateBatch({
+                          candidates: tables,
+                          prefix,
+                          getMatchRank: (table, normalizedPrefix) => {
+                              if (String(table.dbName || '').toLowerCase() !== qualifierLower) return null;
+                              const meta = buildDbQualifiedTableSuggestionMeta(table.dbName || qualifier, table.tableName || '');
+                              return rankQueryEditorCompletionCandidate(normalizedPrefix, [meta.displayName, table.tableName], false);
+                          },
+                          getSelectionKey: (table) => {
+                              const meta = buildDbQualifiedTableSuggestionMeta(table.dbName || qualifier, table.tableName || '');
+                              return '0' + meta.displayName;
+                          },
+                          buildSuggestion: (table) => {
+                              const meta = buildDbQualifiedTableSuggestionMeta(table.dbName || qualifier, table.tableName || '');
+                              return {
+                                  label: meta.displayName,
+                                  kind: monaco.languages.CompletionItemKind.Class,
+                                  insertText: meta.insertText,
+                                  detail: appendCommentToDetail(`${translate('query_editor.object_info.table')} (${table.dbName})`, table.comment),
+                                  documentation: buildCompletionDocumentation(table.comment),
+                                  range,
+                                  sortText: '0' + meta.displayName,
+                              };
+                          },
                       });
-                      const viewSuggestions = [
-                          ...sharedViewsData.map((view) => ({ view, materialized: false })),
-                          ...sharedMaterializedViewsData.map((view) => ({ view, materialized: true })),
-                      ]
-                          .filter(({ view }) => String(view.dbName || '').toLowerCase() === qualifierLower)
-                          .map(({ view, materialized }) => ({ view, materialized, meta: buildViewSuggestionMeta(view) }))
-                          .filter(({ view, meta }) => (
-                              !prefix
-                              || meta.displayName.toLowerCase().startsWith(prefix)
-                              || meta.objectName.toLowerCase().startsWith(prefix)
-                              || String(view.viewName || '').toLowerCase().startsWith(prefix)
-                          ))
-                          .map(({ view, materialized, meta }) => ({
-                              label: meta.displayName,
-                              kind: monaco.languages.CompletionItemKind.Class,
-                              insertText: quoteCompletionPath(meta.displayName),
-                              detail: `${getViewTypeLabel(materialized)} (${view.dbName})`,
-                              range,
-                              sortText: '05' + meta.displayName,
-                          }));
-                      const synonymSuggestions = sharedSynonymsData
-                          .filter((synonym) => String(synonym.ownerName || '').trim().toLowerCase() === qualifierLower)
-                          .filter((synonym) => !prefix || String(synonym.synonymName || '').toLowerCase().startsWith(prefix))
-                          .map((synonym) => buildSynonymSuggestion(synonym, '06' + synonym.synonymName));
-                      const routineSuggestions = sharedRoutinesData
-                          .filter((routine) => String(routine.dbName || '').toLowerCase() === qualifierLower)
-                          .map((routine) => ({ routine, meta: buildRoutineSuggestionMeta(routine) }))
-                          .filter(({ routine, meta }) => (
-                              !prefix
-                              || meta.displayName.toLowerCase().startsWith(prefix)
-                              || meta.objectName.toLowerCase().startsWith(prefix)
-                              || String(routine.routineName || '').toLowerCase().startsWith(prefix)
-                          ))
-                          .map(({ routine, meta }) => ({
-                              label: meta.displayName,
-                              kind: monaco.languages.CompletionItemKind.Function,
-                              insertText: meta.insertText,
-                              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-                              detail: `${getRoutineTypeLabel(routine.routineType)} (${routine.dbName})`,
-                              range,
-                              sortText: '1' + meta.displayName,
-                          }));
-                      return { suggestions: [...suggestions, ...viewSuggestions, ...synonymSuggestions, ...routineSuggestions] };
+                      const buildQualifiedViewBatch = (views: CompletionViewMeta[], materialized: boolean) => (
+                          createBoundedQueryEditorCompletionCandidateBatch({
+                              candidates: views,
+                              prefix,
+                              getMatchRank: (view, normalizedPrefix) => {
+                                  if (String(view.dbName || '').toLowerCase() !== qualifierLower) return null;
+                                  const meta = buildViewSuggestionMeta(view);
+                                  return rankQueryEditorCompletionCandidate(
+                                      normalizedPrefix,
+                                      [meta.displayName, meta.objectName, view.viewName],
+                                      false,
+                                  );
+                              },
+                              getSelectionKey: (view) => '05' + buildViewSuggestionMeta(view).displayName,
+                              buildSuggestion: (view) => {
+                                  const meta = buildViewSuggestionMeta(view);
+                                  return {
+                                      label: meta.displayName,
+                                      kind: monaco.languages.CompletionItemKind.Class,
+                                      insertText: quoteCompletionPath(meta.displayName),
+                                      detail: `${getViewTypeLabel(materialized)} (${view.dbName})`,
+                                      range,
+                                      sortText: '05' + meta.displayName,
+                                  };
+                              },
+                          })
+                      );
+                      const viewBatch = buildQualifiedViewBatch(sharedViewsData, false);
+                      const materializedViewBatch = buildQualifiedViewBatch(sharedMaterializedViewsData, true);
+                      const synonymBatch = createBoundedQueryEditorCompletionCandidateBatch({
+                          candidates: sharedSynonymsData,
+                          prefix,
+                          getMatchRank: (synonym, normalizedPrefix) => (
+                              String(synonym.ownerName || '').trim().toLowerCase() === qualifierLower
+                                  ? rankQueryEditorCompletionCandidate(normalizedPrefix, [synonym.synonymName], false)
+                                  : null
+                          ),
+                          getSelectionKey: (synonym) => '06' + synonym.synonymName,
+                          buildSuggestion: (synonym) => buildSynonymSuggestion(synonym, '06' + synonym.synonymName),
+                      });
+                      const routineBatch = createBoundedQueryEditorCompletionCandidateBatch({
+                          candidates: sharedRoutinesData,
+                          prefix,
+                          getMatchRank: (routine, normalizedPrefix) => {
+                              if (String(routine.dbName || '').toLowerCase() !== qualifierLower) return null;
+                              const meta = buildRoutineSuggestionMeta(routine);
+                              return rankQueryEditorCompletionCandidate(
+                                  normalizedPrefix,
+                                  [meta.displayName, meta.objectName, routine.routineName],
+                                  false,
+                              );
+                          },
+                          getSelectionKey: (routine) => '1' + buildRoutineSuggestionMeta(routine).displayName,
+                          buildSuggestion: (routine) => {
+                              const meta = buildRoutineSuggestionMeta(routine);
+                              return {
+                                  label: meta.displayName,
+                                  kind: monaco.languages.CompletionItemKind.Function,
+                                  insertText: meta.insertText,
+                                  insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                                  detail: `${getRoutineTypeLabel(routine.routineType)} (${routine.dbName})`,
+                                  range,
+                                  sortText: '1' + meta.displayName,
+                              };
+                          },
+                      });
+                      return {
+                          suggestions: materializeBoundedQueryEditorCompletionBatches([
+                              tableBatch,
+                              viewBatch,
+                              materializedViewBatch,
+                              synonymBatch,
+                              routineBatch,
+                          ]),
+                      };
                   }
 
                   // qualifier 是 schema（如 dbo/public）时，仅补全表名，避免输入 dbo. 后再补成 dbo.dbo.table
-                  const schemaTables = sharedTablesData
-                      .map(t => {
-                          const parsed = splitSchemaAndTable(t.tableName || '');
+                  let hasKnownSchemaQualifier = false;
+                  const schemaTableBatch = createBoundedQueryEditorCompletionCandidateBatch({
+                      candidates: sharedTablesData,
+                      prefix,
+                      getMatchRank: (table, normalizedPrefix) => {
+                          const parsed = splitSchemaAndTable(table.tableName || '');
+                          if (parsed.schema.toLowerCase() !== qualifierLower) return null;
+                          hasKnownSchemaQualifier = true;
+                          if (!parsed.table) return null;
+                          return rankQueryEditorCompletionCandidate(normalizedPrefix, [parsed.table], false);
+                      },
+                      getSelectionKey: (table) => '0' + splitSchemaAndTable(table.tableName || '').table,
+                      buildSuggestion: (table) => {
+                          const parsed = splitSchemaAndTable(table.tableName || '');
                           return {
-                              dbName: t.dbName || '',
-                              schema: parsed.schema,
-                              table: parsed.table,
-                              comment: t.comment,
-                          };
-                      })
-                      .filter(t => t.schema.toLowerCase() === qualifierLower && !!t.table);
-                  const schemaViews = [
-                      ...sharedViewsData.map((view) => ({ view, materialized: false })),
-                      ...sharedMaterializedViewsData.map((view) => ({ view, materialized: true })),
-                  ]
-                      .map(({ view, materialized }) => ({ view, materialized, meta: buildViewSuggestionMeta(view) }))
-                      .filter(({ meta }) => meta.schemaName.toLowerCase() === qualifierLower && !!meta.objectName);
-                  const schemaSynonyms = sharedSynonymsData
-                      .filter((synonym) => String(synonym.ownerName || '').trim().toLowerCase() === qualifierLower);
-
-                  if (schemaTables.length > 0 || schemaViews.length > 0 || schemaSynonyms.length > 0) {
-                      const filtered = prefix
-                          ? schemaTables.filter(t => t.table.toLowerCase().startsWith(prefix))
-                          : schemaTables;
-
-                      const suggestions = [
-                          ...filtered.map(t => ({
-                              label: t.table,
+                              label: parsed.table,
                               kind: monaco.languages.CompletionItemKind.Class,
-                              insertText: quoteCompletionPart(t.table),
-                              detail: appendCommentToDetail(`${translate('query_editor.object_info.table')} (${t.dbName}${t.schema ? '.' + t.schema : ''})`, t.comment),
-                              documentation: buildCompletionDocumentation(t.comment),
+                              insertText: quoteCompletionPart(parsed.table),
+                              detail: appendCommentToDetail(`${translate('query_editor.object_info.table')} (${table.dbName}${parsed.schema ? '.' + parsed.schema : ''})`, table.comment),
+                              documentation: buildCompletionDocumentation(table.comment),
                               range,
-                              sortText: '0' + t.table
-                          })),
-                          ...schemaViews
-                              .filter(({ meta }) => !prefix || meta.objectName.toLowerCase().startsWith(prefix))
-                              .map(({ view, materialized, meta }) => ({
-                              label: meta.objectName,
-                              kind: monaco.languages.CompletionItemKind.Class,
-                              insertText: quoteCompletionPart(meta.objectName),
+                              sortText: '0' + parsed.table,
+                          };
+                      },
+                  });
+                  const buildSchemaViewBatch = (views: CompletionViewMeta[], materialized: boolean) => (
+                      createBoundedQueryEditorCompletionCandidateBatch({
+                          candidates: views,
+                          prefix,
+                          getMatchRank: (view, normalizedPrefix) => {
+                              const meta = buildViewSuggestionMeta(view);
+                              if (meta.schemaName.toLowerCase() !== qualifierLower) return null;
+                              hasKnownSchemaQualifier = true;
+                              if (!meta.objectName) return null;
+                              return rankQueryEditorCompletionCandidate(normalizedPrefix, [meta.objectName], false);
+                          },
+                          getSelectionKey: (view) => '05' + buildViewSuggestionMeta(view).objectName,
+                          buildSuggestion: (view) => {
+                              const meta = buildViewSuggestionMeta(view);
+                              return {
+                                  label: meta.objectName,
+                                  kind: monaco.languages.CompletionItemKind.Class,
+                                  insertText: quoteCompletionPart(meta.objectName),
                                   detail: `${getViewTypeLabel(materialized)} (${getViewSuggestionScope(view, meta)})`,
                                   range,
                                   sortText: '05' + meta.objectName,
-                              })),
-                          ...schemaSynonyms
-                              .filter((synonym) => !prefix || String(synonym.synonymName || '').toLowerCase().startsWith(prefix))
-                              .map((synonym) => buildSynonymSuggestion(synonym, '06' + synonym.synonymName)),
-                      ];
-                      const routineSuggestions = sharedRoutinesData
-                          .filter((routine) => {
-                              const meta = buildRoutineSuggestionMeta(routine);
-                              return meta.schemaName.toLowerCase() === qualifierLower;
-                          })
-                          .map((routine) => ({ routine, meta: buildRoutineSuggestionMeta(routine) }))
-                          .filter(({ meta }) => !prefix || meta.objectName.toLowerCase().startsWith(prefix))
-                          .map(({ routine, meta }) => ({
+                              };
+                          },
+                      })
+                  );
+                  const schemaViewBatch = buildSchemaViewBatch(sharedViewsData, false);
+                  const schemaMaterializedViewBatch = buildSchemaViewBatch(sharedMaterializedViewsData, true);
+                  const schemaSynonymBatch = createBoundedQueryEditorCompletionCandidateBatch({
+                      candidates: sharedSynonymsData,
+                      prefix,
+                      getMatchRank: (synonym, normalizedPrefix) => {
+                          if (String(synonym.ownerName || '').trim().toLowerCase() !== qualifierLower) return null;
+                          hasKnownSchemaQualifier = true;
+                          return rankQueryEditorCompletionCandidate(normalizedPrefix, [synonym.synonymName], false);
+                      },
+                      getSelectionKey: (synonym) => '06' + synonym.synonymName,
+                      buildSuggestion: (synonym) => buildSynonymSuggestion(synonym, '06' + synonym.synonymName),
+                  });
+                  const schemaRoutineBatch = createBoundedQueryEditorCompletionCandidateBatch({
+                      candidates: sharedRoutinesData,
+                      prefix,
+                      getMatchRank: (routine, normalizedPrefix) => {
+                          const meta = buildRoutineSuggestionMeta(routine);
+                          if (meta.schemaName.toLowerCase() !== qualifierLower) return null;
+                          hasKnownSchemaQualifier = true;
+                          return rankQueryEditorCompletionCandidate(normalizedPrefix, [meta.objectName], false);
+                      },
+                      getSelectionKey: (routine) => '1' + buildRoutineSuggestionMeta(routine).objectName,
+                      buildSuggestion: (routine) => {
+                          const meta = buildRoutineSuggestionMeta(routine);
+                          return {
                               label: meta.objectName,
                               kind: monaco.languages.CompletionItemKind.Function,
                               insertText: `${quoteCompletionPart(meta.objectName)}($0)`,
@@ -5456,8 +5519,18 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                               detail: `${getRoutineTypeLabel(routine.routineType)} (${routine.dbName}${meta.schemaName ? '.' + meta.schemaName : ''})`,
                               range,
                               sortText: '1' + meta.objectName,
-                          }));
-                      return { suggestions: [...suggestions, ...routineSuggestions] };
+                          };
+                      },
+                  });
+                  const schemaSuggestions = materializeBoundedQueryEditorCompletionBatches([
+                      schemaTableBatch,
+                      schemaViewBatch,
+                      schemaMaterializedViewBatch,
+                      schemaSynonymBatch,
+                      schemaRoutineBatch,
+                  ]);
+                  if (hasKnownSchemaQualifier) {
+                      return { suggestions: schemaSuggestions };
                   }
 
                   // 否则检查是否是表别名或表名，提示列
@@ -5474,19 +5547,21 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           return createEmptySqlCompletionResult();
                       }
 
-                      const filtered = prefix
-                          ? cols.filter(c => (c.name || '').toLowerCase().startsWith(prefix))
-                          : cols;
-
-                      const suggestions = filtered.map(c => ({
-                          label: c.name,
-                          kind: monaco.languages.CompletionItemKind.Field,
-                          insertText: quoteCompletionPart(c.name),
-                          detail: buildColumnCompletionDetail(c),
-                          documentation: buildColumnCompletionDocumentation(c),
-                          range,
-                          sortText: '0' + c.name
-                      }));
+                      const suggestions = buildBoundedQueryEditorCompletionSuggestions({
+                          candidates: cols,
+                          prefix,
+                          getMatchRank: (column, normalizedPrefix) => rankQueryEditorCompletionCandidate(normalizedPrefix, [column.name], false),
+                          getSelectionKey: (column) => '0' + column.name,
+                          buildSuggestion: (column) => ({
+                              label: column.name,
+                              kind: monaco.languages.CompletionItemKind.Field,
+                              insertText: quoteCompletionPart(column.name),
+                              detail: buildColumnCompletionDetail(column),
+                              documentation: buildColumnCompletionDocumentation(column),
+                              range,
+                              sortText: '0' + column.name,
+                          }),
+                      });
                       return { suggestions };
                   }
               }
@@ -5507,8 +5582,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               const isCurrentCompletionDatabase = (dbName: string) =>
                   String(dbName || '').toLowerCase() === currentDatabase.toLowerCase();
               const wordPrefix = (word.word || '').toLowerCase();
-              const startsWithPrefix = (candidate: string) => !wordPrefix || candidate.toLowerCase().startsWith(wordPrefix);
-              const includesWordPrefix = (candidate: string) => !wordPrefix || String(candidate || '').toLowerCase().includes(wordPrefix);
               const getPrefixMatchRank = (...candidates: string[]) => {
                   if (!wordPrefix) return '0';
                   const normalized = candidates
@@ -5543,30 +5616,27 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       ? { keyword: '20', func: '25', routineCurrent: '26', routineOther: '27', columnCurrent: '10', columnOther: '11', tableCurrent: '00', tableOther: '01', db: '30' }
                       : { keyword: '30', func: '25', routineCurrent: '26', routineOther: '27', columnCurrent: '00', columnOther: '01', tableCurrent: '10', tableOther: '11', db: '20' };
               let completionTables = sharedTablesData;
+              const currentSharedTables = expectsTableName && currentDatabase
+                  ? findCompletionTablesByDatabase(sharedTablesData, currentDatabase)
+                  : [];
               if (
                   expectsTableName
                   && currentDatabase
-                  && !sharedTablesData.some((t) => isCurrentCompletionDatabase(t.dbName || ''))
+                  && currentSharedTables.length === 0
               ) {
                   const lazyTables = await getLazyTablesByDB(currentDatabase);
                   if (isSqlCompletionRequestCancelled(token)) {
                       return createEmptySqlCompletionResult();
                   }
                   if (lazyTables.length > 0) {
-                      const seenTableKeys = new Set<string>();
-                      completionTables = [...sharedTablesData, ...lazyTables].filter((table) => {
-                          const key = `${String(table.dbName || '').toLowerCase()}.${String(table.tableName || '').toLowerCase()}`;
-                          if (seenTableKeys.has(key)) return false;
-                          seenTableKeys.add(key);
-                          return true;
-                      });
+                      completionTables = lazyTables;
                   }
               }
               if (
                   expectsTableName
                   && currentDatabase
-                  && sharedTablesData.some((table) => isCurrentCompletionDatabase(table.dbName || ''))
-                  && sharedTablesData.some((table) => isCurrentCompletionDatabase(table.dbName || '') && !normalizeCommentText(table.comment))
+                  && currentSharedTables.length > 0
+                  && currentSharedTables.some((table) => !normalizeCommentText(table.comment))
               ) {
                   const enrichedTables = await getLazyTablesByDB(currentDatabase);
                   if (isSqlCompletionRequestCancelled(token)) {
@@ -5577,7 +5647,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   }
               }
               if (expectsTableName && currentDatabase) {
-                  completionTables = completionTables.filter((table) => isCurrentCompletionDatabase(table.dbName || ''));
+                  completionTables = findCompletionTablesByDatabase(completionTables, currentDatabase);
               }
 
               const referencedColumns: CompletionColumnMeta[] = [];
@@ -5604,149 +5674,189 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               // 相关列提示：匹配 SQL 中引用的表（FROM/JOIN 等）
               // 权重最高，输入 WHERE 条件时优先显示
               // 先用索引把候选收敛到被引用表的列，避免整库列全量扫描。
-              const relevantColumnCandidates = expectsTableName || foundTables.size === 0
+              const preloadedRelevantColumns = expectsTableName || foundTables.size === 0
                   ? []
-                  : [
-                      ...collectSharedColumnsForTableIdents(sharedAllColumnsData, foundTables),
-                      ...referencedColumns,
-                  ];
-              const relevantColumns = relevantColumnCandidates
-                  .filter(c => {
-                      const fullIdent = `${c.dbName}.${c.tableName}`.toLowerCase();
-                      const shortIdent = (c.tableName || '').toLowerCase();
-                      // 对 schema.table 格式，也用纯表名部分匹配（如 public.users → users）
-                      const parsed = splitSchemaAndTable(c.tableName || '');
+                  : collectSharedColumnsForTableIdents(sharedAllColumnsData, foundTables);
+              const relevantColumnCandidates = preloadedRelevantColumns.length === 0
+                  ? referencedColumns
+                  : referencedColumns.length === 0
+                      ? preloadedRelevantColumns
+                      : [...preloadedRelevantColumns, ...referencedColumns];
+              const relevantColumnBatch = createBoundedQueryEditorCompletionCandidateBatch({
+                  candidates: relevantColumnCandidates,
+                  prefix: wordPrefix,
+                  getMatchRank: (column, normalizedPrefix) => {
+                      const fullIdent = `${column.dbName}.${column.tableName}`.toLowerCase();
+                      const shortIdent = (column.tableName || '').toLowerCase();
+                      const parsed = splitSchemaAndTable(column.tableName || '');
                       const pureIdent = (parsed.table || '').toLowerCase();
-                      return (foundTables.has(fullIdent) || foundTables.has(shortIdent) || (pureIdent && foundTables.has(pureIdent))) && startsWithPrefix(c.name || '');
-                  })
-                  .map(c => {
-                      // 当前库的表字段优先级更高
-                      const isCurrentDb = isCurrentCompletionDatabase(c.dbName || '');
+                      if (!foundTables.has(fullIdent) && !foundTables.has(shortIdent) && (!pureIdent || !foundTables.has(pureIdent))) {
+                          return null;
+                      }
+                      return rankQueryEditorCompletionCandidate(normalizedPrefix, [column.name], false);
+                  },
+                  getSelectionKey: (column) => (
+                      isCurrentCompletionDatabase(column.dbName || '')
+                          ? sortGroups.columnCurrent + column.name
+                          : sortGroups.columnOther + column.name
+                  ),
+                  buildSuggestion: (column) => {
+                      const isCurrentDb = isCurrentCompletionDatabase(column.dbName || '');
                       return {
-                          label: c.name,
+                          label: column.name,
                           kind: monaco.languages.CompletionItemKind.Field,
-                          insertText: quoteCompletionPart(c.name),
-                          detail: buildColumnCompletionDetail(c),
-                          documentation: buildColumnCompletionDocumentation(c),
+                          insertText: quoteCompletionPart(column.name),
+                          detail: buildColumnCompletionDetail(column),
+                          documentation: buildColumnCompletionDocumentation(column),
                           range,
-                          sortText: isCurrentDb ? sortGroups.columnCurrent + c.name : sortGroups.columnOther + c.name,
+                          sortText: isCurrentDb ? sortGroups.columnCurrent + column.name : sortGroups.columnOther + column.name,
                       };
-                  });
+                  },
+              });
 
               // 表提示：当前库智能处理 schema.table 格式
               // 1. 构建纯表名到 schema 列表的映射，检测同名表
-              const currentDbTables = completionTables.filter(t =>
-                  isCurrentCompletionDatabase(t.dbName || '')
-              );
-              const tableNameToSchemas = new Map<string, string[]>();
-              for (const t of currentDbTables) {
-                  const parsed = splitSchemaAndTable(t.tableName || '');
-                  const pureTable = (parsed.table || t.tableName || '').toLowerCase();
-                  const schemas = tableNameToSchemas.get(pureTable) || [];
-                  schemas.push(parsed.schema || '');
-                  tableNameToSchemas.set(pureTable, schemas);
-              }
+              const currentDatabaseTables = currentDatabase
+                  ? findCompletionTablesByDatabase(completionTables, currentDatabase)
+                  : [];
+              const tableNameToSchemaCount = getCompletionTableSchemaCounts(currentDatabaseTables);
 
-              const tableSuggestions = completionTables
-                .filter(t => {
-                    const isCurrentDb = isCurrentCompletionDatabase(t.dbName || '');
-                    const parsed = splitSchemaAndTable(t.tableName || '');
-                    const pureTable = parsed.table || t.tableName || '';
-                  if (!isCurrentDb) {
-                      const suggestionMeta = buildDbQualifiedTableSuggestionMeta(t.dbName || '', t.tableName || '');
-                      const label = suggestionMeta.dbQualifiedLabel;
-                      // 跨库：用 db.table 格式匹配
-                        return includesWordPrefix(label)
-                            || includesWordPrefix(t.tableName || '')
-                            || includesWordPrefix(pureTable);
-                    }
-                    // 当前库：同时用完整名和纯表名匹配
-                    return includesWordPrefix(t.tableName || '') || includesWordPrefix(pureTable);
-                })
-                .map(t => {
-                  const isCurrentDb = isCurrentCompletionDatabase(t.dbName || '');
-                  const parsed = splitSchemaAndTable(t.tableName || '');
-                  const pureTable = parsed.table || t.tableName || '';
-                  if (!isCurrentDb) {
-                      const suggestionMeta = buildDbQualifiedTableSuggestionMeta(t.dbName || '', t.tableName || '');
-                      const label = suggestionMeta.dbQualifiedLabel;
+              const tableBatch = createBoundedQueryEditorCompletionCandidateBatch({
+                  candidates: completionTables,
+                  prefix: wordPrefix,
+                  getMatchRank: (table, normalizedPrefix) => {
+                      const isCurrentDb = isCurrentCompletionDatabase(table.dbName || '');
+                      const parsed = splitSchemaAndTable(table.tableName || '');
+                      const pureTable = parsed.table || table.tableName || '';
+                      if (!isCurrentDb) {
+                          const meta = buildDbQualifiedTableSuggestionMeta(table.dbName || '', table.tableName || '');
+                          return rankQueryEditorCompletionCandidate(
+                              normalizedPrefix,
+                              [meta.dbQualifiedLabel, table.tableName, pureTable],
+                          );
+                      }
+                      return rankQueryEditorCompletionCandidate(normalizedPrefix, [table.tableName, pureTable]);
+                  },
+                  getSelectionKey: (table) => {
+                      const isCurrentDb = isCurrentCompletionDatabase(table.dbName || '');
+                      const parsed = splitSchemaAndTable(table.tableName || '');
+                      const pureTable = parsed.table || table.tableName || '';
+                      if (!isCurrentDb) {
+                          const meta = buildDbQualifiedTableSuggestionMeta(table.dbName || '', table.tableName || '');
+                          const label = meta.dbQualifiedLabel;
+                          return sortGroups.tableOther + getPrefixMatchRank(label, table.tableName || '', pureTable) + label;
+                      }
+                      return sortGroups.tableCurrent + getPrefixMatchRank(table.tableName || '', pureTable) + pureTable;
+                  },
+                  buildSuggestion: (table) => {
+                      const isCurrentDb = isCurrentCompletionDatabase(table.dbName || '');
+                      const parsed = splitSchemaAndTable(table.tableName || '');
+                      const pureTable = parsed.table || table.tableName || '';
+                      if (!isCurrentDb) {
+                          const meta = buildDbQualifiedTableSuggestionMeta(table.dbName || '', table.tableName || '');
+                          const label = meta.dbQualifiedLabel;
+                          return {
+                              label,
+                              kind: monaco.languages.CompletionItemKind.Class,
+                              insertText: quoteCompletionPath(label),
+                              detail: appendCommentToDetail(`${translate('query_editor.object_info.table')} (${table.dbName})`, table.comment),
+                              documentation: buildCompletionDocumentation(table.comment),
+                              range,
+                              sortText: sortGroups.tableOther + getPrefixMatchRank(label, table.tableName || '', pureTable) + label,
+                          };
+                      }
+                      const hasDuplicate = (tableNameToSchemaCount.get(pureTable.toLowerCase()) || 0) > 1;
+                      const label = hasDuplicate ? table.tableName : pureTable;
+                      const schemaInfo = parsed.schema ? ` (${parsed.schema})` : '';
                       return {
                           label,
                           kind: monaco.languages.CompletionItemKind.Class,
-                          insertText: quoteCompletionPath(label),
-                          detail: appendCommentToDetail(`${translate('query_editor.object_info.table')} (${t.dbName})`, t.comment),
-                          documentation: buildCompletionDocumentation(t.comment),
+                          insertText: quoteCompletionPath(hasDuplicate ? table.tableName : pureTable),
+                          detail: appendCommentToDetail(`${translate('query_editor.object_info.table')}${schemaInfo}`, table.comment),
+                          documentation: buildCompletionDocumentation(table.comment),
                           range,
-                          sortText: sortGroups.tableOther + getPrefixMatchRank(label, t.tableName || '', pureTable) + label,
+                          sortText: sortGroups.tableCurrent + getPrefixMatchRank(table.tableName || '', pureTable) + pureTable,
                       };
-                  }
-                  // 当前库：检查是否有跨 schema 同名表
-                  const schemas = tableNameToSchemas.get(pureTable.toLowerCase()) || [];
-                  const hasDuplicate = schemas.length > 1;
-                  // 同名表存在于多个 schema → 显示 schema.table；否则只显示纯表名
-                  const label = hasDuplicate ? t.tableName : pureTable;
-                  const insertText = quoteCompletionPath(hasDuplicate ? t.tableName : pureTable);
-                  const schemaInfo = parsed.schema ? ` (${parsed.schema})` : '';
-                  return {
-                      label,
-                      kind: monaco.languages.CompletionItemKind.Class,
-                      insertText,
-                      detail: appendCommentToDetail(`${translate('query_editor.object_info.table')}${schemaInfo}`, t.comment),
-                      documentation: buildCompletionDocumentation(t.comment),
-                      range,
-                      sortText: sortGroups.tableCurrent + getPrefixMatchRank(t.tableName || '', pureTable) + pureTable,
-                  };
+                  },
               });
 
-              const completionViews = [
-                  ...sharedViewsData.map((view) => ({ view, materialized: false })),
-                  ...sharedMaterializedViewsData.map((view) => ({ view, materialized: true })),
-              ].filter(({ view }) => (
-                  !expectsTableName
-                  || !currentDatabase
-                  || isCurrentCompletionDatabase(view.dbName || '')
-              ));
-              const viewSuggestions = completionViews
-                  .map(({ view, materialized }) => ({ view, materialized, meta: buildViewSuggestionMeta(view) }))
-                  .filter(({ view, meta }) => (
-                      includesWordPrefix(meta.dbQualifiedLabel)
-                      || includesWordPrefix(meta.displayName)
-                      || includesWordPrefix(meta.objectName)
-                      || includesWordPrefix(view.viewName || '')
-                  ))
-                  .map(({ view, materialized, meta }) => {
-                      const isCurrentDb = isCurrentCompletionDatabase(view.dbName || '');
-                      const label = isCurrentDb ? meta.displayName : meta.dbQualifiedLabel;
-                      return {
-                          label,
-                          kind: monaco.languages.CompletionItemKind.Class,
-                          insertText: meta.insertText,
-                          detail: `${getViewTypeLabel(materialized)} (${getViewSuggestionScope(view, meta)})`,
-                          range,
-                          sortText: (isCurrentDb ? sortGroups.tableCurrent : sortGroups.tableOther)
+              const buildGlobalViewBatch = (views: CompletionViewMeta[], materialized: boolean) => (
+                  createBoundedQueryEditorCompletionCandidateBatch({
+                      candidates: views,
+                      prefix: wordPrefix,
+                      getMatchRank: (view, normalizedPrefix) => {
+                          if (expectsTableName && currentDatabase && !isCurrentCompletionDatabase(view.dbName || '')) return null;
+                          const meta = buildViewSuggestionMeta(view);
+                          return rankQueryEditorCompletionCandidate(
+                              normalizedPrefix,
+                              [meta.dbQualifiedLabel, meta.displayName, meta.objectName, view.viewName],
+                          );
+                      },
+                      getSelectionKey: (view) => {
+                          const meta = buildViewSuggestionMeta(view);
+                          const isCurrentDb = isCurrentCompletionDatabase(view.dbName || '');
+                          const label = isCurrentDb ? meta.displayName : meta.dbQualifiedLabel;
+                          return (isCurrentDb ? sortGroups.tableCurrent : sortGroups.tableOther)
                               + '1'
                               + getPrefixMatchRank(label, meta.displayName, meta.objectName, view.viewName || '')
-                              + label,
-                      };
-                  });
+                              + label;
+                      },
+                      buildSuggestion: (view) => {
+                          const meta = buildViewSuggestionMeta(view);
+                          const isCurrentDb = isCurrentCompletionDatabase(view.dbName || '');
+                          const label = isCurrentDb ? meta.displayName : meta.dbQualifiedLabel;
+                          return {
+                              label,
+                              kind: monaco.languages.CompletionItemKind.Class,
+                              insertText: meta.insertText,
+                              detail: `${getViewTypeLabel(materialized)} (${getViewSuggestionScope(view, meta)})`,
+                              range,
+                              sortText: (isCurrentDb ? sortGroups.tableCurrent : sortGroups.tableOther)
+                                  + '1'
+                                  + getPrefixMatchRank(label, meta.displayName, meta.objectName, view.viewName || '')
+                                  + label,
+                          };
+                      },
+                  })
+              );
+              const viewBatch = buildGlobalViewBatch(sharedViewsData, false);
+              const materializedViewBatch = buildGlobalViewBatch(sharedMaterializedViewsData, true);
 
-              const synonymSuggestions = selectUnqualifiedCompletionSynonyms(sharedSynonymsData, oracleLoginOwner)
-                  .filter((synonym) => includesWordPrefix(synonym.synonymName || ''))
-                  .map((synonym) => buildSynonymSuggestion(
+              const synonymBatch = createBoundedQueryEditorCompletionCandidateBatch({
+                  candidates: selectUnqualifiedCompletionSynonyms(sharedSynonymsData, oracleLoginOwner),
+                  prefix: wordPrefix,
+                  getMatchRank: (synonym, normalizedPrefix) => (
+                      rankQueryEditorCompletionCandidate(normalizedPrefix, [synonym.synonymName])
+                  ),
+                  getSelectionKey: (synonym) => (
+                      sortGroups.tableCurrent + '05' + getPrefixMatchRank(synonym.synonymName || '') + synonym.synonymName
+                  ),
+                  buildSuggestion: (synonym) => buildSynonymSuggestion(
                       synonym,
                       sortGroups.tableCurrent + '05' + getPrefixMatchRank(synonym.synonymName || '') + synonym.synonymName,
-                  ));
+                  ),
+              });
 
-              const routineSuggestions = sharedRoutinesData
-                  .map((routine) => ({ routine, meta: buildRoutineSuggestionMeta(routine) }))
-                  .filter(({ routine, meta }) => {
-                      if (expectsRoutineName && meta.routineType !== 'PROCEDURE') return false;
-                      return includesWordPrefix(meta.dbQualifiedLabel)
-                          || includesWordPrefix(meta.displayName)
-                          || includesWordPrefix(meta.objectName)
-                          || includesWordPrefix(routine.routineName || '');
-                  })
-                  .map(({ routine, meta }) => {
+              const routineBatch = createBoundedQueryEditorCompletionCandidateBatch({
+                  candidates: sharedRoutinesData,
+                  prefix: wordPrefix,
+                  getMatchRank: (routine, normalizedPrefix) => {
+                      const meta = buildRoutineSuggestionMeta(routine);
+                      if (expectsRoutineName && meta.routineType !== 'PROCEDURE') return null;
+                      return rankQueryEditorCompletionCandidate(
+                          normalizedPrefix,
+                          [meta.dbQualifiedLabel, meta.displayName, meta.objectName, routine.routineName],
+                      );
+                  },
+                  getSelectionKey: (routine) => {
+                      const meta = buildRoutineSuggestionMeta(routine);
+                      const isCurrentDb = isCurrentCompletionDatabase(routine.dbName || '');
+                      return (isCurrentDb ? sortGroups.routineCurrent : sortGroups.routineOther)
+                          + getPrefixMatchRank(meta.dbQualifiedLabel, meta.displayName, meta.objectName, routine.routineName || '')
+                          + meta.dbQualifiedLabel;
+                  },
+                  buildSuggestion: (routine) => {
+                      const meta = buildRoutineSuggestionMeta(routine);
                       const isCurrentDb = isCurrentCompletionDatabase(routine.dbName || '');
                       const schemaInfo = meta.schemaName && meta.schemaName.toLowerCase() !== String(routine.dbName || '').toLowerCase()
                           ? `.${meta.schemaName}`
@@ -5762,65 +5872,68 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                               + getPrefixMatchRank(meta.dbQualifiedLabel, meta.displayName, meta.objectName, routine.routineName || '')
                               + meta.dbQualifiedLabel,
                       };
-                  });
+                  },
+              });
 
               // 数据库提示
-              const dbSuggestions = sharedVisibleDbs
-                  .filter((db) => startsWithPrefix(db))
-                  .map(db => ({
+              const dbBatch = createBoundedQueryEditorCompletionCandidateBatch({
+                  candidates: sharedVisibleDbs,
+                  prefix: wordPrefix,
+                  getMatchRank: (db, normalizedPrefix) => rankQueryEditorCompletionCandidate(normalizedPrefix, [db], false),
+                  getSelectionKey: (db) => sortGroups.db + db,
+                  buildSuggestion: (db) => ({
                       label: db,
                       kind: monaco.languages.CompletionItemKind.Module,
                       insertText: db,
                       detail: translate('query_editor.object_info.database'),
                       range,
                       sortText: sortGroups.db + db,
-                  }));
+                  }),
+              });
 
               // 关键字提示
-              const keywordSuggestions = dialectKeywords
-                  .filter((k) => startsWithPrefix(k))
-                  .map(k => ({
-                  label: k,
-                  kind: monaco.languages.CompletionItemKind.Keyword,
-                  insertText: k,
-                  range,
-                  sortText: sortGroups.keyword + k,
-              }));
+              const keywordBatch = createBoundedQueryEditorCompletionCandidateBatch({
+                  candidates: dialectKeywords,
+                  prefix: wordPrefix,
+                  getMatchRank: (keyword, normalizedPrefix) => rankQueryEditorCompletionCandidate(normalizedPrefix, [keyword], false),
+                  getSelectionKey: (keyword) => sortGroups.keyword + keyword,
+                  buildSuggestion: (keyword) => ({
+                      label: keyword,
+                      kind: monaco.languages.CompletionItemKind.Keyword,
+                      insertText: keyword,
+                      range,
+                      sortText: sortGroups.keyword + keyword,
+                  }),
+              });
 
               // 内置函数提示
-              const funcSuggestions = dialectFunctions
-                  .filter((f) => startsWithPrefix(f.name))
-                  .map(f => ({
-                      label: f.name,
+              const funcBatch = createBoundedQueryEditorCompletionCandidateBatch({
+                  candidates: dialectFunctions,
+                  prefix: wordPrefix,
+                  getMatchRank: (func, normalizedPrefix) => rankQueryEditorCompletionCandidate(normalizedPrefix, [func.name], false),
+                  getSelectionKey: (func) => sortGroups.func + func.name,
+                  buildSuggestion: (func) => ({
+                      label: func.name,
                       kind: monaco.languages.CompletionItemKind.Function,
-                      insertText: f.name + '($0)',
+                      insertText: func.name + '($0)',
                       insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-                      detail: f.detail,
+                      detail: func.detail,
                       range,
-                      sortText: sortGroups.func + f.name,
-                  }));
+                      sortText: sortGroups.func + func.name,
+                  }),
+              });
 
-              const suggestions = isNewStatementKeywordContext
-                  ? [
-                      ...keywordSuggestions,
-                      ...funcSuggestions,
-                      ...tableSuggestions,
-                      ...viewSuggestions,
-                      ...synonymSuggestions,
-                      ...dbSuggestions,
-                      ...routineSuggestions,
-                      ...relevantColumns,
-                  ]
-                  : [
-                      ...relevantColumns,   // FROM 表的列最优先
-                      ...tableSuggestions,  // 表次之
-                      ...viewSuggestions,   // 视图和表同属可查询对象
-                      ...synonymSuggestions, // 同义词也可直接作为查询对象
-                      ...dbSuggestions,     // 数据库
-                      ...routineSuggestions, // 存储过程/函数
-                      ...funcSuggestions,   // 内置函数
-                      ...keywordSuggestions // 关键字最后
-                  ];
+              const suggestions = materializeBoundedQueryEditorCompletionBatches([
+                  relevantColumnBatch,
+                  tableBatch,
+                  viewBatch,
+                  materializedViewBatch,
+                  synonymBatch,
+                  dbBatch,
+                  routineBatch,
+                  funcBatch,
+                  keywordBatch,
+              ], QUERY_EDITOR_COMPLETION_SUGGESTION_LIMIT);
               return { suggestions };
           }
       });
