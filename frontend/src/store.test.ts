@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SIDEBAR_RESIZE_MAX_WIDTH } from './utils/sidebarLayout';
+import type { AIChatMessage } from './types';
 
 class MemoryStorage implements Storage {
   private data = new Map<string, string>();
@@ -1937,6 +1938,43 @@ describe('store appearance persistence', () => {
         'session-stream',
         'session-other',
       ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('finds the newest streaming message without scanning the full session history', async () => {
+    vi.useFakeTimers();
+    try {
+      const { useStore } = await importStore();
+      let messageIdReads = 0;
+      const messages = Array.from({ length: 500 }, (_, index): AIChatMessage => ({
+        id: `message-${index}`,
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        content: `content-${index}`,
+        timestamp: index,
+      })).map((message) => new Proxy(message, {
+        get(target, property, receiver) {
+          if (property === 'id') {
+            messageIdReads += 1;
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      }));
+      useStore.setState({
+        aiChatHistory: { 'session-stream': messages },
+      });
+      messageIdReads = 0;
+
+      useStore.getState().updateAIChatMessage('session-stream', 'message-499', {
+        content: 'content-499-next-token',
+      });
+
+      expect(messageIdReads).toBeLessThanOrEqual(2);
+      expect(useStore.getState().aiChatHistory['session-stream'][499]?.content).toBe(
+        'content-499-next-token',
+      );
+      expect(useStore.getState().aiChatHistory['session-stream'][0]).toBe(messages[0]);
     } finally {
       vi.useRealTimers();
     }

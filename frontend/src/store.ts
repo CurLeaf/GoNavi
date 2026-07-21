@@ -5368,7 +5368,12 @@ export const useStore = create<AppState>()(
         set((state) => {
           const messages = state.aiChatHistory[sessionId];
           if (!messages) return state;
-          const idx = messages.findIndex((m) => m.id === messageId);
+          // Message IDs are unique within a session and are also used as React keys.
+          // Streaming updates target the newest assistant message, so keep that hot path O(1).
+          const lastIndex = messages.length - 1;
+          const idx = lastIndex >= 0 && messages[lastIndex].id === messageId
+            ? lastIndex
+            : messages.findIndex((m) => m.id === messageId);
           if (idx < 0) return state;
           const newMessages = [...messages];
           newMessages[idx] = { ...newMessages[idx], ...updates };
