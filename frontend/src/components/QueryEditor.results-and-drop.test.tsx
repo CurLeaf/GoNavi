@@ -3898,6 +3898,73 @@ describe('QueryEditor external SQL save', () => {
     });
   });
 
+  it('does not rerender inactive query editors when SQL logs change', async () => {
+    const renderCounts = { active: 0, inactive: 0 };
+    const firstTab = createTab({ id: 'tab-1', query: 'SELECT * FROM users' });
+    const secondTab = createTab({ id: 'tab-2', query: 'SELECT * FROM orders' });
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(
+        <>
+          <React.Profiler id="active" onRender={() => { renderCounts.active += 1; }}>
+            <QueryEditor key={firstTab.id} tab={firstTab} isActive />
+          </React.Profiler>
+          <React.Profiler id="inactive" onRender={() => { renderCounts.inactive += 1; }}>
+            <QueryEditor key={secondTab.id} tab={secondTab} isActive={false} />
+          </React.Profiler>
+        </>,
+      );
+    });
+
+    const baseline = { ...renderCounts };
+    await act(async () => {
+      storeState.sqlLogs = [{
+        id: 'log-1',
+        timestamp: Date.now(),
+        sql: 'SELECT 1',
+        status: 'success',
+        duration: 1,
+      }];
+      notifyStoreSubscribers();
+    });
+
+    expect(renderCounts.active).toBeGreaterThan(baseline.active);
+    expect(renderCounts.inactive).toBe(baseline.inactive);
+
+    await act(async () => {
+      renderer.update(
+        <>
+          <React.Profiler id="active" onRender={() => { renderCounts.active += 1; }}>
+            <QueryEditor key={firstTab.id} tab={firstTab} isActive={false} />
+          </React.Profiler>
+          <React.Profiler id="inactive" onRender={() => { renderCounts.inactive += 1; }}>
+            <QueryEditor key={secondTab.id} tab={secondTab} isActive />
+          </React.Profiler>
+        </>,
+      );
+    });
+
+    const switchedBaseline = { ...renderCounts };
+    await act(async () => {
+      storeState.sqlLogs = [{
+        id: 'log-2',
+        timestamp: Date.now() + 1,
+        sql: 'SELECT 2',
+        status: 'success',
+        duration: 1,
+      }, ...storeState.sqlLogs];
+      notifyStoreSubscribers();
+    });
+
+    expect(renderCounts.active).toBe(switchedBaseline.active);
+    expect(renderCounts.inactive).toBeGreaterThan(switchedBaseline.inactive);
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
   it('keeps object hyperlink tab opening tied to the dragged database after drop', async () => {
     const domListeners: Record<string, ((event?: any) => void)[]> = {};
     editorState.domNode = {

@@ -212,6 +212,7 @@ const QUERY_EDITOR_MAC_FIND_WITH_SELECTION_GUARD_ACTION_ID = 'gonavi.suppressMac
 const QUERY_EDITOR_AI_INLINE_DEBOUNCE_MS = 220;
 const QUERY_EDITOR_AI_INLINE_CONTEXT_KEY = 'gonaviAiInlineSuggestionVisible';
 const QUERY_EDITOR_IME_FALLBACK_DELAY_MS = 80;
+const EMPTY_QUERY_EDITOR_SQL_LOGS: SqlLog[] = [];
 
 const isOceanBaseOracleConnection = (config: any): boolean => {
     const type = String(config?.type || '').trim().toLowerCase();
@@ -1392,8 +1393,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   );
 
   const addSqlLog = useStore(state => state.addSqlLog);
-  const sqlLogCount = useStore(state => state.sqlLogs.length);
-  const sqlLogs = useStore(state => state.sqlLogs);
+  const sqlLogs = useStore(state => (isActive ? state.sqlLogs : EMPTY_QUERY_EDITOR_SQL_LOGS));
+  const sqlLogCount = sqlLogs.length;
   const addTab = useStore(state => state.addTab);
   const setActiveContext = useStore(state => state.setActiveContext);
   const updateQueryTabDraft = useStore(state => state.updateQueryTabDraft);

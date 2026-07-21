@@ -112,6 +112,10 @@ import {
     useStore,
 } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
+import {
+    selectRecentSidebarSqlLogs,
+    selectSidebarCommandSearchSqlLogs,
+} from './sidebar/sidebarSqlLogSelector';
 		import { SavedConnection, SavedQuery, SavedQueryGroup, ExternalSQLDirectory, ExternalSQLTreeEntry, SchemaVisibilityRule } from '../types';
 import { getDbIcon } from './DatabaseIcons';
 		import { ListSQLDirectory } from '../../wailsjs/go/app/App';
@@ -557,7 +561,6 @@ const Sidebar: React.FC<{
   const queryOptions = useStore(state => state.queryOptions);
   const setQueryOptions = useStore(state => state.setQueryOptions);
   const addSqlLog = useStore(state => state.addSqlLog);
-  const sqlLogs = useStore(state => state.sqlLogs) || [];
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const languagePreference = useStore(state => state.languagePreference);
   const setAppearance = useStore(state => state.setAppearance);
@@ -655,6 +658,13 @@ const Sidebar: React.FC<{
   const searchInputRef = useRef<any>(null);
   const commandSearchInputRef = useRef<any>(null);
   const [isV2CommandSearchOpen, setIsV2CommandSearchOpen] = useState(false);
+  const commandSearchSqlLogs = useStore(
+      state => selectSidebarCommandSearchSqlLogs(state, isV2Ui && isV2CommandSearchOpen),
+  );
+  const recentSqlLogs = useMemo(
+      () => selectRecentSidebarSqlLogs(commandSearchSqlLogs),
+      [commandSearchSqlLogs],
+  );
   const [v2CommandSearchValue, setV2CommandSearchValue] = useState('');
   const deferredV2CommandSearchValue = useDeferredValue(v2CommandSearchValue);
   const [v2CommandActiveIndex, setV2CommandActiveIndex] = useState(0);
@@ -2468,7 +2478,7 @@ const Sidebar: React.FC<{
       selectedNodesRef,
       activeContext,
       activeTab,
-      sqlLogs,
+      recentSqlLogs,
       shortcutOptions,
       activeShortcutPlatform,
       overlayTheme,
