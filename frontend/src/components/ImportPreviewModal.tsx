@@ -1,8 +1,9 @@
 import Modal from './common/ResizableDraggableModal';
 import React, { useState, useEffect, useRef } from "react";
 import { Table, Alert, Progress, Button, Space, Select } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined } from "@ant-design/icons";
+import { CheckCircleOutlined, CloseCircleOutlined, StopOutlined } from "@ant-design/icons";
 import {
+  CancelQuery,
   DBGetColumns,
   PreviewImportFile,
   ImportDataWithProgressOptions,
@@ -69,11 +70,13 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
   const [columnMappings, setColumnMappings] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [importResult, setImportResult] = useState<any>(null);
   const previewRequestRef = useRef(0);
   const importRequestRef = useRef(0);
   const importingRef = useRef(false);
+  const stoppingRef = useRef(false);
   const activeImportJobIdRef = useRef("");
   const previewConnectionConfigRef = useRef<any>(null);
   const secondaryTextColor = darkMode ? "rgba(255,255,255,0.65)" : "rgba(0,0,0,0.45)";
@@ -131,9 +134,11 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
   const loadPreview = async (requestId: number) => {
     importRequestRef.current += 1;
     importingRef.current = false;
+    stoppingRef.current = false;
     activeImportJobIdRef.current = "";
     previewConnectionConfigRef.current = null;
     setImporting(false);
+    setStopping(false);
     setLoading(true);
     setError(null);
     setPreviewData(null);
@@ -240,8 +245,11 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
     const importJobId = createImportJobId();
     importRequestRef.current = importRequestId;
     importingRef.current = true;
+    stoppingRef.current = false;
     activeImportJobIdRef.current = importJobId;
     setImporting(true);
+    setStopping(false);
+    setError(null);
     setProgress({
       current: 0,
       total: previewData.totalRows,
@@ -269,7 +277,10 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
       );
       if (importRequestRef.current !== importRequestId) return;
 
-      if (res.success && res.data) {
+      setError(null);
+      if (res.data?.cancelled) {
+        setImportResult(res.data);
+      } else if (res.success && res.data) {
         setImportResult(res.data);
         if (res.data.failed === 0) {
           onSuccess();
@@ -287,9 +298,40 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
     } finally {
       if (importRequestRef.current === importRequestId) {
         importingRef.current = false;
+        stoppingRef.current = false;
         activeImportJobIdRef.current = "";
         setImporting(false);
+        setStopping(false);
       }
+    }
+  };
+
+  const handleStopImport = async () => {
+    const importJobId = activeImportJobIdRef.current;
+    if (!importJobId || stoppingRef.current) return;
+
+    stoppingRef.current = true;
+    setStopping(true);
+    setError(null);
+    try {
+      const res = await CancelQuery(importJobId);
+      if (!importingRef.current || activeImportJobIdRef.current !== importJobId) {
+        return;
+      }
+      if (!res.success) {
+        stoppingRef.current = false;
+        setStopping(false);
+        setError(res.message || t("import_preview.error.stop_failed"));
+      }
+    } catch (e: any) {
+      if (!importingRef.current || activeImportJobIdRef.current !== importJobId) {
+        return;
+      }
+      stoppingRef.current = false;
+      setStopping(false);
+      setError(t("import_preview.error.stop_failed_detail", {
+        detail: String(e?.message || e),
+      }));
     }
   };
 
@@ -311,7 +353,19 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
     <Space>
       <Button onClick={onClose}>{t("common.close")}</Button>
     </Space>
-  ) : importing ? null : (
+  ) : importing ? (
+    <Space>
+      <Button
+        danger
+        icon={<StopOutlined />}
+        loading={stopping}
+        disabled={stopping}
+        onClick={() => void handleStopImport()}
+      >
+        {t("import_preview.action.stop")}
+      </Button>
+    </Space>
+  ) : (
     <Space>
       <Button onClick={onClose}>{t("common.cancel")}</Button>
       <Button
@@ -453,7 +507,9 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
               textAlign: "center",
             }}
           >
-            {t("import_preview.status.importing")}
+            {stopping
+              ? t("import_preview.status.stopping")
+              : t("import_preview.status.importing")}
           </div>
           <Progress percent={progressPercent} status="active" />
           <div style={{ marginTop: 16, textAlign: "center", color: "#666" }}>
@@ -482,8 +538,10 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
       {importResult && (
         <div style={{ padding: 20 }}>
           <Alert
-            type={importResult.failed === 0 ? "success" : "warning"}
-            message={t("import_preview.result.completed")}
+            type={!importResult.cancelled && importResult.failed === 0 ? "success" : "warning"}
+            message={importResult.cancelled
+              ? t("import_preview.result.stopped")
+              : t("import_preview.result.completed")}
             description={
               <div>
                 <div>

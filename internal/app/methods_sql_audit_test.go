@@ -84,6 +84,17 @@ func loadSQLAuditEvents(t *testing.T, app *App, filter sqlaudit.Filter) []sqlaud
 	return page.Items
 }
 
+func TestSQLAuditStatusFromResultUsesStructuredCancellationMarker(t *testing.T) {
+	result := connection.QueryResult{
+		Success: false,
+		Message: "导入已停止",
+		Data:    map[string]interface{}{"cancelled": true},
+	}
+	if got := sqlAuditStatusFromResult(result); got != "cancelled" {
+		t.Fatalf("status = %q, want cancelled", got)
+	}
+}
+
 func TestSQLAuditConnectionFingerprintExcludesSecrets(t *testing.T) {
 	base := connection.ConnectionConfig{
 		Type:          "postgres",

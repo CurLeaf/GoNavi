@@ -133,8 +133,9 @@ type databaseConnectResult struct {
 }
 
 type queryContext struct {
-	cancel  context.CancelFunc
-	started time.Time
+	cancel          context.CancelFunc
+	started         time.Time
+	retainUntilDone bool
 }
 
 type managedSQLTransaction struct {
@@ -1665,7 +1666,9 @@ func (a *App) CancelQuery(queryID string) connection.QueryResult {
 
 	if ctx, exists := a.runningQueries[queryID]; exists {
 		ctx.cancel()
-		delete(a.runningQueries, queryID)
+		if !ctx.retainUntilDone {
+			delete(a.runningQueries, queryID)
+		}
 		logger.Infof("查询已取消：queryID=%s", queryID)
 		return connection.QueryResult{Success: true, Message: a.appText("query_editor.message.cancel_success", nil)}
 	}

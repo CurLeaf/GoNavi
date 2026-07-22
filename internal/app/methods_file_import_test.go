@@ -186,11 +186,26 @@ type fakeImportRowWriter struct {
 	batchRows        []map[string]interface{}
 	batchErr         error
 	singleErrByRowID map[interface{}]error
+	afterSingleCall  func()
 }
 
 type noopImportEventEmitter struct{}
 
 func (noopImportEventEmitter) Emit(string, ...any) {}
+
+type cancellableImportTestDB struct {
+	fakeMetadataRetryDB
+	execCalls      int
+	afterFirstExec func()
+}
+
+func (d *cancellableImportTestDB) Exec(string) (int64, error) {
+	d.execCalls++
+	if d.execCalls == 1 && d.afterFirstExec != nil {
+		d.afterFirstExec()
+	}
+	return 1, nil
+}
 
 func (w *fakeImportRowWriter) SetColumns(columns []string) {
 	w.columns = append([]string(nil), columns...)
@@ -205,6 +220,9 @@ func (w *fakeImportRowWriter) ApplyBatch(rows []map[string]interface{}) error {
 
 func (w *fakeImportRowWriter) ApplyOne(row map[string]interface{}) error {
 	w.singleCalls++
+	if w.afterSingleCall != nil {
+		w.afterSingleCall()
+	}
 	if err, ok := w.singleErrByRowID[row["id"]]; ok {
 		return err
 	}
@@ -404,6 +422,71 @@ func TestImportDataWithProgressOptionsRejectsEmptyFilePathBeforeDatabaseAccess(t
 	}
 }
 
+func TestImportDataWithProgressOptionsStopsByJobIDAndReturnsCommittedPartialResult(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+	})
+
+	database := &cancellableImportTestDB{fakeMetadataRetryDB: fakeMetadataRetryDB{
+		columns: []connection.ColumnDefinition{{Name: "id", Type: "bigint"}},
+	}}
+	newDatabaseFunc = func(string) (db.Database, error) { return database, nil }
+	resolveDialConfigWithProxyFunc = func(config connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return config, nil
+	}
+
+	path := filepath.Join(t.TempDir(), "users.csv")
+	if err := os.WriteFile(path, []byte("id\n1\n2\n3\n"), 0o600); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	app.ctx = uievents.WithEmitter(context.Background(), noopImportEventEmitter{})
+	const jobID = "import-cancel-test"
+	database.afterFirstExec = func() {
+		cancelResult := app.CancelQuery(jobID)
+		if !cancelResult.Success {
+			t.Errorf("CancelQuery returned failure: %s", cancelResult.Message)
+		}
+		app.queryMu.Lock()
+		_, retainedWhileStopping := app.runningQueries[jobID]
+		app.queryMu.Unlock()
+		if !retainedWhileStopping {
+			t.Error("cancelled import job was unregistered before its owner stopped")
+		}
+	}
+
+	result := app.ImportDataWithProgressOptions(
+		connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306, Database: "app"},
+		"app",
+		"users",
+		path,
+		ImportFileOptions{ColumnMappings: map[string]string{"id": "id"}, JobID: jobID},
+	)
+	if result.Success {
+		t.Fatal("cancelled import should not be reported as a completed success")
+	}
+	payload, ok := result.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("result data type = %T, want map[string]interface{}", result.Data)
+	}
+	if payload["cancelled"] != true || payload["success"] != 1 || payload["failed"] != 0 || payload["total"] != 1 {
+		t.Fatalf("unexpected cancelled payload: %#v", payload)
+	}
+	if database.execCalls != 1 {
+		t.Fatalf("Exec calls = %d, want 1", database.execCalls)
+	}
+	app.queryMu.Lock()
+	_, stillRegistered := app.runningQueries[jobID]
+	app.queryMu.Unlock()
+	if stillRegistered {
+		t.Fatal("cancelled import job remained registered")
+	}
+}
+
 func TestImportDataWithProgressOptionsUsesOracleColumnMetadataFallback(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
@@ -523,6 +606,51 @@ func TestImportBatchConsumerFallsBackToSingleRowsWhenBatchFails(t *testing.T) {
 	}
 	if len(result.ErrorLogs) != 1 || result.ErrorLogs[0] != "Row 2: duplicate key" {
 		t.Fatalf("unexpected error logs: %#v", result.ErrorLogs)
+	}
+}
+
+func TestImportBatchConsumerStopsSingleRowFallbackAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	writer := &fakeImportRowWriter{
+		batchErr:        fmt.Errorf("batch failed"),
+		afterSingleCall: cancel,
+	}
+	consumer := newImportBatchConsumer(writer, 1000, 3, true, nil)
+	consumer.SetContext(ctx)
+
+	for i := 1; i <= 3; i++ {
+		if err := consumer.ConsumeRow(map[string]interface{}{"id": i}); err != nil {
+			t.Fatalf("ConsumeRow(%d) returned error: %v", i, err)
+		}
+	}
+
+	err := consumer.Flush()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Flush error = %v, want context.Canceled", err)
+	}
+	if writer.singleCalls != 1 {
+		t.Fatalf("single-row fallback calls = %d, want 1", writer.singleCalls)
+	}
+	result := consumer.Result()
+	if result.Success != 1 || result.Failed != 0 {
+		t.Fatalf("unexpected partial result: %#v", result)
+	}
+}
+
+func TestImportBatchConsumerDoesNotCountCancellationAsRowFailure(t *testing.T) {
+	writer := &fakeImportRowWriter{
+		batchErr:         fmt.Errorf("batch failed"),
+		singleErrByRowID: map[interface{}]error{1: context.Canceled},
+	}
+	consumer := newImportBatchConsumer(writer, 1, 1, true, nil)
+
+	err := consumer.ConsumeRow(map[string]interface{}{"id": 1})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ConsumeRow error = %v, want context.Canceled", err)
+	}
+	result := consumer.Result()
+	if result.Success != 0 || result.Failed != 0 {
+		t.Fatalf("unexpected cancelled result: %#v", result)
 	}
 }
 

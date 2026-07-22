@@ -12,6 +12,29 @@ import (
 	"GoNavi-Wails/internal/db"
 )
 
+func TestResolveSQLFileExecutionProgressPercentReservesCompletionForTerminalState(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    string
+		bytesRead int64
+		totalSize int64
+		want      float64
+	}{
+		{name: "running reader reached eof", status: "running", bytesRead: 128, totalSize: 128, want: 99},
+		{name: "running partial read", status: "running", bytesRead: 64, totalSize: 128, want: 50},
+		{name: "done", status: "done", bytesRead: 128, totalSize: 128, want: 100},
+		{name: "unknown size", status: "running", bytesRead: 64, totalSize: 0, want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveSQLFileExecutionProgressPercent(tt.status, tt.bytesRead, tt.totalSize); got != tt.want {
+				t.Fatalf("percent = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 type fakeSQLFileBatchDB struct {
 	batchCalls   int
 	execCalls    int

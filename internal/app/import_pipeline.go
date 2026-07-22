@@ -2,8 +2,10 @@ package app
 
 import (
 	"bufio"
+	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -327,6 +329,7 @@ func (w *importDatabaseRowWriter) ApplyOne(row map[string]interface{}) error {
 
 type importBatchConsumer struct {
 	writer         importRowWriter
+	ctx            context.Context
 	jobID          string
 	batchSize      int
 	totalRows      int
@@ -345,6 +348,7 @@ func newImportBatchConsumer(writer importRowWriter, batchSize int, totalRows int
 	}
 	return &importBatchConsumer{
 		writer:         writer,
+		ctx:            context.Background(),
 		batchSize:      batchSize,
 		totalRows:      totalRows,
 		totalRowsKnown: totalRowsKnown,
@@ -352,7 +356,24 @@ func newImportBatchConsumer(writer importRowWriter, batchSize int, totalRows int
 	}
 }
 
+func (c *importBatchConsumer) SetContext(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.ctx = ctx
+}
+
+func (c *importBatchConsumer) contextError() error {
+	if c == nil || c.ctx == nil {
+		return nil
+	}
+	return c.ctx.Err()
+}
+
 func (c *importBatchConsumer) SetColumns(columns []string) error {
+	if err := c.contextError(); err != nil {
+		return err
+	}
 	if c.writer != nil {
 		c.writer.SetColumns(columns)
 	}
@@ -360,6 +381,9 @@ func (c *importBatchConsumer) SetColumns(columns []string) error {
 }
 
 func (c *importBatchConsumer) ConsumeRow(row map[string]interface{}) error {
+	if err := c.contextError(); err != nil {
+		return err
+	}
 	c.currentRow++
 	if len(c.batch) == 0 {
 		c.batchStartRow = c.currentRow
@@ -385,6 +409,9 @@ func (c *importBatchConsumer) Result() importExecutionResult {
 }
 
 func (c *importBatchConsumer) flush() error {
+	if err := c.contextError(); err != nil {
+		return err
+	}
 	if len(c.batch) == 0 {
 		return nil
 	}
@@ -394,22 +421,41 @@ func (c *importBatchConsumer) flush() error {
 	c.batchStartRow = 0
 
 	if c.writer != nil && c.writer.BatchEnabled() {
-		if err := c.writer.ApplyBatch(rows); err == nil {
+		batchErr := c.writer.ApplyBatch(rows)
+		if batchErr == nil {
 			c.successCount += len(rows)
 			c.emitProgress(startRow + len(rows) - 1)
-			return nil
+			return c.contextError()
+		}
+		if errors.Is(batchErr, context.Canceled) {
+			return batchErr
+		}
+		if err := c.contextError(); err != nil {
+			return err
 		}
 	}
 
 	for idx, row := range rows {
+		if err := c.contextError(); err != nil {
+			return err
+		}
 		if c.writer != nil {
 			if err := c.writer.ApplyOne(row); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return err
+				}
+				if contextErr := c.contextError(); contextErr != nil {
+					return contextErr
+				}
 				c.errorLogs = append(c.errorLogs, fmt.Sprintf("Row %d: %s", startRow+idx, err.Error()))
 			} else {
 				c.successCount++
 			}
 		}
 		c.emitProgress(startRow + idx)
+		if err := c.contextError(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

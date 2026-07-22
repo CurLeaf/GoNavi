@@ -710,6 +710,11 @@ func sqlAuditStatusFromResult(result connection.QueryResult) string {
 	if result.Success {
 		return "success"
 	}
+	if data, ok := result.Data.(map[string]interface{}); ok {
+		if cancelled, ok := data["cancelled"].(bool); ok && cancelled {
+			return "cancelled"
+		}
+	}
 	message := strings.ToLower(strings.TrimSpace(result.Message))
 	if strings.Contains(message, "context canceled") ||
 		strings.Contains(message, "context cancelled") ||

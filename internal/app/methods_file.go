@@ -1695,6 +1695,26 @@ func buildGoNaviMySQLDatabaseBackupBootstrapSQL(backup goNaviMySQLDatabaseBackup
 	return fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", quoteIdentByType("mysql", backup.databaseName))
 }
 
+func resolveSQLFileExecutionProgressPercent(status string, bytesRead, totalSize int64) float64 {
+	if totalSize <= 0 {
+		return 0
+	}
+	percent := float64(bytesRead) / float64(totalSize) * 100
+	if percent < 0 {
+		return 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	// The SQL splitter reads ahead before executing the statements found in that
+	// chunk. Reaching EOF therefore means parsing is complete, not execution.
+	// Reserve 100% for the successful terminal event.
+	if !strings.EqualFold(strings.TrimSpace(status), "done") && percent >= 100 {
+		return 99
+	}
+	return percent
+}
+
 func resolveSQLFileExecutionRunConfig(config connection.ConnectionConfig, dbName string, preamble []byte) connection.ConnectionConfig {
 	runConfig := normalizeRunConfig(config, dbName)
 	if strings.EqualFold(strings.TrimSpace(runConfig.Type), "mysql") {
@@ -1782,13 +1802,7 @@ func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, 
 
 	// 发送进度事件的辅助函数
 	emitProgress := func(status string, executed, failed, total int, bytesRead int64, currentSQL string, errMsg string) {
-		percent := 0.0
-		if totalSize > 0 {
-			percent = float64(bytesRead) / float64(totalSize) * 100
-			if percent > 100 {
-				percent = 100
-			}
-		}
+		percent := resolveSQLFileExecutionProgressPercent(status, bytesRead, totalSize)
 		uievents.Emit(a.ctx, "sqlfile:progress", map[string]interface{}{
 			"jobId":      jobID,
 			"status":     status,
@@ -2562,6 +2576,35 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 	return a.ImportDataWithProgressOptions(config, dbName, tableName, filePath, ImportFileOptions{})
 }
 
+func buildImportExecutionPayload(resultData importExecutionResult, summary string, cancelled bool) map[string]interface{} {
+	total := resultData.Total
+	if cancelled {
+		// Rows that were parsed into an uncommitted buffer are not processed rows.
+		total = resultData.Success + resultData.Failed
+	}
+	return map[string]interface{}{
+		"success":      resultData.Success,
+		"failed":       resultData.Failed,
+		"total":        total,
+		"affectedRows": int64(resultData.Success),
+		"errorLogs":    resultData.ErrorLogs,
+		"errorSummary": summary,
+		"cancelled":    cancelled,
+	}
+}
+
+func (a *App) cancelledImportResult(resultData importExecutionResult) connection.QueryResult {
+	summary := a.appText("file.backend.message.import_cancelled", map[string]any{
+		"imported": resultData.Success,
+		"failed":   resultData.Failed,
+	})
+	return connection.QueryResult{
+		Success: false,
+		Data:    buildImportExecutionPayload(resultData, summary, true),
+		Message: summary,
+	}
+}
+
 // ImportDataWithProgressOptions executes a streamed import with optional source-header
 // to database-column mappings. ImportDataWithProgress remains the compatibility entrypoint.
 func (a *App) ImportDataWithProgressOptions(config connection.ConnectionConfig, dbName, tableName, filePath string, options ImportFileOptions) (result connection.QueryResult) {
@@ -2586,13 +2629,56 @@ func (a *App) ImportDataWithProgressOptions(config connection.ConnectionConfig, 
 	if err := ensureConnectionAllowsDataImport(config, "connection.backend.action.import_data"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
+
+	importCtx := context.Background()
+	jobID := strings.TrimSpace(options.JobID)
+	if jobID != "" {
+		registeredAt := time.Now()
+		ctx, cancel := context.WithCancel(context.Background())
+		importCtx = ctx
+		a.queryMu.Lock()
+		if a.runningQueries == nil {
+			a.runningQueries = make(map[string]queryContext)
+		}
+		if _, exists := a.runningQueries[jobID]; exists {
+			a.queryMu.Unlock()
+			cancel()
+			return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.import_job_already_running", nil)}
+		}
+		a.runningQueries[jobID] = queryContext{
+			cancel:          cancel,
+			started:         registeredAt,
+			retainUntilDone: true,
+		}
+		a.queryMu.Unlock()
+		defer cancel()
+		defer func() {
+			a.queryMu.Lock()
+			if running, exists := a.runningQueries[jobID]; exists && running.started.Equal(registeredAt) {
+				delete(a.runningQueries, jobID)
+			}
+			a.queryMu.Unlock()
+		}()
+	}
+	if err := importCtx.Err(); err != nil {
+		return a.cancelledImportResult(importExecutionResult{})
+	}
 	runConfig := normalizeRunConfig(config, dbName)
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
+		if errors.Is(importCtx.Err(), context.Canceled) {
+			return a.cancelledImportResult(importExecutionResult{})
+		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if err := importCtx.Err(); err != nil {
+		return a.cancelledImportResult(importExecutionResult{})
 	}
 
 	targetColumns, colErr := getColumnsWithMetadataFallback(dbInst, config, metadataSchemaName, metadataTableName, a.appText)
+	if errors.Is(importCtx.Err(), context.Canceled) {
+		return a.cancelledImportResult(importExecutionResult{})
+	}
 	if colErr != nil && options.ColumnMappings != nil {
 		return connection.QueryResult{Success: false, Message: colErr.Error()}
 	}
@@ -2601,18 +2687,27 @@ func (a *App) ImportDataWithProgressOptions(config connection.ConnectionConfig, 
 	batchConsumer := newImportBatchConsumer(writer, defaultImportApplyBatchSize, 0, false, func(state importProgressState) {
 		uievents.Emit(a.ctx, "import:progress", state)
 	})
-	batchConsumer.jobID = strings.TrimSpace(options.JobID)
+	batchConsumer.SetContext(importCtx)
+	batchConsumer.jobID = jobID
 	consumer, err := newImportColumnMappingConsumer(batchConsumer, options.ColumnMappings, targetColumns)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if err := streamImportFile(filePath, consumer); err != nil {
 		resultData := batchConsumer.Result()
+		if errors.Is(err, context.Canceled) {
+			maybeReleaseFileTransferMemory("import-cancelled", int64(resultData.Success+resultData.Failed), filePath)
+			return a.cancelledImportResult(resultData)
+		}
 		maybeReleaseFileTransferMemory("import-stream-error", int64(resultData.Total), filePath)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if err := batchConsumer.Flush(); err != nil {
 		resultData := batchConsumer.Result()
+		if errors.Is(err, context.Canceled) {
+			maybeReleaseFileTransferMemory("import-cancelled", int64(resultData.Success+resultData.Failed), filePath)
+			return a.cancelledImportResult(resultData)
+		}
 		maybeReleaseFileTransferMemory("import-flush-error", int64(resultData.Total), filePath)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -2627,14 +2722,7 @@ func (a *App) ImportDataWithProgressOptions(config connection.ConnectionConfig, 
 		"imported": resultData.Success,
 		"failed":   resultData.Failed,
 	})
-	resultPayload := map[string]interface{}{
-		"success":      resultData.Success,
-		"failed":       resultData.Failed,
-		"total":        resultData.Total,
-		"affectedRows": int64(resultData.Success),
-		"errorLogs":    resultData.ErrorLogs,
-		"errorSummary": summary,
-	}
+	resultPayload := buildImportExecutionPayload(resultData, summary, false)
 
 	maybeReleaseFileTransferMemory("import-finished", int64(resultData.Total), filePath)
 	return connection.QueryResult{Success: true, Data: resultPayload, Message: summary}

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   previewImportFile: vi.fn(),
   dbGetColumns: vi.fn(),
   importDataWithProgressOptions: vi.fn(),
+  cancelQuery: vi.fn(),
   progressHandler: null as ((data: any) => void) | null,
   eventsOn: vi.fn((_event: string, handler: (data: any) => void) => {
     mocks.progressHandler = handler;
@@ -47,6 +48,7 @@ vi.mock("../../wailsjs/go/app/App", () => ({
   PreviewImportFile: mocks.previewImportFile,
   DBGetColumns: mocks.dbGetColumns,
   ImportDataWithProgressOptions: mocks.importDataWithProgressOptions,
+  CancelQuery: mocks.cancelQuery,
 }));
 
 vi.mock("../../wailsjs/runtime/runtime", () => ({
@@ -144,6 +146,7 @@ vi.mock("@ant-design/icons", async () => {
   return {
     CheckCircleOutlined: Icon,
     CloseCircleOutlined: Icon,
+    StopOutlined: Icon,
   };
 });
 
@@ -220,6 +223,8 @@ describe("ImportPreviewModal i18n", () => {
       ],
     });
     mocks.importDataWithProgressOptions.mockReset();
+    mocks.cancelQuery.mockReset();
+    mocks.cancelQuery.mockResolvedValue({ success: true });
     mocks.progressHandler = null;
     mocks.eventsOn.mockClear();
     mocks.eventsOff.mockClear();
@@ -494,6 +499,160 @@ describe("ImportPreviewModal i18n", () => {
     expect(mocks.previewImportFile).toHaveBeenCalledTimes(1);
     expect(textContent(renderer.toJSON())).toContain("Failed 1 rows");
     expect(textContent(renderer.toJSON())).toContain("Row 12: duplicate key");
+  });
+
+  it("stops an active import by its job id and preserves the partial result", async () => {
+    let resolveImport!: (value: any) => void;
+    mocks.importDataWithProgressOptions.mockImplementation(
+      () => new Promise((resolve) => {
+        resolveImport = resolve;
+      }),
+    );
+    const renderer = await renderImportPreview();
+    const startButton = renderer.root
+      .findAllByType("button")
+      .find((node) => textContent(node.props.children) === "Start import");
+
+    await act(async () => {
+      startButton?.props.onClick();
+      await Promise.resolve();
+    });
+
+    const importJobId = mocks.importDataWithProgressOptions.mock.calls[0][4].jobId;
+    const stopButton = renderer.root
+      .findAllByType("button")
+      .find((node) => textContent(node.props.children) === "Stop import");
+    expect(stopButton).toBeDefined();
+
+    await act(async () => {
+      stopButton?.props.onClick();
+      stopButton?.props.onClick();
+      await Promise.resolve();
+    });
+    expect(mocks.cancelQuery).toHaveBeenCalledTimes(1);
+    expect(mocks.cancelQuery).toHaveBeenCalledWith(importJobId);
+
+    await act(async () => {
+      resolveImport({
+        success: false,
+        message: "Import stopped",
+        data: {
+          success: 10,
+          failed: 2,
+          total: 12,
+          errorLogs: ["Row 11: duplicate key", "Row 12: duplicate key"],
+          cancelled: true,
+        },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const renderedText = textContent(renderer.toJSON());
+    expect(renderedText).toContain("Import stopped");
+    expect(renderedText).toContain("Successfully imported 10 rows");
+    expect(renderedText).toContain("Failed 2 rows");
+  });
+
+  it("ignores a late stop failure after the import already completed", async () => {
+    let resolveImport!: (value: any) => void;
+    let resolveCancel!: (value: any) => void;
+    mocks.importDataWithProgressOptions.mockImplementation(
+      () => new Promise((resolve) => {
+        resolveImport = resolve;
+      }),
+    );
+    mocks.cancelQuery.mockImplementation(
+      () => new Promise((resolve) => {
+        resolveCancel = resolve;
+      }),
+    );
+    const renderer = await renderImportPreview();
+    const startButton = renderer.root
+      .findAllByType("button")
+      .find((node) => textContent(node.props.children) === "Start import");
+
+    await act(async () => {
+      startButton?.props.onClick();
+      await Promise.resolve();
+    });
+    const stopButton = renderer.root
+      .findAllByType("button")
+      .find((node) => textContent(node.props.children) === "Stop import");
+    await act(async () => {
+      stopButton?.props.onClick();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      resolveImport({
+        success: true,
+        data: { success: 12, failed: 0, total: 12, errorLogs: [] },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      resolveCancel({ success: false, message: "No running query" });
+      await Promise.resolve();
+    });
+
+    const renderedText = textContent(renderer.toJSON());
+    expect(renderedText).toContain("Import completed");
+    expect(renderedText).not.toContain("No running query");
+  });
+
+  it("clears an earlier stop failure when stop is retried", async () => {
+    let resolveImport!: (value: any) => void;
+    mocks.importDataWithProgressOptions.mockImplementation(
+      () => new Promise((resolve) => {
+        resolveImport = resolve;
+      }),
+    );
+    mocks.cancelQuery.mockResolvedValue({ success: false, message: "No running query" });
+    const renderer = await renderImportPreview();
+    const startButton = renderer.root
+      .findAllByType("button")
+      .find((node) => textContent(node.props.children) === "Start import");
+
+    await act(async () => {
+      startButton?.props.onClick();
+      await Promise.resolve();
+    });
+    const stopButton = renderer.root
+      .findAllByType("button")
+      .find((node) => textContent(node.props.children) === "Stop import");
+    await act(async () => {
+      stopButton?.props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(textContent(renderer.toJSON())).toContain("No running query");
+
+    mocks.cancelQuery.mockResolvedValue({ success: true });
+    const retryStopButton = renderer.root
+      .findAllByType("button")
+      .find((node) => textContent(node.props.children) === "Stop import");
+    await act(async () => {
+      retryStopButton?.props.onClick();
+      await Promise.resolve();
+    });
+    expect(mocks.cancelQuery).toHaveBeenCalledTimes(2);
+    expect(textContent(renderer.toJSON())).not.toContain("No running query");
+
+    await act(async () => {
+      resolveImport({
+        success: false,
+        message: "Import stopped",
+        data: { success: 10, failed: 2, total: 12, errorLogs: [], cancelled: true },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const renderedText = textContent(renderer.toJSON());
+    expect(renderedText).toContain("Import stopped");
+    expect(renderedText).not.toContain("No running query");
   });
 
   it("preserves an RPC failure when connection state changes during import", async () => {
