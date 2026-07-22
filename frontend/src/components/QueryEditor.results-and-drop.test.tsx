@@ -637,6 +637,7 @@ describe('QueryEditor external SQL save', () => {
             readOnly: true,
           }]}
           activeResultKey="result-1"
+          isActive
           loading={false}
           executionError=""
           sqlLogCount={1}
@@ -3327,6 +3328,7 @@ describe('QueryEditor external SQL save', () => {
             sortInfo,
           }]}
           activeResultKey="result-1"
+          isActive
           loading={false}
           executionError=""
           sqlLogCount={0}
@@ -3356,6 +3358,75 @@ describe('QueryEditor external SQL save', () => {
     const serialized = JSON.stringify([{ columnKey: 'id', order: 'descend', enabled: true }]);
     dataGridState.latestProps.onSort(serialized, '');
     expect(onResultSort).toHaveBeenCalledWith('result-1', serialized, '');
+    renderer.unmount();
+  });
+
+  it('activates shortcuts only for the visible result grid in the active query editor', async () => {
+    const resultSets = [
+      {
+        key: 'result-1',
+        sql: 'select 1 as value',
+        rows: [{ value: 1 }],
+        columns: ['value'],
+        pkColumns: [],
+        readOnly: true,
+      },
+      {
+        key: 'result-2',
+        sql: 'select 2 as value',
+        rows: [{ value: 2 }],
+        columns: ['value'],
+        pkColumns: [],
+        readOnly: true,
+      },
+    ];
+    const renderPanel = (activeResultKey: string, isActive: boolean) => (
+      <QueryEditorResultsPanel
+        resultSets={resultSets}
+        activeResultKey={activeResultKey}
+        isActive={isActive}
+        loading={false}
+        executionError=""
+        sqlLogCount={0}
+        darkMode={false}
+        isV2Ui
+        currentDb="main"
+        currentConnectionId="conn-1"
+        toggleShortcutLabel=""
+        onActiveResultKeyChange={vi.fn()}
+        onHide={vi.fn()}
+        onCloseResult={vi.fn()}
+        onCloseOtherResultTabs={vi.fn()}
+        onCloseResultTabsToLeft={vi.fn()}
+        onCloseResultTabsToRight={vi.fn()}
+        onCloseAllResultTabs={vi.fn()}
+        onReloadResult={vi.fn()}
+        onResultPageChange={vi.fn()}
+        onResultSort={vi.fn()}
+        onDiagnoseExecutionError={vi.fn()}
+      />
+    );
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(renderPanel('result-1', true));
+    });
+    expect(dataGridState.latestProps?.data).toEqual([{ value: 1 }]);
+    expect(dataGridState.latestProps?.isActive).toBe(true);
+
+    await act(async () => {
+      renderer.update(renderPanel('result-1', false));
+    });
+    expect(dataGridState.latestProps?.isActive).toBe(false);
+
+    await act(async () => {
+      renderer.update(renderPanel('result-2', true));
+    });
+    expect(dataGridState.latestProps?.data).toEqual([{ value: 2 }]);
+    expect(dataGridState.latestProps?.isActive).toBe(true);
+    expect(readFileSync(new URL('./QueryEditorResultsPanel.tsx', import.meta.url), 'utf8'))
+      .toContain('isActive={isActive && resolvedActiveResultKey === rs.key}');
+
     renderer.unmount();
   });
 
@@ -3476,6 +3547,7 @@ describe('QueryEditor external SQL save', () => {
       <QueryEditorResultsPanel
         resultSets={[]}
         activeResultKey=""
+        isActive
         loading={false}
         executionError=""
         sqlLogCount={sqlLogCount}
@@ -3534,6 +3606,7 @@ describe('QueryEditor external SQL save', () => {
       <QueryEditorResultsPanel
         resultSets={resultSets}
         activeResultKey="stale-result"
+        isActive
         loading={false}
         executionError=""
         sqlLogCount={0}

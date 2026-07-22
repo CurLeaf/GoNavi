@@ -434,6 +434,19 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
           </>
         )}
 
+        {!canModifyData && selectedCellsSize > 0 && (
+          <>
+            {renderToolbarDivider()}
+            <Button
+              data-grid-copy-selection-action="true"
+              icon={<CopyOutlined />}
+              onClick={onCopySelectedCellsToClipboard}
+            >
+              {translate('data_grid.toolbar.copy_selection', { count: selectedCellsSize })}
+            </Button>
+          </>
+        )}
+
         <>
           {renderToolbarDivider()}
           <Tooltip title={translate('data_grid.toolbar.ai_insight_tooltip')}>

@@ -73,6 +73,8 @@ export const useDataGridV2Actions = (ctx: DataGridV2ActionsContext) => {
     hasChanges,
     hasExplicitSort,
     hasFilteredExportSql,
+    isActive,
+    isTableSurfaceActive,
     isQueryResultExport,
     mergedDisplayData,
     modal,
@@ -298,28 +300,35 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
   }, [selectedCells, mergedDisplayData, displayColumnNames, copyToClipboard, translateDataGrid]);
 
   useEffect(() => {
-      if (!cellEditMode) return;
+      if (!isActive || !isTableSurfaceActive || (!cellEditMode && selectedCells.size === 0)) return;
 
       const onKeyDown = (event: KeyboardEvent) => {
+          if (event.defaultPrevented) return;
           const activeElement = document.activeElement as HTMLElement | null;
-          const tagName = String(activeElement?.tagName || '').toLowerCase();
-          if (tagName === 'input' || tagName === 'textarea' || activeElement?.isContentEditable) {
+          const eventTarget = event.target instanceof HTMLElement ? event.target : null;
+          const nativeShortcutGuard = 'input, textarea, select, [contenteditable="true"], .ant-modal, .ant-dropdown, .ant-select-dropdown, .ant-picker-dropdown, .ant-popover, [data-gonavi-close-shortcut-guard]';
+          if (activeElement?.closest(nativeShortcutGuard) || eventTarget?.closest(nativeShortcutGuard)) {
               return;
           }
 
           if (event.key === 'Escape') {
               const activeSelection = currentSelectionRef.current.size > 0 ? currentSelectionRef.current : selectedCells;
-              event.preventDefault();
               if (activeSelection.size === 0) {
-                  closeCellEditMode();
+                  if (cellEditMode) {
+                      event.preventDefault();
+                      closeCellEditMode();
+                  }
                   return;
               }
+              event.preventDefault();
               resetCellSelection();
               return;
           }
 
           const isCopy = (event.ctrlKey || event.metaKey) && !event.altKey && String(event.key || '').toLowerCase() === 'c';
           if (!isCopy) return;
+
+          if (document.getSelection?.()?.toString()) return;
 
           const activeSelection = currentSelectionRef.current.size > 0 ? currentSelectionRef.current : selectedCells;
           if (activeSelection.size === 0) return;
@@ -330,10 +339,10 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
 
       window.addEventListener('keydown', onKeyDown);
       return () => window.removeEventListener('keydown', onKeyDown);
-  }, [cellEditMode, selectedCells, handleCopySelectedCellsToClipboard, resetCellSelection, closeCellEditMode]);
+  }, [cellEditMode, selectedCells, handleCopySelectedCellsToClipboard, resetCellSelection, closeCellEditMode, isActive, isTableSurfaceActive]);
 
   useEffect(() => {
-      if (!cellEditMode) return;
+      if (!isActive || !isTableSurfaceActive || (!cellEditMode && selectedCells.size === 0)) return;
 
       const onPointerDown = (event: MouseEvent) => {
           const root = rootRef.current;
@@ -343,12 +352,16 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
               && target.closest('.ant-modal, .ant-dropdown, .ant-select-dropdown, .ant-picker-dropdown, .ant-popover')) {
               return;
           }
-          closeCellEditMode();
+          if (cellEditMode) {
+              closeCellEditMode();
+          } else {
+              resetCellSelection();
+          }
       };
 
       document.addEventListener('mousedown', onPointerDown);
       return () => document.removeEventListener('mousedown', onPointerDown);
-  }, [cellEditMode, closeCellEditMode]);
+  }, [cellEditMode, closeCellEditMode, isActive, isTableSurfaceActive, resetCellSelection, selectedCells.size]);
   
   const getTargets = useCallback((clickedRecord: any) => {
       const selKeys = selectedRowKeysRef.current;

@@ -8936,6 +8936,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         <QueryEditorResultsPanel
           resultSets={resultSets}
           activeResultKey={activeResultKey}
+          isActive={isActive}
           loading={loading}
           executionError={executionError}
           sqlLogCount={sqlLogCount}

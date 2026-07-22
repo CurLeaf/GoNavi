@@ -71,6 +71,7 @@ export const resolveEffectiveActiveResultKey = (
 interface QueryEditorResultsPanelProps {
     resultSets: QueryEditorResultSet[];
     activeResultKey: string;
+    isActive: boolean;
     loading: boolean;
     executionError: string;
     sqlLogCount: number;
@@ -131,6 +132,7 @@ export const shouldActivateResultTabDetachPointer = (event: {
 const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     resultSets,
     activeResultKey,
+    isActive,
     loading,
     executionError,
     sqlLogCount,
@@ -532,6 +534,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                     <DataGrid
                         data={rs.rows}
                         columnNames={visibleColumns}
+                        isActive={isActive && resolvedActiveResultKey === rs.key}
                         loading={loading || rs.page?.loading === true}
                         tableName={resultTableName}
                         columnPinScope={resultTableName ? undefined : buildQueryResultColumnPinScope({

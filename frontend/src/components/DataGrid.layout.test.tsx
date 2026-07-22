@@ -1126,7 +1126,7 @@ describe('DataGrid layout', () => {
     expect(dataGridSource).toContain('if (activeSelection.size === 0) {');
     expect(dataGridSource).toContain('closeCellEditMode();');
     expect(dataGridSource).toContain('resetCellSelection();');
-    expect(dataGridSource).toContain("tagName === 'input' || tagName === 'textarea' || activeElement?.isContentEditable");
+    expect(dataGridSource).toContain('activeElement?.closest(nativeShortcutGuard) || eventTarget?.closest(nativeShortcutGuard)');
     expect(paginationSource).toContain("padding: 0");
     expect(paginationSource).toContain("justifyContent: 'flex-start'");
   });
@@ -2462,6 +2462,23 @@ describe('DataGrid layout', () => {
     expect(markup).not.toMatch(/data-grid-query-copy-action="true"[^>]*disabled/);
     expect(markup).toContain('复制');
     expect(markup.match(/data-grid-query-copy-action="true"/g)?.length).toBe(1);
+  });
+
+  it('keeps range selection and Ctrl/Cmd+C available for read-only aggregate results', () => {
+    const batchActionsSource = readFileSync(new URL('./useDataGridBatchActions.ts', import.meta.url), 'utf8');
+    const v2ActionsSource = readFileSync(new URL('./useDataGridV2Actions.ts', import.meta.url), 'utf8');
+    const toolbarSource = readFileSync(new URL('./DataGridToolbarFrame.tsx', import.meta.url), 'utf8');
+
+    expect(batchActionsSource).toContain('if (!isActive || !isTableSurfaceActive) return;');
+    expect(batchActionsSource).not.toContain('if (!canModifyData || !isTableSurfaceActive) return;');
+    expect(batchActionsSource).toContain('canSelectGridCellForClipboard({');
+    expect(batchActionsSource).toContain('if (canModifyData && !cellEditModeRef.current)');
+    expect(batchActionsSource).toContain('markCellSelectionDeleteEligible(canModifyData);');
+    expect(v2ActionsSource).toContain('if (!isActive || !isTableSurfaceActive || (!cellEditMode && selectedCells.size === 0)) return;');
+    expect(v2ActionsSource).toContain("String(event.key || '').toLowerCase() === 'c'");
+    expect(v2ActionsSource).toContain('if (document.getSelection?.()?.toString()) return;');
+    expect(toolbarSource).toContain('!canModifyData && selectedCellsSize > 0');
+    expect(toolbarSource).toContain('data-grid-copy-selection-action="true"');
   });
 
   it('keeps export and import chrome behind translateDataGrid while preserving raw details', () => {
