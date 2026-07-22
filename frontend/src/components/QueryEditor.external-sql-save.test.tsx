@@ -60,6 +60,7 @@ const storeState = vi.hoisted(() => ({
   setSqlFormatOptions: vi.fn(),
   queryOptions: {
     maxRows: 5000,
+    wordWrap: false,
     showColumnComment: true,
     showColumnType: true,
     showQueryResultsPanel: false,
@@ -788,6 +789,7 @@ describe('QueryEditor external SQL save', () => {
     storeState.appearance.newQuerySqlTemplate = null;
     storeState.queryOptions = {
       maxRows: 5000,
+      wordWrap: false,
       showColumnComment: true,
       showColumnType: true,
       showQueryResultsPanel: false,
@@ -4470,6 +4472,44 @@ describe('QueryEditor external SQL save', () => {
     expect(findExactButton(renderer, '关键字小写')).toBeUndefined();
     expect(findExactButton(renderer, '代码片段管理...')).toBeUndefined();
     expect(findExactButton(renderer, '快捷键管理...')).toBeUndefined();
+  });
+
+  it('persists word wrap and applies it to newly opened SQL editors', async () => {
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'select a_very_long_column_name from a_very_long_table_name' })} />);
+    });
+
+    expect(monacoEditorMockState.latestProps.options.wordWrap).toBe('off');
+    const enableButton = renderer.root.find((node) => (
+      node.type === 'button' && node.props?.['aria-label'] === '开启自动换行'
+    ));
+    expect(enableButton.props['aria-pressed']).toBe(false);
+    expect(enableButton.children).toContain('换行');
+
+    await act(async () => {
+      enableButton.props.onClick();
+      notifyStoreSubscribers();
+    });
+
+    expect(storeState.setQueryOptions).toHaveBeenCalledWith({ wordWrap: true });
+    expect(monacoEditorMockState.latestProps.options.wordWrap).toBe('on');
+    const disableButton = renderer.root.find((node) => (
+      node.type === 'button' && node.props?.['aria-label'] === '关闭自动换行'
+    ));
+    expect(disableButton.props['aria-pressed']).toBe(true);
+    expect(disableButton.children).toContain('换行');
+
+    await act(async () => {
+      renderer.unmount();
+      renderer = create(<QueryEditor tab={createTab({ id: 'tab-2', query: 'select 2' })} />);
+    });
+
+    expect(monacoEditorMockState.latestProps.options.wordWrap).toBe('on');
+    const newEditorDisableButton = renderer.root.find((node) => (
+      node.type === 'button' && node.props?.['aria-label'] === '关闭自动换行'
+    ));
+    expect(newEditorDisableButton.props['aria-pressed']).toBe(true);
   });
 
   it('shows object info via editor ctrl+q action', async () => {

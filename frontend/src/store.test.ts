@@ -218,6 +218,21 @@ describe('store appearance persistence', () => {
     expect(persisted.state.queryOptions.showSidebarTableComment).toBe(false);
   });
 
+  it('persists the SQL editor word-wrap preference with a disabled default', async () => {
+    const { useStore } = await importStore();
+    expect(useStore.getState().queryOptions.wordWrap).toBe(false);
+
+    useStore.getState().setQueryOptions({ wordWrap: true });
+    expect(useStore.getState().queryOptions.wordWrap).toBe(true);
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.queryOptions.wordWrap).toBe(true);
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().queryOptions.wordWrap).toBe(true);
+  });
+
   it('restores query tabs from crash-recovery snapshots even when persisted tabs are missing', async () => {
     storage.setItem('gonavi-query-tab-drafts-v1', JSON.stringify([
       {

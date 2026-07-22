@@ -312,10 +312,11 @@ const buildQueryEditorInlineMemoryEntries = ({
         .map((entry) => ({ sql: entry.sql }));
 };
 
-const buildQueryEditorMonacoOptions = (isObjectEditQueryTab: boolean) => ({
+const buildQueryEditorMonacoOptions = (isObjectEditQueryTab: boolean, wordWrapEnabled = false) => ({
     minimap: { enabled: false },
     automaticLayout: true,
     fixedOverflowWidgets: true,
+    wordWrap: wordWrapEnabled ? ('on' as const) : ('off' as const),
     find: QUERY_EDITOR_MONACO_FIND_OPTIONS,
     hover: {
         enabled: true,
@@ -1247,6 +1248,9 @@ const sortCompleteQueryResultRows = (
 
 const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isActive = true }) => {
   const appearance = useStore(state => state.appearance);
+  const queryOptions = useStore(state => state.queryOptions);
+  const setQueryOptions = useStore(state => state.setQueryOptions);
+  const wordWrapEnabled = queryOptions?.wordWrap === true;
   const [query, setQuery] = useState(() => getInitialEditorQuery(
       tab,
       resolveNewQueryDefaultTemplate(appearance.newQuerySqlTemplate),
@@ -1254,8 +1258,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const isExternalSQLFileTab = Boolean(String(tab.filePath || '').trim());
   const isObjectEditQueryTab = tab.type === 'query' && tab.queryMode === 'object-edit';
   const queryEditorMonacoOptions = useMemo(
-      () => buildQueryEditorMonacoOptions(isObjectEditQueryTab),
-      [isObjectEditQueryTab],
+      () => buildQueryEditorMonacoOptions(isObjectEditQueryTab, wordWrapEnabled),
+      [isObjectEditQueryTab, wordWrapEnabled],
   );
   
   type ResultSet = QueryEditorResultSet;
@@ -1435,8 +1439,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const isV2Ui = appearance.uiVersion === 'v2';
   const sqlFormatOptions = useStore(state => state.sqlFormatOptions);
   const setSqlFormatOptions = useStore(state => state.setSqlFormatOptions);
-  const queryOptions = useStore(state => state.queryOptions);
-  const setQueryOptions = useStore(state => state.setQueryOptions);
   const queryEditorEditorHeightRatio = sanitizeQueryEditorEditorHeightRatio(
       queryOptions?.queryEditorEditorHeightRatio,
   );
@@ -3712,7 +3714,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       if (mountedModel && typeof monaco?.editor?.setModelLanguage === 'function') {
           monaco.editor.setModelLanguage(mountedModel, 'sql');
       }
-      editor.updateOptions?.(buildQueryEditorMonacoOptions(isObjectEditQueryTab));
+      editor.updateOptions?.(buildQueryEditorMonacoOptions(isObjectEditQueryTab, wordWrapEnabled));
 
       aiInlineGhostVisibleContextKeyRef.current = editor.createContextKey?.(
           QUERY_EDITOR_AI_INLINE_CONTEXT_KEY,
@@ -8843,6 +8845,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         toggleQueryResultsPanelShortcutBinding={toggleQueryResultsPanelShortcutBinding}
         activeShortcutPlatform={activeShortcutPlatform}
         isResultPanelVisible={isResultPanelVisible}
+        wordWrapEnabled={wordWrapEnabled}
         loading={loading}
         saveMoreMenuItems={saveMoreMenuItems}
         formatSettingsMenu={formatSettingsMenu}
@@ -8863,6 +8866,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         onCancel={handleCancel}
         onQuickSave={handleQuickSave}
         onFindInEditor={handleOpenEditorFind}
+        onToggleWordWrap={() => setQueryOptions({ wordWrap: !wordWrapEnabled })}
         onFormat={handleFormat}
         onTriggerSqlAiCompletion={() => triggerAiInlineCompletionRef.current?.()}
         onToggleResultPanelVisibility={toggleResultPanelVisibility}

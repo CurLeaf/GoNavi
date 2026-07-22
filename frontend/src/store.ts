@@ -1691,6 +1691,7 @@ export interface RecentSQLFile {
 
 export interface QueryOptions {
   maxRows: number;
+  wordWrap: boolean;
   showColumnComment: boolean;
   showSidebarTableComment?: boolean;
   sidebarTableMetadataFields?: SidebarTableMetadataField[];
@@ -2738,6 +2739,7 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
       ? (value as Record<string, unknown>)
       : {};
   const maxRows = Number(raw.maxRows);
+  const wordWrap = raw.wordWrap === true;
   const showColumnComment =
     typeof raw.showColumnComment === "boolean" ? raw.showColumnComment : true;
   const showSidebarTableComment =
@@ -2765,6 +2767,7 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
   if (!Number.isFinite(maxRows) || maxRows <= 0) {
     return {
       maxRows: 5000,
+      wordWrap,
       showColumnComment,
       showSidebarTableComment: derivedShowSidebarTableComment,
       sidebarTableMetadataFields: orderedSidebarTableMetadataFields,
@@ -2776,6 +2779,7 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
   }
   return {
     maxRows: Math.min(50000, Math.trunc(maxRows)),
+    wordWrap,
     showColumnComment,
     showSidebarTableComment: derivedShowSidebarTableComment,
     sidebarTableMetadataFields: orderedSidebarTableMetadataFields,
@@ -3480,6 +3484,7 @@ export const useStore = create<AppState>()(
       sqlFormatOptions: { keywordCase: "upper" },
       queryOptions: {
         maxRows: 5000,
+        wordWrap: false,
         showColumnComment: true,
         showSidebarTableComment: false,
         sidebarTableMetadataFields: ["rows"],

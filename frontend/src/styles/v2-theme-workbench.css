@@ -189,6 +189,24 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-btn {
   font-size: 12.5px !important;
 }
 
+body[data-ui-version="v2"] .gn-v2-query-toolbar-word-wrap-action.ant-btn,
+body[data-ui-version="v2"] .gn-v2-query-toolbar-word-wrap-action .ant-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-toolbar-word-wrap-action .ant-btn-icon {
+  line-height: 1;
+}
+
+.gn-query-toolbar-word-wrap-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+
 body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group {
   display: inline-flex !important;
   align-items: center;
