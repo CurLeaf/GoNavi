@@ -4526,7 +4526,7 @@ describe('QueryEditor external SQL save', () => {
     expect(initialOptions).toMatchObject({
       fixedOverflowWidgets: true,
       find: {
-        addExtraSpaceOnTop: true,
+        addExtraSpaceOnTop: false,
       },
       hover: {
         enabled: true,
@@ -11164,14 +11164,13 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-results .query-result-tab-text {');
   });
 
-  it('keeps Monaco find widget spacing scoped to the v2 query editor shell', () => {
+  it('does not reserve vertical space for the Monaco find widget in the v2 query editor', () => {
     const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
     const css = readV2ThemeCss();
 
-    expect(source).toContain('addExtraSpaceOnTop: true');
-    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-monaco-stage:has(.monaco-editor .find-widget.visible:not(.hiddenEditor)) {');
-    expect(css).toContain('padding-top: 24px;');
-    expect(css).toContain('overflow: visible;');
+    expect(source).not.toContain('addExtraSpaceOnTop: true');
+    expect(css).not.toContain('body[data-ui-version="v2"] .gn-v2-query-monaco-stage:has(.monaco-editor .find-widget.visible:not(.hiddenEditor)) {');
+    expect(css).not.toContain('padding-top: 24px;');
     expect(css).not.toContain('body[data-ui-version="v2"] .gn-v2-query-monaco-stage .monaco-editor .find-widget {');
   });
 

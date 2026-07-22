@@ -210,9 +210,6 @@ export {
 const buildQueryEditorMonacoActionLabel = (key: string): string =>
     `GoNavi: ${translate(key)}`;
 
-const QUERY_EDITOR_MONACO_FIND_OPTIONS = {
-    addExtraSpaceOnTop: true,
-} as const;
 const QUERY_EDITOR_NATIVE_SELECT_CURRENT_LINE_EVENT = 'gonavi:native-select-current-line';
 const QUERY_EDITOR_MAC_FIND_WITH_SELECTION_COMBO = 'Meta+E';
 const QUERY_EDITOR_MAC_FIND_WITH_SELECTION_GUARD_ACTION_ID = 'gonavi.suppressMacFindWithSelection';
@@ -316,7 +313,10 @@ const buildQueryEditorMonacoOptions = (isObjectEditQueryTab: boolean) => ({
     minimap: { enabled: false },
     automaticLayout: true,
     fixedOverflowWidgets: true,
-    find: QUERY_EDITOR_MONACO_FIND_OPTIONS,
+    // Keep the find widget as an overlay; Monaco's default top spacer creates a blank band.
+    find: {
+        addExtraSpaceOnTop: false,
+    },
     hover: {
         enabled: true,
         delay: QUERY_EDITOR_HOVER_DELAY_MS,
