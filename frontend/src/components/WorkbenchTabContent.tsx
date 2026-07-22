@@ -111,7 +111,7 @@ export const WorkbenchTabContent: React.FC<WorkbenchTabContentProps> = React.mem
   } else if (tab.type === 'redis-command') {
     content = <RedisCommandEditor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
   } else if (tab.type === 'redis-monitor') {
-    content = <RedisMonitor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
+    content = <RedisMonitor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} isActive={isActive} />;
   } else if (tab.type === 'trigger') {
     content = <TriggerViewer tab={tab} />;
   } else if (tab.type === 'view-def' || tab.type === 'event-def' || tab.type === 'routine-def' || tab.type === 'sequence-def' || tab.type === 'package-def') {
