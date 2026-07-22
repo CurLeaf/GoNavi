@@ -500,7 +500,7 @@ export const attachDataGridVirtualEditRenderVersion = <T extends Item>(
         }
         const nextRow = { ...(row as object) } as T;
         Object.defineProperty(nextRow, DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION, {
-            value: `${editingCell.rowKey}${CELL_KEY_SEP}${editingCell.dataIndex}`,
+            value: `${editingCell.rowKey}${CELL_KEY_SEP}${editingCell.dataIndex}${CELL_KEY_SEP}${editingCell.sessionId}`,
             enumerable: true,
         });
         return nextRow;
@@ -1387,6 +1387,7 @@ type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er' | 'sqlLo
 type DdlViewLayoutMode = 'bottom' | 'side';
 type DataGridExportScope = 'selected' | 'page' | 'all' | 'filteredAll';
 type VirtualEditingCellState = {
+    sessionId: number;
     rowKey: string;
     dataIndex: string;
     title: React.ReactNode;

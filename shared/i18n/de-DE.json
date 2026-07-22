@@ -3919,6 +3919,7 @@
   "data_grid.cell_editor.now": "Jetzt",
   "data_grid.cell_editor.title": "Zelle bearbeiten",
   "data_grid.cell_editor.title_with_column": "Zelle bearbeiten: {{column}}",
+  "data_grid.cell_viewer.title_with_column": "Zelle anzeigen: {{column}}",
   "data_grid.column.comment_tooltip": "Kommentar: {{comment}}",
   "data_grid.column.drag_tooltip": "Ziehen, um Spalten neu anzuordnen",
   "data_grid.column.foreign_key_jump_title": "Zur Fremdschlüssel-Tabelle springen: {{tableName}}",

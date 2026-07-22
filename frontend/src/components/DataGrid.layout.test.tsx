@@ -748,6 +748,10 @@ describe('DataGrid layout', () => {
       'const handleCellEditorSave = useCallback(() => {',
       'const handleFormatJsonInEditor = useCallback(() => {',
     );
+    const cellEditorPermissionEffectSource = sliceCallback(
+      'useEffect(() => {\n      if (!cellEditorOpen) return;',
+      'const virtualEditingSessionSequenceRef = useRef(0);',
+    );
     const openRowEditorByKeySource = sliceCallback(
       'const openRowEditorByKey = useCallback((keyStr?: string) => {',
       'const openCurrentViewRowEditor = useCallback(() => {',
@@ -772,7 +776,7 @@ describe('DataGrid layout', () => {
         'data_grid.message.saved',
       ]],
       [handleCellSetNullSource, ['data_grid.message.current_field_not_editable']],
-      [handleCellEditorSaveSource, ['data_grid.message.current_field_not_editable']],
+      [cellEditorPermissionEffectSource, ['data_grid.message.current_field_not_editable']],
       [openRowEditorByKeySource, [
         'data_grid.message.locate_record_to_edit',
         'data_grid.message.target_row_not_found',
@@ -791,6 +795,10 @@ describe('DataGrid layout', () => {
       (keys as string[]).forEach((key) => expectTranslateCall(callbackSource as string, key));
       expectTranslateDependency(callbackSource as string);
     });
+    expect(handleCellEditorSaveSource).toContain('const runtime = cellEditorRuntimeRef.current;');
+    expect(handleCellEditorSaveSource).toContain('!runtime.canModifyData');
+    expect(handleCellEditorSaveSource).toContain('runtime.effectiveEditLocator');
+    expect(handleCellEditorSaveSource).toContain('handleCellSaveRef.current(nextRow);');
 
     expect(applyJsonEditorSource).toMatch(
       /const\s+rawErrorMessage\s*=\s*e\?\.message\s*\|\|\s*String\(e\);[\s\S]*translateDataGrid\(\s*['"]data_grid\.message\.json_parse_failed['"]\s*,\s*\{\s*detail:\s*rawErrorMessage\s*\}\s*\)/,
@@ -1228,6 +1236,7 @@ describe('DataGrid layout', () => {
     expect(detachedChromeSource).toContain("translate('data_grid.row_editor.popup_edit')");
     expect(detachedChromeSource).toContain("translate('data_grid.cell_editor.title')");
     expect(detachedChromeSource).toContain("translate('data_grid.cell_editor.title_with_column'");
+    expect(detachedChromeSource).toContain("translate('data_grid.cell_viewer.title_with_column'");
     expect(detachedChromeSource).toContain("translate('data_grid.batch_fill.title'");
     expect(detachedChromeSource).toContain("translate('data_grid.batch_fill.set_null')");
     expect(detachedChromeSource).toContain("translate('data_grid.batch_fill.value_placeholder')");
@@ -2704,7 +2713,7 @@ describe('DataGrid layout', () => {
     expect(source).toContain('const scheduleVirtualHorizontalAlignment = useCallback((preferredLeft?: number) => {');
     expect(source).toContain('virtualHorizontalElementsRef.current = { tableContainer: null, holderEl: null, innerEl: null, headerEl: null };');
     expect(source).toContain('applyVirtualHorizontalOffset(tableContainer, nextLeft, { forceInternalScroll: true });');
-    expect(source).toContain('}, [horizontalScrollVisible, scheduleVirtualHorizontalAlignment, tableRenderData, tableScrollX, virtualEditingCell]);');
+    expect(source).toContain('}, [horizontalScrollVisible, scheduleVirtualHorizontalAlignment, tableRenderData, tableScrollX, virtualEditingCellForRender]);');
     expect(source).toContain('tableInstance.scrollTo({ left: clampedOffset });');
     expect(source).not.toContain('tableInstance.scrollTo({ left: clampedOffset, top: holderEl.scrollTop });');
     expect(source).toContain("tableContainer.addEventListener('scroll', stopPreviewHeaderScroll, true);");
@@ -2750,7 +2759,7 @@ describe('DataGrid layout', () => {
     expect(source).toContain('}, areEditableCellPropsEqual);');
     expect(source).toContain('const [virtualEditingCell, setVirtualEditingCell] = useState<VirtualEditingCellState | null>(null);');
     expect(source).toContain('const openVirtualInlineEditor = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {');
-    expect(source).toContain('if (isVirtualInlineEditingCell && virtualEditable) {');
+    expect(source).toContain('if (isVirtualInlineEditingCell && virtualEditable && virtualEditingCellForRender) {');
     expect(source).toContain('const DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION = Symbol(\'DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION\');');
     expect(source).toContain('const attachDataGridVirtualEditRenderVersion = <T extends Item>(');
     expect(source).toContain('hasDataGridVirtualEditRenderVersionChanged(record, prevRecord)');
@@ -2774,7 +2783,7 @@ describe('DataGrid layout', () => {
     expect(source).toContain('return originalRenderContent;');
     expect(source).toContain('const virtualListItemHeightFixed = !!(');
     expect(source).toContain('listItemHeightFixed: virtualListItemHeightFixed');
-    expect(source).toContain('const virtualListItemColumnVirtual = isV2Ui && enableVirtual && !virtualEditingCell;');
+    expect(source).toContain('const virtualListItemColumnVirtual = isV2Ui && enableVirtual && !virtualEditingCellForRender;');
     expect(source).toContain('listItemColumnVirtual: virtualListItemColumnVirtual');
     expect(source).toContain('if (scrollSnapshotRafRef.current !== null) return;');
     expect(source).toContain('scrollSnapshotRafRef.current = requestAnimationFrame');

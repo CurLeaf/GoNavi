@@ -744,6 +744,30 @@ const DataGrid: React.FC<DataGridProps> = ({
   const { exportProgressModal, runExportWithProgress } = useExportProgressDialog();
   const gridId = useMemo(() => `grid-${generateUuid()}`, []);
   const [textRecordIndex, setTextRecordIndex] = useState(0);
+  const cellEditorSourceRef = useRef<{
+      data: typeof data;
+      connectionId: typeof connectionId;
+      dbName: typeof dbName;
+      tableName: typeof tableName;
+  } | null>(null);
+  const cellEditorRuntimeRef = useRef({
+      data,
+      connectionId,
+      dbName,
+      tableName,
+      isActive,
+      canModifyData,
+      effectiveEditLocator,
+  });
+  cellEditorRuntimeRef.current = {
+      data,
+      connectionId,
+      dbName,
+      tableName,
+      isActive,
+      canModifyData,
+      effectiveEditLocator,
+  };
   const {
       cellEditorOpen,
       cellEditorValue,
@@ -751,8 +775,9 @@ const DataGrid: React.FC<DataGridProps> = ({
       cellEditorIsJson,
       cellEditorMeta,
       cellEditorApplyRef,
-      closeCellEditor,
-      openCellEditor,
+      closeCellEditor: closeCellEditorState,
+      openCellEditor: openCellEditorState,
+      openCellViewer: openCellViewerState,
       jsonEditorOpen,
       jsonEditorValue,
       setJsonEditorValue,
@@ -775,9 +800,128 @@ const DataGrid: React.FC<DataGridProps> = ({
       closeBatchEditModal,
   } = useDataGridModalEditors({
       toEditableText: mongoAwareEditableText,
+      toViewerText: toEditableText,
       looksLikeJsonText,
   });
+  const isCellEditorSourceCurrent = useCallback(() => {
+      const source = cellEditorSourceRef.current;
+      const runtime = cellEditorRuntimeRef.current;
+      return !!source
+          && source.data === runtime.data
+          && source.connectionId === runtime.connectionId
+          && source.dbName === runtime.dbName
+          && source.tableName === runtime.tableName;
+  }, []);
+  const closeCellEditor = useCallback(() => {
+      cellEditorSourceRef.current = null;
+      closeCellEditorState();
+  }, [closeCellEditorState]);
+  const openCellEditor = useCallback((...args: Parameters<typeof openCellEditorState>) => {
+      cellEditorSourceRef.current = { data, connectionId, dbName, tableName };
+      openCellEditorState(...args);
+  }, [connectionId, data, dbName, openCellEditorState, tableName]);
+  const openCellViewer = useCallback((...args: Parameters<typeof openCellViewerState>) => {
+      cellEditorSourceRef.current = { data, connectionId, dbName, tableName };
+      const [record, dataIndex, title] = args;
+      const rowKey = record?.[GONAVI_ROW_KEY];
+      const rowKeyText = rowKey === undefined || rowKey === null ? '' : String(rowKey);
+      const sourceRecord = !rowKeyText
+          ? undefined
+          : data.find((candidate) => {
+              const candidateKey = candidate?.[GONAVI_ROW_KEY];
+              return candidateKey !== undefined && candidateKey !== null && String(candidateKey) === rowKeyText;
+          });
+      const normalizedSourceRecord = isMongoDBConnection && sourceRecord
+          ? normalizeMongoDocumentForEditing(sourceRecord)
+          : undefined;
+      const shouldUseRawMongoValue = !!sourceRecord
+          && !!normalizedSourceRecord
+          && isCellValueEqualForDiff(record?.[dataIndex], normalizedSourceRecord?.[dataIndex]);
+      const viewerRecord = shouldUseRawMongoValue
+          ? { ...record, [dataIndex]: sourceRecord[dataIndex] }
+          : record;
+      openCellViewerState(viewerRecord, dataIndex, title);
+  }, [connectionId, data, dbName, isMongoDBConnection, openCellViewerState, tableName]);
+  const cellEditorViewerMode = cellEditorMeta?.readOnly === true;
+  const cellEditorPermissionLost = !!cellEditorMeta
+      && !cellEditorMeta.readOnly
+      && (!canModifyData || !isWritableResultColumn(cellEditorMeta.dataIndex, effectiveEditLocator));
+  const cellEditorContextChanged = cellEditorOpen && !isCellEditorSourceCurrent();
+  const cellEditorUnavailable = cellEditorOpen && (!isActive || cellEditorContextChanged);
+  const cellEditorReadOnly = cellEditorViewerMode || cellEditorPermissionLost || cellEditorUnavailable;
+  const cellEditorOpenForRender = cellEditorOpen && !cellEditorUnavailable;
+  useEffect(() => {
+      if (!cellEditorOpen) return;
+      if (cellEditorUnavailable) {
+          closeCellEditor();
+          return;
+      }
+      if (cellEditorPermissionLost) {
+          void message.info(translateDataGrid('data_grid.message.current_field_not_editable'));
+          closeCellEditor();
+      }
+  }, [cellEditorOpen, cellEditorPermissionLost, cellEditorUnavailable, closeCellEditor, translateDataGrid]);
+  const virtualEditingSessionSequenceRef = useRef(0);
+  const virtualEditingSessionRef = useRef<{
+      sessionId: number;
+      sourceData: typeof data;
+      connectionId: typeof connectionId;
+      dbName: typeof dbName;
+      tableName: typeof tableName;
+      rowKey: string;
+      dataIndex: string;
+  } | null>(null);
+  const virtualEditingRuntimeRef = useRef({
+      data,
+      isActive,
+      canModifyData,
+      effectiveEditLocator,
+      connectionId,
+      dbName,
+      tableName,
+  });
+  virtualEditingRuntimeRef.current = {
+      data,
+      isActive,
+      canModifyData,
+      effectiveEditLocator,
+      connectionId,
+      dbName,
+      tableName,
+  };
   const [virtualEditingCell, setVirtualEditingCell] = useState<VirtualEditingCellState | null>(null);
+  const isVirtualEditingSessionCurrent = useCallback((editingCell: VirtualEditingCellState | null) => {
+      if (!editingCell) return false;
+      const session = virtualEditingSessionRef.current;
+      const runtime = virtualEditingRuntimeRef.current;
+      return !!session
+          && session.sessionId === editingCell.sessionId
+          && session.rowKey === editingCell.rowKey
+          && session.dataIndex === editingCell.dataIndex
+          && session.sourceData === runtime.data
+          && session.connectionId === runtime.connectionId
+          && session.dbName === runtime.dbName
+          && session.tableName === runtime.tableName
+          && runtime.isActive
+          && runtime.canModifyData
+          && isWritableResultColumn(editingCell.dataIndex, runtime.effectiveEditLocator);
+  }, []);
+  const virtualEditingSession = virtualEditingSessionRef.current;
+  const virtualEditingContextChanged = !!virtualEditingCell && (
+      !virtualEditingSession
+      || virtualEditingSession.sessionId !== virtualEditingCell.sessionId
+      || virtualEditingSession.sourceData !== data
+      || virtualEditingSession.connectionId !== connectionId
+      || virtualEditingSession.dbName !== dbName
+      || virtualEditingSession.tableName !== tableName
+  );
+  const virtualEditingPermissionLost = !!virtualEditingCell
+      && (!canModifyData || !isWritableResultColumn(virtualEditingCell.dataIndex, effectiveEditLocator));
+  const virtualEditingUnavailable = !!virtualEditingCell
+      && (!isActive || virtualEditingContextChanged);
+  const virtualEditingCellForRender = virtualEditingUnavailable || virtualEditingPermissionLost
+      ? null
+      : virtualEditingCell;
   const [virtualRowHeightMeasurement, setVirtualRowHeightMeasurement] = useState<{
       signature: string;
       height: number;
@@ -903,7 +1047,6 @@ const DataGrid: React.FC<DataGridProps> = ({
   const currentSelectionRef = useRef<Set<string>>(new Set());
   const selectionStartRef = useRef<{ rowKey: string; colName: string; rowIndex: number; colIndex: number } | null>(null);
   const rowIndexMapRef = useRef<Map<string, number>>(new Map());
-  const mergedDisplayDataByRowKeyRef = useRef<Map<string, Item>>(new Map());
 
   const scrollTableBodyToBottom = useCallback(() => {
       const root = containerRef.current;
@@ -1217,11 +1360,34 @@ const DataGrid: React.FC<DataGridProps> = ({
       virtualInlineScrollLockRef.current = null;
   }, []);
 
-  const closeVirtualInlineEditor = useCallback(() => {
+  const closeVirtualInlineEditor = useCallback((expectedSessionId?: number) => {
+      if (
+          expectedSessionId !== undefined
+          && virtualEditingSessionRef.current?.sessionId !== expectedSessionId
+      ) {
+          return;
+      }
+      virtualEditingSessionRef.current = null;
       lockVirtualInlineTableScroll(false);
       virtualInlinePickerOpenRef.current = false;
-      setVirtualEditingCell(null);
+      setVirtualEditingCell((current) => (
+          expectedSessionId === undefined || current?.sessionId === expectedSessionId
+              ? null
+              : current
+      ));
   }, [lockVirtualInlineTableScroll]);
+
+  useEffect(() => {
+      if (!virtualEditingCell) return;
+      if (virtualEditingUnavailable) {
+          closeVirtualInlineEditor(virtualEditingCell.sessionId);
+          return;
+      }
+      if (virtualEditingPermissionLost) {
+          void message.info(translateDataGrid('data_grid.message.current_field_not_editable'));
+          closeVirtualInlineEditor(virtualEditingCell.sessionId);
+      }
+  }, [closeVirtualInlineEditor, translateDataGrid, virtualEditingCell, virtualEditingPermissionLost, virtualEditingUnavailable]);
 
   // Dynamic Height
   const [tableHeight, setTableHeight] = useState(500);
@@ -1982,6 +2148,8 @@ const DataGrid: React.FC<DataGridProps> = ({
           setModifiedRows(prev => ({ ...prev, [keyStr]: normalizedRow }));
       }
   }, [addedRows, baseData, rowKeyStr, deletedRowKeys, effectiveEditLocator, modifiedRows, normalizeMongoEditedRow]);
+  const handleCellSaveRef = useRef(handleCellSave);
+  handleCellSaveRef.current = handleCellSave;
 
   const handleDataPanelSave = useCallback(() => {
       if (!focusedCellInfo) return;
@@ -2054,8 +2222,16 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const handleCellEditorSave = useCallback(() => {
       if (!cellEditorMeta) return;
-      if (!isWritableResultColumn(cellEditorMeta.dataIndex, effectiveEditLocator)) {
-          void message.info(translateDataGrid('data_grid.message.current_field_not_editable'));
+      const runtime = cellEditorRuntimeRef.current;
+      if (!runtime.isActive || !isCellEditorSourceCurrent()) {
+          closeCellEditor();
+          return;
+      }
+      if (
+          cellEditorMeta.readOnly
+          || !runtime.canModifyData
+          || !isWritableResultColumn(cellEditorMeta.dataIndex, runtime.effectiveEditLocator)
+      ) {
           closeCellEditor();
           return;
       }
@@ -2066,9 +2242,9 @@ const DataGrid: React.FC<DataGridProps> = ({
           return;
       }
       const nextRow: any = { ...cellEditorMeta.record, [cellEditorMeta.dataIndex]: cellEditorValue };
-      handleCellSave(nextRow);
+      handleCellSaveRef.current(nextRow);
       closeCellEditor();
-  }, [cellEditorMeta, cellEditorValue, handleCellSave, closeCellEditor, effectiveEditLocator, translateDataGrid]);
+  }, [cellEditorMeta, cellEditorValue, closeCellEditor, isCellEditorSourceCurrent]);
 
   const handleFormatJsonInEditor = useCallback(() => {
       if (!cellEditorIsJson) return;
@@ -2082,9 +2258,19 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [cellEditorIsJson, cellEditorValue, translateDataGrid]);
 
   const openVirtualInlineEditor = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {
-      if (!record || !dataIndex || !canModifyData) return;
+      if (
+          !record
+          || !dataIndex
+          || !isActive
+          || !canModifyData
+          || !isWritableResultColumn(dataIndex, effectiveEditLocator)
+      ) {
+          return;
+      }
       const rowKey = record?.[GONAVI_ROW_KEY];
       if (rowKey === undefined || rowKey === null) return;
+
+      closeVirtualInlineEditor();
 
       const raw = record?.[dataIndex];
       if (shouldOpenModalEditor(raw)) {
@@ -2104,13 +2290,26 @@ const DataGrid: React.FC<DataGridProps> = ({
               : (typeof raw === 'string' ? normalizeDateTimeString(raw) : raw);
           setCellFieldValue(form, fieldName, initialValue);
       }
+      const rowKeyText = rowKeyStr(rowKey);
+      const sessionId = virtualEditingSessionSequenceRef.current + 1;
+      virtualEditingSessionSequenceRef.current = sessionId;
+      virtualEditingSessionRef.current = {
+          sessionId,
+          sourceData: data,
+          connectionId,
+          dbName,
+          tableName,
+          rowKey: rowKeyText,
+          dataIndex,
+      };
       setVirtualEditingCell({
-          rowKey: rowKeyStr(rowKey),
+          sessionId,
+          rowKey: rowKeyText,
           dataIndex,
           title,
           columnType,
       });
-  }, [canModifyData, columnMetaMap, columnMetaMapByLowerName, currentConnConfig, dbType, form, isMongoDBConnection, mongoAwareEditableText, openCellEditor, rowKeyStr]);
+  }, [canModifyData, closeVirtualInlineEditor, columnMetaMap, columnMetaMapByLowerName, connectionId, currentConnConfig, data, dbName, dbType, effectiveEditLocator, form, isActive, isMongoDBConnection, mongoAwareEditableText, openCellEditor, rowKeyStr, tableName]);
 
   const handleVirtualCellActivate = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {
       if (!canModifyData) return;
@@ -2207,15 +2406,17 @@ const DataGrid: React.FC<DataGridProps> = ({
       viewMode,
   ]); // Reset on context change
 
-  useEffect(() => {
+  const mergedDisplayDataByRowKey = useMemo(() => {
       const next = new Map<string, Item>();
       mergedDisplayData.forEach((row) => {
           const key = row?.[GONAVI_ROW_KEY];
           if (key === undefined || key === null) return;
           next.set(rowKeyStr(key), row);
       });
-      mergedDisplayDataByRowKeyRef.current = next;
+      return next;
   }, [mergedDisplayData, rowKeyStr]);
+  const mergedDisplayDataByRowKeyRef = useRef(mergedDisplayDataByRowKey);
+  mergedDisplayDataByRowKeyRef.current = mergedDisplayDataByRowKey;
 
   const resolveRenderedCellInfoFromElement = useCallback((target: EventTarget | null) => {
       const closestSource = target && typeof target === 'object' && 'closest' in target
@@ -2227,9 +2428,9 @@ const DataGrid: React.FC<DataGridProps> = ({
       if (!element) {
           return null;
       }
-      const rowKey = String(element.getAttribute?.('data-row-key') || '').trim();
-      const dataIndex = String(element.getAttribute?.('data-col-name') || '').trim();
-      if (!rowKey || !dataIndex) {
+      const rowKey = element.getAttribute?.('data-row-key');
+      const dataIndex = element.getAttribute?.('data-col-name');
+      if (rowKey === null || rowKey === undefined || rowKey === '' || dataIndex === null || dataIndex === undefined) {
           return null;
       }
       const record = mergedDisplayDataByRowKeyRef.current.get(rowKey);
@@ -2248,6 +2449,15 @@ const DataGrid: React.FC<DataGridProps> = ({
       showCellContextMenu(event, cellInfo.record, cellInfo.dataIndex, cellInfo.dataIndex);
   }, [resolveRenderedCellInfoFromElement, showCellContextMenu]);
 
+  const handleSharedCellDoubleClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
+      const eventTarget = (event.currentTarget as EventTarget | null) ?? event.target;
+      const cellInfo = resolveRenderedCellInfoFromElement(eventTarget);
+      if (!cellInfo) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openCellViewer(cellInfo.record, cellInfo.dataIndex, cellInfo.dataIndex);
+  }, [openCellViewer, resolveRenderedCellInfoFromElement]);
+
   const handleVirtualTableClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
       if (!dataPanelOpenRef.current) return;
       const cellInfo = resolveRenderedCellInfoFromElement(event.target);
@@ -2256,18 +2466,28 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [resolveRenderedCellInfoFromElement, updateFocusedCell]);
 
   const handleVirtualTableDoubleClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+      const eventTarget = event.target && typeof event.target === 'object' && 'closest' in event.target
+          ? event.target as { closest?: (selector: string) => unknown }
+          : null;
+      if (typeof eventTarget?.closest === 'function' && eventTarget.closest('.data-grid-virtual-inline-editing')) {
+          return;
+      }
       const cellInfo = resolveRenderedCellInfoFromElement(event.target);
       if (!cellInfo) return;
       const rowDeleted = cellInfo.record?.[GONAVI_ROW_KEY] !== undefined
           ? deletedRowKeys.has(rowKeyStr(cellInfo.record[GONAVI_ROW_KEY]))
           : false;
-      if (rowDeleted || !isWritableResultColumn(cellInfo.dataIndex, effectiveEditLocator)) {
+      if (rowDeleted) {
           return;
       }
       event.preventDefault();
       event.stopPropagation();
+      if (!canModifyData || !isWritableResultColumn(cellInfo.dataIndex, effectiveEditLocator)) {
+          openCellViewer(cellInfo.record, cellInfo.dataIndex, cellInfo.dataIndex);
+          return;
+      }
       handleVirtualCellActivate(cellInfo.record, cellInfo.dataIndex, cellInfo.dataIndex);
-  }, [resolveRenderedCellInfoFromElement, deletedRowKeys, rowKeyStr, effectiveEditLocator, handleVirtualCellActivate]);
+  }, [canModifyData, deletedRowKeys, effectiveEditLocator, handleVirtualCellActivate, openCellViewer, resolveRenderedCellInfoFromElement, rowKeyStr]);
 
   const handleVirtualTableContextMenuCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
       const cellInfo = resolveRenderedCellInfoFromElement(event.target);
@@ -2277,13 +2497,15 @@ const DataGrid: React.FC<DataGridProps> = ({
       showCellContextMenu(event, cellInfo.record, cellInfo.dataIndex, cellInfo.dataIndex);
   }, [resolveRenderedCellInfoFromElement, showCellContextMenu]);
 
-  const saveVirtualInlineEditor = useCallback(async (pickerValue?: dayjs.Dayjs | null) => {
-      const editingCell = virtualEditingCell;
-      if (!editingCell) return;
+  const saveVirtualInlineEditor = useCallback(async (
+      editingCell: VirtualEditingCellState,
+      pickerValue?: dayjs.Dayjs | null,
+  ) => {
+      if (!isVirtualEditingSessionCurrent(editingCell)) return;
 
       const record = mergedDisplayDataByRowKeyRef.current.get(editingCell.rowKey);
       if (!record) {
-          closeVirtualInlineEditor();
+          closeVirtualInlineEditor(editingCell.sessionId);
           return;
       }
 
@@ -2292,21 +2514,28 @@ const DataGrid: React.FC<DataGridProps> = ({
       const fieldName = getCellFieldName(record, editingCell.dataIndex);
       try {
           await form.validateFields([fieldName]);
+          if (!isVirtualEditingSessionCurrent(editingCell)) return;
+          const currentRecord = mergedDisplayDataByRowKeyRef.current.get(editingCell.rowKey);
+          if (!currentRecord) {
+              closeVirtualInlineEditor(editingCell.sessionId);
+              return;
+          }
           let nextValue = form.getFieldValue(fieldName);
           if (isDateTimeField) {
               nextValue = resolveTemporalEditorSaveValue(nextValue, pickerValue, pickerType);
           }
-          closeVirtualInlineEditor();
-          if (!isCellValueEqualForDiff(record?.[editingCell.dataIndex], nextValue)) {
-              handleCellSave({ ...record, [editingCell.dataIndex]: nextValue });
+          closeVirtualInlineEditor(editingCell.sessionId);
+          if (!isCellValueEqualForDiff(currentRecord?.[editingCell.dataIndex], nextValue)) {
+              handleCellSaveRef.current({ ...currentRecord, [editingCell.dataIndex]: nextValue });
           }
       } catch (errInfo) {
+          if (!isVirtualEditingSessionCurrent(editingCell)) return;
           console.log('Virtual inline save failed:', errInfo);
           if (isDateTimeField) {
-              closeVirtualInlineEditor();
+              closeVirtualInlineEditor(editingCell.sessionId);
           }
       }
-  }, [closeVirtualInlineEditor, currentConnConfig, dbType, form, handleCellSave, virtualEditingCell]);
+  }, [closeVirtualInlineEditor, currentConnConfig, dbType, form, isVirtualEditingSessionCurrent]);
 
   const pageFindResult = useMemo(() => collectDataGridFindResult(
       mergedDisplayData,
@@ -2349,9 +2578,9 @@ const DataGrid: React.FC<DataGridProps> = ({
               attachDataGridFindRenderVersion(mergedDisplayData, normalizedPageFindText),
               displayRenderVersion,
           ),
-          virtualEditingCell,
+          virtualEditingCellForRender,
       ),
-      [displayRenderVersion, mergedDisplayData, normalizedPageFindText, virtualEditingCell]
+      [displayRenderVersion, mergedDisplayData, normalizedPageFindText, virtualEditingCellForRender]
   );
 
   useEffect(() => {
@@ -2656,7 +2885,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const useInlineEditableBodyCell = enableInlineEditableCell && !enableVirtual;
 
   useEffect(() => {
-      if (!virtualEditingCell) return;
+      if (!virtualEditingCellForRender) return;
       const rafId = requestAnimationFrame(() => {
           virtualInlineInputRef.current?.focus?.();
           try {
@@ -2667,7 +2896,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           }
       });
       return () => cancelAnimationFrame(rafId);
-  }, [virtualEditingCell]);
+  }, [virtualEditingCellForRender]);
 
   const columns: (ColumnType<any> & { editable?: boolean })[] = useMemo(() => {
       return displayColumnNames.map(key => ({
@@ -2792,6 +3021,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               } else {
                   // 不可编辑（只读查询结果）：共享右键菜单 handler，减少单元格闭包。
                   cellProps.onContextMenu = handleSharedCellContextMenu;
+                  cellProps.onDoubleClick = handleSharedCellDoubleClick;
               }
               return cellProps;
           },
@@ -2801,9 +3031,9 @@ const DataGrid: React.FC<DataGridProps> = ({
               const rowKeyText = rowKey === undefined || rowKey === null ? '' : rowKeyStr(rowKey);
               const rowDeletedForRender = !!rowKeyText && deletedRowKeys.has(rowKeyText);
               const columnType = displayColumnTypeMap[dataIndex];
-              const isVirtualInlineEditingCell = !!virtualEditingCell
-                  && virtualEditingCell.rowKey === rowKeyText
-                  && virtualEditingCell.dataIndex === dataIndex;
+              const isVirtualInlineEditingCell = !!virtualEditingCellForRender
+                  && virtualEditingCellForRender.rowKey === rowKeyText
+                  && virtualEditingCellForRender.dataIndex === dataIndex;
               const isModifiedCell = !!rowKeyText && !!modifiedColumns[rowKeyText]?.has(dataIndex);
               const modifiedStyle: React.CSSProperties | undefined = isModifiedCell
                   ? { backgroundColor: darkMode ? 'rgba(255, 214, 102, 0.16)' : '#FFF3B0' }
@@ -2814,13 +3044,14 @@ const DataGrid: React.FC<DataGridProps> = ({
                   const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(record?.[dataIndex] || '')));
                   const virtualCellStyle = modifiedStyle ? { ...virtualCellWrapperStyle, ...modifiedStyle } : virtualCellWrapperStyle;
                   const virtualEditable = !!col.editable && !rowDeletedForRender;
-                  if (isVirtualInlineEditingCell && virtualEditable) {
-                  return (
-                      <div
-                          style={modifiedStyle ? { ...VIRTUAL_EDITING_CELL_STYLE, ...modifiedStyle } : VIRTUAL_EDITING_CELL_STYLE}
-                          className="data-grid-virtual-inline-editing"
-                          onContextMenu={(e) => handleVirtualCellContextMenu(e, record, dataIndex)}
-                      >
+                  if (isVirtualInlineEditingCell && virtualEditable && virtualEditingCellForRender) {
+                      const currentVirtualEditingCell = virtualEditingCellForRender;
+                      return (
+                          <div
+                              style={modifiedStyle ? { ...VIRTUAL_EDITING_CELL_STYLE, ...modifiedStyle } : VIRTUAL_EDITING_CELL_STYLE}
+                              className="data-grid-virtual-inline-editing"
+                              onContextMenu={(e) => handleVirtualCellContextMenu(e, record, dataIndex)}
+                          >
                               <Form.Item className="data-grid-inline-editor-form-item" style={INLINE_EDIT_FORM_ITEM_STYLE} name={getCellFieldName(record, dataIndex)}>
                                   {isDateTimeField ? (
                                       pickerType === 'time' ? (
@@ -2828,9 +3059,12 @@ const DataGrid: React.FC<DataGridProps> = ({
                                               ref={virtualInlineInputRef}
                                               style={{ width: '100%' }}
                                               format={TEMPORAL_FORMATS[pickerType]}
-                                              onChange={(value) => setTimeout(() => { void saveVirtualInlineEditor(value); }, 0)}
-                                              onOpenChange={lockVirtualInlineTableScroll}
-                                              onBlur={() => setTimeout(() => { void saveVirtualInlineEditor(); }, 0)}
+                                              onChange={(value) => setTimeout(() => { void saveVirtualInlineEditor(currentVirtualEditingCell, value); }, 0)}
+                                              onOpenChange={(open) => {
+                                                  if (!isVirtualEditingSessionCurrent(currentVirtualEditingCell)) return;
+                                                  lockVirtualInlineTableScroll(open);
+                                              }}
+                                              onBlur={() => setTimeout(() => { void saveVirtualInlineEditor(currentVirtualEditingCell); }, 0)}
                                               needConfirm={false}
                                           />
                                       ) : pickerType === 'datetime' ? (
@@ -2844,18 +3078,20 @@ const DataGrid: React.FC<DataGridProps> = ({
                                                   <a
                                                       style={{ padding: '0 2px' }}
                                                       onClick={() => {
+                                                          if (!isVirtualEditingSessionCurrent(currentVirtualEditingCell)) return;
                                                           setCellFieldValue(form, getCellFieldName(record, dataIndex), dayjs());
                                                       }}
                                                   >{translateDataGrid('data_grid.datetime_picker.now')}</a>
                                               )}
-                                              onOk={(value) => setTimeout(() => { void saveVirtualInlineEditor((value as dayjs.Dayjs | null | undefined) ?? undefined); }, 0)}
+                                              onOk={(value) => setTimeout(() => { void saveVirtualInlineEditor(currentVirtualEditingCell, (value as dayjs.Dayjs | null | undefined) ?? undefined); }, 0)}
                                               onOpenChange={(open) => {
+                                                  if (!isVirtualEditingSessionCurrent(currentVirtualEditingCell)) return;
                                                   virtualInlinePickerOpenRef.current = open;
                                                   lockVirtualInlineTableScroll(open);
                                                   if (!open) {
                                                       setTimeout(() => {
                                                           if (!virtualInlinePickerOpenRef.current) {
-                                                              closeVirtualInlineEditor();
+                                                              closeVirtualInlineEditor(currentVirtualEditingCell.sessionId);
                                                           }
                                                       }, 0);
                                                   }
@@ -2863,7 +3099,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                               onBlur={() => {
                                                   setTimeout(() => {
                                                       if (!virtualInlinePickerOpenRef.current) {
-                                                          closeVirtualInlineEditor();
+                                                          closeVirtualInlineEditor(currentVirtualEditingCell.sessionId);
                                                       }
                                                   }, 150);
                                               }}
@@ -2875,9 +3111,12 @@ const DataGrid: React.FC<DataGridProps> = ({
                                               style={{ width: '100%' }}
                                               format={TEMPORAL_FORMATS[pickerType]}
                                               picker={pickerType as any}
-                                              onChange={(value) => setTimeout(() => { void saveVirtualInlineEditor(value); }, 0)}
-                                              onOpenChange={lockVirtualInlineTableScroll}
-                                              onBlur={() => setTimeout(() => { void saveVirtualInlineEditor(); }, 0)}
+                                              onChange={(value) => setTimeout(() => { void saveVirtualInlineEditor(currentVirtualEditingCell, value); }, 0)}
+                                              onOpenChange={(open) => {
+                                                  if (!isVirtualEditingSessionCurrent(currentVirtualEditingCell)) return;
+                                                  lockVirtualInlineTableScroll(open);
+                                              }}
+                                              onBlur={() => setTimeout(() => { void saveVirtualInlineEditor(currentVirtualEditingCell); }, 0)}
                                               needConfirm={false}
                                           />
                                       )
@@ -2887,8 +3126,8 @@ const DataGrid: React.FC<DataGridProps> = ({
                                           ref={virtualInlineInputRef}
                                           className="data-grid-inline-editor-input"
                                           style={{ width: '100%', ...inputCellPadding }}
-                                          onPressEnter={() => { void saveVirtualInlineEditor(); }}
-                                          onBlur={() => { void saveVirtualInlineEditor(); }}
+                                          onPressEnter={() => { void saveVirtualInlineEditor(currentVirtualEditingCell); }}
+                                          onBlur={() => { void saveVirtualInlineEditor(currentVirtualEditingCell); }}
                                           onFocus={(e) => {
                                               try {
                                                   (e.target as HTMLInputElement)?.select?.();
@@ -2924,7 +3163,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               return originalRenderContent;
           }
       };
-  }), [closeVirtualInlineEditor, columns, currentConnConfig, darkMode, dbType, deletedRowKeys, displayColumnTypeMap, enableInlineEditableCell, enableVirtual, form, handleCellSave, handleSharedCellContextMenu, handleVirtualCellActivate, inputCellPadding, lockVirtualInlineTableScroll, modifiedColumns, openCellEditor, rowKeyStr, saveVirtualInlineEditor, updateFocusedCell, useInlineEditableBodyCell, virtualCellWrapperStyle, virtualEditingCell]);
+  }), [closeVirtualInlineEditor, columns, currentConnConfig, darkMode, dbType, deletedRowKeys, displayColumnTypeMap, enableInlineEditableCell, enableVirtual, form, handleCellSave, handleSharedCellContextMenu, handleSharedCellDoubleClick, handleVirtualCellActivate, inputCellPadding, isVirtualEditingSessionCurrent, lockVirtualInlineTableScroll, modifiedColumns, openCellEditor, rowKeyStr, saveVirtualInlineEditor, updateFocusedCell, useInlineEditableBodyCell, virtualCellWrapperStyle, virtualEditingCellForRender]);
 
   const rowNumberColumnWidth = useMemo(() => {
       const manual = columnWidths[GONAVI_ROW_NUMBER_COLUMN_KEY];
@@ -3613,12 +3852,12 @@ const DataGrid: React.FC<DataGridProps> = ({
       isV2Ui
       && measuredVirtualRowHeight
       && measuredVirtualRowHeight > 0
-      && !virtualEditingCell
+      && !virtualEditingCellForRender
   );
-  const virtualListItemColumnVirtual = isV2Ui && enableVirtual && !virtualEditingCell;
+  const virtualListItemColumnVirtual = isV2Ui && enableVirtual && !virtualEditingCellForRender;
 
   useEffect(() => {
-      if (!isV2Ui || !enableVirtual || !isTableSurfaceActive || virtualEditingCell) return;
+      if (!isV2Ui || !enableVirtual || !isTableSurfaceActive || virtualEditingCellForRender) return;
       if (tableRenderData.length === 0) {
           setVirtualRowHeightMeasurement((current) => (
               current?.signature === virtualRowHeightSignature ? null : current
@@ -3666,7 +3905,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (firstRaf) cancelAnimationFrame(firstRaf);
           if (secondRaf) cancelAnimationFrame(secondRaf);
       };
-  }, [enableVirtual, isTableSurfaceActive, isV2Ui, tableRenderData.length, virtualEditingCell, virtualRowHeightSignature]);
+  }, [enableVirtual, isTableSurfaceActive, isV2Ui, tableRenderData.length, virtualEditingCellForRender, virtualRowHeightSignature]);
   const tableComponents = useMemo(() => {
       const body: Record<string, any> = {};
       // 虚拟表模式下 render() 已返回 EditableCell；这里再挂 body.cell 会形成双层包装，
@@ -4624,7 +4863,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               virtualHorizontalAlignmentRafRef.current = null;
           }
       };
-  }, [horizontalScrollVisible, scheduleVirtualHorizontalAlignment, tableRenderData, tableScrollX, virtualEditingCell]);
+  }, [horizontalScrollVisible, scheduleVirtualHorizontalAlignment, tableRenderData, tableScrollX, virtualEditingCellForRender]);
 
   // 虚拟表列对齐：antd 虚拟表 body 使用 <div>+<td>（非 <table>），
   // 不会自动拉伸列宽到视口。而 header <table> 会被 antd 的 CSS 或 JS
@@ -4958,7 +5197,9 @@ const DataGrid: React.FC<DataGridProps> = ({
         cellEditModeRef,
         cellEditorIsJson,
         cellEditorMeta,
-        cellEditorOpen,
+        cellEditorOpen: cellEditorOpenForRender,
+        cellEditorReadOnly,
+        cellEditorViewerMode,
         cellEditorValue,
         clearAllFiltersAndSorts,
         clearAutoCommitTimer,
