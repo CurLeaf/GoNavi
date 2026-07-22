@@ -113,7 +113,7 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().appearance.uiVersion).toBe('v2');
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
-    expect(persisted.version).toBe(17);
+    expect(persisted.version).toBe(18);
     expect(persisted.state.appearance.uiVersion).toBe('v2');
   });
 
@@ -1255,7 +1255,7 @@ describe('store appearance persistence', () => {
     )).toEqual(legacyTag?.childOrder);
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
-    expect(persisted.version).toBe(17);
+    expect(persisted.version).toBe(18);
     expect(persisted.state.connectionTags[0].childOrder).toEqual([
       'connection:conn-a',
       'connection:conn-b',
@@ -3035,6 +3035,66 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().shortcutOptions.sendAIChatMessage).toEqual({
       mac: { combo: 'Enter', enabled: true },
       windows: { combo: 'Enter', enabled: true },
+    });
+  });
+
+  it('migrates legacy sidebar search defaults to K only before storage version 18', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        shortcutOptions: {
+          focusSidebarSearch: {
+            mac: { combo: 'Meta+F', enabled: false },
+            windows: { combo: 'Ctrl+F', enabled: true },
+          },
+        },
+      },
+      version: 17,
+    }));
+
+    const migrated = await importStore();
+    expect(migrated.useStore.getState().shortcutOptions.focusSidebarSearch).toEqual({
+      mac: { combo: 'Meta+K', enabled: false },
+      windows: { combo: 'Ctrl+K', enabled: true },
+    });
+    expect(JSON.parse(storage.getItem('lite-db-storage') || '{}').version).toBe(18);
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        shortcutOptions: {
+          focusSidebarSearch: {
+            mac: { combo: 'Meta+F', enabled: true },
+            windows: { combo: 'Ctrl+F', enabled: false },
+          },
+        },
+      },
+      version: 18,
+    }));
+    vi.resetModules();
+
+    const current = await importStore();
+    expect(current.useStore.getState().shortcutOptions.focusSidebarSearch).toEqual({
+      mac: { combo: 'Meta+F', enabled: true },
+      windows: { combo: 'Ctrl+F', enabled: false },
+    });
+  });
+
+  it('does not restore legacy sidebar search defaults during an early startup refresh', async () => {
+    const { useStore } = await importStore();
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        shortcutOptions: {
+          focusSidebarSearch: { combo: 'Ctrl+F', enabled: true },
+        },
+      },
+      version: 17,
+    }));
+
+    useStore.getState().replaceConnections([]);
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.shortcutOptions.focusSidebarSearch).toEqual({
+      mac: { combo: 'Meta+K', enabled: true },
+      windows: { combo: 'Ctrl+K', enabled: true },
     });
   });
 

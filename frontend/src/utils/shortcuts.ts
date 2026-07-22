@@ -807,6 +807,29 @@ export const sanitizeShortcutOptions = (value: unknown): ShortcutOptions => {
   return defaults;
 };
 
+const LEGACY_SIDEBAR_SEARCH_DEFAULTS: Record<ShortcutPlatform, readonly string[]> = {
+  // The pre-platform schema stored one Ctrl+F binding and copied it into the mac slot.
+  mac: ['Meta+F', 'Ctrl+F'],
+  windows: ['Ctrl+F'],
+};
+
+export const migrateLegacySidebarSearchShortcutOptions = (value: unknown): ShortcutOptions => {
+  const options = sanitizeShortcutOptions(value);
+
+  (['mac', 'windows'] as const).forEach((platform) => {
+    const binding = options.focusSidebarSearch[platform];
+    if (!LEGACY_SIDEBAR_SEARCH_DEFAULTS[platform].includes(normalizeShortcutCombo(binding.combo))) {
+      return;
+    }
+    options.focusSidebarSearch[platform] = {
+      ...binding,
+      combo: DEFAULT_SHORTCUT_OPTIONS.focusSidebarSearch[platform].combo,
+    };
+  });
+
+  return options;
+};
+
 export const resolveShortcutBinding = (
   options: Partial<ShortcutOptions> | null | undefined,
   action: ShortcutAction,

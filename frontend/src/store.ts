@@ -25,6 +25,7 @@ import {
   DEFAULT_SHORTCUT_OPTIONS,
   cloneShortcutOptions,
   getShortcutPlatform,
+  migrateLegacySidebarSearchShortcutOptions,
   sanitizeShortcutOptions,
   type ShortcutPlatformBinding,
   type ShortcutPlatform,
@@ -257,8 +258,9 @@ const MIN_KEEPALIVE_INTERVAL_MINUTES = 1;
 const MAX_KEEPALIVE_INTERVAL_MINUTES = 1440;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
-const PERSIST_VERSION = 17;
+const PERSIST_VERSION = 18;
 const UI_VERSION_V2_MIGRATION_VERSION = 14;
+const SIDEBAR_SEARCH_SHORTCUT_MIGRATION_VERSION = 18;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
 const PERSIST_WRITE_DEBOUNCE_MS = 160;
 const MAX_PERSISTED_QUERY_TABS = 20;
@@ -3101,6 +3103,15 @@ const unwrapPersistedAppState = (
 
 let shortcutOptionsExplicitlySet = false;
 
+const sanitizePersistedShortcutOptions = (
+  value: unknown,
+  version: number,
+): ShortcutOptions => (
+  version < SIDEBAR_SEARCH_SHORTCUT_MIGRATION_VERSION
+    ? migrateLegacySidebarSearchShortcutOptions(value)
+    : sanitizeShortcutOptions(value)
+);
+
 const readPersistedShortcutOptions = (): ShortcutOptions | null => {
   if (typeof localStorage === "undefined") {
     return null;
@@ -3110,11 +3121,13 @@ const readPersistedShortcutOptions = (): ShortcutOptions | null => {
     if (!payload) {
       return null;
     }
-    const state = unwrapPersistedAppState(JSON.parse(payload));
+    const raw = JSON.parse(payload) as Record<string, unknown>;
+    const state = unwrapPersistedAppState(raw);
     if (state.shortcutOptions === undefined) {
       return null;
     }
-    return sanitizeShortcutOptions(state.shortcutOptions);
+    const version = typeof raw.version === "number" ? raw.version : 0;
+    return sanitizePersistedShortcutOptions(state.shortcutOptions, version);
   } catch {
     return null;
   }
@@ -5722,8 +5735,9 @@ export const useStore = create<AppState>()(
           sanitizeDataEditTransactionOptions(state.dataEditTransactionOptions);
         nextState.sqlEditorTransactionOptions =
           sanitizeSqlEditorTransactionOptions(state.sqlEditorTransactionOptions);
-        nextState.shortcutOptions = sanitizeShortcutOptions(
+        nextState.shortcutOptions = sanitizePersistedShortcutOptions(
           state.shortcutOptions,
+          version,
         );
         nextState.sqlLogs = sanitizeRuntimeSqlLogs(state.sqlLogs);
         nextState.tableExportHistories = sanitizeTableExportHistories(

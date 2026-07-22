@@ -13,6 +13,7 @@ import {
   RESERVED_SHORTCUTS,
   comboToMonacoKeyBinding,
   eventToShortcut,
+  getShortcutPlatform,
   getPrimaryShortcutDisplayLabel,
   getShortcutDisplayLabel,
   getShortcutPrimaryModifierDisplayLabel,
@@ -22,6 +23,7 @@ import {
   isImeComposingKeyEvent,
   isShortcutMatch,
   isShortcutPhysicalMatch,
+  migrateLegacySidebarSearchShortcutOptions,
   resolveShortcutBinding,
   resolveShortcutDisplay,
   setGlobalShortcutCaptureActive,
@@ -578,6 +580,13 @@ describe('shortcut defaults', () => {
       mac: { combo: 'Meta+Shift+H', enabled: true },
       windows: { combo: 'Ctrl+H', enabled: true },
     });
+    expect(DEFAULT_SHORTCUT_OPTIONS.focusSidebarSearch).toEqual({
+      mac: { combo: 'Meta+K', enabled: true },
+      windows: { combo: 'Ctrl+K', enabled: true },
+    });
+    expect(getShortcutPlatform(true)).toBe('mac');
+    expect(getShortcutPlatform(false)).toBe('windows');
+    expect(getShortcutPlatform()).toBe('windows');
   });
 
   it('registers connection and AI panel actions as real shortcuts', () => {
@@ -606,6 +615,53 @@ describe('shortcut defaults', () => {
     expect(options.closeActiveTab).toEqual({
       mac: { combo: 'Meta+W', enabled: true },
       windows: { combo: 'Ctrl+W', enabled: true },
+    });
+  });
+
+  it('migrates legacy sidebar search defaults by platform while preserving enabled state', () => {
+    const options = migrateLegacySidebarSearchShortcutOptions({
+      focusSidebarSearch: {
+        mac: { combo: 'Meta+F', enabled: false },
+        windows: { combo: 'Ctrl+F', enabled: true },
+      },
+    });
+
+    expect(options.focusSidebarSearch).toEqual({
+      mac: { combo: 'Meta+K', enabled: false },
+      windows: { combo: 'Ctrl+K', enabled: true },
+    });
+  });
+
+  it('migrates the pre-platform Ctrl+F binding without changing other custom shortcuts', () => {
+    const options = migrateLegacySidebarSearchShortcutOptions({
+      focusSidebarSearch: { combo: 'Ctrl+F', enabled: false },
+      toggleTheme: {
+        mac: { combo: 'Meta+Shift+T', enabled: true },
+        windows: { combo: 'Ctrl+Shift+T', enabled: true },
+      },
+    });
+
+    expect(options.focusSidebarSearch).toEqual({
+      mac: { combo: 'Meta+K', enabled: false },
+      windows: { combo: 'Ctrl+K', enabled: false },
+    });
+    expect(options.toggleTheme).toEqual({
+      mac: { combo: 'Meta+Shift+T', enabled: true },
+      windows: { combo: 'Ctrl+Shift+T', enabled: true },
+    });
+  });
+
+  it('keeps non-default sidebar search shortcuts unchanged during legacy migration', () => {
+    const options = migrateLegacySidebarSearchShortcutOptions({
+      focusSidebarSearch: {
+        mac: { combo: 'Meta+P', enabled: true },
+        windows: { combo: 'Ctrl+P', enabled: false },
+      },
+    });
+
+    expect(options.focusSidebarSearch).toEqual({
+      mac: { combo: 'Meta+P', enabled: true },
+      windows: { combo: 'Ctrl+P', enabled: false },
     });
   });
 
