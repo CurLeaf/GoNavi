@@ -405,6 +405,7 @@ func (a *App) Shutdown() {
 	logger.Infof("应用开始关闭，准备释放资源")
 	a.beginDatabaseShutdown()
 	a.stopConnectionKeepAliveLoop()
+	a.closeResultDiffSessions()
 	a.rollbackPendingSQLTransactionsOnShutdown()
 	a.closeSQLAuditStore()
 	a.closeCachedDatabasesForShutdown()

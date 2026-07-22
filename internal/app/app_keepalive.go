@@ -160,6 +160,9 @@ func (a *App) runConnectionKeepAliveTickContext(ctx context.Context, now time.Ti
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if a != nil && a.resultDiffManager != nil {
+		a.resultDiffManager.PruneExpired(now)
+	}
 	targets := a.collectDueConnectionKeepAliveTargets(now)
 	for index, target := range targets {
 		if ctx.Err() != nil {
