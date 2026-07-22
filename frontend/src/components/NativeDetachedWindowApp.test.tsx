@@ -9,8 +9,18 @@ import type {
 } from '../utils/nativeDetachedWindowClient';
 import { clearQueryTabDraft, setQueryTabDraft } from '../utils/sqlFileTabDrafts';
 
-const { aiTerminalGuard, detachedResultRows, flushAIChatSessionPersistence } = vi.hoisted(() => ({
+const {
+  aiTerminalGuard,
+  detachedResultAutoReport,
+  detachedResultDataChangeHandlers,
+  detachedResultRows,
+  flushAIChatSessionPersistence,
+} = vi.hoisted(() => ({
   aiTerminalGuard: vi.fn(async (): Promise<boolean> => true),
+  detachedResultAutoReport: { current: false },
+  detachedResultDataChangeHandlers: {
+    current: [] as Array<((rows: Array<Record<string, unknown>>) => void) | undefined>,
+  },
   detachedResultRows: {
     current: [{ id: 1, name: 'edited in detached result' }] as Array<Record<string, unknown>>,
   },
@@ -139,13 +149,21 @@ vi.mock('./WorkbenchTabContent', () => ({
 }));
 
 vi.mock('./DataGrid', () => ({
-  default: ({ onDataChange }: { onDataChange?: (rows: Array<Record<string, unknown>>) => void }) => (
-    <button
-      data-component="data-grid"
-      type="button"
-      onClick={() => onDataChange?.(detachedResultRows.current)}
-    />
-  ),
+  default: ({ onDataChange }: { onDataChange?: (rows: Array<Record<string, unknown>>) => void }) => {
+    detachedResultDataChangeHandlers.current.push(onDataChange);
+    React.useEffect(() => {
+      if (detachedResultAutoReport.current) {
+        onDataChange?.(detachedResultRows.current);
+      }
+    }, [onDataChange]);
+    return (
+      <button
+        data-component="data-grid"
+        type="button"
+        onClick={() => onDataChange?.(detachedResultRows.current)}
+      />
+    );
+  },
 }));
 
 vi.mock('./AIChatPanel', () => ({
@@ -199,6 +217,8 @@ describe('NativeDetachedWindowApp', () => {
     flushAIChatSessionPersistence.mockResolvedValue(undefined);
     aiTerminalGuard.mockReset();
     aiTerminalGuard.mockResolvedValue(true);
+    detachedResultAutoReport.current = false;
+    detachedResultDataChangeHandlers.current = [];
     detachedResultRows.current = [{ id: 1, name: 'edited in detached result' }];
     storeState = {
       tabs: [],
@@ -592,6 +612,90 @@ describe('NativeDetachedWindowApp', () => {
         }),
       }));
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps query-result data reporting stable across unrelated parent renders', async () => {
+    vi.useFakeTimers();
+    const initialRows = [{ id: 1, name: 'before' }];
+    detachedResultRows.current = initialRows;
+    detachedResultAutoReport.current = true;
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'query-result:query-native-1:stable-callback',
+      kind: 'query-result',
+      title: 'Stable result callback',
+      payload: {
+        storeState: { appearance: { uiVersion: 'v2' }, theme: 'light', sqlLogs: [] },
+        resultWindow: {
+          id: 'query-result:query-native-1:stable-callback',
+          sourceQueryTabId: queryTab.id,
+          connectionId: queryTab.connectionId,
+          dbName: queryTab.dbName,
+          title: 'Stable result callback',
+          x: 0,
+          y: 0,
+          width: 800,
+          height: 600,
+          zIndex: 1201,
+          result: {
+            key: 'stable-callback',
+            sql: 'select * from users',
+            rows: initialRows,
+            columns: ['id', 'name'],
+            pkColumns: ['id'],
+            readOnly: false,
+          },
+        },
+      },
+    };
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+    };
+
+    let renderer: TestRenderer.ReactTestRenderer | undefined;
+    try {
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(client.sync).toHaveBeenCalledOnce();
+
+      await act(async () => {
+        storeState = { ...storeState, theme: 'dark' };
+        storeListeners.forEach((listener) => listener());
+        await flushEffects();
+        await vi.advanceTimersByTimeAsync(200);
+      });
+
+      expect(new Set(detachedResultDataChangeHandlers.current)).toHaveLength(1);
+      expect(client.sync).toHaveBeenCalledOnce();
+
+      detachedResultRows.current = [{ id: 1, name: 'edited after rerender' }];
+      await act(async () => {
+        renderer!.root.findByProps({ 'data-component': 'data-grid' }).props.onClick();
+        await vi.advanceTimersByTimeAsync(200);
+      });
+
+      expect(client.sync).toHaveBeenCalledTimes(2);
+      expect(client.sync).toHaveBeenLastCalledWith(expect.objectContaining({
+        resultWindow: expect.objectContaining({
+          result: expect.objectContaining({
+            rows: [{ id: 1, name: 'edited after rerender' }],
+          }),
+        }),
+      }));
+    } finally {
+      await act(async () => renderer?.unmount());
       vi.useRealTimers();
     }
   });

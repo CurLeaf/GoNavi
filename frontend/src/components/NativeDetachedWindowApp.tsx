@@ -335,6 +335,16 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
   const hostEventSequenceRef = useRef(0);
   const workbenchStateSourceRef = useRef<NativeDetachedStoreSnapshot>({});
   const syncedWorkbenchTabIdsRef = useRef<Set<string>>(new Set());
+  const handleQueryResultDataChange = useCallback((rows: Array<Record<string, unknown>>) => {
+    const resultWindow = queryResultWindowRef.current;
+    if (!resultWindow) return;
+    queryResultWindowRef.current = {
+      ...resultWindow,
+      result: { ...resultWindow.result, rows },
+    };
+    queryResultDirtyGenerationRef.current += 1;
+    scheduleSyncRef.current(false);
+  }, []);
 
   const themeMode = useStore((state) => state.theme);
   const uiVersion = useStore((state) => state.appearance.uiVersion);
@@ -1179,16 +1189,7 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
                   aiTerminalGuardRef.current = guard;
                 }}
                 interactionDisabled={Boolean(terminalAction)}
-                onQueryResultDataChange={(rows) => {
-                  const resultWindow = queryResultWindowRef.current;
-                  if (!resultWindow) return;
-                  queryResultWindowRef.current = {
-                    ...resultWindow,
-                    result: { ...resultWindow.result, rows },
-                  };
-                  queryResultDirtyGenerationRef.current += 1;
-                  scheduleSyncRef.current(false);
-                }}
+                onQueryResultDataChange={handleQueryResultDataChange}
               />
             </React.Suspense>
           ) : null}
