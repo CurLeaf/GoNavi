@@ -30,9 +30,11 @@ describe('empty workbench layout', () => {
 describe('workbench tab native detach drag', () => {
   it('treats a captured native pointercancel as a possible cross-window release', () => {
     expect(tabManagerSource).toContain(
-      "window.addEventListener('pointercancel', recordTerminalPointer, true)",
+      "windowTarget.addEventListener('pointercancel', recordTerminalPointer, true)",
     );
     expect(tabManagerSource).toContain('terminalPointer: session?.terminalPointer');
     expect(tabManagerSource).toContain('shouldDetachAfterNativePointerCancel(release');
+    expect(tabManagerSource).toContain('const hadActiveSession = detachDragSessionRef.current !== null;');
+    expect(tabManagerSource).toContain('if (hadActiveSession) {\n      dispatchDndPointerCancel();');
   });
 });

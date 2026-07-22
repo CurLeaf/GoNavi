@@ -385,6 +385,14 @@ vi.mock('./LogPanel', () => ({
   ),
 }));
 
+vi.mock('./DetachDragPreview', async () => {
+  const actual = await vi.importActual<typeof import('./DetachDragPreview')>('./DetachDragPreview');
+  return {
+    ...actual,
+    default: () => null,
+  };
+});
+
 vi.mock('@ant-design/icons', () => {
   const Icon = () => <span />;
   return {
@@ -4528,4 +4536,287 @@ describe('QueryEditor external SQL save', () => {
       expect(messageApi.warning).not.toHaveBeenCalled();
     },
   );
+});
+
+type ResultTabTestListener = (event: Record<string, unknown>) => void;
+
+const createResultTabTestEventTarget = () => {
+  const listeners = new Map<string, Set<ResultTabTestListener>>();
+  return {
+    addEventListener: vi.fn((type: string, listener: ResultTabTestListener) => {
+      const registered = listeners.get(type) ?? new Set<ResultTabTestListener>();
+      registered.add(listener);
+      listeners.set(type, registered);
+    }),
+    removeEventListener: vi.fn((type: string, listener: ResultTabTestListener) => {
+      listeners.get(type)?.delete(listener);
+    }),
+    dispatch(type: string, event: Record<string, unknown> = {}) {
+      for (const listener of [...(listeners.get(type) ?? [])]) {
+        listener({ type, ...event });
+      }
+    },
+    listenerCount(type: string) {
+      return listeners.get(type)?.size ?? 0;
+    },
+  };
+};
+
+const createResultTabPointerCaptureTarget = (throwOnRelease = false) => {
+  const eventTarget = createResultTabTestEventTarget();
+  const capturedPointers = new Set<number>();
+  return Object.assign(eventTarget, {
+    setPointerCapture: vi.fn((pointerId: number) => {
+      capturedPointers.add(pointerId);
+    }),
+    hasPointerCapture: vi.fn((pointerId: number) => capturedPointers.has(pointerId)),
+    releasePointerCapture: vi.fn((pointerId: number) => {
+      if (throwOnRelease) throw new Error('capture already released');
+      capturedPointers.delete(pointerId);
+    }),
+  });
+};
+
+describe('QueryEditorResultsPanel result-tab detach lifecycle', () => {
+  let renderer: ReactTestRenderer | null = null;
+  let windowTarget: ReturnType<typeof createResultTabTestEventTarget> & Record<string, any>;
+  let documentTarget: Record<string, any>;
+  let classNames: Set<string>;
+  let removeAllRanges: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    classNames = new Set<string>();
+    removeAllRanges = vi.fn();
+    windowTarget = Object.assign(createResultTabTestEventTarget(), {
+      screenX: 0,
+      screenY: 0,
+      outerWidth: 1200,
+      outerHeight: 800,
+      innerWidth: 1200,
+      innerHeight: 800,
+      getSelection: vi.fn(() => ({ rangeCount: 1, removeAllRanges })),
+    });
+    documentTarget = {
+      body: {
+        style: {
+          userSelect: 'text',
+          webkitUserSelect: 'auto',
+        },
+      },
+      documentElement: {
+        classList: {
+          add: vi.fn((className: string) => classNames.add(className)),
+          remove: vi.fn((className: string) => classNames.delete(className)),
+          contains: (className: string) => classNames.has(className),
+        },
+      },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal('window', windowTarget);
+    vi.stubGlobal('document', documentTarget);
+  });
+
+  afterEach(() => {
+    act(() => {
+      renderer?.unmount();
+    });
+    renderer = null;
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  const renderDetachableResultPanel = async (onOpenResultInWindow = vi.fn()) => {
+    await act(async () => {
+      renderer = create(
+        <QueryEditorResultsPanel
+          resultSets={[{
+            key: 'result-1',
+            sql: 'select 1',
+            rows: [{ value: 1 }],
+            columns: ['value'],
+            pkColumns: [],
+            readOnly: true,
+          }]}
+          activeResultKey="result-1"
+          isActive
+          loading={false}
+          executionError=""
+          sqlLogCount={0}
+          darkMode={false}
+          isV2Ui
+          currentDb="main"
+          currentConnectionId="conn-1"
+          toggleShortcutLabel=""
+          onActiveResultKeyChange={vi.fn()}
+          onHide={vi.fn()}
+          onCloseResult={vi.fn()}
+          onCloseOtherResultTabs={vi.fn()}
+          onCloseResultTabsToLeft={vi.fn()}
+          onCloseResultTabsToRight={vi.fn()}
+          onCloseAllResultTabs={vi.fn()}
+          onOpenResultInWindow={onOpenResultInWindow}
+          onReloadResult={vi.fn()}
+          onResultPageChange={vi.fn()}
+          onResultSort={vi.fn()}
+          onDiagnoseExecutionError={vi.fn()}
+        />,
+      );
+    });
+  };
+
+  const beginResultTabDrag = (captureTarget = createResultTabPointerCaptureTarget()) => {
+    const resultTabLabel = renderer!.root.findAll((node) =>
+      typeof node.props?.onPointerDown === 'function'
+      && String(node.props?.className || '').split(/\s+/).includes('query-result-tab-label'),
+    )[0];
+    act(() => {
+      resultTabLabel.props.onPointerDown({
+        button: 0,
+        buttons: 1,
+        isPrimary: true,
+        target: { closest: () => null },
+        currentTarget: captureTarget,
+        pointerId: 7,
+        clientX: 100,
+        clientY: 100,
+        screenX: 300,
+        screenY: 300,
+      });
+    });
+    return captureTarget;
+  };
+
+  it('restores selection state and removes global listeners when the window blurs', async () => {
+    const onOpenResultInWindow = vi.fn();
+    await renderDetachableResultPanel(onOpenResultInWindow);
+    const captureTarget = beginResultTabDrag();
+
+    act(() => {
+      windowTarget.dispatch('pointermove', {
+        pointerId: 7,
+        buttons: 1,
+        clientX: 120,
+        clientY: 130,
+        preventDefault: vi.fn(),
+      });
+    });
+
+    expect(documentTarget.body.style.userSelect).toBe('none');
+    expect(documentTarget.body.style.webkitUserSelect).toBe('none');
+    expect(classNames.has('gn-result-tab-detaching')).toBe(true);
+    expect(windowTarget.listenerCount('selectstart')).toBe(1);
+    expect(windowTarget.listenerCount('dragstart')).toBe(1);
+    expect(removeAllRanges).toHaveBeenCalled();
+
+    act(() => {
+      windowTarget.dispatch('blur');
+      windowTarget.dispatch('blur');
+      captureTarget.dispatch('lostpointercapture', { pointerId: 7 });
+    });
+
+    expect(documentTarget.body.style.userSelect).toBe('text');
+    expect(documentTarget.body.style.webkitUserSelect).toBe('auto');
+    expect(classNames.has('gn-result-tab-detaching')).toBe(false);
+    expect(windowTarget.listenerCount('pointermove')).toBe(0);
+    expect(windowTarget.listenerCount('pointerup')).toBe(0);
+    expect(windowTarget.listenerCount('pointercancel')).toBe(0);
+    expect(windowTarget.listenerCount('blur')).toBe(0);
+    expect(windowTarget.listenerCount('selectstart')).toBe(0);
+    expect(windowTarget.listenerCount('dragstart')).toBe(0);
+    expect(captureTarget.listenerCount('lostpointercapture')).toBe(0);
+    expect(captureTarget.releasePointerCapture).toHaveBeenCalledTimes(1);
+    expect(onOpenResultInWindow).not.toHaveBeenCalled();
+  });
+
+  it('ignores other pointers and cleans up when the active pointer loses capture', async () => {
+    await renderDetachableResultPanel();
+    const captureTarget = beginResultTabDrag();
+
+    act(() => {
+      windowTarget.dispatch('pointermove', {
+        pointerId: 9,
+        buttons: 0,
+        clientX: 180,
+        clientY: 180,
+        preventDefault: vi.fn(),
+      });
+      windowTarget.dispatch('pointerup', { pointerId: 9 });
+      captureTarget.dispatch('lostpointercapture', { pointerId: 9 });
+    });
+
+    expect(windowTarget.listenerCount('pointermove')).toBe(1);
+    expect(captureTarget.listenerCount('lostpointercapture')).toBe(1);
+    expect(captureTarget.releasePointerCapture).not.toHaveBeenCalled();
+
+    act(() => {
+      captureTarget.dispatch('lostpointercapture', { pointerId: 7 });
+    });
+
+    expect(windowTarget.listenerCount('pointermove')).toBe(0);
+    expect(windowTarget.listenerCount('pointerup')).toBe(0);
+    expect(windowTarget.listenerCount('pointercancel')).toBe(0);
+    expect(windowTarget.listenerCount('blur')).toBe(0);
+    expect(captureTarget.listenerCount('lostpointercapture')).toBe(0);
+  });
+
+  it('self-heals on buttons=0 even when releasing pointer capture throws', async () => {
+    const onOpenResultInWindow = vi.fn();
+    await renderDetachableResultPanel(onOpenResultInWindow);
+    const captureTarget = beginResultTabDrag(createResultTabPointerCaptureTarget(true));
+
+    expect(() => {
+      act(() => {
+        windowTarget.dispatch('pointermove', {
+          pointerId: 7,
+          buttons: 0,
+          clientX: 160,
+          clientY: 160,
+          preventDefault: vi.fn(),
+        });
+      });
+    }).not.toThrow();
+
+    expect(captureTarget.releasePointerCapture).toHaveBeenCalledWith(7);
+    expect(windowTarget.listenerCount('pointermove')).toBe(0);
+    expect(windowTarget.listenerCount('pointerup')).toBe(0);
+    expect(windowTarget.listenerCount('pointercancel')).toBe(0);
+    expect(windowTarget.listenerCount('blur')).toBe(0);
+    expect(captureTarget.listenerCount('lostpointercapture')).toBe(0);
+    expect(onOpenResultInWindow).not.toHaveBeenCalled();
+  });
+
+  it('restores active drag state when the result panel unmounts', async () => {
+    await renderDetachableResultPanel();
+    const captureTarget = beginResultTabDrag();
+
+    act(() => {
+      windowTarget.dispatch('pointermove', {
+        pointerId: 7,
+        buttons: 1,
+        clientX: 120,
+        clientY: 130,
+        preventDefault: vi.fn(),
+      });
+    });
+    expect(classNames.has('gn-result-tab-detaching')).toBe(true);
+
+    act(() => {
+      renderer?.unmount();
+    });
+    renderer = null;
+
+    expect(documentTarget.body.style.userSelect).toBe('text');
+    expect(documentTarget.body.style.webkitUserSelect).toBe('auto');
+    expect(classNames.has('gn-result-tab-detaching')).toBe(false);
+    expect(windowTarget.listenerCount('pointermove')).toBe(0);
+    expect(windowTarget.listenerCount('pointerup')).toBe(0);
+    expect(windowTarget.listenerCount('pointercancel')).toBe(0);
+    expect(windowTarget.listenerCount('blur')).toBe(0);
+    expect(windowTarget.listenerCount('selectstart')).toBe(0);
+    expect(windowTarget.listenerCount('dragstart')).toBe(0);
+    expect(captureTarget.listenerCount('lostpointercapture')).toBe(0);
+    expect(captureTarget.releasePointerCapture).toHaveBeenCalledWith(7);
+  });
 });

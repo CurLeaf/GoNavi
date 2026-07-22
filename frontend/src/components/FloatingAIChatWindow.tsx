@@ -10,6 +10,7 @@ import {
 } from '../utils/detachedWindow';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { hasNativeDetachedWindowManager } from '../utils/nativeDetachedWindowHost';
+import { useManagedPointerInteraction } from '../hooks/useManagedPointerInteraction';
 import AIPanelErrorBoundary from './ai/AIPanelErrorBoundary';
 
 const createLazyAIChatPanel = () => React.lazy(() => import('./AIChatPanel'));
@@ -42,6 +43,10 @@ const FloatingAIChatWindow: React.FC<FloatingAIChatWindowProps> = ({
   const updateDetachedAIChatBounds = useStore((state) => state.updateDetachedAIChatBounds);
   const focusDetachedAIChatPanel = useStore((state) => state.focusDetachedAIChatPanel);
   const LazyAIChatPanel = useMemo(createLazyAIChatPanel, [renderNonce]);
+  const nativeWindowManagerAvailable = hasNativeDetachedWindowManager();
+  const { startInteraction: startManagedInteraction } = useManagedPointerInteraction(
+    Boolean(windowState) && !nativeWindowManagerAvailable,
+  );
 
   const dragRef = useRef<{
     mode: DragMode;
@@ -62,6 +67,50 @@ const FloatingAIChatWindow: React.FC<FloatingAIChatWindowProps> = ({
     event.preventDefault();
     event.stopPropagation();
     focusDetachedAIChatPanel();
+    const started = startManagedInteraction(event, {
+      onMove: (moveEvent) => {
+        const drag = dragRef.current;
+        if (!drag) return;
+        const dx = moveEvent.clientX - drag.startX;
+        const dy = moveEvent.clientY - drag.startY;
+        if (drag.mode === 'move') {
+          const maxX = Math.max(
+            DETACHED_WINDOW_VIEWPORT_PADDING,
+            window.innerWidth - drag.originW - DETACHED_WINDOW_VIEWPORT_PADDING,
+          );
+          const maxY = Math.max(
+            DETACHED_WINDOW_VIEWPORT_PADDING,
+            window.innerHeight - drag.originH - DETACHED_WINDOW_VIEWPORT_PADDING,
+          );
+          updateDetachedAIChatBounds({
+            x: clamp(drag.originX + dx, DETACHED_WINDOW_VIEWPORT_PADDING, maxX),
+            y: clamp(drag.originY + dy, DETACHED_WINDOW_VIEWPORT_PADDING, maxY),
+          });
+          return;
+        }
+        let nextW = drag.originW;
+        let nextH = drag.originH;
+        if (drag.mode === 'resize-e' || drag.mode === 'resize-se') {
+          nextW = clamp(
+            drag.originW + dx,
+            DEFAULT_DETACHED_AI_CHAT_MIN_WIDTH,
+            window.innerWidth - drag.originX - DETACHED_WINDOW_VIEWPORT_PADDING,
+          );
+        }
+        if (drag.mode === 'resize-s' || drag.mode === 'resize-se') {
+          nextH = clamp(
+            drag.originH + dy,
+            DEFAULT_DETACHED_AI_CHAT_MIN_HEIGHT,
+            window.innerHeight - drag.originY - DETACHED_WINDOW_VIEWPORT_PADDING,
+          );
+        }
+        updateDetachedAIChatBounds({ width: nextW, height: nextH });
+      },
+      onStop: () => {
+        dragRef.current = null;
+      },
+    });
+    if (!started) return;
     dragRef.current = {
       mode,
       startX: event.clientX,
@@ -71,59 +120,9 @@ const FloatingAIChatWindow: React.FC<FloatingAIChatWindowProps> = ({
       originW: bounds.width,
       originH: bounds.height,
     };
+  }, [focusDetachedAIChatPanel, startManagedInteraction, updateDetachedAIChatBounds]);
 
-    const handleMove = (moveEvent: PointerEvent) => {
-      const drag = dragRef.current;
-      if (!drag) return;
-      const dx = moveEvent.clientX - drag.startX;
-      const dy = moveEvent.clientY - drag.startY;
-      if (drag.mode === 'move') {
-        const maxX = Math.max(
-          DETACHED_WINDOW_VIEWPORT_PADDING,
-          window.innerWidth - drag.originW - DETACHED_WINDOW_VIEWPORT_PADDING,
-        );
-        const maxY = Math.max(
-          DETACHED_WINDOW_VIEWPORT_PADDING,
-          window.innerHeight - drag.originH - DETACHED_WINDOW_VIEWPORT_PADDING,
-        );
-        updateDetachedAIChatBounds({
-          x: clamp(drag.originX + dx, DETACHED_WINDOW_VIEWPORT_PADDING, maxX),
-          y: clamp(drag.originY + dy, DETACHED_WINDOW_VIEWPORT_PADDING, maxY),
-        });
-        return;
-      }
-      let nextW = drag.originW;
-      let nextH = drag.originH;
-      if (drag.mode === 'resize-e' || drag.mode === 'resize-se') {
-        nextW = clamp(
-          drag.originW + dx,
-          DEFAULT_DETACHED_AI_CHAT_MIN_WIDTH,
-          window.innerWidth - drag.originX - DETACHED_WINDOW_VIEWPORT_PADDING,
-        );
-      }
-      if (drag.mode === 'resize-s' || drag.mode === 'resize-se') {
-        nextH = clamp(
-          drag.originH + dy,
-          DEFAULT_DETACHED_AI_CHAT_MIN_HEIGHT,
-          window.innerHeight - drag.originY - DETACHED_WINDOW_VIEWPORT_PADDING,
-        );
-      }
-      updateDetachedAIChatBounds({ width: nextW, height: nextH });
-    };
-
-    const stop = () => {
-      dragRef.current = null;
-      window.removeEventListener('pointermove', handleMove);
-      window.removeEventListener('pointerup', stop);
-      window.removeEventListener('pointercancel', stop);
-    };
-
-    window.addEventListener('pointermove', handleMove);
-    window.addEventListener('pointerup', stop);
-    window.addEventListener('pointercancel', stop);
-  }, [focusDetachedAIChatPanel, updateDetachedAIChatBounds]);
-
-  if (!windowState || hasNativeDetachedWindowManager()) {
+  if (!windowState || nativeWindowManagerAvailable) {
     return null;
   }
 

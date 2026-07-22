@@ -17,6 +17,7 @@ import {
 import WorkbenchTabContent from './WorkbenchTabContent';
 import { hasNativeDetachedWindowManager } from '../utils/nativeDetachedWindowHost';
 import { useWorkbenchTabs } from '../hooks/useWorkbenchTabs';
+import { useManagedPointerInteraction } from '../hooks/useManagedPointerInteraction';
 
 const getTabKindLabel = (type: string): string => {
   if (type === 'query') return t('tab_manager.kind_badge.query');
@@ -106,6 +107,10 @@ const FloatingWorkbenchWindows: React.FC = () => {
       isFocused: boolean;
     }>;
   }, [activeTabId, appearance.tabDisplay, connections, detachedWorkbenchWindows, tabs]);
+  const nativeWindowManagerAvailable = hasNativeDetachedWindowManager();
+  const { startInteraction: startManagedInteraction } = useManagedPointerInteraction(
+    windowModels.length > 0 && !nativeWindowManagerAvailable,
+  );
 
   const startInteraction = useCallback((
     event: React.PointerEvent,
@@ -117,6 +122,50 @@ const FloatingWorkbenchWindows: React.FC = () => {
     event.preventDefault();
     event.stopPropagation();
     focusDetachedWorkbenchTab(tabId);
+    const started = startManagedInteraction(event, {
+      onMove: (moveEvent) => {
+        const drag = dragRef.current;
+        if (!drag) return;
+        const dx = moveEvent.clientX - drag.startX;
+        const dy = moveEvent.clientY - drag.startY;
+        if (drag.mode === 'move') {
+          const maxX = Math.max(
+            DETACHED_WINDOW_VIEWPORT_PADDING,
+            window.innerWidth - drag.originW - DETACHED_WINDOW_VIEWPORT_PADDING,
+          );
+          const maxY = Math.max(
+            DETACHED_WINDOW_VIEWPORT_PADDING,
+            window.innerHeight - drag.originH - DETACHED_WINDOW_VIEWPORT_PADDING,
+          );
+          updateDetachedWorkbenchBounds(drag.tabId, {
+            x: clamp(drag.originX + dx, DETACHED_WINDOW_VIEWPORT_PADDING, maxX),
+            y: clamp(drag.originY + dy, DETACHED_WINDOW_VIEWPORT_PADDING, maxY),
+          });
+          return;
+        }
+        let nextW = drag.originW;
+        let nextH = drag.originH;
+        if (drag.mode === 'resize-e' || drag.mode === 'resize-se') {
+          nextW = clamp(
+            drag.originW + dx,
+            DEFAULT_DETACHED_WINDOW_MIN_WIDTH,
+            window.innerWidth - drag.originX - DETACHED_WINDOW_VIEWPORT_PADDING,
+          );
+        }
+        if (drag.mode === 'resize-s' || drag.mode === 'resize-se') {
+          nextH = clamp(
+            drag.originH + dy,
+            DEFAULT_DETACHED_WINDOW_MIN_HEIGHT,
+            window.innerHeight - drag.originY - DETACHED_WINDOW_VIEWPORT_PADDING,
+          );
+        }
+        updateDetachedWorkbenchBounds(drag.tabId, { width: nextW, height: nextH });
+      },
+      onStop: () => {
+        dragRef.current = null;
+      },
+    });
+    if (!started) return;
     dragRef.current = {
       tabId,
       mode,
@@ -127,59 +176,9 @@ const FloatingWorkbenchWindows: React.FC = () => {
       originW: bounds.width,
       originH: bounds.height,
     };
+  }, [focusDetachedWorkbenchTab, startManagedInteraction, updateDetachedWorkbenchBounds]);
 
-    const handleMove = (moveEvent: PointerEvent) => {
-      const drag = dragRef.current;
-      if (!drag) return;
-      const dx = moveEvent.clientX - drag.startX;
-      const dy = moveEvent.clientY - drag.startY;
-      if (drag.mode === 'move') {
-        const maxX = Math.max(
-          DETACHED_WINDOW_VIEWPORT_PADDING,
-          window.innerWidth - drag.originW - DETACHED_WINDOW_VIEWPORT_PADDING,
-        );
-        const maxY = Math.max(
-          DETACHED_WINDOW_VIEWPORT_PADDING,
-          window.innerHeight - drag.originH - DETACHED_WINDOW_VIEWPORT_PADDING,
-        );
-        updateDetachedWorkbenchBounds(drag.tabId, {
-          x: clamp(drag.originX + dx, DETACHED_WINDOW_VIEWPORT_PADDING, maxX),
-          y: clamp(drag.originY + dy, DETACHED_WINDOW_VIEWPORT_PADDING, maxY),
-        });
-        return;
-      }
-      let nextW = drag.originW;
-      let nextH = drag.originH;
-      if (drag.mode === 'resize-e' || drag.mode === 'resize-se') {
-        nextW = clamp(
-          drag.originW + dx,
-          DEFAULT_DETACHED_WINDOW_MIN_WIDTH,
-          window.innerWidth - drag.originX - DETACHED_WINDOW_VIEWPORT_PADDING,
-        );
-      }
-      if (drag.mode === 'resize-s' || drag.mode === 'resize-se') {
-        nextH = clamp(
-          drag.originH + dy,
-          DEFAULT_DETACHED_WINDOW_MIN_HEIGHT,
-          window.innerHeight - drag.originY - DETACHED_WINDOW_VIEWPORT_PADDING,
-        );
-      }
-      updateDetachedWorkbenchBounds(drag.tabId, { width: nextW, height: nextH });
-    };
-
-    const stop = () => {
-      dragRef.current = null;
-      window.removeEventListener('pointermove', handleMove);
-      window.removeEventListener('pointerup', stop);
-      window.removeEventListener('pointercancel', stop);
-    };
-
-    window.addEventListener('pointermove', handleMove);
-    window.addEventListener('pointerup', stop);
-    window.addEventListener('pointercancel', stop);
-  }, [focusDetachedWorkbenchTab, updateDetachedWorkbenchBounds]);
-
-  if (hasNativeDetachedWindowManager() || windowModels.length === 0) {
+  if (nativeWindowManagerAvailable || windowModels.length === 0) {
     return null;
   }
 

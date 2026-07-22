@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Dropdown, Tabs, Tooltip, message, type MenuProps } from 'antd';
 import { BugOutlined, CloseOutlined, CopyOutlined, EyeInvisibleOutlined, RobotOutlined } from '@ant-design/icons';
 
@@ -173,6 +173,11 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
         captureTarget: HTMLElement;
         active: boolean;
     } | null>(null);
+    const resultTabDragCleanupRef = useRef<((resetVisualState?: boolean) => void) | null>(null);
+
+    useEffect(() => () => {
+        resultTabDragCleanupRef.current?.(false);
+    }, []);
 
     const resolveResultTabTitle = useCallback((key: string) => {
         const index = resultSets.findIndex((item) => item.key === key);
@@ -186,8 +191,10 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
 
     const handleResultTabPointerDown = useCallback((event: React.PointerEvent<HTMLElement>, key: string) => {
         if (!onOpenResultInWindow || !shouldActivateResultTabDetachPointer(event)) return;
+        const openResultInWindow = onOpenResultInWindow;
+        resultTabDragCleanupRef.current?.();
         const title = resolveResultTabTitle(key);
-        resultTabDragRef.current = {
+        const dragState = {
             key,
             title,
             startX: event.clientX,
@@ -198,15 +205,12 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
             captureTarget: event.currentTarget,
             active: false,
         };
-        try {
-            event.currentTarget.setPointerCapture(event.pointerId);
-        } catch {
-            // Some embedded WebViews do not expose pointer capture for tab labels.
-        }
+        resultTabDragRef.current = dragState;
 
         const previousUserSelect = document.body.style.userSelect;
         const previousWebkitUserSelect = (document.body.style as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect || '';
         let selectionSuppressed = false;
+        let cleaned = false;
 
         const clearNativeSelection = () => {
             const selection = window.getSelection?.();
@@ -215,7 +219,12 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
             }
         };
 
-        const suppressTextSelection = () => {
+        function preventSelectStart(selectEvent: Event) {
+            selectEvent.preventDefault();
+            selectEvent.stopPropagation();
+        }
+
+        function suppressTextSelection() {
             if (!selectionSuppressed) {
                 selectionSuppressed = true;
                 document.body.style.userSelect = 'none';
@@ -225,18 +234,19 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                 window.addEventListener('dragstart', preventSelectStart, true);
             }
             clearNativeSelection();
-        };
+        }
 
-        const preventSelectStart = (selectEvent: Event) => {
-            selectEvent.preventDefault();
-            selectEvent.stopPropagation();
-        };
-
-        const clearListeners = () => {
-            const drag = resultTabDragRef.current;
+        function clearListeners(resetVisualState = true) {
+            if (cleaned) return;
+            cleaned = true;
+            if (resultTabDragCleanupRef.current === clearListeners) {
+                resultTabDragCleanupRef.current = null;
+            }
             window.removeEventListener('pointermove', handleMove);
             window.removeEventListener('pointerup', handleUp);
-            window.removeEventListener('pointercancel', handleUp);
+            window.removeEventListener('pointercancel', handleCancel);
+            window.removeEventListener('blur', handleWindowBlur);
+            dragState.captureTarget.removeEventListener('lostpointercapture', handleLostPointerCapture);
             window.removeEventListener('selectstart', preventSelectStart, true);
             window.removeEventListener('dragstart', preventSelectStart, true);
             if (selectionSuppressed) {
@@ -244,17 +254,30 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                 (document.body.style as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect = previousWebkitUserSelect;
                 document.documentElement.classList.remove('gn-result-tab-detaching');
             }
-            if (drag?.captureTarget.hasPointerCapture?.(drag.pointerId)) {
-                drag.captureTarget.releasePointerCapture(drag.pointerId);
+            try {
+                if (dragState.captureTarget.hasPointerCapture?.(dragState.pointerId)) {
+                    dragState.captureTarget.releasePointerCapture(dragState.pointerId);
+                }
+            } catch {
+                // Capture may already be gone after blur, cancellation, or unmount.
             }
-            resultTabDragRef.current = null;
-            setDraggingResultKey(null);
-            setDetachDragPreview(null);
-        };
+            if (resultTabDragRef.current === dragState) {
+                resultTabDragRef.current = null;
+            }
+            if (resetVisualState) {
+                setDraggingResultKey(null);
+                setDetachDragPreview(null);
+            }
+        }
 
-        const handleMove = (moveEvent: PointerEvent) => {
+        function handleMove(moveEvent: PointerEvent) {
+            if (moveEvent.pointerId !== dragState.pointerId) return;
+            if (moveEvent.buttons === 0) {
+                clearListeners();
+                return;
+            }
             const drag = resultTabDragRef.current;
-            if (!drag || drag.key !== key) return;
+            if (drag !== dragState) return;
             const dx = moveEvent.clientX - drag.startX;
             const dy = moveEvent.clientY - drag.startY;
             if (!drag.active && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
@@ -273,11 +296,12 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                     deltaY: dy,
                 }));
             }
-        };
+        }
 
-        const handleUp = (upEvent: PointerEvent) => {
+        function handleUp(upEvent: PointerEvent) {
+            if (upEvent.pointerId !== dragState.pointerId) return;
             const drag = resultTabDragRef.current;
-            if (!drag || drag.key !== key) {
+            if (drag !== dragState) {
                 clearListeners();
                 return;
             }
@@ -302,13 +326,37 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
             // 先清预览再打开真实窗口，避免叠两层
             clearListeners();
             if (shouldDetach) {
-                onOpenResultInWindow(key, resolveNativeDetachPreferredBounds(releaseScreenX, releaseScreenY));
+                openResultInWindow(key, resolveNativeDetachPreferredBounds(releaseScreenX, releaseScreenY));
             }
-        };
+        }
 
+        function handleCancel(cancelEvent: PointerEvent) {
+            if (cancelEvent.pointerId === dragState.pointerId) {
+                clearListeners();
+            }
+        }
+
+        function handleWindowBlur() {
+            clearListeners();
+        }
+
+        function handleLostPointerCapture(lostEvent: Event) {
+            if ((lostEvent as PointerEvent).pointerId === dragState.pointerId) {
+                clearListeners();
+            }
+        }
+
+        resultTabDragCleanupRef.current = clearListeners;
         window.addEventListener('pointermove', handleMove, { passive: false });
         window.addEventListener('pointerup', handleUp);
-        window.addEventListener('pointercancel', handleUp);
+        window.addEventListener('pointercancel', handleCancel);
+        window.addEventListener('blur', handleWindowBlur);
+        dragState.captureTarget.addEventListener('lostpointercapture', handleLostPointerCapture);
+        try {
+            dragState.captureTarget.setPointerCapture(dragState.pointerId);
+        } catch {
+            // Some embedded WebViews do not expose pointer capture for tab labels.
+        }
     }, [onOpenResultInWindow, resolveResultTabTitle]);
 
     const shouldShowSqlLogTab = isV2Ui;
