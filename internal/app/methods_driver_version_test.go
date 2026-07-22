@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -133,6 +134,21 @@ func TestCurrentDriverReleaseTagUsesVersionedReleaseForStableBuild(t *testing.T)
 	}
 }
 
+func TestDriverReleaseLatestDownloadURLForCurrentChannelUsesDevLatest(t *testing.T) {
+	originalVersion := AppVersion
+	AppVersion = "dev-a1b2c3d"
+	t.Cleanup(func() {
+		AppVersion = originalVersion
+	})
+
+	const assetName = "sqlserver-driver-agent-windows-amd64.exe"
+	got := driverReleaseLatestDownloadURLForCurrentChannel(assetName)
+	want := driverReleaseDownloadURL(driverReleaseDevTag, assetName)
+	if got != want {
+		t.Fatalf("dev latest fallback URL = %q, want %q", got, want)
+	}
+}
+
 func TestResolveOptionalDriverBundleDownloadURLsUsesDriverReleaseRepo(t *testing.T) {
 	originalVersion := AppVersion
 	AppVersion = "0.7.4"
@@ -141,6 +157,7 @@ func TestResolveOptionalDriverBundleDownloadURLsUsesDriverReleaseRepo(t *testing
 	})
 
 	urls := resolveOptionalDriverBundleDownloadURLs()
+	wantMirror := driverMirrorReleaseDownloadURL("v0.7.4", optionalDriverBundleAssetName)
 	wantTagged := driverReleaseDownloadURL("v0.7.4", optionalDriverBundleAssetName)
 	wantLatest := driverReleaseLatestDownloadURL(optionalDriverBundleAssetName)
 	if len(urls) < 2 {
@@ -148,7 +165,11 @@ func TestResolveOptionalDriverBundleDownloadURLsUsesDriverReleaseRepo(t *testing
 	}
 	foundTagged := false
 	foundLatest := false
+	foundMirror := false
 	for _, candidate := range urls {
+		if candidate == wantMirror {
+			foundMirror = true
+		}
 		if candidate == wantTagged {
 			foundTagged = true
 		}
@@ -156,8 +177,147 @@ func TestResolveOptionalDriverBundleDownloadURLsUsesDriverReleaseRepo(t *testing
 			foundLatest = true
 		}
 	}
-	if !foundTagged || !foundLatest {
-		t.Fatalf("expected bundle URLs to include tagged=%q and latest=%q, got %v", wantTagged, wantLatest, urls)
+	if !foundMirror || !foundTagged || !foundLatest {
+		t.Fatalf("expected bundle URLs to include mirror=%q, tagged=%q and latest=%q, got %v", wantMirror, wantTagged, wantLatest, urls)
+	}
+	if urls[0] != wantMirror {
+		t.Fatalf("expected R2 mirror first, got %v", urls)
+	}
+}
+
+func TestDriverReleaseDownloadCoordinates(t *testing.T) {
+	tag, asset, ok := driverReleaseDownloadCoordinates("https://github.com/Syngnat/GoNavi-DriverAgents/releases/download/v1.2.3/driver%20agent.exe")
+	if !ok || tag != "v1.2.3" || asset != "driver agent.exe" {
+		t.Fatalf("unexpected GitHub coordinates: tag=%q asset=%q ok=%v", tag, asset, ok)
+	}
+	tag, asset, ok = driverReleaseDownloadCoordinates(driverMirrorReleaseDownloadURL("dev-latest", "driver agent.exe"))
+	if !ok || tag != "dev-latest" || asset != "driver agent.exe" {
+		t.Fatalf("unexpected mirror coordinates: tag=%q asset=%q ok=%v", tag, asset, ok)
+	}
+	if _, _, ok := driverReleaseDownloadCoordinates("https://example.com/releases/download/v1.2.3/driver.exe"); ok {
+		t.Fatal("expected unrelated release URL not to be rewritten to the GoNavi mirror")
+	}
+}
+
+func TestFetchDriverReleaseIndexByURLBuildsMirrorAssets(t *testing.T) {
+	for _, name := range []string{
+		"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+		"http_proxy", "https_proxy", "all_proxy",
+	} {
+		t.Setenv(name, "")
+	}
+	t.Setenv("NO_PROXY", "127.0.0.1,localhost")
+	t.Setenv("no_proxy", "127.0.0.1,localhost")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"assets":{"sqlserver-driver-agent-windows-amd64.exe":12345}}`)
+	}))
+	defer server.Close()
+
+	release, err := fetchDriverReleaseIndexByURL("v1.2.3", server.URL)
+	if err != nil {
+		t.Fatalf("fetch driver index: %v", err)
+	}
+	if release.TagName != "v1.2.3" || len(release.Assets) != 1 {
+		t.Fatalf("unexpected synthetic release: %#v", release)
+	}
+	asset := release.Assets[0]
+	if asset.Name != "sqlserver-driver-agent-windows-amd64.exe" || asset.Size != 12345 {
+		t.Fatalf("unexpected synthetic asset: %#v", asset)
+	}
+	if asset.BrowserDownloadURL != driverMirrorReleaseDownloadURL("v1.2.3", asset.Name) {
+		t.Fatalf("unexpected mirror URL: %q", asset.BrowserDownloadURL)
+	}
+	if asset.URL != driverReleaseDownloadURL("v1.2.3", asset.Name) {
+		t.Fatalf("unexpected GitHub fallback URL: %q", asset.URL)
+	}
+
+	latestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"tagName":"v1.2.2","assets":{"sqlserver-driver-agent-windows-amd64.exe":12345}}`)
+	}))
+	defer latestServer.Close()
+	latestRelease, err := fetchDriverReleaseIndexByURL("", latestServer.URL)
+	if err != nil {
+		t.Fatalf("fetch latest driver index: %v", err)
+	}
+	if latestRelease.TagName != "v1.2.2" || len(latestRelease.Assets) != 1 {
+		t.Fatalf("unexpected latest synthetic release: %#v", latestRelease)
+	}
+	latestAsset := latestRelease.Assets[0]
+	if latestAsset.BrowserDownloadURL != driverMirrorReleaseDownloadURL("v1.2.2", latestAsset.Name) ||
+		latestAsset.URL != driverReleaseDownloadURL("v1.2.2", latestAsset.Name) {
+		t.Fatalf("latest pointer did not preserve source tag: %#v", latestAsset)
+	}
+
+	devServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"tagName":"dev-stale-logical-tag","mirrorTagName":"dev-a1b2c3d","assets":{"sqlserver-driver-agent-windows-amd64.exe":12345}}`)
+	}))
+	defer devServer.Close()
+	devRelease, err := fetchDriverReleaseIndexByURL(driverReleaseDevTag, devServer.URL)
+	if err != nil {
+		t.Fatalf("fetch dev driver index: %v", err)
+	}
+	if devRelease.TagName != driverReleaseDevTag || len(devRelease.Assets) != 1 {
+		t.Fatalf("unexpected dev synthetic release: %#v", devRelease)
+	}
+	devAsset := devRelease.Assets[0]
+	if devAsset.BrowserDownloadURL != driverMirrorDevReleaseDownloadURL("dev-a1b2c3d", devAsset.Name) {
+		t.Fatalf("dev mirror URL did not use the physical mirror tag: %#v", devAsset)
+	}
+	if devAsset.URL != driverReleaseDownloadURL(driverReleaseDevTag, devAsset.Name) {
+		t.Fatalf("dev GitHub fallback did not retain dev-latest: %#v", devAsset)
+	}
+}
+
+func TestResolvePublishedDriverDownloadURLForTagUsesDevMirrorTag(t *testing.T) {
+	definition := driverDefinition{Type: "sqlserver"}
+	assetNames := optionalDriverReleaseAssetNamesForVersion(definition.Type, "")
+	if len(assetNames) == 0 {
+		t.Fatal("expected sqlserver release asset names")
+	}
+	assetName := assetNames[0]
+	want := driverMirrorDevReleaseDownloadURL("dev-a1b2c3d", assetName)
+
+	driverReleaseSizeMu.Lock()
+	original := cloneReleaseAssetSizeCache(driverReleaseSizeMap)
+	driverReleaseSizeMap["tag:"+driverReleaseDevTag] = driverReleaseAssetSizeCacheEntry{
+		LoadedAt:           time.Now(),
+		SizeByKey:          map[string]int64{assetName: 12345},
+		PublishedAssets:    map[string]bool{assetName: true},
+		MirrorDownloadURLs: map[string]string{assetName: want},
+	}
+	driverReleaseSizeMu.Unlock()
+	t.Cleanup(func() {
+		driverReleaseSizeMu.Lock()
+		driverReleaseSizeMap = original
+		driverReleaseSizeMu.Unlock()
+	})
+
+	got, ok := resolvePublishedDriverDownloadURLForTag(definition, "", driverReleaseDevTag)
+	if !ok || got != want {
+		t.Fatalf("dev published URL = %q, ok=%v, want mirror %q", got, ok, want)
+	}
+}
+
+func TestResolveLatestPublishedDriverDownloadURLFallsBackWhenMirrorIndexMissesAsset(t *testing.T) {
+	seedReleaseAssetSizeCache(t, "latest", map[string]int64{
+		"unrelated-driver-agent-windows-amd64.exe": 123,
+	})
+	definition := driverDefinition{Type: "sqlserver"}
+	assetNames := optionalDriverReleaseAssetNamesForVersion(definition.Type, "")
+	if len(assetNames) == 0 {
+		t.Fatal("expected sqlserver release asset names")
+	}
+	got, ok := resolveLatestPublishedDriverDownloadURLForVersion(definition, "")
+	if !ok {
+		t.Fatal("expected GitHub latest fallback for an incomplete mirror index")
+	}
+	want := driverReleaseLatestDownloadURL(assetNames[0])
+	if got != want {
+		t.Fatalf("latest fallback URL = %q, want %q", got, want)
 	}
 }
 
@@ -389,10 +549,10 @@ func TestResolveOptionalDriverAgentDownloadURLsDoesNotFallbackForHistoricalVersi
 		explicitURL,
 		"1.17.4",
 	)
-	if len(urls) != 1 {
-		t.Fatalf("expected only explicit historical URL, got %d candidates: %v", len(urls), urls)
+	if len(urls) != 2 {
+		t.Fatalf("expected mirror plus explicit historical URL, got %d candidates: %v", len(urls), urls)
 	}
-	if urls[0] != explicitURL {
+	if urls[0] != driverMirrorReleaseDownloadURL("v1.17.4", mongoVersionedReleaseAssetName(1)) || urls[1] != explicitURL {
 		t.Fatalf("unexpected historical URL candidate: %v", urls)
 	}
 }
@@ -2196,11 +2356,23 @@ func cloneReleaseAssetSizeCache(src map[string]driverReleaseAssetSizeCacheEntry)
 	cloned := make(map[string]driverReleaseAssetSizeCacheEntry, len(src))
 	for key, value := range src {
 		cloned[key] = driverReleaseAssetSizeCacheEntry{
-			LoadedAt:        value.LoadedAt,
-			SizeByKey:       cloneInt64Map(value.SizeByKey),
-			PublishedAssets: cloneBoolMap(value.PublishedAssets),
-			Err:             value.Err,
+			LoadedAt:           value.LoadedAt,
+			SizeByKey:          cloneInt64Map(value.SizeByKey),
+			PublishedAssets:    cloneBoolMap(value.PublishedAssets),
+			MirrorDownloadURLs: cloneDriverStringMap(value.MirrorDownloadURLs),
+			Err:                value.Err,
 		}
+	}
+	return cloned
+}
+
+func cloneDriverStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return map[string]string{}
+	}
+	cloned := make(map[string]string, len(src))
+	for key, value := range src {
+		cloned[key] = value
 	}
 	return cloned
 }

@@ -28,6 +28,7 @@ jobs:
           bash tools/generate-driver-agent-revisions.test.sh
           python3 tools/generate-driver-release-manifest.test.py
           python3 tools/generate-update-latest-manifest.test.py
+          python3 tools/r2-release-retention.test.py
           python3 tools/package-driver-release-assets.test.py
           python3 tools/legal-release-assets.test.py
           python3 tools/windows-release-artifacts.test.py
@@ -1246,6 +1247,7 @@ jobs:
             --version "$VERSION" \
             --tag "$TAG" \
             --channel latest \
+            --download-base-url https://download.syngnat.top/gonavi/releases/download \
             --output release-assets/latest.json
           test -s release-assets/latest.json
           echo "📄 latest.json ready:"

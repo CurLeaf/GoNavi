@@ -250,6 +250,7 @@ type driverNetworkProbeItem struct {
 
 const (
 	driverStatusReasonSlimBuildMissingDriver = "slim_build_missing_driver"
+	driverNetworkProbeCodeCloudflareR2       = "cloudflare_r2"
 	driverNetworkProbeCodeGitHubAPI          = "github_api"
 	driverNetworkProbeCodeGitHubRelease      = "github_release"
 	driverNetworkProbeCodeGitHubReleaseAsset = "github_release_asset"
@@ -317,10 +318,11 @@ type driverVersionOptionItem struct {
 }
 
 type driverReleaseAssetSizeCacheEntry struct {
-	LoadedAt        time.Time
-	SizeByKey       map[string]int64
-	PublishedAssets map[string]bool
-	Err             string
+	LoadedAt           time.Time
+	SizeByKey          map[string]int64
+	PublishedAssets    map[string]bool
+	MirrorDownloadURLs map[string]string
+	Err                string
 }
 
 type goModuleLatestVersionCacheEntry struct {
@@ -345,47 +347,53 @@ type goModuleVersionMeta struct {
 }
 
 type driverBundleAssetIndex struct {
-	Assets map[string]int64 `json:"assets"`
+	TagName       string           `json:"tagName,omitempty"`
+	MirrorTagName string           `json:"mirrorTagName,omitempty"`
+	Assets        map[string]int64 `json:"assets"`
 }
 
 const (
 	// 默认使用内置 manifest，避免依赖网络与外部仓库 404。
-	defaultDriverManifestURLValue       = "builtin://manifest"
-	driverReleaseRepo                   = "Syngnat/GoNavi-DriverAgents"
-	driverReleaseLatestAPIURL           = "https://api.github.com/repos/" + driverReleaseRepo + "/releases/latest"
-	driverReleaseDevTag                 = "dev-latest"
-	optionalDriverBundleAssetName       = "GoNavi-DriverAgents.zip"
-	duckDBWindowsDriverZipAssetName     = "duckdb-driver.zip"
-	optionalDriverBundleIndexAssetName  = "GoNavi-DriverAgents-Index.json"
-	optionalDriverBundleDownloadTimeout = 15 * time.Minute
-	optionalDriverBundleCacheMaxAge     = 7 * 24 * time.Hour
-	optionalDriverBundleCacheMaxFiles   = 4
-	driverManifestCacheTTL              = 5 * time.Minute
-	driverReleaseAssetSizeCacheTTL      = 30 * time.Minute
-	driverReleaseAssetSizeErrorCacheTTL = 30 * time.Second
-	driverReleaseAssetSizeProbeTimeout  = 4 * time.Second
-	driverReleaseListProbeTimeout       = 6 * time.Second
-	driverModuleLatestCacheTTL          = 6 * time.Hour
-	driverModuleLatestErrorCacheTTL     = 2 * time.Minute
-	driverModuleLatestProbeTimeout      = 4 * time.Second
-	driverModuleVersionInspectLimit     = 30
-	driverModuleVersionListMaxSize      = 4 << 20
-	driverRecentVersionLimit            = 5
-	driverModuleVersionFetchLimit       = 64
-	driverVersionWarmupMinInterval      = 30 * time.Second
-	driverBundleIndexMaxSize            = 1 << 20
-	driverManifestMaxSize               = 2 << 20
-	driverNetworkProbeTimeout           = 4 * time.Second
-	driverNetworkProbeTCPTimeout        = 3 * time.Second
-	localDriverDirectoryScanMaxEntries  = 20000
-	driverChecksumPolicyStrict          = "strict"
-	driverChecksumPolicyWarn            = "warn"
-	driverChecksumPolicyOff             = "off"
-	driverEngineGo                      = "go"
-	driverEngineExternal                = "external"
-	duckDBWindowsLibraryVersion         = "v1.4.4"
-	duckDBWindowsLibraryArchiveURL      = "https://github.com/duckdb/duckdb/releases/download/" + duckDBWindowsLibraryVersion + "/libduckdb-windows-amd64.zip"
-	duckDBWindowsSupportDLLName         = "duckdb.dll"
+	defaultDriverManifestURLValue        = "builtin://manifest"
+	driverReleaseRepo                    = "Syngnat/GoNavi-DriverAgents"
+	driverReleaseMirrorBaseURL           = "https://download.syngnat.top/drivers/releases/download"
+	driverReleaseMirrorLatestIndexURL    = "https://download.syngnat.top/drivers/releases/latest/GoNavi-DriverAgents-Index.json"
+	driverReleaseMirrorDevBaseURL        = "https://download.syngnat.top/drivers/dev/releases/download"
+	driverReleaseMirrorDevLatestIndexURL = "https://download.syngnat.top/drivers/dev/releases/latest/GoNavi-DriverAgents-Index.json"
+	driverReleaseLatestAPIURL            = "https://api.github.com/repos/" + driverReleaseRepo + "/releases/latest"
+	driverReleaseDevTag                  = "dev-latest"
+	optionalDriverBundleAssetName        = "GoNavi-DriverAgents.zip"
+	duckDBWindowsDriverZipAssetName      = "duckdb-driver.zip"
+	optionalDriverBundleIndexAssetName   = "GoNavi-DriverAgents-Index.json"
+	optionalDriverBundleDownloadTimeout  = 15 * time.Minute
+	optionalDriverBundleCacheMaxAge      = 7 * 24 * time.Hour
+	optionalDriverBundleCacheMaxFiles    = 4
+	driverManifestCacheTTL               = 5 * time.Minute
+	driverReleaseAssetSizeCacheTTL       = 30 * time.Minute
+	driverReleaseAssetSizeErrorCacheTTL  = 30 * time.Second
+	driverReleaseAssetSizeProbeTimeout   = 4 * time.Second
+	driverReleaseListProbeTimeout        = 6 * time.Second
+	driverModuleLatestCacheTTL           = 6 * time.Hour
+	driverModuleLatestErrorCacheTTL      = 2 * time.Minute
+	driverModuleLatestProbeTimeout       = 4 * time.Second
+	driverModuleVersionInspectLimit      = 30
+	driverModuleVersionListMaxSize       = 4 << 20
+	driverRecentVersionLimit             = 5
+	driverModuleVersionFetchLimit        = 64
+	driverVersionWarmupMinInterval       = 30 * time.Second
+	driverBundleIndexMaxSize             = 1 << 20
+	driverManifestMaxSize                = 2 << 20
+	driverNetworkProbeTimeout            = 4 * time.Second
+	driverNetworkProbeTCPTimeout         = 3 * time.Second
+	localDriverDirectoryScanMaxEntries   = 20000
+	driverChecksumPolicyStrict           = "strict"
+	driverChecksumPolicyWarn             = "warn"
+	driverChecksumPolicyOff              = "off"
+	driverEngineGo                       = "go"
+	driverEngineExternal                 = "external"
+	duckDBWindowsLibraryVersion          = "v1.4.4"
+	duckDBWindowsLibraryArchiveURL       = "https://github.com/duckdb/duckdb/releases/download/" + duckDBWindowsLibraryVersion + "/libduckdb-windows-amd64.zip"
+	duckDBWindowsSupportDLLName          = "duckdb.dll"
 )
 
 const builtinDriverManifestJSON = `{
@@ -1289,6 +1297,11 @@ func (a *App) GetDriverStatusList(downloadDir string, manifestURL string) connec
 func (a *App) CheckDriverNetworkStatus() connection.QueryResult {
 	checks := []driverNetworkProbeItem{
 		{
+			ProbeCode: driverNetworkProbeCodeCloudflareR2,
+			Name:      "Cloudflare R2",
+			URL:       "https://download.syngnat.top/health.txt",
+		},
+		{
 			ProbeCode: driverNetworkProbeCodeGitHubAPI,
 			Name:      "GitHub API",
 			URL:       "https://api.github.com/rate_limit",
@@ -1326,17 +1339,18 @@ func (a *App) CheckDriverNetworkStatus() connection.QueryResult {
 		}
 		return driverNetworkProbeItem{}, false
 	}
+	r2Check, _ := findProbe(driverNetworkProbeCodeCloudflareR2)
 	githubAPICheck, _ := findProbe(driverNetworkProbeCodeGitHubAPI)
 	githubReleaseCheck, _ := findProbe(driverNetworkProbeCodeGitHubRelease)
 	releaseAssetsCheck, _ := findProbe(driverNetworkProbeCodeGitHubReleaseAsset)
-	downloadChainReachable := githubReleaseCheck.Reachable && releaseAssetsCheck.Reachable
+	downloadChainReachable := r2Check.Reachable || (githubReleaseCheck.Reachable && releaseAssetsCheck.Reachable)
 
 	proxyEnv := collectDriverProxyEnv()
 	proxyConfigured := len(proxyEnv) > 0
 	summary := a.appText("driver_manager.network.summary.reachable", nil)
 	if githubAPICheck.Reachable && !downloadChainReachable {
 		summary = a.appText("driver_manager.backend.network.summary.download_chain_unreachable", nil)
-	} else if !allReachable {
+	} else if !downloadChainReachable {
 		if proxyConfigured {
 			summary = a.appText("driver_manager.network.summary.unreachable_proxy_configured", nil)
 		} else {
@@ -1345,13 +1359,15 @@ func (a *App) CheckDriverNetworkStatus() connection.QueryResult {
 	}
 
 	data := map[string]interface{}{
-		"reachable":              allReachable,
+		"reachable":              downloadChainReachable,
+		"allReachable":           allReachable,
 		"summary":                summary,
-		"recommendedProxy":       !allReachable,
+		"recommendedProxy":       !downloadChainReachable,
 		"proxyConfigured":        proxyConfigured,
 		"proxyEnv":               proxyEnv,
 		"downloadChainReachable": downloadChainReachable,
 		"downloadRequiredHosts": []string{
+			"download.syngnat.top",
 			"github.com",
 			"api.github.com",
 			"release-assets.githubusercontent.com",
@@ -2345,6 +2361,11 @@ func resolvePublishedDriverDownloadURLForTag(definition driverDefinition, select
 	assetName, ok := resolvePublishedDriverReleaseAssetName(driverType, selectedVersion, tagName)
 	if !ok {
 		return "", false
+	}
+	if strings.EqualFold(tagName, driverReleaseDevTag) {
+		if mirrorURL := readReleaseMirrorDownloadURLFromCache("tag:"+tagName, assetName); mirrorURL != "" {
+			return mirrorURL, true
+		}
 	}
 	return driverReleaseDownloadURL(tagName, assetName), true
 }

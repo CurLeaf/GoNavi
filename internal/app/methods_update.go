@@ -61,6 +61,8 @@ var (
 	updateExitProcess               = os.Exit
 )
 
+var errUpdateChecksumMismatch = errors.New("update package checksum mismatch")
+
 type updateState struct {
 	lastCheck   *UpdateInfo
 	downloading bool
@@ -502,20 +504,6 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 		}
 		a.emitUpdateDownloadProgress("downloading", downloaded, reportTotal, "")
 	}
-	actualHash, err := downloadFileWithHash(info.AssetURL, assetPath, progressCB)
-	if err != nil && strings.TrimSpace(info.AssetAPIURL) != "" && !strings.EqualFold(strings.TrimSpace(info.AssetAPIURL), strings.TrimSpace(info.AssetURL)) {
-		logger.Warnf("更新包主下载地址失败，尝试 assets API 回退：err=%v", err)
-		_ = os.Remove(assetPath)
-		actualHash, err = downloadFileWithHash(info.AssetAPIURL, assetPath, progressCB)
-	}
-	if err != nil {
-		_ = os.Remove(assetPath)
-		_ = os.RemoveAll(stagedDir)
-		message := a.localizedUpdateError(err)
-		a.emitUpdateDownloadProgress("error", 0, info.AssetSize, message)
-		return connection.QueryResult{Success: false, Message: message}
-	}
-
 	if info.SHA256 == "" {
 		_ = os.Remove(assetPath)
 		_ = os.RemoveAll(stagedDir)
@@ -523,10 +511,22 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 		a.emitUpdateDownloadProgress("error", 0, info.AssetSize, message)
 		return connection.QueryResult{Success: false, Message: message}
 	}
-	if !strings.EqualFold(info.SHA256, actualHash) {
+
+	_, err := downloadUpdateAssetWithFallback(
+		[]string{info.AssetURL, info.AssetAPIURL},
+		assetPath,
+		info.SHA256,
+		progressCB,
+	)
+	if err != nil {
 		_ = os.Remove(assetPath)
 		_ = os.RemoveAll(stagedDir)
-		message := a.appText("app.update.backend.message.checksum_failed", nil)
+		if errors.Is(err, errUpdateChecksumMismatch) {
+			message := a.appText("app.update.backend.message.checksum_failed", nil)
+			a.emitUpdateDownloadProgress("error", 0, info.AssetSize, message)
+			return connection.QueryResult{Success: false, Message: message}
+		}
+		message := a.localizedUpdateError(err)
 		a.emitUpdateDownloadProgress("error", 0, info.AssetSize, message)
 		return connection.QueryResult{Success: false, Message: message}
 	}
@@ -550,6 +550,52 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 
 	a.emitUpdateDownloadProgress("done", info.AssetSize, info.AssetSize, "")
 	return connection.QueryResult{Success: true, Message: a.appText("app.update.backend.message.package_downloaded", nil), Data: buildUpdateDownloadResult(info, staged)}
+}
+
+func downloadUpdateAssetWithFallback(
+	candidates []string,
+	assetPath string,
+	expectedSHA256 string,
+	onProgress func(downloaded, total int64),
+) (string, error) {
+	seen := make(map[string]struct{}, len(candidates))
+	urls := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		trimmed := strings.TrimSpace(candidate)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		urls = append(urls, trimmed)
+	}
+	if len(urls) == 0 {
+		return "", localizedUpdateError{
+			key:    "app.update.backend.error.download_failed",
+			params: map[string]any{"detail": "download URL is empty"},
+		}
+	}
+
+	expectedHash := strings.TrimSpace(expectedSHA256)
+	var lastErr error
+	for index, candidate := range urls {
+		_ = os.Remove(assetPath)
+		actualHash, err := downloadFileWithHash(candidate, assetPath, onProgress)
+		if err == nil && expectedHash != "" && !strings.EqualFold(expectedHash, actualHash) {
+			err = errUpdateChecksumMismatch
+		}
+		if err == nil {
+			return actualHash, nil
+		}
+		lastErr = err
+		if index+1 < len(urls) {
+			logger.Warnf("更新包下载源失败，尝试下一下载源：attempt=%d err=%v", index+1, err)
+		}
+	}
+	_ = os.Remove(assetPath)
+	return "", lastErr
 }
 
 func fetchLatestUpdateInfo(channel updateChannel) (UpdateInfo, error) {
