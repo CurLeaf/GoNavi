@@ -5036,6 +5036,74 @@ describe('QueryEditor external SQL save', () => {
     expect(document.execCommand).not.toHaveBeenCalled();
   });
 
+  it('leaves Ctrl/Cmd+A inside Monaco find inputs while retaining the editor fallback', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'SELECT * FROM users' })} />);
+    });
+
+    const OriginalHTMLElement = globalThis.HTMLElement;
+    class EditableInputTarget {
+      tagName = 'INPUT';
+      isContentEditable = false;
+      closest = vi.fn(() => null);
+    }
+    vi.stubGlobal('HTMLElement', EditableInputTarget as any);
+
+    editorState.editor.trigger.mockClear();
+    editorState.editor.focus.mockClear();
+    const findInputEvent = {
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      key: 'a',
+      target: new EditableInputTarget(),
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(findInputEvent));
+    });
+
+    expect(findInputEvent.preventDefault).not.toHaveBeenCalled();
+    expect(findInputEvent.stopPropagation).not.toHaveBeenCalled();
+    expect(editorState.editor.trigger).not.toHaveBeenCalledWith('keyboard', 'editor.action.selectAll', null);
+    expect(editorState.editor.focus).not.toHaveBeenCalled();
+
+    const documentLevelEvent = {
+      ...findInputEvent,
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(documentLevelEvent));
+    });
+
+    expect(documentLevelEvent.preventDefault).toHaveBeenCalled();
+    expect(documentLevelEvent.stopPropagation).toHaveBeenCalled();
+    expect(editorState.editor.trigger).toHaveBeenCalledWith('keyboard', 'editor.action.selectAll', null);
+    vi.stubGlobal('HTMLElement', OriginalHTMLElement);
+  });
+
   it('intercepts Ctrl/Cmd+D at window level and duplicates the current line below', async () => {
     storeState.shortcutOptions.duplicateCurrentLine.mac = { enabled: true, combo: 'Meta+D' };
     storeState.shortcutOptions.duplicateCurrentLine.windows = { enabled: true, combo: 'Ctrl+D' };

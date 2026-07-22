@@ -7533,7 +7533,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const editorHasFocus = !!editor.hasTextFocus?.();
           const inEditorPane = !!(targetNode && editorPaneRef.current?.contains(targetNode));
           const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
-          if (isEditableElement(event.target) && !inEditorPane) {
+          if (isEditableElement(event.target)) {
               return;
           }
           if (!editorHasFocus && !inEditorPane) {

@@ -3289,8 +3289,13 @@ describe('QueryEditor external SQL save', () => {
 
   it('keeps editor select-all scoped away from non-editor editable targets', () => {
     const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
+    const selectAllSource = source.slice(
+      source.indexOf('const handleSelectAllInEditor = (event: KeyboardEvent) => {'),
+      source.indexOf("window.addEventListener('keydown', handleSelectAllInEditor, true);"),
+    );
 
-    expect(source).toContain("if (isEditableElement(event.target) && !inEditorPane) {");
+    expect(selectAllSource).toContain("if (isEditableElement(event.target)) {");
+    expect(selectAllSource).not.toContain("if (isEditableElement(event.target) && !inEditorPane) {");
   });
 
   it('keeps the embedded sql execution log limited to v2 query editor result tabs', () => {
