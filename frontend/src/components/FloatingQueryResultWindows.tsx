@@ -1,9 +1,10 @@
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Button, Tooltip } from 'antd';
 import { CloseOutlined, CompressOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { t } from '../i18n';
-import DataGrid from './DataGrid';
+import DeferredWorkspaceContentErrorBoundary from './DeferredWorkspaceContentErrorBoundary';
+import DeferredWorkspaceContentFallback from './DeferredWorkspaceContentFallback';
 import { hasNativeDetachedWindowManager } from '../utils/nativeDetachedWindowHost';
 import {
   clamp,
@@ -11,6 +12,28 @@ import {
   DEFAULT_DETACHED_WINDOW_MIN_WIDTH,
   DETACHED_WINDOW_VIEWPORT_PADDING,
 } from '../utils/detachedWindow';
+
+const createLazyDetachedResultDataGrid = () => React.lazy(() => import('./DataGrid'));
+
+type DeferredDetachedResultDataGridProps = React.ComponentProps<
+  typeof import('./DataGrid')['default']
+>;
+
+const DeferredDetachedResultDataGrid: React.FC<DeferredDetachedResultDataGridProps> = (props) => {
+  const [renderNonce, setRenderNonce] = useState(0);
+  const LazyDataGrid = useMemo(createLazyDetachedResultDataGrid, [renderNonce]);
+  const retry = useCallback(() => {
+    setRenderNonce((current) => current + 1);
+  }, []);
+
+  return (
+    <DeferredWorkspaceContentErrorBoundary key={renderNonce} onRetry={retry}>
+      <React.Suspense fallback={<DeferredWorkspaceContentFallback />}>
+        <LazyDataGrid {...props} />
+      </React.Suspense>
+    </DeferredWorkspaceContentErrorBoundary>
+  );
+};
 
 type DragMode = 'move' | 'resize-e' | 'resize-s' | 'resize-se';
 
@@ -289,7 +312,7 @@ const FloatingQueryResultWindows: React.FC = () => {
                   value={messageText}
                 />
               ) : (
-                <DataGrid
+                <DeferredDetachedResultDataGrid
                   data={windowState.result.rows || []}
                   columnNames={windowState.result.columns || []}
                   loading={false}
