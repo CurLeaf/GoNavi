@@ -493,6 +493,7 @@ describe("i18n catalog", () => {
       "data_grid.row_editor.popup_edit",
       "data_grid.cell_editor.title",
       "data_grid.cell_editor.title_with_column",
+      "data_grid.cell_viewer.title_with_column",
       "data_grid.batch_fill.title",
       "data_grid.batch_fill.set_null",
       "data_grid.batch_fill.value_placeholder",

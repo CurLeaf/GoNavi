@@ -3913,6 +3913,7 @@
   "data_grid.cell_editor.now": "此刻",
   "data_grid.cell_editor.title": "編輯儲存格",
   "data_grid.cell_editor.title_with_column": "編輯儲存格：{{column}}",
+  "data_grid.cell_viewer.title_with_column": "檢視儲存格：{{column}}",
   "data_grid.column.comment_tooltip": "註解：{{comment}}",
   "data_grid.column.drag_tooltip": "拖曳調整欄位順序",
   "data_grid.column.foreign_key_jump_title": "跳轉到外鍵表：{{tableName}}",

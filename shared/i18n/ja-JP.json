@@ -3913,6 +3913,7 @@
   "data_grid.cell_editor.now": "現在時刻",
   "data_grid.cell_editor.title": "セルを編集",
   "data_grid.cell_editor.title_with_column": "セルを編集: {{column}}",
+  "data_grid.cell_viewer.title_with_column": "セルを表示: {{column}}",
   "data_grid.column.comment_tooltip": "コメント: {{comment}}",
   "data_grid.column.drag_tooltip": "ドラッグして列を並べ替え",
   "data_grid.column.foreign_key_jump_title": "外部キーテーブルへ移動: {{tableName}}",

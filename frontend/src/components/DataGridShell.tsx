@@ -79,6 +79,8 @@ const DataGridShell: React.FC<DataGridShellProps> = (props) => {
     cellEditorIsJson,
     cellEditorMeta,
     cellEditorOpen,
+    cellEditorReadOnly,
+    cellEditorViewerMode,
     cellEditorValue,
     clearAllFiltersAndSorts,
     clearAutoCommitTimer,
@@ -710,6 +712,8 @@ const renderDataTableView = () => (
                 onOpenRowEditorFieldEditor={openRowEditorFieldEditor}
                 cellEditorOpen={cellEditorOpen}
                 cellEditorMeta={cellEditorMeta}
+                cellEditorReadOnly={cellEditorReadOnly}
+                cellEditorViewerMode={cellEditorViewerMode}
                 cellEditorIsJson={cellEditorIsJson}
                 cellEditorValue={cellEditorValue}
                 onCloseCellEditor={closeCellEditor}

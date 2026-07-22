@@ -3913,6 +3913,7 @@
   "data_grid.cell_editor.now": "Сейчас",
   "data_grid.cell_editor.title": "Редактировать ячейку",
   "data_grid.cell_editor.title_with_column": "Редактировать ячейку: {{column}}",
+  "data_grid.cell_viewer.title_with_column": "Просмотр ячейки: {{column}}",
   "data_grid.column.comment_tooltip": "Комментарий: {{comment}}",
   "data_grid.column.drag_tooltip": "Перетащите, чтобы изменить порядок столбцов",
   "data_grid.column.foreign_key_jump_title": "Перейти к таблице внешнего ключа: {{tableName}}",
