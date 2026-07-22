@@ -131,6 +131,11 @@ import {
 import { supportsSSLForType } from "./utils/connectionTypeCapabilities";
 import { normalizeDriverType } from "./utils/connectionDriverType";
 import { createDebouncedPersistStorage } from "./utils/debouncedPersistStorage";
+import {
+  incrementTableAccessCount,
+  removeConnectionTableAccessCounts,
+  sanitizeTableAccessCount,
+} from "./utils/tableAccessCount";
 
 export type TableDoubleClickAction = "open-data" | "open-design";
 export type ThemeMode = "light" | "dark";
@@ -2799,20 +2804,6 @@ const sanitizeSqlEditorTransactionOptions = (
   };
 };
 
-const sanitizeTableAccessCount = (value: unknown): Record<string, number> => {
-  const raw =
-    value && typeof value === "object"
-      ? (value as Record<string, unknown>)
-      : {};
-  const result: Record<string, number> = {};
-  Object.entries(raw).forEach(([key, count]) => {
-    const parsed = Number(count);
-    if (!Number.isFinite(parsed) || parsed < 0) return;
-    result[key] = Math.trunc(parsed);
-  });
-  return result;
-};
-
 const sanitizeTableSortPreference = (
   value: unknown,
 ): Record<string, "name" | "frequency"> => {
@@ -3352,7 +3343,7 @@ const buildPersistedStateProjection = (
       state.tableExportHistories,
     ),
     sqlSnippets: state.sqlSnippets,
-    tableAccessCount: state.tableAccessCount,
+    tableAccessCount: sanitizeTableAccessCount(state.tableAccessCount),
     tableSortPreference: state.tableSortPreference,
     tableColumnOrders: state.tableColumnOrders,
     enableColumnOrderMemory: state.enableColumnOrderMemory,
@@ -3531,6 +3522,11 @@ export const useStore = create<AppState>()(
             ),
             recentSQLFiles: state.recentSQLFiles.filter(
               (file) => file.connectionId !== id,
+            ),
+            tableAccessCount: removeConnectionTableAccessCounts(
+              state.tableAccessCount,
+              id,
+              nextConnections.map((connection) => connection.id),
             ),
             sidebarRootOrder: normalized.sidebarRootOrder,
           };
@@ -5067,13 +5063,13 @@ export const useStore = create<AppState>()(
 
       recordTableAccess: (connectionId, dbName, tableName) =>
         set((state) => {
-          const key = `${connectionId}-${dbName}-${tableName}`;
-          const currentCount = state.tableAccessCount[key] || 0;
           return {
-            tableAccessCount: {
-              ...state.tableAccessCount,
-              [key]: currentCount + 1,
-            },
+            tableAccessCount: incrementTableAccessCount(
+              state.tableAccessCount,
+              connectionId,
+              dbName,
+              tableName,
+            ),
           };
         }),
 

@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SIDEBAR_RESIZE_MAX_WIDTH } from './utils/sidebarLayout';
 import type { AIChatMessage } from './types';
+import {
+  buildLegacyTableAccessCountKey,
+  buildTableAccessCountKey,
+  MAX_TABLE_ACCESS_COUNT_ENTRIES,
+} from './utils/tableAccessCount';
 
 class MemoryStorage implements Storage {
   private data = new Map<string, string>();
@@ -1533,6 +1538,130 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().connectionTags.find(
       (tag) => tag.id === 'group-1-1',
     )?.connectionIds).toEqual(['host-2']);
+  });
+
+  it('bounds hydrated table access counts while retaining frequent and recent entries', async () => {
+    const tableAccessCount = Object.fromEntries([
+      ['priority-main-users', 100],
+      ...Array.from(
+        { length: MAX_TABLE_ACCESS_COUNT_ENTRIES + 1 },
+        (_, index) => [`connection-${index}-main-table`, 1] as const,
+      ),
+    ]);
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: { tableAccessCount },
+      version: 17,
+    }));
+
+    const { useStore } = await importStore();
+    const hydrated = useStore.getState().tableAccessCount;
+
+    expect(Object.keys(hydrated)).toHaveLength(MAX_TABLE_ACCESS_COUNT_ENTRIES);
+    expect(hydrated['priority-main-users']).toBe(100);
+    expect(hydrated['connection-0-main-table']).toBeUndefined();
+    expect(hydrated[`connection-${MAX_TABLE_ACCESS_COUNT_ENTRIES}-main-table`]).toBe(1);
+  });
+
+  it('bounds directly injected table access counts before persistence', async () => {
+    const { useStore } = await importStore();
+    useStore.setState({
+      tableAccessCount: Object.fromEntries(
+        Array.from(
+          { length: MAX_TABLE_ACCESS_COUNT_ENTRIES + 10 },
+          (_, index) => [`injected-${index}`, index + 1],
+        ),
+      ),
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(Object.keys(persisted.state.tableAccessCount)).toHaveLength(
+      MAX_TABLE_ACCESS_COUNT_ENTRIES,
+    );
+    expect(persisted.state.tableAccessCount['injected-0']).toBeUndefined();
+    expect(persisted.state.tableAccessCount[
+      `injected-${MAX_TABLE_ACCESS_COUNT_ENTRIES + 9}`
+    ]).toBe(MAX_TABLE_ACCESS_COUNT_ENTRIES + 10);
+  });
+
+  it('bounds runtime table access counts and evicts the oldest least-used entry', async () => {
+    const { useStore } = await importStore();
+    useStore.setState({
+      tableAccessCount: Object.fromEntries(
+        Array.from(
+          { length: MAX_TABLE_ACCESS_COUNT_ENTRIES },
+          (_, index) => [buildTableAccessCountKey('conn', 'main', `table-${index}`), 1],
+        ),
+      ),
+    });
+
+    useStore.getState().recordTableAccess('conn', 'main', 'table-0');
+    useStore.getState().recordTableAccess('conn', 'main', 'new-table');
+
+    const counts = useStore.getState().tableAccessCount;
+    expect(Object.keys(counts)).toHaveLength(MAX_TABLE_ACCESS_COUNT_ENTRIES);
+    expect(counts[buildTableAccessCountKey('conn', 'main', 'table-0')]).toBe(2);
+    expect(counts[buildTableAccessCountKey('conn', 'main', 'table-1')]).toBeUndefined();
+    expect(counts[buildTableAccessCountKey('conn', 'main', 'new-table')]).toBe(1);
+  });
+
+  it('uses a legacy table access count and migrates it on the next access', async () => {
+    const { useStore } = await importStore();
+    const legacyKey = buildLegacyTableAccessCountKey('conn', 'main', 'users');
+    const currentKey = buildTableAccessCountKey('conn', 'main', 'users');
+    useStore.setState({ tableAccessCount: { [legacyKey]: 4 } });
+
+    useStore.getState().recordTableAccess('conn', 'main', 'users');
+
+    expect(useStore.getState().tableAccessCount).toEqual({ [currentKey]: 5 });
+  });
+
+  it('cleans deleted connection access counts without matching a longer connection id', async () => {
+    const { useStore } = await importStore();
+    useStore.getState().replaceConnections(
+      ['conn', 'conn-prod'].map((id) => ({
+        id,
+        name: id,
+        config: { id, type: 'mysql', host: `${id}.local`, port: 3306, user: 'root' },
+      })),
+    );
+    useStore.setState({
+      tableAccessCount: {
+        [buildLegacyTableAccessCountKey('conn', 'main', 'users')]: 3,
+        [buildLegacyTableAccessCountKey('conn-prod', 'main', 'orders')]: 5,
+      },
+    });
+
+    useStore.getState().removeConnection('conn');
+
+    expect(useStore.getState().tableAccessCount).toEqual({
+      [buildLegacyTableAccessCountKey('conn-prod', 'main', 'orders')]: 5,
+    });
+  });
+
+  it('keeps colliding legacy tuples isolated with versioned table access keys', async () => {
+    const { useStore } = await importStore();
+    useStore.getState().replaceConnections(
+      ['conn', 'conn-prod'].map((id) => ({
+        id,
+        name: id,
+        config: { id, type: 'mysql', host: `${id}.local`, port: 3306, user: 'root' },
+      })),
+    );
+
+    useStore.getState().recordTableAccess('conn', 'prod', 'main-orders');
+    useStore.getState().recordTableAccess('conn-prod', 'main', 'orders');
+    expect(buildLegacyTableAccessCountKey('conn', 'prod', 'main-orders')).toBe(
+      buildLegacyTableAccessCountKey('conn-prod', 'main', 'orders'),
+    );
+    expect(buildTableAccessCountKey('conn', 'prod', 'main-orders')).not.toBe(
+      buildTableAccessCountKey('conn-prod', 'main', 'orders'),
+    );
+
+    useStore.getState().removeConnection('conn');
+
+    expect(useStore.getState().tableAccessCount).toEqual({
+      [buildTableAccessCountKey('conn-prod', 'main', 'orders')]: 1,
+    });
   });
 
   it('keeps legacy global proxy password during hydration until explicit cleanup', async () => {

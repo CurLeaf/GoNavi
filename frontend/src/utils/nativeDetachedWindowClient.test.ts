@@ -30,6 +30,7 @@ import {
   getQueryTabDraft,
   setQueryTabDraft,
 } from './sqlFileTabDrafts';
+import { MAX_TABLE_ACCESS_COUNT_ENTRIES } from './tableAccessCount';
 
 const queryTab: TabData = {
   id: 'query-1',
@@ -210,6 +211,26 @@ describe('nativeDetachedWindowClient', () => {
         orders: ['internal_note'],
       },
     });
+  });
+
+  it('bounds table access counts merged from detached workbench windows', () => {
+    const current = Object.fromEntries(
+      Array.from(
+        { length: MAX_TABLE_ACCESS_COUNT_ENTRIES },
+        (_, index) => [`current-${index}`, index + 2],
+      ),
+    );
+    const merged = mergeNativeDetachedStoreDelta(
+      { tableAccessCount: current },
+      { tableAccessCount: {} },
+      { tableAccessCount: { 'child-new': 1 } },
+    );
+
+    expect(Object.keys(merged.tableAccessCount as object)).toHaveLength(
+      MAX_TABLE_ACCESS_COUNT_ENTRIES,
+    );
+    expect((merged.tableAccessCount as Record<string, number>)['current-0']).toBe(2);
+    expect((merged.tableAccessCount as Record<string, number>)['child-new']).toBeUndefined();
   });
 
   it('merges identity-based array deltas without deleting concurrent peer additions', () => {

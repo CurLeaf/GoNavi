@@ -9,6 +9,7 @@ import {
 } from '../store';
 import type { ConnectionTag, SavedConnection } from '../types';
 import type { SidebarTableMetadataField } from '../utils/sidebarTableMetadata';
+import { readTableAccessCount } from '../utils/tableAccessCount';
 import { t } from '../i18n';
 import { t as catalogTranslate } from '../i18n/catalog';
 import {
@@ -125,10 +126,18 @@ export const sortSidebarTableEntries = <T extends SidebarTableEntryForSort>(
   const compareByName = (a: T, b: T) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase());
   const compareWithinPinnedGroup = (a: T, b: T) => {
     if (options.sortBy === 'frequency') {
-      const keyA = `${options.connectionId}-${options.dbName}-${a.tableName}`;
-      const keyB = `${options.connectionId}-${options.dbName}-${b.tableName}`;
-      const countA = accessCount[keyA] || 0;
-      const countB = accessCount[keyB] || 0;
+      const countA = readTableAccessCount(
+        accessCount,
+        options.connectionId,
+        options.dbName,
+        a.tableName,
+      );
+      const countB = readTableAccessCount(
+        accessCount,
+        options.connectionId,
+        options.dbName,
+        b.tableName,
+      );
       if (countA !== countB) {
         return countB - countA;
       }

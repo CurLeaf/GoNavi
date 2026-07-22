@@ -7,6 +7,7 @@ import type { QueryEditorResultSessionSnapshot } from './queryEditorResultSessio
 import { isNativeDetachedWindowRoute } from './nativeDetachedWindowRoute';
 import { resolveLiveQueryTab, resolveLiveQueryTabs } from './liveQueryTabs';
 import { setQueryTabDraft } from './sqlFileTabDrafts';
+import { sanitizeTableAccessCount } from './tableAccessCount';
 
 export const NATIVE_DETACHED_BOOTSTRAP_URL = '/__gonavi/detached/bootstrap';
 export const NATIVE_DETACHED_ACTION_URL = '/__gonavi/detached/action';
@@ -549,12 +550,15 @@ export const mergeNativeDetachedStoreDelta = (
   const nextState = { ...currentState };
   for (const [key, nextSourceValue] of Object.entries(changedSource)) {
     if (UNSAFE_OBJECT_KEYS.has(key)) continue;
-    nextState[key] = mergeNativeDetachedValueDelta(
+    const mergedValue = mergeNativeDetachedValueDelta(
       currentState[key],
       previousSource[key],
       nextSourceValue,
       [key],
     );
+    nextState[key] = key === 'tableAccessCount'
+      ? sanitizeTableAccessCount(mergedValue)
+      : mergedValue;
   }
   return nextState;
 };
