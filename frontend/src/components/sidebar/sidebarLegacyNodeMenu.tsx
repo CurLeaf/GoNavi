@@ -1,4 +1,5 @@
-import { Input, Modal, message, type MenuProps } from 'antd';
+import { Input, message, type MenuProps } from 'antd';
+import Modal from '../common/ResizableDraggableModal';
 import {
   CheckSquareOutlined,
   CloudOutlined,

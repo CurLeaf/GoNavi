@@ -1,5 +1,6 @@
 import React from 'react';
-import { Alert, Checkbox, Modal, Space } from 'antd';
+import { Alert, Checkbox, Space } from 'antd';
+import Modal from './common/ResizableDraggableModal';
 
 import { t } from '../i18n';
 

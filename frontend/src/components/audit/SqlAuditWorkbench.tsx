@@ -5,7 +5,6 @@ import {
   Dropdown,
   Empty,
   Input,
-  Modal,
   Pagination,
   Select,
   Space,
@@ -16,6 +15,7 @@ import {
   message,
   theme,
 } from 'antd';
+import Modal from '../common/ResizableDraggableModal';
 import type { ColumnsType } from 'antd/es/table';
 import {
   AuditOutlined,

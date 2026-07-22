@@ -507,10 +507,9 @@ const ResultDiffPanel: React.FC<ResultDiffPanelProps> = ({
           value={previewMode}
           options={previewModeOptions}
           onChange={(v) => setPreviewMode(v)}
-          // 独立窗 z-index ≥1320，下拉挂 body 并抬高，避免被浮动窗遮挡
+          // Portal 仍挂 body；层级由 Drawer 的 z-index context 自动抬高。
           getPopupContainer={() => document.body}
           popupMatchSelectWidth={false}
-          styles={{ popup: { root: { zIndex: 10050 } } }}
         />
         <Select
           style={{ minWidth: 140 }}
@@ -526,7 +525,6 @@ const ResultDiffPanel: React.FC<ResultDiffPanelProps> = ({
           ]}
           getPopupContainer={() => document.body}
           popupMatchSelectWidth={false}
-          styles={{ popup: { root: { zIndex: 10050 } } }}
         />
         {changedColumn && (
           <Tag closable onClose={() => setChangedColumn('')}>

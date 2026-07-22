@@ -9,6 +9,9 @@ import { setCurrentLanguage } from './i18n';
 import { I18nProvider } from './i18n/provider';
 import { applyDayjsLocale } from './i18n/runtime';
 import { useStore } from './store';
+import { configureAntdStaticOverlayLayer } from './utils/overlayZIndex';
+
+configureAntdStaticOverlayLayer();
 
 const readBrowserLanguages = (): string[] => {
   if (typeof navigator === 'undefined') return [];

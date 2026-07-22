@@ -201,6 +201,11 @@ import {
   collectApplicationQuitUnsavedSQLTargets,
   saveApplicationQuitUnsavedSQLTargets,
 } from './utils/sqlEditorApplicationQuit';
+import {
+  APP_FOREGROUND_MODAL_Z_INDEX,
+  APP_NESTED_MODAL_Z_INDEX,
+  APP_OVERLAY_Z_INDEX_BASE,
+} from './utils/overlayZIndex';
 import { useAppUpdateManager } from './hooks/useAppUpdateManager';
 import { useAppLogPanelResize } from './hooks/useAppLogPanelResize';
 import { useAppSidebarResize } from './hooks/useAppSidebarResize';
@@ -225,8 +230,6 @@ const MIN_UI_SCALE = 0.8;
 const MAX_UI_SCALE = 1.25;
 const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 20;
-// Keep the settings center above in-WebView detached windows and context menus.
-const SETTINGS_CENTER_MODAL_Z_INDEX = 10001;
 type ApplicationQuitConfirmedAction = () => Promise<boolean>;
 /** 设置页 Slider 底部预设刻度 */
 const UI_SCALE_SLIDER_MARKS: Record<number, string> = {
@@ -1027,8 +1030,12 @@ function App() {
   const aiChatDetached = Boolean(detachedAIChatWindow);
   const detachedAIChatZIndex = Number(detachedAIChatWindow?.zIndex);
   const settingsCenterModalZIndex = Math.max(
-    SETTINGS_CENTER_MODAL_Z_INDEX,
-    Number.isFinite(detachedAIChatZIndex) ? detachedAIChatZIndex + 1 : SETTINGS_CENTER_MODAL_Z_INDEX,
+    APP_FOREGROUND_MODAL_Z_INDEX,
+    Number.isFinite(detachedAIChatZIndex) ? detachedAIChatZIndex + 1 : APP_FOREGROUND_MODAL_Z_INDEX,
+  );
+  const settingsChildModalZIndex = Math.max(
+    APP_NESTED_MODAL_Z_INDEX,
+    settingsCenterModalZIndex + 100,
   );
   const toggleAIPanel = useStore(state => state.toggleAIPanel);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
@@ -2206,12 +2213,14 @@ function App() {
           return;
       }
       if (repairEntry.type === 'connection') {
+          setIsSettingsModalOpen(false);
           setSecurityUpdateRepairSource(repairEntry.repairSource);
           setEditingConnection(repairEntry.connection);
           setIsModalOpen(true);
           return;
       }
       if (repairEntry.type === 'proxy') {
+          setIsSettingsModalOpen(false);
           setSecurityUpdateRepairSource(repairEntry.repairSource);
           setIsProxyModalOpen(true);
           return;
@@ -4188,6 +4197,7 @@ function App() {
           fontSizeLG: tokenFontSizeLG,
           fontFamily: resolvedUiFontFamily,
           fontFamilyCode: resolvedMonoFontFamily,
+          zIndexPopupBase: APP_OVERLAY_Z_INDEX_BASE,
           controlHeight: tokenControlHeight,
           controlHeightSM: tokenControlHeightSM,
           controlHeightLG: tokenControlHeightLG,
@@ -8228,6 +8238,7 @@ function App() {
           />
           <SecurityUpdateProgressModal
             open={isSecurityUpdateProgressOpen}
+            zIndex={settingsChildModalZIndex}
             stageText={securityUpdateProgressStage}
             overlayTheme={overlayTheme}
             surfaceOpacity={effectiveOpacity}
@@ -8321,6 +8332,7 @@ function App() {
           <Modal
               title={renderUtilityModalTitle(<GlobalOutlined />, t('app.proxy.title'), t('app.proxy.description'))}
               open={isProxyModalOpen}
+              zIndex={settingsChildModalZIndex}
               onCancel={handleCloseGlobalProxySettings}
               footer={null}
               width={680}
@@ -8335,6 +8347,7 @@ function App() {
                   ? t('app.about.download_progress.title_with_version', { version: updateDownloadProgress.version })
                   : t('app.about.download_progress.title')}
               open={updateDownloadProgress.open}
+              zIndex={settingsChildModalZIndex}
               destroyOnHidden
               closable
               maskClosable

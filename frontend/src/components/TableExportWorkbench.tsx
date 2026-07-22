@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Empty, InputNumber, Modal, Select, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, Empty, InputNumber, Select, Tooltip, Typography, message } from 'antd';
+import Modal from './common/ResizableDraggableModal';
 import { ClockCircleOutlined, DeleteOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
   ClearTables,

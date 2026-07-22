@@ -188,9 +188,12 @@ describe('settings center layout', () => {
     const settingsModalSource = appSource.slice(settingsModalStart, settingsModalStart + 900);
 
     expect(settingsModalStart).toBeGreaterThan(-1);
-    expect(appSource).toContain('const SETTINGS_CENTER_MODAL_Z_INDEX = 10001;');
+    expect(appSource).toContain('APP_FOREGROUND_MODAL_Z_INDEX,');
+    expect(appSource).toContain('APP_NESTED_MODAL_Z_INDEX,');
     expect(appSource).toContain('const settingsCenterModalZIndex = Math.max(');
-    expect(appSource).toContain('Number.isFinite(detachedAIChatZIndex) ? detachedAIChatZIndex + 1');
+    expect(appSource).toContain('Number.isFinite(detachedAIChatZIndex) ? detachedAIChatZIndex + 1 : APP_FOREGROUND_MODAL_Z_INDEX');
+    expect(appSource).toContain('const settingsChildModalZIndex = Math.max(');
+    expect(appSource).toContain('settingsCenterModalZIndex + 100');
     expect(settingsModalSource).toContain('zIndex={settingsCenterModalZIndex}');
   });
 

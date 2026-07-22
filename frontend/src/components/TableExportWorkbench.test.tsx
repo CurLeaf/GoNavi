@@ -1,6 +1,6 @@
 import React from 'react';
 import { readFileSync } from 'node:fs';
-import { Button, Modal, Select } from 'antd';
+import { Button, Select } from 'antd';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,6 +27,7 @@ import { loadViews } from './sidebar/sidebarMetadataLoaders';
 import { setCurrentLanguage } from '../i18n';
 import type { ExportProgressState } from './useExportProgressRunner';
 import type { ExportProgressLogEntry } from './useExportProgressRunner';
+import Modal from './common/ResizableDraggableModal';
 
 const mockUpsertTableExportHistory = vi.fn();
 const mockRunExportWithProgress = vi.fn();
@@ -108,7 +109,6 @@ vi.mock('antd', async () => {
     Progress: component('mock-progress'),
     Select: component('mock-select'),
     Tooltip: component('mock-tooltip'),
-    Modal: { confirm: vi.fn() },
     message: {
       loading: vi.fn(() => vi.fn()),
       success: vi.fn(),
@@ -121,6 +121,10 @@ vi.mock('antd', async () => {
     },
   };
 });
+
+vi.mock('./common/ResizableDraggableModal', () => ({
+  default: { confirm: vi.fn() },
+}));
 
 vi.mock('@ant-design/icons', async () => {
   const { createElement } = await import('react');

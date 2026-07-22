@@ -8,6 +8,9 @@ import { I18nProvider } from './i18n/provider'
 import { applyDayjsLocale } from './i18n/runtime'
 import { useStore } from './store'
 import { cloneBrowserMockValue, duplicateBrowserMockConnection, resolveBrowserMockSecretFlag } from './utils/browserMockConnections'
+import { configureAntdStaticOverlayLayer } from './utils/overlayZIndex'
+
+configureAntdStaticOverlayLayer();
 
 const resolveDevHarnessMode = (): string => {
     if (typeof window === 'undefined') {

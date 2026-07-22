@@ -68,6 +68,10 @@ import { resolveConnectionProtectionConfig } from "../utils/connectionReadOnly";
 import { getCustomConnectionDriverHelp } from "../utils/driverImportGuidance";
 import { isBackendCancelledResult } from "../utils/connectionExport";
 import {
+  APP_FOREGROUND_MODAL_Z_INDEX,
+  APP_NESTED_MODAL_Z_INDEX,
+} from '../utils/overlayZIndex';
+import {
   buildUriFromValues,
   getConnectionParamsPlaceholder,
   getUriPlaceholder,
@@ -2804,7 +2808,7 @@ const ConnectionModal: React.FC<{
         centered
         wrapClassName="connection-modal-wrap"
         width={CONNECTION_MODAL_WIDTH}
-        zIndex={10001}
+        zIndex={APP_FOREGROUND_MODAL_Z_INDEX}
         destroyOnHidden
         maskClosable={false}
         styles={{
@@ -2834,7 +2838,7 @@ const ConnectionModal: React.FC<{
         onCancel={() => setTestErrorLogOpen(false)}
         centered
         width={760}
-        zIndex={10002}
+        zIndex={APP_NESTED_MODAL_Z_INDEX}
         destroyOnHidden
         styles={{
           content: modalShellStyle,

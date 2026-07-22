@@ -47,6 +47,7 @@ import {
   type QueryEditorResultSessionSnapshot,
 } from '../utils/queryEditorResultSessionCache';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
+import { APP_OVERLAY_Z_INDEX_BASE } from '../utils/overlayZIndex';
 import { resolveLiveQueryTab, resolveLiveQueryTabs } from '../utils/liveQueryTabs';
 import { subscribeQueryTabDraftChanges } from '../utils/sqlFileTabDrafts';
 import {
@@ -1018,6 +1019,7 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
         algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         token: {
           fontSize: Math.max(10, Number(fontSize) || 14),
+          zIndexPopupBase: APP_OVERLAY_Z_INDEX_BASE,
           colorPrimary: uiVersion === 'v2'
             ? (isDark ? '#22c55e' : '#16a34a')
             : (isDark ? '#f6c453' : '#1677ff'),

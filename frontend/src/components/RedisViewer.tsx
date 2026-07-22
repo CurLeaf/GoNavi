@@ -34,6 +34,7 @@ import { decodeRedisUtf8Value, formatRedisStringValue, toHexDisplay } from '../u
 import { isConnectionDataImportRestricted } from '../utils/connectionReadOnly';
 import { t, type I18nParams } from '../i18n';
 import { useOptionalI18n } from '../i18n/provider';
+import { APP_POPUP_Z_INDEX } from '../utils/overlayZIndex';
 
 const { Search } = Input;
 
@@ -2527,7 +2528,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         position: 'fixed',
                         left: typeof window !== 'undefined' ? Math.min(treeContextMenu.x + 4, Math.max(16, window.innerWidth - 220)) : treeContextMenu.x,
                         top: typeof window !== 'undefined' ? Math.min(treeContextMenu.y + 4, Math.max(16, window.innerHeight - 140)) : treeContextMenu.y,
-                        zIndex: 1200,
+                        zIndex: APP_POPUP_Z_INDEX,
                         minWidth: 188,
                         padding: 8,
                         borderRadius: 14,
