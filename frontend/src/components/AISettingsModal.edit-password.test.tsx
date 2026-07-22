@@ -110,7 +110,7 @@ describe('AISettingsModal edit password behavior', () => {
   it('delegates bulky MCP and built-in tool sections to dedicated ai components', () => {
     expect(source).toContain("import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';");
     expect(source).toContain("import AISettingsProvidersSection from './ai/AISettingsProvidersSection';");
-    expect(source).toContain("import AISettingsSidebar, { type AISettingsSectionKey } from './ai/AISettingsSidebar';");
+    expect(source).toContain("import AISettingsSidebar, { AI_SETTINGS_NAV_ITEMS, type AISettingsSectionKey } from './ai/AISettingsSidebar';");
     expect(source).toContain("import AISettingsSafetySection from './ai/AISettingsSafetySection';");
     expect(source).toContain("import AISettingsContextSection from './ai/AISettingsContextSection';");
     expect(source).toContain('<AISettingsProvidersSection');
@@ -120,6 +120,30 @@ describe('AISettingsModal edit password behavior', () => {
     expect(source).toContain('<AISettingsContextSection');
     expect(source).toContain('<AISettingsMCPSection');
     expect(source).toContain('<AIBuiltinToolsCatalog');
+  });
+
+  it('keeps every AI section mounted while exposing only the active tabpanel', () => {
+    expect(source).toContain('const renderSectionPanel = (sectionKey: AISettingsSectionKey, content: React.ReactNode) => {');
+    expect(source).toContain('hidden={activeSection !== sectionKey}');
+    expect(source).toContain('id={`gonavi-ai-settings-panel-${sectionKey}`}');
+    expect(source).toContain('aria-labelledby={`gonavi-ai-settings-tab-${sectionKey}`}');
+    expect(source).toContain('role="tabpanel"');
+
+    for (const sectionKey of ['providers', 'safety', 'context', 'mcp', 'skills', 'tools', 'prompts']) {
+      expect(source).toContain(`renderSectionPanel('${sectionKey}', (`);
+    }
+
+    expect(source).not.toContain('key={activeSection}');
+    expect(source).not.toContain("{activeSection === 'mcp' && (");
+    expect(source).not.toContain("{activeSection === 'tools' && (");
+  });
+
+  it('resets the shared AI settings scroll region after section navigation', () => {
+    expect(source).toContain('const settingsContentScrollRef = useRef<HTMLDivElement>(null);');
+    expect(source).toContain('ref={settingsContentScrollRef}');
+    expect(source).toContain('scrollRegion.scrollTop = 0;');
+    expect(source).toContain('scrollRegion.scrollLeft = 0;');
+    expect(source).toContain('}, [activeSection]);');
   });
 
   it('wires the external MCP client install panel actions back to the modal handlers', () => {

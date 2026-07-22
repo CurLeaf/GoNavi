@@ -5,58 +5,85 @@ type BrandIconPickerProps = {
   value: string;
   onChange: (id: BrandIconId) => void;
   darkMode?: boolean;
+  accentColor?: string;
+  ariaLabel?: string;
 };
 
-export default function BrandIconPicker({ value, onChange, darkMode = false }: BrandIconPickerProps) {
+export default function BrandIconPicker({ value, onChange, darkMode = false, accentColor = '#16a34a', ariaLabel = 'GoNavi brand icon' }: BrandIconPickerProps) {
   const border = darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(16,24,40,0.12)';
-  const activeBorder = '#1677ff';
-  const cardBg = darkMode ? 'rgba(255,255,255,0.04)' : '#fff';
   const muted = darkMode ? 'rgba(255,255,255,0.55)' : 'rgba(16,24,40,0.55)';
   const title = darkMode ? 'rgba(255,255,255,0.88)' : 'rgba(16,24,40,0.88)';
 
   return (
     <div
+      role="radiogroup"
+      aria-label={ariaLabel}
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(148px, 1fr))',
-        gap: 14,
+        gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+        columnGap: 14,
+        rowGap: 0,
+        borderTop: `1px solid ${border}`,
       }}
     >
-      {BRAND_ICONS.map((item) => {
+      {BRAND_ICONS.map((item, itemIndex) => {
         const active = value === item.id;
         return (
           <button
             key={item.id}
             type="button"
+            role="radio"
+            aria-checked={active}
+            tabIndex={active ? 0 : -1}
             onClick={() => onChange(item.id)}
+            onKeyDown={(event) => {
+              if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                return;
+              }
+              event.preventDefault();
+              const nextIndex = event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? BRAND_ICONS.length - 1
+                  : event.key === 'ArrowRight' || event.key === 'ArrowDown'
+                    ? (itemIndex + 1) % BRAND_ICONS.length
+                    : (itemIndex - 1 + BRAND_ICONS.length) % BRAND_ICONS.length;
+              onChange(BRAND_ICONS[nextIndex].id);
+              const radios = event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="radio"]');
+              radios?.[nextIndex]?.focus();
+            }}
             style={{
               appearance: 'none',
               cursor: 'pointer',
-              border: `2px solid ${active ? activeBorder : border}`,
-              background: cardBg,
-              borderRadius: 14,
-              padding: '12px 10px 10px',
+              border: 'none',
+              borderLeft: `3px solid ${active ? accentColor : 'transparent'}`,
+              borderBottom: `1px solid ${border}`,
+              background: active ? (darkMode ? 'rgba(34,197,94,0.12)' : 'rgba(34,197,94,0.08)') : 'transparent',
+              borderRadius: 0,
+              padding: '9px 10px',
               display: 'flex',
-              flexDirection: 'column',
+              flexDirection: 'row',
               alignItems: 'center',
-              gap: 8,
-              boxShadow: active
-                ? (darkMode ? '0 0 0 3px rgba(22,119,255,0.25)' : '0 0 0 3px rgba(22,119,255,0.15)')
-                : 'none',
-              transition: 'border-color 120ms ease, box-shadow 120ms ease',
+              gap: 12,
+              boxShadow: 'none',
+              transition: 'border-color 120ms ease, background-color 120ms ease',
               overflow: 'visible',
+              color: title,
+              textAlign: 'left',
             }}
           >
-            {/* Each picker card uses the same lossless source as every app surface. */}
+            {/* The preview uses the same lossless source as every app surface. */}
             <div
               style={{
-                width: '100%',
-                height: 150,
+                width: 56,
+                height: 56,
+                flex: '0 0 56px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 background: '#fff',
-                borderRadius: 12,
+                border: `1px solid ${border}`,
+                borderRadius: 6,
                 overflow: 'hidden',
               }}
             >
@@ -74,13 +101,13 @@ export default function BrandIconPicker({ value, onChange, darkMode = false }: B
                 draggable={false}
               />
             </div>
-            <div style={{ textAlign: 'center', minWidth: 0, width: '100%' }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: title }}>
+            <div style={{ textAlign: 'left', minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 'var(--gn-font-size-sm, 12px)', fontWeight: 700, color: title }}>
                 #{item.id} {item.titleZh}
               </div>
               <div
                 style={{
-                  fontSize: 11,
+                  fontSize: 'var(--gn-font-size-xs, 11px)',
                   color: muted,
                   marginTop: 2,
                   overflow: 'hidden',

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Form, Input, Popconfirm, Select, Space, Tooltip } from 'antd';
+import { Button, Form, Input, Popconfirm, Segmented, Select, Space, Tooltip } from 'antd';
 import { ApiOutlined, AppstoreOutlined, CheckOutlined, DeleteOutlined, EditOutlined, KeyOutlined, LinkOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons';
 import type { FormInstance } from 'antd/es/form';
 
@@ -63,19 +63,18 @@ interface AISettingsProvidersSectionProps {
   onSaveProvider: () => void;
 }
 
-const fieldGroupStyle = (cardBorder: string, cardBg: string): React.CSSProperties => ({
-  padding: '14px 16px',
-  borderRadius: 12,
-  border: `1px solid ${cardBorder}`,
-  background: cardBg,
-  marginBottom: 12,
+const fieldGroupStyle = (cardBorder: string): React.CSSProperties => ({
+  padding: '18px 0',
+  borderRadius: 0,
+  border: 'none',
+  borderBottom: `1px solid ${cardBorder}`,
+  background: 'transparent',
+  marginBottom: 0,
 });
 
 const fieldLabelStyle = (sectionLabelColor: string): React.CSSProperties => ({
-  fontSize: 13,
+  fontSize: 'var(--gn-settings-font-secondary, 13px)',
   fontWeight: 700,
-  textTransform: 'uppercase',
-  letterSpacing: '0.08em',
   color: sectionLabelColor,
   marginBottom: 10,
   display: 'flex',
@@ -136,7 +135,7 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
         { value: 'claude-cli', label: 'Claude CLI' },
       ];
   const sectionLabelColor = darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)';
-  const currentFieldGroupStyle = fieldGroupStyle(cardBorder, cardBg);
+  const currentFieldGroupStyle = fieldGroupStyle(cardBorder);
   const currentFieldLabelStyle = fieldLabelStyle(sectionLabelColor);
   const watchedModel = Form.useWatch('model', form);
   const watchedModels = Form.useWatch('models', form);
@@ -162,24 +161,27 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
       value,
     }));
   }, [editingProvider?.inlineCompletionModel, presetFromForm?.defaultModel, presetFromForm?.models, watchedInlineCompletionModel, watchedModel, watchedModels]);
+  const selectProviderPreset = (presetKey: string) => {
+    form.setFieldValue('presetKey', presetKey);
+    onPresetChange(presetKey);
+  };
 
   if (!isEditing) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="gonavi-ai-provider-list" style={{ display: 'flex', flexDirection: 'column', borderTop: `1px solid ${cardBorder}` }}>
         {providers.length === 0 && (
           <div style={{
             textAlign: 'center',
             padding: '36px 20px',
             color: overlayTheme.mutedText,
-            fontSize: 14,
-            border: `1px dashed ${cardBorder}`,
-            borderRadius: 14,
-            background: cardBg,
+            fontSize: 'var(--gn-font-size, 14px)',
+            borderBottom: `1px solid ${cardBorder}`,
+            background: 'transparent',
           }}>
             <RobotOutlined style={{ fontSize: 32, marginBottom: 12, opacity: 0.3, display: 'block' }} />
             {copy('ai_settings.provider.empty.title')}
             <br />
-            <span style={{ fontSize: 13, opacity: 0.6 }}>{copy('ai_settings.provider.empty.description')}</span>
+            <span style={{ fontSize: 'var(--gn-settings-font-secondary, 13px)', opacity: 0.6 }}>{copy('ai_settings.provider.empty.description')}</span>
           </div>
         )}
         {providers.map((provider) => {
@@ -191,51 +193,73 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
               : copy('ai_settings.provider.no_model'));
           return (
             <div
+              className={`gonavi-ai-provider-row${isActive ? ' is-active' : ''}`}
               key={provider.id}
-              onClick={() => onSetActiveProvider(provider.id)}
               style={{
-                padding: '14px 16px',
-                borderRadius: 14,
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                border: `1.5px solid ${isActive ? overlayTheme.selectedText : cardBorder}`,
-                background: isActive ? overlayTheme.selectedBg : cardBg,
+                borderRadius: 0,
+                transition: 'background-color 0.2s ease',
+                border: 'none',
+                borderBottom: `1px solid ${cardBorder}`,
+                borderLeft: `3px solid ${isActive ? overlayTheme.selectedText : 'transparent'}`,
+                background: isActive ? overlayTheme.selectedBg : 'transparent',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 14,
               }}
             >
-              <div style={{
-                width: 36,
-                height: 36,
-                borderRadius: 10,
-                display: 'grid',
-                placeItems: 'center',
-                background: isActive ? overlayTheme.iconBg : (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'),
-                color: isActive ? overlayTheme.iconColor : overlayTheme.mutedText,
-                fontSize: 18,
-                flexShrink: 0,
-                transition: 'all 0.2s ease',
-              }}>
-                {matchedPreset.icon || <ApiOutlined />}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {provider.name || provider.type}
-                  {isActive && <CheckOutlined style={{ color: overlayTheme.iconColor, fontSize: 13 }} />}
+              <button
+                className="gonavi-ai-provider-select"
+                type="button"
+                aria-pressed={isActive}
+                onClick={() => onSetActiveProvider(provider.id)}
+                style={{
+                  alignSelf: 'stretch',
+                  minWidth: 0,
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 14,
+                  padding: '16px 12px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'inherit',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 0,
+                  display: 'grid',
+                  placeItems: 'center',
+                  background: 'transparent',
+                  color: isActive ? overlayTheme.iconColor : overlayTheme.mutedText,
+                  fontSize: 18,
+                  flexShrink: 0,
+                  transition: 'all 0.2s ease',
+                }}>
+                  {matchedPreset.icon || <ApiOutlined />}
                 </div>
-                <div style={{ fontSize: 12, color: overlayTheme.mutedText, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span>{matchedPreset.label}</span>
-                  <span style={{ opacity: 0.4 }}>·</span>
-                  <span style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12 }}>{modelLabel}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 'var(--gn-font-size, 14px)', color: overlayTheme.titleText, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {provider.name || provider.type}
+                    {isActive && <CheckOutlined style={{ color: overlayTheme.iconColor, fontSize: 13 }} />}
+                  </div>
+                  <div style={{ fontSize: 'var(--gn-font-size-sm, 12px)', color: overlayTheme.mutedText, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>{matchedPreset.label}</span>
+                    <span style={{ opacity: 0.4 }}>·</span>
+                    <span style={{ fontFamily: provider.model ? 'var(--gn-font-mono)' : 'inherit', fontSize: 'var(--gn-font-size-sm, 12px)' }}>{modelLabel}</span>
+                  </div>
                 </div>
-              </div>
-              <Space size={2}>
+              </button>
+              <Space size={2} style={{ paddingRight: 8 }}>
                 <Tooltip title={copy('ai_settings.provider.action.edit')}>
                   <Button
                     type="text"
                     size="small"
                     icon={<EditOutlined />}
+                    aria-label={`${copy('ai_settings.provider.action.edit')}: ${provider.name || provider.type}`}
                     onClick={(event) => {
                       event.stopPropagation();
                       onEditProvider(provider);
@@ -254,6 +278,7 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
                     type="text"
                     size="small"
                     icon={<DeleteOutlined />}
+                    aria-label={`${copy('ai_settings.provider.action.delete')}: ${provider.name || provider.type}`}
                     danger
                     onClick={(event) => event.stopPropagation()}
                   />
@@ -263,10 +288,11 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
           );
         })}
         <Button
-          type="dashed"
+          className="gonavi-ai-provider-add"
+          type="text"
           icon={<PlusOutlined />}
           onClick={onAddProvider}
-          style={{ borderRadius: 12, height: 42, borderColor: darkMode ? 'rgba(255,255,255,0.12)' : undefined }}
+          style={{ borderRadius: 0, borderBottom: `1px solid ${cardBorder}` }}
         >
           {copy('ai_settings.provider.action.add')}
         </Button>
@@ -278,7 +304,7 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
     <div>
       <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
         <Button size="small" onClick={onCancelEdit} style={{ borderRadius: 8 }}>{copy('ai_settings.action.back')}</Button>
-        <span style={{ fontWeight: 700, fontSize: 16, color: overlayTheme.titleText }}>
+        <span style={{ fontWeight: 700, fontSize: 'calc(var(--gn-font-size, 14px) * 1.14)', color: overlayTheme.titleText }}>
           {copy(editingProvider?.id ? 'ai_settings.provider.editor.edit_title' : 'ai_settings.provider.editor.add_title')}
         </span>
       </div>
@@ -288,20 +314,42 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
           <div style={currentFieldLabelStyle}>
             <AppstoreOutlined style={{ fontSize: 14 }} /> {copy('ai_settings.form.section.service_type')}
           </div>
-          <Form.Item name="presetKey" noStyle>
-            <div style={PROVIDER_PRESET_GRID_STYLE}>
-              {providerPresets.map((preset) => (
-                <div
+          <Form.Item noStyle>
+            <div
+              role="radiogroup"
+              aria-label={copy('ai_settings.form.section.service_type')}
+              style={PROVIDER_PRESET_GRID_STYLE}
+            >
+              {providerPresets.map((preset, presetIndex) => (
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={presetKeyFromForm === preset.key}
+                  tabIndex={presetKeyFromForm === preset.key ? 0 : -1}
                   key={preset.key}
-                  onClick={() => {
-                    form.setFieldValue('presetKey', preset.key);
-                    onPresetChange(preset.key);
+                  onClick={() => selectProviderPreset(preset.key)}
+                  onKeyDown={(event) => {
+                    if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                      return;
+                    }
+                    event.preventDefault();
+                    const nextIndex = event.key === 'Home'
+                      ? 0
+                      : event.key === 'End'
+                        ? providerPresets.length - 1
+                        : event.key === 'ArrowRight' || event.key === 'ArrowDown'
+                          ? (presetIndex + 1) % providerPresets.length
+                          : (presetIndex - 1 + providerPresets.length) % providerPresets.length;
+                    selectProviderPreset(providerPresets[nextIndex].key);
+                    const radios = event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="radio"]');
+                    radios?.[nextIndex]?.focus();
                   }}
                   style={{
                     ...PROVIDER_PRESET_CARD_BASE_STYLE,
-                    border: `1.5px solid ${presetKeyFromForm === preset.key ? overlayTheme.selectedText : 'transparent'}`,
-                    background: presetKeyFromForm === preset.key ? overlayTheme.selectedBg : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
-                    boxShadow: presetKeyFromForm === preset.key ? 'none' : (darkMode ? 'inset 0 0 0 1px rgba(255,255,255,0.028)' : 'inset 0 0 0 1px rgba(16,24,40,0.03)'),
+                    borderBottom: `1px solid ${cardBorder}`,
+                    borderLeft: `3px solid ${presetKeyFromForm === preset.key ? overlayTheme.selectedText : 'transparent'}`,
+                    background: presetKeyFromForm === preset.key ? overlayTheme.selectedBg : 'transparent',
+                    color: overlayTheme.titleText,
                   }}
                 >
                   <div style={{
@@ -314,13 +362,14 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
                     {preset.icon}
                   </div>
                   <div style={PROVIDER_PRESET_CARD_CONTENT_STYLE}>
-                    <div style={{ ...PROVIDER_PRESET_CARD_TITLE_STYLE, fontSize: 13, fontWeight: 700, color: overlayTheme.titleText, lineHeight: 1.3 }}>{preset.label}</div>
-                    <div style={{ ...PROVIDER_PRESET_CARD_DESCRIPTION_STYLE, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.4 }}>{preset.desc}</div>
+                    <div style={{ ...PROVIDER_PRESET_CARD_TITLE_STYLE, fontSize: 'var(--gn-settings-font-secondary, 13px)', fontWeight: 700, color: overlayTheme.titleText, lineHeight: 1.3 }}>{preset.label}</div>
+                    <div style={{ ...PROVIDER_PRESET_CARD_DESCRIPTION_STYLE, fontSize: 'var(--gn-font-size-sm, 12px)', color: overlayTheme.mutedText, lineHeight: 1.4 }}>{preset.desc}</div>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </Form.Item>
+          <Form.Item name="presetKey" hidden><Input /></Form.Item>
           <Form.Item name="type" hidden><Input /></Form.Item>
           <Form.Item name="authMode" hidden><Input /></Form.Item>
         </div>
@@ -342,38 +391,18 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
             )}
 
             {showsApiFormat && (
-              <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.api_format')}</span>} name="apiFormat" style={{ marginBottom: 16 }}>
-                <div style={{
-                  display: 'inline-flex',
-                  flexWrap: 'wrap',
-                  maxWidth: '100%',
-                  padding: 4,
-                  background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.04)',
-                  borderRadius: 8,
-                  gap: 4,
-                }}>
-                  {apiFormatOptions.map((format) => (
-                    <div
-                      key={format.value}
-                      onClick={() => form.setFieldsValue({ apiFormat: format.value })}
-                      style={{
-                        padding: '6px 16px',
-                        borderRadius: 6,
-                        fontSize: 13,
-                        fontWeight: watchedApiFormat === format.value ? 600 : 500,
-                        whiteSpace: 'nowrap',
-                        cursor: 'pointer',
-                        background: watchedApiFormat === format.value ? (darkMode ? '#374151' : '#ffffff') : 'transparent',
-                        color: watchedApiFormat === format.value ? overlayTheme.titleText : overlayTheme.mutedText,
-                        boxShadow: watchedApiFormat === format.value ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                        transition: 'all 0.2s ease',
-                      }}
-                    >
-                      {format.label}
-                    </div>
-                  ))}
-                </div>
-              </Form.Item>
+              <>
+                <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.api_format')}</span>} style={{ marginBottom: 16 }}>
+                  <Segmented
+                    block
+                    aria-label={copy('ai_settings.form.api_format')}
+                    value={watchedApiFormat}
+                    options={apiFormatOptions}
+                    onChange={(value) => form.setFieldValue('apiFormat', value)}
+                  />
+                </Form.Item>
+                <Form.Item name="apiFormat" hidden><Input /></Form.Item>
+              </>
             )}
 
             {supportsModelList && (
@@ -427,10 +456,10 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
             <div
               role="note"
               style={{
-                padding: '12px 14px',
-                borderRadius: 10,
-                background: darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.035)',
-                border: `1px solid ${cardBorder}`,
+                padding: '8px 0 8px 12px',
+                background: 'transparent',
+                border: 'none',
+                borderLeft: `3px solid ${overlayTheme.selectedText}`,
                 color: overlayTheme.mutedText,
                 fontSize: 13,
                 lineHeight: 1.6,

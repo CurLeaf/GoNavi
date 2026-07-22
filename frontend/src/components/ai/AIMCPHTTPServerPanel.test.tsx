@@ -24,6 +24,7 @@ const REQUIRED_KEYS = [
   'ai_settings.mcp_http.panel.status.running',
   'ai_settings.mcp_http.panel.status.stopped',
   'ai_settings.mcp_http.panel.description',
+  'ai_settings.mcp_http.panel.details_summary',
   'ai_settings.mcp_http.panel.retry_start',
   'ai_settings.mcp_http.panel.switch.on',
   'ai_settings.mcp_http.panel.switch.off',
@@ -114,6 +115,9 @@ describe('AIMCPHTTPServerPanel', () => {
     expect(markup).toContain('http://127.0.0.1:8765/mcp');
     expect(markup).toContain('Copy Authorization');
     expect(markup).toContain('Bearer gnv_test');
+    expect(markup).toContain('Connection settings and permissions');
+    expect(markup).toContain('class="gonavi-ai-mcp-disclosure gonavi-ai-mcp-http-disclosure"');
+    expect(markup).not.toContain('gonavi-ai-mcp-http-disclosure" open');
   });
 
   it('falls back to English without an i18n provider', () => {

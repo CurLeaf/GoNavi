@@ -82,7 +82,7 @@ describe('settings center tool entries', () => {
     expect(appSource).toContain('const combinedSettingsCenterGroups = [');
     expect(appSource).toContain('(group) => group.key === activeSettingsCenterGroupKey');
     expect(appUtilityStylesSource).toContain("const toolCenterModalSplitStyle = useMemo<React.CSSProperties>(() => ({");
-    expect(appUtilityStylesSource).toContain("gridTemplateColumns: '232px minmax(0, 1fr)'");
+    expect(appUtilityStylesSource).toContain("gridTemplateColumns: '204px minmax(0, 1fr)'");
     expect(appUtilityStylesSource).toContain("const toolCenterNavPanelStyle = useMemo<React.CSSProperties>(() => ({");
     expect(appUtilityStylesSource).toContain("const toolCenterNavScrollStyle = useMemo<React.CSSProperties>(() => ({");
     expect(appUtilityStylesSource).toContain("const toolCenterContentPanelStyle = useMemo<React.CSSProperties>(() => ({");
@@ -94,11 +94,11 @@ describe('settings center tool entries', () => {
     expect(appSource).toContain('title={`${group.title} - ${group.description}`}');
     expect(appUtilityStylesSource).toContain("borderRight: `1px solid ${overlayTheme.divider}`");
     expect(appSource).toContain('setActiveSettingsCenterPane(null);');
-    expect(appSource).toContain('group.items.length');
+    expect(appSource).not.toContain('{group.items.length}');
     expect(appSource).toContain("const handleOpenToolCenterPane = useCallback((group: ToolCenterGroupKey, key: ToolCenterPaneKey) => {");
     expect(appSource).toContain("const [activeSettingsCenterPane, setActiveSettingsCenterPane] = useState<SettingsCenterPaneState | null>(null);");
     expect(appSource).toContain("const handleReturnToToolCenter = useCallback((closeChild?: () => void) => {");
-    expect(appSource).toContain("t('common.back_to_previous')");
+    expect(appSource).toContain("t('common.back_to_settings')");
     expect(appSource).toContain("width={1080}");
     expect(appSource).toContain('centered');
     expect(appSource).not.toContain('const [isToolsModalOpen');
@@ -116,7 +116,7 @@ describe('settings center tool entries', () => {
     expect(appSource).toContain('style={toolCenterNavPanelStyle}');
     expect(appSource).toContain('style={toolCenterNavScrollStyle}');
     expect(appSource).toContain('style={toolCenterContentPanelStyle}');
-    expect(appSource).toContain('style={toolCenterDetailPanelStyle}');
+    expect(appSource).toContain('style={activeSettingsCenterDetailPanelStyle}');
     expect(appSource).toContain('style={isActiveToolCenterPane ? toolCenterDetailBodyStyle : settingsCenterDetailBodyStyle}');
     expect(appSource).toContain('style={toolCenterScrollableListStyle}');
     expect(appUtilityStylesSource).toContain("overflowY: 'auto'");
@@ -197,13 +197,13 @@ describe('settings center tool entries', () => {
     const combinedGroupsIndex = appSource.indexOf('combinedSettingsCenterGroups.map');
     const detailHeaderSource = appSource.slice(
       appSource.indexOf('{activeSettingsCenterPane ? (', combinedGroupsIndex),
-      appSource.indexOf('<div style={isActiveToolCenterPane ?', combinedGroupsIndex),
+      appSource.indexOf('key={activeSettingsCenterPane.key}', combinedGroupsIndex),
     );
 
     expect(detailHeaderSource).toContain('activeSettingsCenterPaneItem?.title ?? activeSettingsCenterGroup.title');
     expect(detailHeaderSource).toContain('activeSettingsCenterPaneItem?.description ?? activeSettingsCenterGroup.description');
     expect(detailHeaderSource).not.toContain('<Button onClick={closeToolCenterPane}>');
-    expect(detailHeaderSource).not.toContain("{t('common.back_to_previous')}");
+    expect(detailHeaderSource).not.toContain("{t('common.back_to_settings')}");
   });
 
   it('keeps the v2 AI entry in the sidebar and the legacy AI entry on the content edge', () => {
@@ -290,7 +290,7 @@ describe('settings center tool entries', () => {
     expect(appSource).toContain("colorPrimary: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#f6c453' : '#1677ff')");
     expect(appSource).toMatch(/background:\s*active\s*\?\s*overlayTheme\.selectedBg/);
     expect(appSource).toMatch(/background:\s*active\s*\?\s*overlayTheme\.selectedText/);
-    expect(appSource).toMatch(/background:\s*active\s*\?\s*overlayTheme\.iconBg/);
+    expect(appSource).toContain("background: 'transparent'");
     expect(appSource).toMatch(/color:\s*active\s*\?\s*overlayTheme\.iconColor/);
     expect(appSource).toContain("background: isV2Ui ? v2AntPrimaryBgColor : (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.10)')");
     expect(appSource).toContain("color: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff')");
@@ -604,5 +604,16 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain('sidebarTreeFontSizeFollowGlobal: !sidebarTreeFontSizeFollowsGlobal');
     expect(appSource).toContain('dataTableFontSize: dataTableFontSizeFollowsGlobal');
     expect(appSource).toContain('sidebarTreeFontSize: sidebarTreeFontSizeFollowsGlobal');
+  });
+
+  it('scales settings-center typography and keeps action heights consistent', () => {
+    expect(appCss).toContain('--gn-font-size: calc(var(--gonavi-font-size, 14px) * var(--gn-ui-scale, 1));');
+    expect(appCss).toContain('--gn-font-size-sm: calc(var(--gonavi-font-size, 14px) * var(--gn-ui-scale, 1) * 0.86);');
+    expect(appCss).toContain('--gn-font-size-xs: calc(var(--gonavi-font-size, 14px) * var(--gn-ui-scale, 1) * 0.76);');
+    expect(appCss).toContain('--gn-font-size-mono: calc(var(--gonavi-font-size, 14px) * var(--gn-ui-scale, 1) * 0.92);');
+    expect(appCss).toContain('--gn-settings-font-secondary: var(--gn-font-size-sm);');
+    expect(appCss).toMatch(/\.gonavi-settings-center-modal \.ant-btn\s*\{[^}]*font-size:\s*var\(--gn-settings-font-caption\)/s);
+    expect(appCss).toMatch(/\.gonavi-settings-center-modal \.gonavi-ai-provider-add\.ant-btn\s*\{[^}]*height:\s*var\(--gn-control-height, 32px\) !important;/s);
+    expect(appCss).toMatch(/\.gonavi-theme-settings \.gonavi-settings-section-hint\s*\{[^}]*font-size:\s*var\(--gn-settings-font-secondary/s);
   });
 });

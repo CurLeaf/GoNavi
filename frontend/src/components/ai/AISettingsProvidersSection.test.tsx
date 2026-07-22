@@ -91,7 +91,26 @@ describe('AISettingsProvidersSection', () => {
     expect(providerSectionSource).not.toContain('apiKey || editingProvider?.id');
   });
 
-  it('renders provider cards in list mode', () => {
+  it('keeps provider list and editor groups flat', () => {
+    const listStart = providerSectionSource.indexOf('if (!isEditing) {');
+    const listEnd = providerSectionSource.indexOf('\n  return (', listStart);
+    const fieldGroupStart = providerSectionSource.indexOf('const fieldGroupStyle =');
+    const fieldGroupEnd = providerSectionSource.indexOf('const fieldLabelStyle =', fieldGroupStart);
+    const listSource = providerSectionSource.slice(listStart, listEnd);
+    const fieldGroupSource = providerSectionSource.slice(fieldGroupStart, fieldGroupEnd);
+
+    expect(listStart).toBeGreaterThan(-1);
+    expect(listEnd).toBeGreaterThan(listStart);
+    expect(listSource).toContain('className="gonavi-ai-provider-list"');
+    expect(listSource).toContain('className={`gonavi-ai-provider-row');
+    expect(listSource).not.toContain('type="dashed"');
+    expect(listSource).not.toContain('borderRadius: 14');
+    expect(fieldGroupSource).toContain('borderRadius: 0');
+    expect(fieldGroupSource).toContain("border: 'none'");
+    expect(fieldGroupSource).toContain("background: 'transparent'");
+  });
+
+  it('renders providers as flat rows with a separate native selection button', () => {
     const Wrap = () => {
       const [form] = Form.useForm();
       return (
@@ -131,6 +150,11 @@ describe('AISettingsProvidersSection', () => {
     expect(markup).toContain('OpenAI');
     expect(markup).toContain('No model selected');
     expect(markup).toContain('Add model provider');
+    expect(markup).toContain('gonavi-ai-provider-row is-active');
+    expect(markup).toContain('gonavi-ai-provider-select');
+    expect(markup).toContain('gonavi-ai-provider-add');
+    expect(markup).toContain('<button class="gonavi-ai-provider-select" type="button" aria-pressed="true"');
+    expect(markup).toContain('border-left:3px solid');
   });
 
   it('renders provider form in editing mode', () => {
@@ -179,6 +203,9 @@ describe('AISettingsProvidersSection', () => {
     expect(markup).toContain('API Endpoint (URL)');
     expect(markup).toContain('Test connection');
     expect(markup).toContain('OpenAI Responses');
+    expect(markup).toContain('role="radiogroup"');
+    expect(markup).toContain('role="radio" aria-checked="true"');
+    expect(markup).toContain('aria-label="API format"');
   });
 
   it('renders the Responses protocol selector for the built-in OpenAI preset', () => {

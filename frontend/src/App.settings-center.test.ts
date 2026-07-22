@@ -7,6 +7,11 @@ const appSource = readFileSync(
   'utf8',
 );
 
+const appCssSource = readFileSync(
+  fileURLToPath(new globalThis.URL('./App.css', import.meta.url)),
+  'utf8',
+);
+
 const aiSettingsModalSource = readFileSync(
   fileURLToPath(new globalThis.URL('./components/AISettingsModal.tsx', import.meta.url)),
   'utf8',
@@ -24,7 +29,7 @@ describe('settings center layout', () => {
     expect(appSource).toContain('style={toolCenterNavPanelStyle}');
     expect(appSource).toContain('style={toolCenterNavScrollStyle}');
     expect(appSource).toContain('style={toolCenterContentPanelStyle}');
-    expect(appSource).toContain('style={toolCenterDetailPanelStyle}');
+    expect(appSource).toContain('style={activeSettingsCenterDetailPanelStyle}');
     expect(appSource).toContain('style={isActiveToolCenterPane ? toolCenterDetailBodyStyle : settingsCenterDetailBodyStyle}');
     expect(appSource).toContain('style={toolCenterScrollableListStyle}');
     expect(appSource).toContain("title: t('app.settings.group.preferences.title')");
@@ -85,13 +90,13 @@ describe('settings center layout', () => {
     expect(appSource).toContain("t('app.proxy.test.target_placeholder')");
   });
 
-  it('adds cancel and back actions to settings center detail panes', () => {
+  it('adds close and back-to-settings actions to settings center detail panes', () => {
     expect(appSource).toContain('const handleBackFromSettingsCenterPane = useCallback(() => {');
     expect(appSource).toContain('const handleCancelSettingsCenterPane = useCallback(() => {');
     expect(appSource).toContain('onClick={handleCancelSettingsCenterPane}');
-    expect(appSource).toContain("t('common.cancel')");
+    expect(appSource).toContain("t('common.close')");
     expect(appSource).toContain('onClick={handleBackFromSettingsCenterPane}');
-    expect(appSource).toContain("t('common.back_to_previous')");
+    expect(appSource).toContain("t('common.back_to_settings')");
   });
 
   it('clears embedded tool transient state before switching settings groups or panes', () => {
@@ -131,8 +136,8 @@ describe('settings center layout', () => {
     expect(appSource).not.toContain('setIsSecurityUpdateSettingsOpen');
   });
 
-  it('uses instant-apply footer actions only on v2 theme settings pane', () => {
-    expect(appSource).toContain("isV2Ui && activeSettingsCenterPane.key === 'theme' ? (");
+  it('uses a consistent close footer while keeping the theme instant-apply hint', () => {
+    expect(appSource).toContain("t('common.back_to_settings')");
     expect(appSource).toContain("t('common.close')");
     expect(appSource).toContain("t('app.theme.instant_apply_hint')");
   });
@@ -141,7 +146,8 @@ describe('settings center layout', () => {
     expect(appSource).toContain('renderThemeSettingsContentV2');
     expect(appSource).toContain('renderThemeSettingsContentLegacy');
     expect(appSource).toContain('isV2Ui ? renderThemeSettingsContentV2() : renderThemeSettingsContentLegacy()');
-    expect(appSource).toContain("gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0'");
+    expect(aiSettingsModalSource).toContain("gridTemplateColumns: '168px minmax(0, 1fr)', gap: 0, padding: '10px 0'");
+    expect(aiSettingsModalSource).toContain('className="ai-settings-body gonavi-ai-settings-flat"');
     expect(appSource).toContain('className="gonavi-theme-settings"');
     expect(appSource).toContain('ThemeSettingsSlider');
     expect(appSource).toContain("t('app.theme.custom.title')");
@@ -213,22 +219,44 @@ describe('settings center layout', () => {
     expect(appSource).toContain('isSettingsAboutPaneOpen');
   });
 
-  it('renders the settings center about page with the reference card layout', () => {
+  it('renders the settings center about page as flat sections without nested cards', () => {
+    const projectEntryStart = appSource.indexOf('const renderSettingsCenterAboutProjectEntry = ({');
+    const aboutPaneStart = appSource.indexOf('const renderSettingsCenterAboutPane = () => {');
+    const aboutPaneEnd = appSource.indexOf('const renderSettingsCenterAboutFooter = () => (', aboutPaneStart);
+    const projectEntrySource = appSource.slice(projectEntryStart, aboutPaneStart);
+    const aboutPaneSource = appSource.slice(aboutPaneStart, aboutPaneEnd);
+
+    expect(projectEntryStart).toBeGreaterThan(-1);
+    expect(aboutPaneStart).toBeGreaterThan(projectEntryStart);
+    expect(aboutPaneEnd).toBeGreaterThan(aboutPaneStart);
     expect(appSource).toContain('const renderSettingsCenterAboutPane = () => {');
     expect(appSource).toContain('const renderSettingsCenterAboutProjectEntry = ({');
-    expect(appSource).toContain("padding: '18px 22px'");
-    expect(appSource).toContain('width={108}');
-    expect(appSource).toContain('height={108}');
-    expect(appSource).toContain('width: 108');
-    expect(appSource).toContain('height: 108');
-    expect(appSource).toContain('minWidth: 260');
+    expect(appSource).toContain("activeSettingsCenterPane?.key === 'about-go-navi'");
+    expect(appSource).toContain("padding: '0 4px 0 0'");
+    expect(appSource).toContain("border: 'none'");
+    expect(appSource).toContain("background: 'transparent'");
+    expect(aboutPaneSource).toContain('className="gonavi-about-pane"');
+    expect(aboutPaneSource).toContain('aria-labelledby="gonavi-about-version-heading"');
+    expect(aboutPaneSource).toContain('aria-labelledby="gonavi-about-project-heading"');
+    expect(aboutPaneSource).toContain("gridTemplateColumns: 'minmax(0, 1.15fr) minmax(260px, 0.85fr)'");
+    expect(aboutPaneSource).not.toContain('cardBorder');
+    expect(aboutPaneSource).not.toContain('cardBg');
+    expect(aboutPaneSource).not.toContain('borderRadius');
+    expect(projectEntrySource).toContain('className="gonavi-about-project-entry"');
+    expect(projectEntrySource).toContain("border: 'none'");
+    expect(projectEntrySource).toContain("background: 'transparent'");
+    expect(projectEntrySource).not.toContain('borderRadius');
+    expect(appCssSource).toContain('.gonavi-about-project-entry:hover:not(:disabled)');
+    expect(appSource).toContain('width={92}');
+    expect(appSource).toContain('height={92}');
+    expect(appSource).toContain('width: 92');
+    expect(appSource).toContain('height: 92');
     expect(appSource).toContain('const releaseTimeText = formatAboutReleaseTime(lastUpdateInfo?.releasePublishedAt);');
     expect(appSource).toContain("[t('app.about.version.release_time'), releaseTimeText]");
     expect(appSource).toContain("installMode === 'msi' || installMode === 'portable'");
     expect(appSource).toContain("[t('app.about.version.install_mode'), t(`app.about.install_mode.${installMode}`)]");
     expect(appSource).toContain("hasUpdate && packageType !== 'unknown'");
     expect(appSource).toContain("[t('app.about.version.package_type'), t(`app.about.package_type.${packageType}`)]");
-    expect(appSource).toContain("gridTemplateColumns: 'minmax(0, 1fr) minmax(220px, 260px)'");
     expect(appSource).toContain('className="gonavi-about-update-channel"');
     expect(appSource).toContain('<Segmented');
     expect(appSource).toContain("t('app.about.field.auto_check_updates')");
@@ -249,6 +277,16 @@ describe('settings center layout', () => {
     expect(appSource).toContain('const renderSettingsCenterAboutFooter = () => (');
     expect(appSource).toContain("t('app.about.last_checked_at', { time: aboutLastCheckedAt })");
     expect(appSource).toContain('renderAboutUpdateActions()');
+  });
+
+  it('uses one flat detail shell across every settings page', () => {
+    expect(appSource).toContain('const activeSettingsCenterDetailPanelStyle: React.CSSProperties = {');
+    expect(appSource).toContain('style={activeSettingsCenterDetailPanelStyle}');
+    expect(appSource).toContain("padding: '0 4px 0 0'");
+    expect(appSource).toContain("background: 'transparent'");
+    expect(aiSettingsModalSource).toContain('className="ai-settings-body gonavi-ai-settings-flat"');
+    expect(aiSettingsModalSource).toContain("gap: 0, padding: '10px 0'");
+    expect(aiSettingsModalSource).toContain("padding: '0 6px 24px 22px'");
   });
 
   it('keeps embedded split-pane settings stable at scroll boundaries', () => {

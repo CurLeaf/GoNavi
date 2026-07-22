@@ -648,7 +648,8 @@ const SidebarMetadataSortableRow: React.FC<SidebarMetadataSortableRowProps> = ({
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: 12,
-        paddingBottom: 12,
+        minHeight: 44,
+        padding: '6px 2px',
         borderBottom: `1px solid ${dividerColor}`,
         transform: CSS.Transform.toString(transform),
         transition,
@@ -1017,6 +1018,7 @@ function App() {
   const [activeSettingsCenterGroupKey, setActiveSettingsCenterGroupKey] = useState<SettingsCenterGroupKey>('preferences');
   const [activeSettingsCenterPane, setActiveSettingsCenterPane] = useState<SettingsCenterPaneState | null>(null);
   const activeSettingsCenterPaneRef = useRef<SettingsCenterPaneState | null>(null);
+  const settingsCenterReturnFocusKeyRef = useRef<SettingsCenterPaneKey | null>(null);
   activeSettingsCenterPaneRef.current = activeSettingsCenterPane;
   const [focusedTabDisplayElementKey, setFocusedTabDisplayElementKey] = useState<TabDisplayElementKey | null>(null);
   const [focusedAIProviderId, setFocusedAIProviderId] = useState<string | undefined>(undefined);
@@ -3333,6 +3335,7 @@ function App() {
   const handleBackFromSettingsCenterPane = useCallback(() => {
       const leavingAI = activeSettingsCenterPane?.key === 'ai';
       const returnGroup = activeSettingsCenterPane?.group ?? activeSettingsCenterGroupKey;
+      settingsCenterReturnFocusKeyRef.current = activeSettingsCenterPane?.key ?? null;
       setActiveSettingsCenterGroupKey(returnGroup);
       setActiveSettingsCenterPane(null);
       if (leavingAI) {
@@ -3344,6 +3347,17 @@ function App() {
       activeSettingsCenterPane?.key,
       finalizeSecurityRepairReturnFromAISettings,
   ]);
+  useEffect(() => {
+      const returnFocusKey = settingsCenterReturnFocusKeyRef.current;
+      if (!isSettingsModalOpen || activeSettingsCenterPane || !returnFocusKey) {
+          return undefined;
+      }
+      settingsCenterReturnFocusKeyRef.current = null;
+      const animationFrame = window.requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>(`[data-settings-pane-key="${returnFocusKey}"]`)?.focus();
+      });
+      return () => window.cancelAnimationFrame(animationFrame);
+  }, [activeSettingsCenterPane, isSettingsModalOpen]);
   const handleCancelSettingsCenterPane = useCallback(() => {
       const leavingAI = activeSettingsCenterPane?.key === 'ai';
       if (activeSettingsCenterPane?.key === 'connection-package') {
@@ -4372,24 +4386,22 @@ function App() {
       };
       const proxyGridColumns = viewportWidth < 760 ? '1fr' : '1fr 1fr';
       const proxyCardAccent = proxyDraft.enabled
-          ? (darkMode ? 'rgba(34,197,94,0.12)' : 'rgba(16,185,129,0.10)')
-          : (darkMode ? 'rgba(148,163,184,0.12)' : 'rgba(71,85,105,0.08)');
+          ? (darkMode ? '#4ade80' : '#16a34a')
+          : (darkMode ? 'rgba(148,163,184,0.45)' : 'rgba(71,85,105,0.38)');
       const proxyTestAlertType = proxyTestResult
           ? (!proxyTestResult.success ? 'error' : ((proxyTestResult.statusCode || 0) >= 400 ? 'warning' : 'success'))
           : 'info';
 
       return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '12px 0' }}>
-              <div style={{ ...utilityPanelStyle, background: `linear-gradient(135deg, ${proxyCardAccent}, transparent 58%)` }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
-                      <div>
-                          <div style={{ fontWeight: 700, fontSize: 15 }}>{t('app.proxy.section_title')}</div>
-                          <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>{t('app.proxy.description')}</div>
-                      </div>
+              <div style={{ ...utilityPanelStyle, borderLeft: `3px solid ${proxyCardAccent}`, paddingLeft: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: overlayTheme.titleText }}>
+                          {t(proxyDraft.enabled ? 'app.proxy.switch.enabled' : 'app.proxy.switch.disabled')}
+                      </span>
                       <Switch
+                          aria-label={t('app.proxy.section_title')}
                           checked={proxyDraft.enabled}
-                          checkedChildren={t('app.proxy.switch.enabled')}
-                          unCheckedChildren={t('app.proxy.switch.disabled')}
                           onChange={(checked) => setProxyDraft((current) => ({ ...current, enabled: checked }))}
                       />
                   </div>
@@ -4622,10 +4634,6 @@ function App() {
   const renderSidebarMetadataSettingsPane = useCallback(() => (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
           <div style={utilityPanelStyle}>
-              <div style={{ marginBottom: 8, fontWeight: 600 }}>{t('app.settings.sidebar_metadata.title')}</div>
-              <div style={{ ...utilityMutedTextStyle, marginBottom: 14 }}>
-                  {t('app.settings.sidebar_metadata.description')}
-              </div>
               <DndContext
                   sensors={sidebarMetadataDragSensors}
                   collisionDetection={closestCenter}
@@ -4635,7 +4643,7 @@ function App() {
                       items={sidebarMetadataFieldItems.map((item) => item.field)}
                       strategy={verticalListSortingStrategy}
                   >
-                      <div style={{ display: 'grid', gap: 14 }}>
+                      <div style={{ display: 'grid', gap: 0, borderTop: `1px solid ${overlayTheme.divider}` }}>
                           {sidebarMetadataFieldItems.map((item) => {
                               const checked = sidebarTableMetadataFields.includes(item.field);
                               return (
@@ -4704,11 +4712,7 @@ function App() {
       return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
               <div style={utilityPanelStyle}>
-                  <div style={{ marginBottom: 8, fontWeight: 600 }}>{t('app.settings.sidebar_objects.title')}</div>
-                  <div style={{ ...utilityMutedTextStyle, marginBottom: 14 }}>
-                      {t('app.settings.sidebar_objects.description')}
-                  </div>
-                  <div style={{ display: 'grid', gap: 8 }}>
+                  <div style={{ display: 'grid', gap: 0, borderTop: `1px solid ${overlayTheme.divider}` }}>
                       {objectGroupItems.map((item) => (
                           <div
                               key={item.key}
@@ -4884,6 +4888,7 @@ function App() {
       url?: string;
   }) => (
       <button
+        className="gonavi-about-project-entry"
         type="button"
         onClick={() => {
             if (url) {
@@ -4894,20 +4899,20 @@ function App() {
         style={{
             width: '100%',
             display: 'grid',
-            gridTemplateColumns: '44px minmax(0, 1fr) auto',
+            gridTemplateColumns: '40px minmax(0, 1fr) auto',
             alignItems: 'center',
-            gap: 14,
-            padding: '18px 20px',
-            borderRadius: 12,
-            border: `1px solid ${darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(16,24,40,0.10)'}`,
-            background: darkMode ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.76)',
+            gap: 12,
+            padding: '18px 4px',
+            border: 'none',
+            borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.09)' : 'rgba(16,24,40,0.09)'}`,
+            background: 'transparent',
             color: darkMode ? 'rgba(255,255,255,0.90)' : '#101828',
             cursor: url ? 'pointer' : 'not-allowed',
             opacity: url ? 1 : 0.58,
             textAlign: 'left',
         }}
       >
-          <span style={{ fontSize: 26, display: 'grid', placeItems: 'center', color: darkMode ? '#f8fafc' : '#0f172a' }}>
+          <span style={{ fontSize: 24, display: 'grid', placeItems: 'center', color: darkMode ? '#f8fafc' : '#0f172a' }}>
               {icon}
           </span>
           <span style={{ minWidth: 0 }}>
@@ -4938,8 +4943,6 @@ function App() {
       const packageType = ['portable', 'msi', 'dmg', 'archive'].includes(String(lastUpdateInfo?.packageType || ''))
           ? String(lastUpdateInfo?.packageType)
           : 'unknown';
-      const cardBorder = darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(16,24,40,0.11)';
-      const cardBg = darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.82)';
       const mutedText = utilityMutedTextStyle.color;
       const dividerColor = darkMode ? 'rgba(255,255,255,0.09)' : 'rgba(16,24,40,0.09)';
       const versionRows = [
@@ -4956,29 +4959,28 @@ function App() {
       ];
 
       return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '10px 0 20px' }}>
-              <div
+          <div className="gonavi-about-pane" style={{ display: 'flex', flexDirection: 'column', padding: '0 0 18px' }}>
+              <section
+                aria-label="GoNavi"
                 style={{
-                    border: `1px solid ${cardBorder}`,
-                    borderRadius: 14,
-                    padding: '18px 22px',
-                    background: cardBg,
+                    padding: '24px 6px',
+                    borderBottom: `1px solid ${dividerColor}`,
                     display: 'grid',
                     gridTemplateColumns: 'minmax(0, 1fr) auto',
                     alignItems: 'center',
-                    gap: 18,
+                    gap: 24,
                 }}
               >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 18, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
                       <img
                         src={resolveBrandAboutSrc(brandIconId)}
                         alt="GoNavi"
-                        width={108}
-                        height={108}
+                        width={92}
+                        height={92}
                         draggable={false}
                         style={{
-                            width: 108,
-                            height: 108,
+                            width: 92,
+                            height: 92,
                             objectFit: 'contain',
                             background: 'transparent',
                             boxShadow: 'none',
@@ -4987,19 +4989,8 @@ function App() {
                       />
                       <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 24, lineHeight: 1.1, fontWeight: 800, color: overlayTheme.titleText }}>GoNavi</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
-                              <span
-                                style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 7,
-                                    padding: '5px 10px',
-                                    borderRadius: 999,
-                                    background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(16,24,40,0.04)',
-                                    color: mutedText,
-                                    fontWeight: 600,
-                                }}
-                              >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12, flexWrap: 'wrap' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: mutedText, fontWeight: 600 }}>
                                   <TagOutlined />
                                   {aboutDisplayVersion}
                               </span>
@@ -5012,33 +5003,27 @@ function App() {
                   </div>
                   <div
                     style={{
-                        minWidth: 260,
-                        padding: '11px 18px',
-                        borderRadius: 10,
-                        border: `1px solid ${hasUpdate ? (darkMode ? 'rgba(74,222,128,0.46)' : 'rgba(22,163,74,0.30)') : cardBorder}`,
-                        background: hasUpdate
-                            ? (darkMode ? 'rgba(34,197,94,0.10)' : 'rgba(22,163,74,0.055)')
-                            : (darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(16,24,40,0.025)'),
                         color: hasUpdate ? (darkMode ? '#86efac' : '#16a34a') : mutedText,
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 10,
-                        fontSize: 15,
+                        justifyContent: 'flex-end',
+                        gap: 8,
+                        fontSize: 14,
                         fontWeight: 700,
+                        whiteSpace: 'nowrap',
                     }}
                   >
-                      <UpCircleOutlined style={{ fontSize: 21 }} />
+                      <UpCircleOutlined style={{ fontSize: 19 }} />
                       {updateStatusText}
                   </div>
-              </div>
+              </section>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 22 }}>
-                  <div style={{ border: `1px solid ${cardBorder}`, borderRadius: 12, background: cardBg, overflow: 'hidden' }}>
-                      <div style={{ padding: '22px 24px', fontSize: 18, fontWeight: 800, color: overlayTheme.titleText }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.15fr) minmax(260px, 0.85fr)' }}>
+                  <section aria-labelledby="gonavi-about-version-heading" style={{ padding: '24px 28px 8px 6px', minWidth: 0 }}>
+                      <div id="gonavi-about-version-heading" style={{ marginBottom: 22, fontSize: 18, fontWeight: 800, color: overlayTheme.titleText }}>
                           {t('app.about.version_update.title')}
                       </div>
-                      <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 24px' }}>
+                      <div>
                           <div style={{ display: 'grid', gap: 8 }}>
                               <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', alignItems: 'center', gap: 16 }}>
                                   <div style={{ fontSize: 15, fontWeight: 600, color: overlayTheme.titleText, whiteSpace: 'nowrap' }}>{t('app.about.field.update_channel')}</div>
@@ -5106,17 +5091,16 @@ function App() {
                               ))}
                           </div>
                       </div>
-                      <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '16px 24px', display: 'flex', alignItems: 'center', gap: 10, color: hasUpdate ? (darkMode ? '#86efac' : '#16a34a') : mutedText, fontWeight: 700 }}>
-                          <CheckOutlined />
-                          {hasUpdate ? t('app.about.version_update.available') : t('app.about.version_update.up_to_date')}
-                      </div>
-                  </div>
+                  </section>
 
-                  <div style={{ border: `1px solid ${cardBorder}`, borderRadius: 12, background: cardBg, padding: '22px 24px' }}>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: overlayTheme.titleText, marginBottom: 18 }}>
+                  <section
+                    aria-labelledby="gonavi-about-project-heading"
+                    style={{ borderLeft: `1px solid ${dividerColor}`, padding: '24px 4px 8px 28px', minWidth: 0 }}
+                  >
+                      <div id="gonavi-about-project-heading" style={{ fontSize: 18, fontWeight: 800, color: overlayTheme.titleText, marginBottom: 8 }}>
                           {t('app.about.project_links')}
                       </div>
-                      <div style={{ display: 'grid', gap: 14 }}>
+                      <div style={{ borderTop: `1px solid ${dividerColor}` }}>
                           {renderSettingsCenterAboutProjectEntry({
                               icon: <GithubOutlined />,
                               title: t('app.about.project.github.title'),
@@ -5136,7 +5120,7 @@ function App() {
                               url: lastUpdateInfo?.releaseNotesUrl || aboutInfo?.releaseUrl,
                           })}
                       </div>
-                  </div>
+                  </section>
               </div>
           </div>
       );
@@ -5231,6 +5215,12 @@ function App() {
       </div>
   );
 
+  const themeSettingsSections = [
+      { value: 'theme' as const, label: t('app.theme.nav.theme.title'), icon: <SkinOutlined /> },
+      { value: 'appearance' as const, label: t('app.theme.nav.appearance.title'), icon: <BgColorsOutlined /> },
+      { value: 'workspace' as const, label: t('app.theme.nav.workspace.title'), icon: <AppstoreOutlined /> },
+  ];
+
   const renderThemeSettingsContentV2 = () => (
               <div className="gonavi-theme-settings" style={{
                   display: 'flex',
@@ -5245,20 +5235,35 @@ function App() {
                   <div style={{ flexShrink: 0, display: 'grid', gap: 4 }}>
                       {/* 自绘 Tab：避开 antd Segmented CSS-in-JS 压掉选中态 */}
                       <div className="gonavi-settings-tabs" role="tablist" aria-label={t('app.settings.entry.theme.title')}>
-                          {([
-                              { value: 'theme' as const, label: t('app.theme.nav.theme.title'), icon: <SkinOutlined /> },
-                              { value: 'appearance' as const, label: t('app.theme.nav.appearance.title'), icon: <BgColorsOutlined /> },
-                              { value: 'workspace' as const, label: t('app.theme.nav.workspace.title'), icon: <AppstoreOutlined /> },
-                          ]).map((item) => {
+                          {themeSettingsSections.map((item, itemIndex) => {
                               const active = themeModalSection === item.value;
                               return (
                                   <button
                                       key={item.value}
+                                      id={`gonavi-theme-settings-tab-${item.value}`}
                                       type="button"
                                       role="tab"
                                       aria-selected={active}
+                                      aria-controls={`gonavi-theme-settings-panel-${item.value}`}
+                                      tabIndex={active ? 0 : -1}
                                       className={`gonavi-settings-tab${active ? ' is-active' : ''}`}
                                       onClick={() => setThemeModalSection(item.value)}
+                                      onKeyDown={(event) => {
+                                          if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) {
+                                              return;
+                                          }
+                                          event.preventDefault();
+                                          const nextIndex = event.key === 'Home'
+                                              ? 0
+                                              : event.key === 'End'
+                                                  ? themeSettingsSections.length - 1
+                                                  : event.key === 'ArrowRight'
+                                                      ? (itemIndex + 1) % themeSettingsSections.length
+                                                      : (itemIndex - 1 + themeSettingsSections.length) % themeSettingsSections.length;
+                                          setThemeModalSection(themeSettingsSections[nextIndex].value);
+                                          const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="tab"]');
+                                          tabs?.[nextIndex]?.focus();
+                                      }}
                                   >
                                       <span className="gonavi-settings-tab-icon">{item.icon}</span>
                                       <span>{item.label}</span>
@@ -5272,6 +5277,9 @@ function App() {
                   </div>
                   <div
                     key={themeModalSection}
+                    id={`gonavi-theme-settings-panel-${themeModalSection}`}
+                    role="tabpanel"
+                    aria-labelledby={`gonavi-theme-settings-tab-${themeModalSection}`}
                     style={{
                         minWidth: 0,
                         minHeight: 0,
@@ -5294,7 +5302,7 @@ function App() {
                                           { key: 'light' as const, label: t('app.theme.mode.light.label'), preview: 'light' as const },
                                           { key: 'dark' as const, label: t('app.theme.mode.dark.label'), preview: 'dark' as const },
                                           { key: 'system' as const, label: t('app.theme.mode.system.label'), preview: 'system' as const },
-                                      ]).map((item) => {
+                                      ]).map((item, itemIndex, themeItems) => {
                                           const active = !activeCustomTheme && themePreference === item.key;
                                           return (
                                               <button
@@ -5302,8 +5310,25 @@ function App() {
                                                   type="button"
                                                   role="radio"
                                                   aria-checked={active}
+                                                  tabIndex={themePreference === item.key ? 0 : -1}
                                                   className={`gonavi-settings-mode-tile${active ? ' is-active' : ''}`}
                                                   onClick={() => selectPresetTheme(item.key)}
+                                                  onKeyDown={(event) => {
+                                                      if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                                                          return;
+                                                      }
+                                                      event.preventDefault();
+                                                      const nextIndex = event.key === 'Home'
+                                                          ? 0
+                                                          : event.key === 'End'
+                                                              ? themeItems.length - 1
+                                                              : event.key === 'ArrowRight' || event.key === 'ArrowDown'
+                                                                  ? (itemIndex + 1) % themeItems.length
+                                                                  : (itemIndex - 1 + themeItems.length) % themeItems.length;
+                                                      selectPresetTheme(themeItems[nextIndex].key);
+                                                      const radios = event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="radio"]');
+                                                      radios?.[nextIndex]?.focus();
+                                                  }}
                                               >
                                                   {renderThemeModePreview(item.preview)}
                                                   <div className="gonavi-settings-mode-meta">
@@ -5355,7 +5380,7 @@ function App() {
                                                   badge: t('app.theme.ui_version.v2.badge'),
                                                   badgeClass: ' is-new',
                                               },
-                                          ]).map((item) => {
+                                          ]).map((item, itemIndex, uiVersionItems) => {
                                               const active = (appearance.uiVersion ?? 'legacy') === item.key;
                                               return (
                                                   <button
@@ -5363,8 +5388,25 @@ function App() {
                                                       type="button"
                                                       role="radio"
                                                       aria-checked={active}
+                                                      tabIndex={active ? 0 : -1}
                                                       className={`gonavi-settings-ui-version-tile${active ? ' is-active' : ''}`}
                                                       onClick={() => setAppearance({ uiVersion: item.key })}
+                                                      onKeyDown={(event) => {
+                                                          if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                                                              return;
+                                                          }
+                                                          event.preventDefault();
+                                                          const nextIndex = event.key === 'Home'
+                                                              ? 0
+                                                              : event.key === 'End'
+                                                                  ? uiVersionItems.length - 1
+                                                                  : event.key === 'ArrowRight' || event.key === 'ArrowDown'
+                                                                      ? (itemIndex + 1) % uiVersionItems.length
+                                                                      : (itemIndex - 1 + uiVersionItems.length) % uiVersionItems.length;
+                                                          setAppearance({ uiVersion: uiVersionItems[nextIndex].key });
+                                                          const radios = event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="radio"]');
+                                                          radios?.[nextIndex]?.focus();
+                                                      }}
                                                   >
                                                       {renderUiVersionPreview(item.key)}
                                                       <div className="gonavi-settings-ui-version-meta">
@@ -5671,44 +5713,36 @@ function App() {
                                                       gridTemplateColumns: 'minmax(0, 1fr) auto',
                                                       gap: 10,
                                                       alignItems: 'center',
-                                                      padding: '9px 10px',
-                                                      borderRadius: 10,
-                                                      border: `1px solid ${isFocused
-                                                          ? (isV2Ui
-                                                              ? v2AntPrimaryBorderHoverColor
-                                                              : (darkMode ? 'rgba(255,214,102,0.54)' : 'rgba(24,144,255,0.54)'))
-                                                          : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
-                                                      boxShadow: isFocused
-                                                          ? (isV2Ui
-                                                              ? `0 0 0 2px ${v2AntControlActiveBg}`
-                                                              : (darkMode ? '0 0 0 2px rgba(255,214,102,0.14)' : '0 0 0 2px rgba(24,144,255,0.12)'))
-                                                          : 'none',
+                                                      padding: '8px 2px 8px 10px',
+                                                      borderRadius: 0,
+                                                      border: 'none',
+                                                      borderLeft: `3px solid ${isFocused
+                                                          ? (isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'))
+                                                          : 'transparent'}`,
+                                                      borderBottom: `1px solid ${overlayTheme.divider}`,
+                                                      boxShadow: 'none',
                                                       background: isFocused
                                                           ? (isV2Ui
-                                                              ? `linear-gradient(90deg, ${v2AntPrimaryBgHoverColor} 0%, rgba(255,255,255,0.045) 100%)`
-                                                              : (darkMode ? 'linear-gradient(90deg, rgba(255,214,102,0.12) 0%, rgba(255,255,255,0.045) 100%)' : 'linear-gradient(90deg, rgba(24,144,255,0.10) 0%, rgba(255,255,255,0.78) 100%)'))
-                                                          : checked
-                                                          ? (darkMode ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.62)')
-                                                          : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(16,24,40,0.025)'),
+                                                              ? v2AntPrimaryBgColor
+                                                              : (darkMode ? 'rgba(255,214,102,0.10)' : 'rgba(24,144,255,0.08)'))
+                                                          : 'transparent',
                                                       cursor: 'pointer',
-                                                      transition: 'border-color 140ms ease, box-shadow 140ms ease, background 140ms ease',
+                                                      transition: 'border-color 140ms ease, background-color 140ms ease',
                                                   }}
                                               >
                                                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                                                       <span style={{
                                                           width: 22,
                                                           height: 22,
-                                                          borderRadius: 999,
+                                                          borderRadius: 0,
                                                           display: 'inline-flex',
                                                           alignItems: 'center',
                                                           justifyContent: 'center',
                                                           flexShrink: 0,
                                                           fontFamily: resolvedMonoFontFamily,
-                                                          fontSize: 11,
-                                                          fontWeight: 800,
-                                                          background: isFocused
-                                                              ? (isV2Ui ? v2AntPrimaryBgHoverColor : (darkMode ? 'rgba(255,214,102,0.22)' : 'rgba(24,144,255,0.14)'))
-                                                              : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(16,24,40,0.05)'),
+                                                          fontSize: 'var(--gn-font-size-sm, 12px)',
+                                                          fontWeight: 600,
+                                                          background: 'transparent',
                                                           color: isFocused
                                                               ? (isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'))
                                                               : (darkMode ? 'rgba(255,255,255,0.56)' : 'rgba(16,24,40,0.5)'),
@@ -5726,7 +5760,7 @@ function App() {
                                                               <span style={{ fontWeight: 600 }}>{getTabDisplayElementLabel(key)}</span>
                                                               {isFocused ? (
                                                                   <span style={{
-                                                                      fontSize: 10,
+                                                                      fontSize: 'var(--gn-font-size-sm, 12px)',
                                                                       lineHeight: '16px',
                                                                       padding: '0 6px',
                                                                       borderRadius: 999,
@@ -5738,7 +5772,7 @@ function App() {
                                                               ) : null}
                                                               {checked && tabDisplaySettings.layout === 'double' ? (
                                                                   <span style={{
-                                                                      fontSize: 10,
+                                                                      fontSize: 'var(--gn-font-size-sm, 12px)',
                                                                       lineHeight: '16px',
                                                                       padding: '0 6px',
                                                                       borderRadius: 999,
@@ -6407,44 +6441,36 @@ function App() {
                                                       gridTemplateColumns: 'minmax(0, 1fr) auto',
                                                       gap: 10,
                                                       alignItems: 'center',
-                                                      padding: '9px 10px',
-                                                      borderRadius: 10,
-                                                      border: `1px solid ${isFocused
-                                                          ? (isV2Ui
-                                                              ? v2AntPrimaryBorderHoverColor
-                                                              : (darkMode ? 'rgba(255,214,102,0.54)' : 'rgba(24,144,255,0.54)'))
-                                                          : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
-                                                      boxShadow: isFocused
-                                                          ? (isV2Ui
-                                                              ? `0 0 0 2px ${v2AntControlActiveBg}`
-                                                              : (darkMode ? '0 0 0 2px rgba(255,214,102,0.14)' : '0 0 0 2px rgba(24,144,255,0.12)'))
-                                                          : 'none',
+                                                      padding: '8px 2px 8px 10px',
+                                                      borderRadius: 0,
+                                                      border: 'none',
+                                                      borderLeft: `3px solid ${isFocused
+                                                          ? (isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'))
+                                                          : 'transparent'}`,
+                                                      borderBottom: `1px solid ${overlayTheme.divider}`,
+                                                      boxShadow: 'none',
                                                       background: isFocused
                                                           ? (isV2Ui
-                                                              ? `linear-gradient(90deg, ${v2AntPrimaryBgHoverColor} 0%, rgba(255,255,255,0.045) 100%)`
-                                                              : (darkMode ? 'linear-gradient(90deg, rgba(255,214,102,0.12) 0%, rgba(255,255,255,0.045) 100%)' : 'linear-gradient(90deg, rgba(24,144,255,0.10) 0%, rgba(255,255,255,0.78) 100%)'))
-                                                          : checked
-                                                          ? (darkMode ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.62)')
-                                                          : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(16,24,40,0.025)'),
+                                                              ? v2AntPrimaryBgColor
+                                                              : (darkMode ? 'rgba(255,214,102,0.10)' : 'rgba(24,144,255,0.08)'))
+                                                          : 'transparent',
                                                       cursor: 'pointer',
-                                                      transition: 'border-color 140ms ease, box-shadow 140ms ease, background 140ms ease',
+                                                      transition: 'border-color 140ms ease, background-color 140ms ease',
                                                   }}
                                               >
                                                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                                                       <span style={{
                                                           width: 22,
                                                           height: 22,
-                                                          borderRadius: 999,
+                                                          borderRadius: 0,
                                                           display: 'inline-flex',
                                                           alignItems: 'center',
                                                           justifyContent: 'center',
                                                           flexShrink: 0,
                                                           fontFamily: resolvedMonoFontFamily,
-                                                          fontSize: 11,
-                                                          fontWeight: 800,
-                                                          background: isFocused
-                                                              ? (isV2Ui ? v2AntPrimaryBgHoverColor : (darkMode ? 'rgba(255,214,102,0.22)' : 'rgba(24,144,255,0.14)'))
-                                                              : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(16,24,40,0.05)'),
+                                                          fontSize: 'var(--gn-font-size-sm, 12px)',
+                                                          fontWeight: 600,
+                                                          background: 'transparent',
                                                           color: isFocused
                                                               ? (isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'))
                                                               : (darkMode ? 'rgba(255,255,255,0.56)' : 'rgba(16,24,40,0.5)'),
@@ -6462,7 +6488,7 @@ function App() {
                                                               <span style={{ fontWeight: 600 }}>{getTabDisplayElementLabel(key)}</span>
                                                               {isFocused ? (
                                                                   <span style={{
-                                                                      fontSize: 10,
+                                                                      fontSize: 'var(--gn-font-size-sm, 12px)',
                                                                       lineHeight: '16px',
                                                                       padding: '0 6px',
                                                                       borderRadius: 999,
@@ -6474,7 +6500,7 @@ function App() {
                                                               ) : null}
                                                               {checked && tabDisplaySettings.layout === 'double' ? (
                                                                   <span style={{
-                                                                      fontSize: 10,
+                                                                      fontSize: 'var(--gn-font-size-sm, 12px)',
                                                                       lineHeight: '16px',
                                                                       padding: '0 6px',
                                                                       borderRadius: 999,
@@ -6883,6 +6909,13 @@ function App() {
   const isSettingsCenterContainedScrollPane =
       activeSettingsCenterPane?.key === 'theme' || activeSettingsCenterPane?.key === 'ai';
   const isV2ThemeSettingsPane = isV2Ui && activeSettingsCenterPane?.key === 'theme';
+  const activeSettingsCenterDetailPanelStyle: React.CSSProperties = {
+      ...toolCenterDetailPanelStyle,
+      padding: '0 4px 0 0',
+      border: 'none',
+      borderRadius: 0,
+      background: 'transparent',
+  };
   const settingsCenterDetailBodyStyle: React.CSSProperties = isSettingsCenterContainedScrollPane
       ? {
           ...toolCenterDetailBodyStyle,
@@ -6915,18 +6948,12 @@ function App() {
       }
       if (activeSettingsCenterPane.key === 'brand-icon') {
           return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '12px 0 20px' }}>
-                  <div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: overlayTheme.titleText }}>
-                          {t('app.settings.entry.brand_icon.title')}
-                      </div>
-                      <div style={{ marginTop: 6, color: utilityMutedTextStyle.color, fontSize: 13, lineHeight: 1.5 }}>
-                          {t('app.settings.entry.brand_icon.help')}
-                      </div>
-                  </div>
+              <div style={{ padding: '16px 0 20px' }}>
                   <BrandIconPicker
                     value={brandIconId}
                     darkMode={darkMode}
+                    accentColor={overlayTheme.selectedText}
+                    ariaLabel={t('app.settings.entry.brand_icon.title')}
                     onChange={(id: BrandIconId) => {
                         setBrandIconId(id);
                         message.success(t('app.settings.entry.brand_icon.applied'));
@@ -7618,12 +7645,20 @@ function App() {
               return null;
             }
             const closeToolCenterPane = () => {
+              settingsCenterReturnFocusKeyRef.current = activeSettingsCenterPane?.key ?? null;
               if (activeSettingsCenterPane?.key === 'connection-package') {
                 closeConnectionPackageDialog();
                 return;
               }
               setToolCenterBackGroupKey(null);
               setActiveSettingsCenterPane(null);
+            };
+            const activateSettingsCenterGroup = (group: typeof combinedSettingsCenterGroups[number]) => {
+              if (isToolCenterGroupKey(group.key)) {
+                handleOpenToolsModal(group.key);
+                return;
+              }
+              handleOpenSettingsModal(group.key);
             };
             const renderToolCenterPane = () => {
               if (!activeSettingsCenterPane || !isToolCenterGroupKey(activeSettingsCenterPane.group)) {
@@ -7647,8 +7682,7 @@ function App() {
                     confirmText={connectionPackageDialog.mode === 'export'
                         ? t('app.connection_package.action.start_export')
                         : t('app.connection_package.action.start_import')}
-                    cancelText={t('common.close')}
-                    onBack={closeToolCenterPane}
+                    cancelText={t('common.back_to_settings')}
                     onIncludeSecretsChange={(value) => {
                         setConnectionPackageDialog((current) => ({
                             ...current,
@@ -7676,7 +7710,7 @@ function App() {
                     onConfirm={() => {
                         void handleConfirmConnectionPackageDialog();
                     }}
-                    onCancel={closeConnectionPackageDialog}
+                    onCancel={closeToolCenterPane}
                   />
                 );
               }
@@ -7712,11 +7746,11 @@ function App() {
                     closable={false}
                     onCancel={closeToolCenterPane}
                     footer={[
-                      <Button key="close" onClick={closeToolCenterPane}>
-                        {t('common.close')}
-                      </Button>,
                       <Button key="back" onClick={closeToolCenterPane}>
-                        {t('common.back_to_previous')}
+                        {t('common.back_to_settings')}
+                      </Button>,
+                      <Button key="close" type="primary" onClick={handleCancelSettingsCenterPane}>
+                        {t('common.close')}
                       </Button>,
                     ]}
                     styles={{
@@ -7799,7 +7833,7 @@ function App() {
                     status={securityUpdateStatus}
                     focusTarget={securityUpdateSettingsFocusTarget}
                     focusRequest={securityUpdateSettingsFocusRequest}
-                    onClose={closeToolCenterPane}
+                    onClose={handleCancelSettingsCenterPane}
                     onBack={closeToolCenterPane}
                     onStart={handleStartSecurityUpdate}
                     onRetry={handleRetrySecurityUpdate}
@@ -7814,7 +7848,7 @@ function App() {
                   <DriverManagerModal
                     embedded
                     open
-                    onClose={closeToolCenterPane}
+                    onClose={handleCancelSettingsCenterPane}
                     onBack={closeToolCenterPane}
                     onOpenGlobalProxySettings={handleOpenGlobalProxySettings}
                   />
@@ -7826,7 +7860,7 @@ function App() {
                   <SnippetSettingsModal
                     embedded
                     open
-                    onClose={closeToolCenterPane}
+                    onClose={handleCancelSettingsCenterPane}
                     onBack={closeToolCenterPane}
                     darkMode={darkMode}
                     overlayTheme={overlayTheme}
@@ -7843,11 +7877,13 @@ function App() {
                     closable={false}
                     onCancel={() => {
                       setCapturingShortcutAction(null);
-                      closeToolCenterPane();
+                      handleCancelSettingsCenterPane();
                     }}
-                    footer={[
+                    footer={(
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <Button
                         key="reset"
+                        style={{ marginRight: 'auto' }}
                         onClick={() => {
                            resetShortcutOptions();
                            setCapturingShortcutAction(null);
@@ -7855,17 +7891,7 @@ function App() {
                         }}
                       >
                         {t('app.shortcuts.action.restore_defaults')}
-                      </Button>,
-                      <Button
-                        key="close"
-                        type="primary"
-                        onClick={() => {
-                          setCapturingShortcutAction(null);
-                          closeToolCenterPane();
-                        }}
-                      >
-                         {t('common.close')}
-                      </Button>,
+                      </Button>
                       <Button
                         key="back"
                         onClick={() => {
@@ -7873,9 +7899,20 @@ function App() {
                           closeToolCenterPane();
                         }}
                       >
-                        {t('common.back_to_previous')}
-                      </Button>,
-                    ]}
+                        {t('common.back_to_settings')}
+                      </Button>
+                      <Button
+                        key="close"
+                        type="primary"
+                        onClick={() => {
+                          setCapturingShortcutAction(null);
+                          handleCancelSettingsCenterPane();
+                        }}
+                      >
+                         {t('common.close')}
+                      </Button>
+                      </div>
+                    )}
                     styles={{
                       header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
                       body: { paddingTop: 8, overflow: 'hidden', flex: 1, minHeight: 0 },
@@ -7953,6 +7990,7 @@ function App() {
 
             return (
               <Modal
+                rootClassName="gonavi-settings-center-modal"
                 title={renderUtilityModalTitle(<SettingOutlined />, t('app.settings.title'), t('app.settings.description'))}
                 open={isSettingsModalOpen}
                 onCancel={handleCancelSettingsCenterPane}
@@ -7968,32 +8006,47 @@ function App() {
                 }}
               >
                 <div style={toolCenterModalWorkspaceStyle}>
-                  <div style={toolCenterModalSplitStyle}>
-                    <div style={toolCenterNavPanelStyle}>
+                    <div className="gonavi-settings-center-layout" style={toolCenterModalSplitStyle}>
+                    <div className="gonavi-settings-center-groups" style={toolCenterNavPanelStyle}>
                       <div style={toolCenterNavScrollStyle} role="tablist" aria-orientation="vertical">
-                        {combinedSettingsCenterGroups.map((group) => {
+                        {combinedSettingsCenterGroups.map((group, groupIndex) => {
                           const active = group.key === activeSettingsCenterGroup.key;
                           return (
                             <button
+                              className={`gonavi-settings-center-group-tab${active ? ' is-active' : ''}`}
                               key={group.key}
+                              id={`gonavi-settings-center-group-tab-${group.key}`}
                               type="button"
                               role="tab"
                               aria-selected={active}
+                              aria-controls={`gonavi-settings-center-group-panel-${group.key}`}
+                              tabIndex={active ? 0 : -1}
                               title={`${group.title} - ${group.description}`}
-                              onClick={() => {
-                                if (isToolCenterGroupKey(group.key)) {
-                                  handleOpenToolsModal(group.key);
+                              onClick={() => activateSettingsCenterGroup(group)}
+                              onKeyDown={(event) => {
+                                if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
                                   return;
                                 }
-                                handleOpenSettingsModal(group.key);
+                                event.preventDefault();
+                                const nextIndex = event.key === 'Home'
+                                  ? 0
+                                  : event.key === 'End'
+                                    ? combinedSettingsCenterGroups.length - 1
+                                    : event.key === 'ArrowDown'
+                                      ? (groupIndex + 1) % combinedSettingsCenterGroups.length
+                                      : (groupIndex - 1 + combinedSettingsCenterGroups.length) % combinedSettingsCenterGroups.length;
+                                activateSettingsCenterGroup(combinedSettingsCenterGroups[nextIndex]);
+                                const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="tab"]');
+                                tabs?.[nextIndex]?.focus();
                               }}
                               style={{
                                 position: 'relative',
                                 textAlign: 'left',
                                 width: '100%',
-                                padding: '11px 10px 11px 14px',
-                                borderRadius: 8,
+                                padding: '10px 6px 10px 12px',
+                                borderRadius: 0,
                                 border: 'none',
+                                borderBottom: `1px solid ${overlayTheme.divider}`,
                                 background: active
                                   ? overlayTheme.selectedBg
                                   : 'transparent',
@@ -8015,20 +8068,18 @@ function App() {
                                     : 'transparent',
                                 }}
                               />
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
                                 <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                                   <span
                                     style={{
-                                      width: 28,
-                                      height: 28,
-                                      borderRadius: 8,
+                                      width: 20,
+                                      height: 20,
+                                      borderRadius: 0,
                                       display: 'grid',
                                       placeItems: 'center',
-                                      fontSize: 15,
+                                      fontSize: 'var(--gn-font-size, 14px)',
                                       flexShrink: 0,
-                                      background: active
-                                        ? overlayTheme.iconBg
-                                        : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)'),
+                                      background: 'transparent',
                                       color: active
                                         ? overlayTheme.iconColor
                                         : overlayTheme.mutedText,
@@ -8038,7 +8089,7 @@ function App() {
                                   </span>
                                   <span
                                     style={{
-                                      fontSize: 13,
+                                      fontSize: 'var(--gn-font-size, 14px)',
                                       fontWeight: active ? 700 : 600,
                                       minWidth: 0,
                                       overflow: 'hidden',
@@ -8049,38 +8100,24 @@ function App() {
                                     {group.title}
                                   </span>
                                 </span>
-                                <span
-                                  style={{
-                                    minWidth: 20,
-                                    height: 20,
-                                    paddingInline: 6,
-                                    borderRadius: 999,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    background: active
-                                      ? overlayTheme.selectedBg
-                                      : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)'),
-                                    color: active ? (darkMode ? '#f8fafc' : '#0f172a') : overlayTheme.mutedText,
-                                    fontSize: 10,
-                                    fontWeight: 700,
-                                    flexShrink: 0,
-                                  }}
-                                >
-                                  {group.items.length}
-                                </span>
                               </div>
                             </button>
                           );
                         })}
                       </div>
                     </div>
-                    <div style={toolCenterContentPanelStyle}>
+                    <div
+                      id={`gonavi-settings-center-group-panel-${activeSettingsCenterGroup.key}`}
+                      className="gonavi-settings-center-content"
+                      role="tabpanel"
+                      aria-labelledby={`gonavi-settings-center-group-tab-${activeSettingsCenterGroup.key}`}
+                      style={toolCenterContentPanelStyle}
+                    >
                       {activeSettingsCenterPane ? (
-                        <div style={toolCenterDetailPanelStyle}>
+                        <div style={activeSettingsCenterDetailPanelStyle}>
                           <div style={{ paddingBottom: 10, borderBottom: `1px solid ${overlayTheme.divider}` }}>
                             <div style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>
+                              <div style={{ fontSize: 'calc(var(--gn-font-size, 14px) * 1.14)', fontWeight: 700, color: overlayTheme.titleText }}>
                                 {activeSettingsCenterPaneItem?.title ?? activeSettingsCenterGroup.title}
                               </div>
                               <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
@@ -8088,7 +8125,10 @@ function App() {
                               </div>
                             </div>
                           </div>
-                          <div style={isActiveToolCenterPane ? toolCenterDetailBodyStyle : settingsCenterDetailBodyStyle}>
+                          <div
+                            key={activeSettingsCenterPane.key}
+                            style={isActiveToolCenterPane ? toolCenterDetailBodyStyle : settingsCenterDetailBodyStyle}
+                          >
                             {isActiveToolCenterPane ? renderToolCenterPane() : renderSettingsCenterPane()}
                           </div>
                           {!isActiveToolCenterPane && (
@@ -8106,22 +8146,13 @@ function App() {
                             >
                               {activeSettingsCenterPane.key === 'about-go-navi' ? (
                                 renderSettingsCenterAboutFooter()
-                              ) : isV2Ui && activeSettingsCenterPane.key === 'theme' ? (
+                              ) : (
                                 <>
                                   <Button onClick={handleBackFromSettingsCenterPane}>
-                                    {t('common.back_to_previous')}
+                                    {t('common.back_to_settings')}
                                   </Button>
                                   <Button type="primary" onClick={handleCancelSettingsCenterPane}>
                                     {t('common.close')}
-                                  </Button>
-                                </>
-                              ) : (
-                                <>
-                                  <Button onClick={handleCancelSettingsCenterPane}>
-                                    {t('common.cancel')}
-                                  </Button>
-                                  <Button type="primary" onClick={handleBackFromSettingsCenterPane}>
-                                    {t('common.back_to_previous')}
                                   </Button>
                                 </>
                               )}
@@ -8131,13 +8162,15 @@ function App() {
                       ) : (
                         <>
                           <div style={{ display: 'grid', gap: 4 }}>
-                            <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>{activeSettingsCenterGroup.title}</div>
+                            <div style={{ fontSize: 'calc(var(--gn-font-size, 14px) * 1.14)', fontWeight: 700, color: overlayTheme.titleText }}>{activeSettingsCenterGroup.title}</div>
                             <div style={utilityMutedTextStyle}>{activeSettingsCenterGroup.description}</div>
                           </div>
                           <div style={toolCenterScrollableListStyle}>
                             {activeSettingsCenterGroup.items.map((item, index) => (
                               <Button
+                                className="gonavi-settings-center-entry"
                                 key={item.key}
+                                data-settings-pane-key={item.key}
                                 type="text"
                                 style={{
                                   ...toolCenterRowStyle,
@@ -8147,7 +8180,7 @@ function App() {
                                 onClick={item.onClick}
                               >
                                 <span style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                                  <span style={{ width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
+                                  <span style={{ width: 24, height: 24, display: 'grid', placeItems: 'center', color: overlayTheme.iconColor, flexShrink: 0 }}>
                                     {item.icon}
                                   </span>
                                   <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>

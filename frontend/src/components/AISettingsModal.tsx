@@ -22,7 +22,7 @@ import { EMPTY_MCP_CLIENT_STATUSES } from '../utils/mcpClientInstallStatus';
 import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';
 import AISettingsMCPSection from './ai/AISettingsMCPSection';
 import type { AIMCPHTTPServerDraft } from './ai/AIMCPHTTPServerPanel';
-import AISettingsSidebar, { type AISettingsSectionKey } from './ai/AISettingsSidebar';
+import AISettingsSidebar, { AI_SETTINGS_NAV_ITEMS, type AISettingsSectionKey } from './ai/AISettingsSidebar';
 import AISettingsSafetySection from './ai/AISettingsSafetySection';
 import AISettingsContextSection from './ai/AISettingsContextSection';
 import AISettingsProvidersSection from './ai/AISettingsProvidersSection';
@@ -127,6 +127,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
     const [primaryPasswordVisible, setPrimaryPasswordVisible] = useState(false);
     const [form] = Form.useForm();
     const modalBodyRef = useRef<HTMLDivElement>(null);
+    const settingsContentScrollRef = useRef<HTMLDivElement>(null);
     const missingAIServiceWarnedRef = useRef(false);
     const aiChatOpenMode = useStore((state) => state.aiChatOpenMode);
     const setAIChatOpenMode = useStore((state) => state.setAIChatOpenMode);
@@ -275,6 +276,13 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
     }, [defaultMCPHTTPServerStatus, resolveAIService, syncMCPClientStatuses]);
 
     useEffect(() => { if (active) void loadConfig(); }, [active, loadConfig]);
+
+    useEffect(() => {
+        const scrollRegion = settingsContentScrollRef.current;
+        if (!scrollRegion) return;
+        scrollRegion.scrollTop = 0;
+        scrollRegion.scrollLeft = 0;
+    }, [activeSection]);
 
     useEffect(() => {
         if (active) {
@@ -776,8 +784,31 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
         });
     };
 
+    const renderSectionPanel = (sectionKey: AISettingsSectionKey, content: React.ReactNode) => {
+        const sectionMeta = AI_SETTINGS_NAV_ITEMS.find((item) => item.key === sectionKey) ?? AI_SETTINGS_NAV_ITEMS[0]!;
+        return (
+            <section
+                key={sectionKey}
+                id={`gonavi-ai-settings-panel-${sectionKey}`}
+                role="tabpanel"
+                aria-labelledby={`gonavi-ai-settings-tab-${sectionKey}`}
+                hidden={activeSection !== sectionKey}
+            >
+                <div style={{ paddingBottom: 12, marginBottom: 2, borderBottom: `1px solid ${overlayTheme.divider}` }}>
+                    <div style={{ fontSize: 'var(--gn-font-size, 14px)', fontWeight: 700, color: overlayTheme.titleText }}>
+                        {t(sectionMeta.titleKey)}
+                    </div>
+                    <div style={{ marginTop: 3, fontSize: 'var(--gn-font-size-sm, 12px)', lineHeight: 1.55, color: overlayTheme.mutedText }}>
+                        {t(sectionMeta.descriptionKey)}
+                    </div>
+                </div>
+                {content}
+            </section>
+        );
+    };
+
     return (
-        <div ref={modalBodyRef} className="ai-settings-body" style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0', height: '100%', minHeight: 0, overflow: 'hidden', alignItems: 'stretch', position: 'relative', boxSizing: 'border-box' }}>
+        <div ref={modalBodyRef} className="ai-settings-body gonavi-ai-settings-flat" style={{ display: 'grid', gridTemplateColumns: '168px minmax(0, 1fr)', gap: 0, padding: '10px 0', height: '100%', minHeight: 0, overflow: 'hidden', alignItems: 'stretch', position: 'relative', boxSizing: 'border-box' }}>
             {messageContextHolder}
             <AISettingsSidebar
                 activeSection={activeSection}
@@ -785,8 +816,12 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                 overlayTheme={overlayTheme}
                 onSelectSection={setActiveSection}
             />
-            <div style={{ minWidth: 0, minHeight: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain', paddingRight: 8, paddingBottom: 28 }}>
-                {activeSection === 'providers' && (
+            <div
+                ref={settingsContentScrollRef}
+                className="gonavi-ai-settings-content"
+                style={{ minWidth: 0, minHeight: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain', padding: '0 6px 24px 22px' }}
+            >
+                {renderSectionPanel('providers', (
                     <AISettingsProvidersSection
                         providers={providers}
                         activeProviderId={activeProviderId}
@@ -816,8 +851,8 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                         onTestProvider={handleTestProvider}
                         onSaveProvider={handleSaveProvider}
                     />
-                )}
-                {activeSection === 'safety' && (
+                ))}
+                {renderSectionPanel('safety', (
                     <AISettingsSafetySection
                         safetyLevel={safetyLevel}
                         darkMode={darkMode}
@@ -826,8 +861,8 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                         cardBorder={cardBorder}
                         onChange={handleSafetyChange}
                     />
-                )}
-                {activeSection === 'context' && (
+                ))}
+                {renderSectionPanel('context', (
                     <AISettingsContextSection
                         contextLevel={contextLevel}
                         openMode={aiChatOpenMode}
@@ -845,8 +880,8 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                             );
                         }}
                     />
-                )}
-                {activeSection === 'mcp' && (
+                ))}
+                {renderSectionPanel('mcp', (
                     <AISettingsMCPSection
                         mcpClientStatuses={mcpClientStatuses}
                         selectedMCPClient={selectedMCPClient}
@@ -879,8 +914,8 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                         onSaveServer={handleSaveMCPServer}
                         onDeleteServer={handleDeleteMCPServer}
                     />
-                )}
-                {activeSection === 'skills' && (
+                ))}
+                {renderSectionPanel('skills', (
                     <AISettingsSkillsSection
                         skills={skills}
                         skillRequiredToolOptions={skillRequiredToolOptions}
@@ -894,16 +929,16 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                         onSaveSkill={handleSaveSkill}
                         onDeleteSkill={handleDeleteSkill}
                     />
-                )}
-                {activeSection === 'tools' && (
+                ))}
+                {renderSectionPanel('tools', (
                     <AIBuiltinToolsCatalog
                         darkMode={darkMode}
                         overlayTheme={overlayTheme}
                         cardBg={cardBg}
                         cardBorder={cardBorder}
                     />
-                )}
-                {activeSection === 'prompts' && (
+                ))}
+                {renderSectionPanel('prompts', (
                     <AISettingsPromptsSection
                         builtinPrompts={builtinPrompts}
                         userPromptSettings={userPromptSettings}
@@ -919,7 +954,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                         }))}
                         onSave={handleSaveUserPromptSettings}
                     />
-                )}
+                ))}
             </div>
         </div>
     );
