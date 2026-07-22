@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import TableOverview from './TableOverview';
 
+const storeSubscribers = vi.hoisted(() => new Set<() => void>());
+
 const storeState = vi.hoisted(() => ({
   theme: 'light',
   appearance: {
@@ -34,6 +36,10 @@ const storeState = vi.hoisted(() => ({
   addAIContext: vi.fn(),
   pinnedSidebarTables: [] as string[],
   setSidebarTablePinned: vi.fn(),
+  queryOptions: {
+    tableOverviewViewMode: undefined,
+  } as { tableOverviewViewMode?: 'card' | 'list' | 'table' },
+  setQueryOptions: vi.fn(),
 }));
 
 const backendApp = vi.hoisted(() => ({
@@ -49,11 +55,21 @@ const messageApi = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
-vi.mock('../store', () => ({
-  useStore: (selector: (state: typeof storeState) => any) => selector(storeState),
-  buildSidebarTablePinKey: (connectionId: string, dbName: string, tableName: string, schemaName: string) =>
-    `${connectionId}:${dbName}:${schemaName}:${tableName}`,
-}));
+vi.mock('../store', async () => {
+  const react = await vi.importActual<typeof import('react')>('react');
+  return {
+    useStore: <T,>(selector: (state: typeof storeState) => T) => react.useSyncExternalStore(
+      (listener) => {
+        storeSubscribers.add(listener);
+        return () => storeSubscribers.delete(listener);
+      },
+      () => selector(storeState),
+      () => selector(storeState),
+    ),
+    buildSidebarTablePinKey: (connectionId: string, dbName: string, tableName: string, schemaName: string) =>
+      `${connectionId}:${dbName}:${schemaName}:${tableName}`,
+  };
+});
 
 vi.mock('../../wailsjs/go/app/App', () => backendApp);
 vi.mock('../utils/autoFetchVisibility', () => ({
@@ -89,6 +105,8 @@ vi.mock('@ant-design/icons', () => {
     AppstoreOutlined: Icon,
     UnorderedListOutlined: Icon,
     WarningOutlined: Icon,
+    CaretUpFilled: Icon,
+    CaretDownFilled: Icon,
   };
 });
 
@@ -141,7 +159,13 @@ const collectText = (node: any): string => {
 describe('TableOverview metadata compatibility', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    storeSubscribers.clear();
     storeState.appearance = { uiVersion: 'legacy', tableDoubleClickAction: 'open-data' };
+    storeState.queryOptions = { tableOverviewViewMode: undefined };
+    storeState.setQueryOptions.mockImplementation((options: { tableOverviewViewMode?: 'card' | 'list' | 'table' }) => {
+      storeState.queryOptions = { ...storeState.queryOptions, ...options };
+      storeSubscribers.forEach((listener) => listener());
+    });
     storeState.connections = [
       {
         id: 'conn-1',
@@ -388,12 +412,8 @@ describe('TableOverview metadata compatibility', () => {
     });
     await flushPromises();
 
-    const viewModeActions = renderer!.root.findAll((node) => (
-      typeof node.props.onClick === 'function' && node.props.style?.padding === '3px 7px'
-    ));
-    expect(viewModeActions.length).toBeGreaterThanOrEqual(2);
     await act(async () => {
-      viewModeActions[1].props.onClick();
+      renderer!.root.findByProps({ 'data-table-overview-view-mode': 'list' }).props.onClick();
     });
 
     const listRow = renderer!.root.findAll((node) => node.props.className === 'gn-v2-table-row')[0];
@@ -413,6 +433,111 @@ describe('TableOverview metadata compatibility', () => {
       type: 'design',
       tableName: 'd001',
     }));
+  });
+
+  it('persists compact view across hosts and sorts numeric headers with unknown values last', async () => {
+    storeState.appearance = { uiVersion: 'v2', tableDoubleClickAction: 'open-data' };
+    storeState.connections = [
+      {
+        id: 'conn-1',
+        config: {
+          type: 'mysql',
+          host: '127.0.0.1',
+          port: 3306,
+          user: 'root',
+          password: 'secret',
+          database: 'app_db',
+          useSSH: false,
+          ssh: { host: '', port: 22, user: '', password: '', keyPath: '' },
+        },
+      },
+      {
+        id: 'conn-2',
+        config: {
+          type: 'mysql',
+          host: '192.0.2.20',
+          port: 3306,
+          user: 'root',
+          password: 'secret',
+          database: 'other_db',
+          useSSH: false,
+          ssh: { host: '', port: 22, user: '', password: '', keyPath: '' },
+        },
+      },
+    ];
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [
+        { TABLE_NAME: 'unknown_stats', TABLE_COMMENT: '', TABLE_ROWS: null, DATA_LENGTH: null, INDEX_LENGTH: null },
+        { TABLE_NAME: 'large_table', TABLE_COMMENT: 'large', TABLE_ROWS: 50, DATA_LENGTH: 500, INDEX_LENGTH: 20, ENGINE: 'InnoDB' },
+        { TABLE_NAME: 'small_table', TABLE_COMMENT: 'small', TABLE_ROWS: 5, DATA_LENGTH: 50, INDEX_LENGTH: 2, ENGINE: 'InnoDB' },
+      ],
+    });
+
+    let renderer: ReactTestRenderer;
+    let otherHostRenderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<TableOverview tab={{
+        id: 'tab-1',
+        title: '表概览 - app_db',
+        type: 'table-overview',
+        connectionId: 'conn-1',
+        dbName: 'app_db',
+      } as any} />);
+      otherHostRenderer = create(<TableOverview tab={{
+        id: 'tab-2',
+        title: '表概览 - other_db',
+        type: 'table-overview',
+        connectionId: 'conn-2',
+        dbName: 'other_db',
+      } as any} />);
+    });
+    await flushPromises();
+
+    await act(async () => {
+      renderer!.root.findByProps({ 'data-table-overview-view-mode': 'table' }).props.onClick();
+    });
+
+    expect(storeState.setQueryOptions).toHaveBeenCalledWith({ tableOverviewViewMode: 'table' });
+
+    expect(renderer!.root.findByProps({ 'data-table-overview-view-mode': 'card' }).props).toMatchObject({
+      type: 'button',
+      'aria-pressed': false,
+    });
+    expect(renderer!.root.findByProps({ 'data-table-overview-view-mode': 'table' }).props).toMatchObject({
+      type: 'button',
+      'aria-pressed': true,
+    });
+    expect(otherHostRenderer!.root.findByProps({ 'data-table-overview-view-mode': 'table' }).props['aria-pressed']).toBe(true);
+    expect(otherHostRenderer!.root.findByProps({ role: 'table' })).toBeTruthy();
+
+    const rowNames = () => renderer!.root
+      .findAll((node) => typeof node.props?.['data-table-overview-row'] === 'string')
+      .map((node) => node.props['data-table-overview-row']);
+
+    expect(rowNames()).toEqual(['large_table', 'small_table', 'unknown_stats']);
+    expect(renderer!.root.findByProps({ role: 'table' })).toBeTruthy();
+    expect(renderer!.root.findAllByProps({ role: 'columnheader' })).toHaveLength(8);
+
+    await act(async () => {
+      renderer!.root.findByProps({ 'data-table-overview-sort': 'rows' }).props.onClick();
+    });
+    expect(rowNames()).toEqual(['large_table', 'small_table', 'unknown_stats']);
+
+    await act(async () => {
+      renderer!.root.findByProps({ 'data-table-overview-sort': 'rows' }).props.onClick();
+    });
+    expect(rowNames()).toEqual(['small_table', 'large_table', 'unknown_stats']);
+
+    storeState.addTab.mockClear();
+    await act(async () => {
+      renderer!.root.findByProps({ 'data-table-overview-row': 'small_table' }).props.onDoubleClick();
+    });
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'table',
+      tableName: 'small_table',
+    }));
+
   });
 
   it('renders comment and temporal metadata in the legacy table list when available', async () => {

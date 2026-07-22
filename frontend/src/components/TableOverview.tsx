@@ -3,8 +3,8 @@ import React, { useState, useEffect, useMemo, useCallback, useDeferredValue, use
 import { createPortal } from 'react-dom';
 import { Input, Spin, Empty, Dropdown, message, Tooltip, Button } from 'antd';
 import type { MenuProps } from 'antd';
-import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined, AppstoreOutlined, UnorderedListOutlined, WarningOutlined } from '@ant-design/icons';
-import { buildSidebarTablePinKey, useStore } from '../store';
+import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined, AppstoreOutlined, UnorderedListOutlined, WarningOutlined, CaretUpFilled, CaretDownFilled } from '@ant-design/icons';
+import { buildSidebarTablePinKey, useStore, type TableOverviewViewMode } from '../store';
 import { DBGetTables, DBQuery, DBShowCreateTable, DropTable, RenameTable } from '../../wailsjs/go/app/App';
 import type { TabData } from '../types';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
@@ -49,7 +49,7 @@ interface TableStatRow {
 
 type SortField = TableOverviewSortField;
 type SortOrder = TableOverviewSortOrder;
-type ViewMode = 'card' | 'list';
+type ViewMode = TableOverviewViewMode;
 type OverviewContextMenuState = {
     tableName: string;
     x: number;
@@ -260,6 +260,8 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const addAIContext = useStore(state => state.addAIContext);
     const pinnedSidebarTables = useStore(state => state.pinnedSidebarTables);
     const setSidebarTablePinned = useStore(state => state.setSidebarTablePinned);
+    const queryOptions = useStore(state => state.queryOptions);
+    const setQueryOptions = useStore(state => state.setQueryOptions);
     const darkMode = theme === 'dark';
     const isV2Ui = appearance.uiVersion === 'v2';
     const tableDoubleClickAction = appearance.tableDoubleClickAction === 'open-design' ? 'open-design' : 'open-data';
@@ -270,7 +272,10 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const [searchText, setSearchText] = useState('');
     const [sortField, setSortField] = useState<SortField>('name');
     const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
-    const [viewMode, setViewMode] = useState<ViewMode>(isV2Ui ? 'card' : 'list');
+    const viewMode: ViewMode = queryOptions.tableOverviewViewMode || (isV2Ui ? 'card' : 'list');
+    const setViewMode = useCallback((nextViewMode: ViewMode) => {
+        setQueryOptions({ tableOverviewViewMode: nextViewMode });
+    }, [setQueryOptions]);
     const [v2ContextMenu, setV2ContextMenu] = useState<OverviewContextMenuState | null>(null);
     const v2ContextMenuPortalRef = useRef<HTMLDivElement | null>(null);
     const [visibleTableLimit, setVisibleTableLimit] = useState(TABLE_OVERVIEW_RENDER_BATCH_SIZE);
@@ -820,7 +825,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             setSortOrder(o => o === 'asc' ? 'desc' : 'asc');
         } else {
             setSortField(field);
-            setSortOrder(field === 'name' ? 'asc' : 'desc');
+            setSortOrder(field === 'name' || field === 'comment' || field === 'engine' ? 'asc' : 'desc');
         }
     };
 
@@ -831,8 +836,13 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
 
     const sortMenuItems = [
         { key: 'name', label: getSortMenuLabel('name', 'table_overview.sort.name'), onClick: () => toggleSort('name') },
+        { key: 'comment', label: getSortMenuLabel('comment', 'table_overview.metric.comment'), onClick: () => toggleSort('comment') },
         { key: 'rows', label: getSortMenuLabel('rows', 'table_overview.sort.rows'), onClick: () => toggleSort('rows') },
         { key: 'dataSize', label: getSortMenuLabel('dataSize', 'table_overview.sort.size'), onClick: () => toggleSort('dataSize') },
+        { key: 'indexSize', label: getSortMenuLabel('indexSize', 'table_overview.metric.index_size'), onClick: () => toggleSort('indexSize') },
+        { key: 'engine', label: getSortMenuLabel('engine', 'table_overview.metric.engine'), onClick: () => toggleSort('engine') },
+        { key: 'updateTime', label: getSortMenuLabel('updateTime', 'table_overview.metric.updated_at'), onClick: () => toggleSort('updateTime') },
+        { key: 'createTime', label: getSortMenuLabel('createTime', 'table_overview.metric.created_at'), onClick: () => toggleSort('createTime') },
     ];
 
     const hasKnownTableSize = useCallback((table: TableStatRow) => table.dataSize >= 0 || table.indexSize >= 0, []);
@@ -1282,23 +1292,140 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         );
     };
 
+    const renderCompactSortHeader = (
+        field: SortField,
+        labelKey: string,
+        align: 'left' | 'right' = 'left',
+    ) => {
+        const active = sortField === field;
+        return (
+            <button
+                type="button"
+                className="gn-table-overview-compact-sort-button"
+                data-table-overview-sort={field}
+                aria-pressed={active}
+                onClick={() => toggleSort(field)}
+                style={{
+                    width: '100%',
+                    minWidth: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: align === 'right' ? 'flex-end' : 'flex-start',
+                    gap: 5,
+                    padding: '0 10px',
+                    border: 0,
+                    background: 'transparent',
+                    color: active ? accentColor : textSecondary,
+                    cursor: 'pointer',
+                    font: 'inherit',
+                    fontWeight: active ? 700 : 600,
+                    textAlign: align,
+                }}
+            >
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {t(labelKey)}
+                </span>
+                {active && (sortOrder === 'asc'
+                    ? <CaretUpFilled aria-hidden="true" />
+                    : <CaretDownFilled aria-hidden="true" />)}
+            </button>
+        );
+    };
+
+    const renderCompactTableHeader = () => (
+        <div className="gn-table-overview-compact-header" role="row">
+            <div role="columnheader" aria-sort={sortField === 'name' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                {renderCompactSortHeader('name', 'table_overview.sort.name')}
+            </div>
+            <div role="columnheader" aria-sort={sortField === 'comment' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                {renderCompactSortHeader('comment', 'table_overview.metric.comment')}
+            </div>
+            <div role="columnheader" aria-sort={sortField === 'rows' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                {renderCompactSortHeader('rows', 'table_overview.sort.rows', 'right')}
+            </div>
+            <div role="columnheader" aria-sort={sortField === 'dataSize' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                {renderCompactSortHeader('dataSize', 'table_overview.metric.data_size', 'right')}
+            </div>
+            <div role="columnheader" aria-sort={sortField === 'indexSize' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                {renderCompactSortHeader('indexSize', 'table_overview.metric.index_size', 'right')}
+            </div>
+            <div role="columnheader" aria-sort={sortField === 'engine' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                {renderCompactSortHeader('engine', 'table_overview.metric.engine')}
+            </div>
+            <div role="columnheader" aria-sort={sortField === 'updateTime' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                {renderCompactSortHeader('updateTime', 'table_overview.metric.updated_at')}
+            </div>
+            <div role="columnheader" aria-sort={sortField === 'createTime' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                {renderCompactSortHeader('createTime', 'table_overview.metric.created_at')}
+            </div>
+        </div>
+    );
+
+    const renderCompactTableRow = (table: TableStatRow) => {
+        const content = (
+            <div
+                className="gn-table-overview-compact-row"
+                role="row"
+                data-table-overview-row={table.name}
+                onDoubleClick={() => openTableByDefaultAction(table.name)}
+                onContextMenu={isV2Ui ? (event) => openV2OverviewContextMenu(event, table) : undefined}
+                style={{
+                    display: 'grid',
+                    alignItems: 'center',
+                    minWidth: 1120,
+                    minHeight: 32,
+                    borderBottom: `1px solid ${cardBorder}`,
+                    background: cardBg,
+                    color: textPrimary,
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                }}
+            >
+                <div className="gn-table-overview-compact-name" role="cell" title={table.name}>
+                    <TableOutlined aria-hidden="true" />
+                    <span>{table.name}</span>
+                </div>
+                <div className="gn-table-overview-compact-cell" role="cell" title={table.comment || undefined}>{table.comment || '—'}</div>
+                <div className="gn-table-overview-compact-cell gn-table-overview-compact-number" role="cell" title={table.rows >= 0 ? String(table.rows) : undefined}>{formatRows(table.rows)}</div>
+                <div className="gn-table-overview-compact-cell gn-table-overview-compact-number" role="cell" title={table.dataSize >= 0 ? String(table.dataSize) : undefined}>{formatSize(table.dataSize)}</div>
+                <div className="gn-table-overview-compact-cell gn-table-overview-compact-number" role="cell" title={table.indexSize >= 0 ? String(table.indexSize) : undefined}>{formatSize(table.indexSize)}</div>
+                <div className="gn-table-overview-compact-cell" role="cell" title={table.engine || undefined}>{table.engine || '—'}</div>
+                <div className="gn-table-overview-compact-cell" role="cell" title={table.updateTime || undefined}>{table.updateTime || '—'}</div>
+                <div className="gn-table-overview-compact-cell" role="cell" title={table.createTime || undefined}>{table.createTime || '—'}</div>
+            </div>
+        );
+
+        if (isV2Ui) {
+            return <React.Fragment key={table.name}>{content}</React.Fragment>;
+        }
+        return (
+            <Dropdown
+                key={table.name}
+                trigger={['contextMenu']}
+                menu={{ items: buildLegacyTableContextMenuItems(table) }}
+            >
+                {content}
+            </Dropdown>
+        );
+    };
+
     if (loading) {
         return (
-            <div className={isV2Ui ? 'gn-v2-table-overview gn-v2-table-overview-loading' : undefined} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: containerBg }}>
+            <div className={isV2Ui ? 'gn-table-overview gn-v2-table-overview gn-v2-table-overview-loading' : 'gn-table-overview'} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: containerBg }}>
                 <Spin size="large" tip={t('table_overview.status.loading_tables')} />
             </div>
         );
     }
 
     return (
-        <div className={isV2Ui ? 'gn-v2-table-overview' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%', background: containerBg, overflow: 'hidden' }}>
+        <div className={isV2Ui ? 'gn-table-overview gn-v2-table-overview' : 'gn-table-overview'} style={{ display: 'flex', flexDirection: 'column', height: '100%', background: containerBg, overflow: 'hidden' }}>
             {/* Toolbar */}
-            <div className={isV2Ui ? 'gn-v2-table-overview-header' : undefined} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', flexShrink: 0 }}>
+            <div className={isV2Ui ? 'gn-table-overview-header gn-v2-table-overview-header' : 'gn-table-overview-header'} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', flexShrink: 0 }}>
                 <span className={isV2Ui ? 'gn-v2-table-overview-icon' : undefined}>
                     <DatabaseOutlined style={{ fontSize: 16, color: isV2Ui ? undefined : accentColor }} />
                 </span>
                 <span className={isV2Ui ? 'gn-v2-table-overview-title' : undefined} style={{ fontSize: 14, fontWeight: 600, color: textPrimary }}>{tab.dbName}</span>
-                <span className={isV2Ui ? 'gn-v2-table-overview-summary' : undefined} style={{ fontSize: 12, color: textMuted }}>
+                <span className={isV2Ui ? 'gn-table-overview-summary gn-v2-table-overview-summary' : 'gn-table-overview-summary'} style={{ fontSize: 12, color: textMuted }}>
                     {renderToolbarSummary()}
                 </span>
                 <div style={{ flex: 1 }} />
@@ -1317,37 +1444,75 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 </Dropdown>
                 <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 6, background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }}>
                     <Tooltip title={t('table_overview.tooltip.card_view')}>
-                        <div
+                        <button
+                            type="button"
+                            data-table-overview-view-mode="card"
+                            aria-label={t('table_overview.tooltip.card_view')}
+                            aria-pressed={viewMode === 'card'}
                             onClick={() => setViewMode('card')}
                             style={{
-                                padding: '3px 7px', borderRadius: 5, cursor: 'pointer', transition: 'all 0.15s',
+                                width: 28, height: 24, padding: 0, border: 0, borderRadius: 5, cursor: 'pointer', transition: 'all 0.15s',
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', font: 'inherit',
                                 background: viewMode === 'card' ? (darkMode ? 'rgba(255,255,255,0.12)' : '#fff') : 'transparent',
                                 boxShadow: viewMode === 'card' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
                                 color: viewMode === 'card' ? accentColor : textMuted,
                             }}
                         >
                             <AppstoreOutlined style={{ fontSize: 14 }} />
-                        </div>
+                        </button>
                     </Tooltip>
                     <Tooltip title={t('table_overview.tooltip.list_view')}>
-                        <div
+                        <button
+                            type="button"
+                            data-table-overview-view-mode="list"
+                            aria-label={t('table_overview.tooltip.list_view')}
+                            aria-pressed={viewMode === 'list'}
                             onClick={() => setViewMode('list')}
                             style={{
-                                padding: '3px 7px', borderRadius: 5, cursor: 'pointer', transition: 'all 0.15s',
+                                width: 28, height: 24, padding: 0, border: 0, borderRadius: 5, cursor: 'pointer', transition: 'all 0.15s',
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', font: 'inherit',
                                 background: viewMode === 'list' ? (darkMode ? 'rgba(255,255,255,0.12)' : '#fff') : 'transparent',
                                 boxShadow: viewMode === 'list' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
                                 color: viewMode === 'list' ? accentColor : textMuted,
                             }}
                         >
                             <UnorderedListOutlined style={{ fontSize: 14 }} />
-                        </div>
+                        </button>
+                    </Tooltip>
+                    <Tooltip title={t('table_overview.tooltip.table_view')}>
+                        <button
+                            type="button"
+                            data-table-overview-view-mode="table"
+                            aria-label={t('table_overview.tooltip.table_view')}
+                            aria-pressed={viewMode === 'table'}
+                            onClick={() => setViewMode('table')}
+                            style={{
+                                width: 28, height: 24, padding: 0, border: 0, borderRadius: 5, cursor: 'pointer', transition: 'all 0.15s',
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', font: 'inherit',
+                                background: viewMode === 'table' ? (darkMode ? 'rgba(255,255,255,0.12)' : '#fff') : 'transparent',
+                                boxShadow: viewMode === 'table' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                color: viewMode === 'table' ? accentColor : textMuted,
+                            }}
+                        >
+                            <TableOutlined style={{ fontSize: 14 }} />
+                        </button>
                     </Tooltip>
                 </div>
                 <Tooltip title={t('table_overview.tooltip.refresh')}><ReloadOutlined onClick={loadData} style={{ fontSize: 16, color: textSecondary, cursor: 'pointer' }} /></Tooltip>
             </div>
 
             {/* Content Area */}
-            <div className={isV2Ui ? 'gn-v2-table-overview-content' : undefined} style={{ flex: 1, overflow: 'auto', padding: '0 16px 16px 16px' }}>
+            <div
+                className={isV2Ui ? 'gn-v2-table-overview-content' : undefined}
+                style={{
+                    flex: 1,
+                    minHeight: 0,
+                    overflow: viewMode === 'table' ? 'hidden' : 'auto',
+                    padding: '0 16px 16px 16px',
+                    display: viewMode === 'table' ? 'flex' : undefined,
+                    flexDirection: viewMode === 'table' ? 'column' : undefined,
+                }}
+            >
                 {sortedFiltered.length > 0 && (isSearchPending || visibleOverview.hiddenCount > 0 || deferredSearchText.trim()) && (
                     <div
                         style={{
@@ -1379,6 +1544,25 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 {sortedFiltered.length === 0 ? (
                     <Empty description={searchText ? t('table_overview.empty.no_matches') : t('table_overview.empty.no_tables')} style={{ marginTop: 80 }} />
                 ) : (
+                    viewMode === 'table' ? (
+                        <div
+                            className="gn-table-overview-compact-scroll"
+                            role="table"
+                            aria-label={t('table_overview.tooltip.table_view')}
+                        >
+                            {renderCompactTableHeader()}
+                            {visibleTableSections.map((section) => (
+                                <React.Fragment key={section.key}>
+                                    {pinnedOverview.pinnedRows.length > 0 && (
+                                        <div className="gn-table-overview-compact-section">
+                                            {renderOverviewSectionTitle(section)}
+                                        </div>
+                                    )}
+                                    {section.rows.map(renderCompactTableRow)}
+                                </React.Fragment>
+                            ))}
+                        </div>
+                    ) : (
                     <div className={isV2Ui ? 'gn-v2-table-overview-sections' : undefined}>
                         {visibleTableSections.map((section) => (
                             <section key={section.key} className={isV2Ui ? 'gn-v2-table-overview-section' : undefined}>
@@ -1399,6 +1583,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                             </section>
                         ))}
                     </div>
+                    )
                 )}
                 {sortedFiltered.length > 0 && visibleOverview.hiddenCount > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0 4px' }}>

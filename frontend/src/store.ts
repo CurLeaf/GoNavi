@@ -1689,9 +1689,12 @@ export interface RecentSQLFile {
   openedAt: number;
 }
 
+export type TableOverviewViewMode = "card" | "list" | "table";
+
 export interface QueryOptions {
   maxRows: number;
   wordWrap: boolean;
+  tableOverviewViewMode?: TableOverviewViewMode;
   showColumnComment: boolean;
   showSidebarTableComment?: boolean;
   sidebarTableMetadataFields?: SidebarTableMetadataField[];
@@ -2740,6 +2743,12 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
       : {};
   const maxRows = Number(raw.maxRows);
   const wordWrap = raw.wordWrap === true;
+  const tableOverviewViewMode =
+    raw.tableOverviewViewMode === "card" ||
+    raw.tableOverviewViewMode === "list" ||
+    raw.tableOverviewViewMode === "table"
+      ? raw.tableOverviewViewMode
+      : undefined;
   const showColumnComment =
     typeof raw.showColumnComment === "boolean" ? raw.showColumnComment : true;
   const showSidebarTableComment =
@@ -2768,6 +2777,7 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
     return {
       maxRows: 5000,
       wordWrap,
+      tableOverviewViewMode,
       showColumnComment,
       showSidebarTableComment: derivedShowSidebarTableComment,
       sidebarTableMetadataFields: orderedSidebarTableMetadataFields,
@@ -2780,6 +2790,7 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
   return {
     maxRows: Math.min(50000, Math.trunc(maxRows)),
     wordWrap,
+    tableOverviewViewMode,
     showColumnComment,
     showSidebarTableComment: derivedShowSidebarTableComment,
     sidebarTableMetadataFields: orderedSidebarTableMetadataFields,

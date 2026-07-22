@@ -233,6 +233,29 @@ describe('store appearance persistence', () => {
     expect(reloaded.useStore.getState().queryOptions.wordWrap).toBe(true);
   });
 
+  it('persists the table overview view mode across store reloads', async () => {
+    const { useStore } = await importStore();
+    expect(useStore.getState().queryOptions.tableOverviewViewMode).toBeUndefined();
+
+    useStore.getState().setQueryOptions({ tableOverviewViewMode: 'table' });
+    expect(useStore.getState().queryOptions.tableOverviewViewMode).toBe('table');
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.queryOptions.tableOverviewViewMode).toBe('table');
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().queryOptions.tableOverviewViewMode).toBe('table');
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: { queryOptions: { tableOverviewViewMode: 'invalid' } },
+      version: 18,
+    }));
+    vi.resetModules();
+    const sanitized = await importStore();
+    expect(sanitized.useStore.getState().queryOptions.tableOverviewViewMode).toBeUndefined();
+  });
+
   it('restores query tabs from crash-recovery snapshots even when persisted tabs are missing', async () => {
     storage.setItem('gonavi-query-tab-drafts-v1', JSON.stringify([
       {
