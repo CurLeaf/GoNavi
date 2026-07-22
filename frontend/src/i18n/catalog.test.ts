@@ -69,13 +69,14 @@ const readRowLocatorSource = (): string =>
   readFileSync(new URL("../utils/rowLocator.ts", import.meta.url), "utf8");
 
 const sliceBetween = (source: string, start: string, end: string): string => {
-  const startIndex = source.indexOf(start);
-  const endIndex = source.indexOf(end, startIndex + start.length);
+  const normalizedSource = source.replace(/\r\n/g, "\n");
+  const startIndex = normalizedSource.indexOf(start);
+  const endIndex = normalizedSource.indexOf(end, startIndex + start.length);
 
   expect(startIndex).toBeGreaterThanOrEqual(0);
   expect(endIndex).toBeGreaterThan(startIndex);
 
-  return source.slice(startIndex, endIndex);
+  return normalizedSource.slice(startIndex, endIndex);
 };
 
 const assertSourceDoesNotInlineCatalogValues = (
@@ -85,6 +86,7 @@ const assertSourceDoesNotInlineCatalogValues = (
     ignoreEnglishBaseline?: boolean;
   },
 ): void => {
+  const executableSource = source.replace(/\/\*[\s\S]*?\*\//g, "");
   for (const language of SUPPORTED_LANGUAGES) {
     for (const key of keys) {
       const value = catalogs[language][key];
@@ -95,7 +97,7 @@ const assertSourceDoesNotInlineCatalogValues = (
       if (options?.ignoreEnglishBaseline && value === catalogs["en-US"][key]) {
         continue;
       }
-      if (source.includes(value)) {
+      if (executableSource.includes(value)) {
         throw new Error(`catalog literal leaked into source: ${language} ${key}`);
       }
     }
@@ -1011,7 +1013,7 @@ describe("i18n catalog", () => {
     const formatMenuSource = sliceBetween(
       source,
       "const formatSettingsMenu: MenuProps['items'] = [",
-      "const splitSQLStatements = (sql: string): string[] => {",
+      "const splitSQLStatements = (",
     );
 
     for (const language of SUPPORTED_LANGUAGES) {
@@ -1743,7 +1745,7 @@ describe("i18n catalog", () => {
     const databaseQualifiedTableDetailSource = sliceBetween(
       databaseQualifiedTableCompletionSource,
       "                          detail: appendCommentToDetail(",
-      "                          documentation: buildCompletionDocumentation(t.comment),",
+      "                          documentation: buildCompletionDocumentation(table.comment),",
     );
 
     for (const language of SUPPORTED_LANGUAGES) {
@@ -1773,7 +1775,7 @@ describe("i18n catalog", () => {
     const schemaQualifiedTableDetailSource = sliceBetween(
       schemaQualifiedTableCompletionSource,
       "                          detail: appendCommentToDetail(",
-      "                          documentation: buildCompletionDocumentation(t.comment),",
+      "                          documentation: buildCompletionDocumentation(table.comment),",
     );
 
     for (const language of SUPPORTED_LANGUAGES) {
@@ -1797,13 +1799,13 @@ describe("i18n catalog", () => {
     const source = readQueryEditorSource();
     const globalCrossDbTableCompletionSource = sliceBetween(
       source,
-      "                  if (!isCurrentDb) {",
-      "                  // 当前库：检查是否有跨 schema 同名表",
+      "              // 表提示：当前库智能处理 schema.table 格式",
+      "                      const hasDuplicate = (",
     );
     const globalCrossDbTableDetailSource = sliceBetween(
       globalCrossDbTableCompletionSource,
-      "                          detail: appendCommentToDetail(",
-      "                          documentation: buildCompletionDocumentation(t.comment),",
+      "                              detail: appendCommentToDetail(",
+      "                              documentation: buildCompletionDocumentation(table.comment),",
     );
 
     for (const language of SUPPORTED_LANGUAGES) {
@@ -1827,13 +1829,13 @@ describe("i18n catalog", () => {
     const source = readQueryEditorSource();
     const currentDbTableCompletionSource = sliceBetween(
       source,
-      "                  // 当前库：检查是否有跨 schema 同名表",
-      "              });",
+      "                      const hasDuplicate = (",
+      "              const buildGlobalViewBatch =",
     );
     const currentDbTableDetailSource = sliceBetween(
       currentDbTableCompletionSource,
       "                      detail: appendCommentToDetail(",
-      "                      documentation: buildCompletionDocumentation(t.comment),",
+      "                      documentation: buildCompletionDocumentation(table.comment),",
     );
 
     for (const language of SUPPORTED_LANGUAGES) {
