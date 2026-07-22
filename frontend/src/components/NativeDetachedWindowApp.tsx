@@ -25,8 +25,8 @@ import {
   fetchNativeDetachedWindowBootstrap,
   hydrateNativeDetachedStore,
   hideCurrentNativeDetachedWindow,
+  hideCurrentNativeDetachedWindowForAISettings,
   hideNativeDetachedWindow,
-  openNativeDetachedAISettings,
   presentCurrentNativeDetachedWindow,
   readyNativeDetachedWindow,
   sendNativeDetachedHostEvent,
@@ -65,6 +65,7 @@ const NativeDetachedWindowController = React.lazy(
 
 export const NATIVE_DETACHED_SYNC_DEBOUNCE_MS = 180;
 export const NATIVE_DETACHED_PAINT_FALLBACK_MS = 250;
+const NATIVE_DETACHED_CANCEL_CLOSE_ATTEMPTS = 2;
 
 export const waitForNativeDetachedContentPaint = (): Promise<void> => {
   if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
@@ -95,7 +96,7 @@ type NativeDetachedWindowClient = {
   hide?: (payload: NativeDetachedWindowActionPayload) => Promise<number>;
   close: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
   cancelCloseRequest?: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
-  openAISettings: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
+  openAISettings: (visibilityRevision: number) => Promise<void>;
   hostEvent?: (payload: NativeDetachedWindowActionPayload) => Promise<void>;
   closeCurrentWindow: () => Promise<void>;
   hideCurrentWindow?: (visibilityRevision: number) => Promise<void>;
@@ -111,7 +112,7 @@ const defaultClient: NativeDetachedWindowClient = {
   hide: hideNativeDetachedWindow,
   close: closeNativeDetachedWindow,
   cancelCloseRequest: cancelNativeDetachedWindowClose,
-  openAISettings: openNativeDetachedAISettings,
+  openAISettings: hideCurrentNativeDetachedWindowForAISettings,
   hostEvent: sendNativeDetachedHostEvent,
   closeCurrentWindow: closeCurrentNativeDetachedWindow,
   hideCurrentWindow: hideCurrentNativeDetachedWindow,
@@ -314,11 +315,17 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
   const [controllerEnabled, setControllerEnabled] = useState(false);
   const markContentReady = useCallback(() => setContentReady(true), []);
   const [terminalAction, setTerminalAction] = useState<'attach' | 'hide' | 'close' | null>(null);
+  const [terminalCloseRecoveryAvailable, setTerminalCloseRecoveryAvailable] = useState(false);
+  const [terminalCloseRecoveryPending, setTerminalCloseRecoveryPending] = useState(false);
   const terminalActionStartedRef = useRef(false);
   const terminalActionRequestedRef = useRef(false);
+  const terminalActionGenerationRef = useRef(0);
+  const terminalCloseRecoveryPendingRef = useRef(false);
+  const openAISettingsAfterHideRef = useRef(false);
   const activeTerminalActionRef = useRef<'attach' | 'hide' | 'close' | null>(null);
   const closePreemptionRequestedRef = useRef(false);
   const hideVisibilityRevisionRef = useRef(0);
+  const lastFocusVisibilityRevisionRef = useRef(0);
   const aiTerminalGuardRef = useRef<(() => Promise<boolean>) | null>(null);
   const resultSessionRef = useRef<QueryEditorResultSessionSnapshot | null>(null);
   const queryResultWindowRef = useRef<DetachedQueryResultWindow | null>(null);
@@ -378,6 +385,10 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
     void client.load()
       .then((nextBootstrap) => {
         if (!active) return;
+        const bootstrapActionRevision = Math.trunc(Number(nextBootstrap.actionRevision));
+        actionRevisionRef.current = Number.isFinite(bootstrapActionRevision) && bootstrapActionRevision > 0
+          ? bootstrapActionRevision
+          : 0;
         setContentReady(false);
         setControllerEnabled(false);
         hydrateNativeDetachedStore(useStore, nextBootstrap.payload.storeState);
@@ -419,6 +430,43 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
     return EventsOn(
       NATIVE_DETACHED_WINDOW_COMMAND_EVENT,
       (command: NativeDetachedHostStateCommand) => {
+        const isCurrentAIWindow = bootstrap.kind === 'ai-chat'
+          && String(command?.id || '') === bootstrap.id;
+        const visibilityRevision = Math.trunc(Number(command?.payload?.visibilityRevision));
+        if (isCurrentAIWindow && Number.isFinite(visibilityRevision) && visibilityRevision > 0) {
+          if (
+            command.action === 'hide'
+            && visibilityRevision > lastFocusVisibilityRevisionRef.current
+          ) {
+            hideVisibilityRevisionRef.current = Math.max(
+              hideVisibilityRevisionRef.current,
+              visibilityRevision,
+            );
+          } else if (
+            command.action === 'focus'
+            && visibilityRevision > lastFocusVisibilityRevisionRef.current
+          ) {
+            lastFocusVisibilityRevisionRef.current = visibilityRevision;
+            if (
+              activeTerminalActionRef.current !== 'attach'
+              && activeTerminalActionRef.current !== 'close'
+              && !closePreemptionRequestedRef.current
+              && visibilityRevision > hideVisibilityRevisionRef.current
+            ) {
+              // WindowHide can suspend the WebView before React commits the
+              // terminal-action cleanup. A newer native focus is the resume
+              // boundary, so invalidate the old hide and unlock the live tree.
+              terminalActionGenerationRef.current += 1;
+              terminalActionStartedRef.current = false;
+              terminalActionRequestedRef.current = false;
+              activeTerminalActionRef.current = null;
+              openAISettingsAfterHideRef.current = false;
+              hideVisibilityRevisionRef.current = 0;
+              setTerminalCloseRecoveryAvailable(false);
+              setTerminalAction((current) => current === 'hide' ? null : current);
+            }
+          }
+        }
         hostStateRevisionRef.current = applyNativeDetachedHostStateCommand(
           useStore,
           bootstrap.id,
@@ -479,6 +527,7 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
       if (!isShortcutMatch(event, binding.combo)) return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      if (event.repeat) return;
       hostEventSequenceRef.current += 1;
       void client.hostEvent?.({
         id: bootstrap.id,
@@ -712,17 +761,39 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
     visibilityRevision = 0,
   ) => {
     if (!bootstrap) return;
+    if (action !== 'hide') openAISettingsAfterHideRef.current = false;
+    const normalizedVisibilityRevision = Math.trunc(Number(visibilityRevision));
+    if (
+      action === 'hide'
+      && Number.isFinite(normalizedVisibilityRevision)
+      && normalizedVisibilityRevision > 0
+      && normalizedVisibilityRevision <= lastFocusVisibilityRevisionRef.current
+    ) {
+      return;
+    }
     if (terminalActionRequestedRef.current) {
+      if (
+        action === 'hide'
+        && activeTerminalActionRef.current === 'hide'
+        && Number.isFinite(normalizedVisibilityRevision)
+        && normalizedVisibilityRevision > 0
+      ) {
+        hideVisibilityRevisionRef.current = Math.max(
+          hideVisibilityRevisionRef.current,
+          normalizedVisibilityRevision,
+        );
+      }
       if (action === 'close' && activeTerminalActionRef.current === 'hide') {
         closePreemptionRequestedRef.current = true;
       }
       return;
     }
     if (action === 'hide' && bootstrap.kind !== 'ai-chat') return;
+    terminalActionGenerationRef.current += 1;
+    setTerminalCloseRecoveryAvailable(false);
     terminalActionRequestedRef.current = true;
     activeTerminalActionRef.current = action;
     closePreemptionRequestedRef.current = false;
-    const normalizedVisibilityRevision = Math.trunc(Number(visibilityRevision));
     hideVisibilityRevisionRef.current = action === 'hide'
       && Number.isFinite(normalizedVisibilityRevision)
       && normalizedVisibilityRevision > 0
@@ -737,11 +808,14 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
   }, [bootstrap]);
 
   const requestOpenAISettings = useCallback(() => {
-    if (!bootstrap || bootstrap.kind !== 'ai-chat') return;
-    void client.openAISettings({ id: bootstrap.id, kind: bootstrap.kind }).catch((error) => {
-      console.error('[Native Detached Window] Failed to open AI settings', error);
-    });
-  }, [bootstrap, client]);
+    if (
+      !bootstrap
+      || bootstrap.kind !== 'ai-chat'
+      || terminalActionRequestedRef.current
+    ) return;
+    openAISettingsAfterHideRef.current = true;
+    requestTerminalAction('hide');
+  }, [bootstrap, requestTerminalAction]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -775,11 +849,17 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
       !bootstrap
       || !terminalAction
       || terminalActionStartedRef.current
+      || !terminalActionRequestedRef.current
+      || activeTerminalActionRef.current !== terminalAction
       || (bootstrap.kind !== 'ai-chat' && contentMounted)
     ) {
       return;
     }
     terminalActionStartedRef.current = true;
+    const terminalActionGeneration = terminalActionGenerationRef.current;
+    const isCurrentTerminalAction = () => (
+      terminalActionGenerationRef.current === terminalActionGeneration
+    );
 
     // Workbench content has unmounted before this effect runs, so QueryEditor
     // has published its final result session to the cache.
@@ -807,14 +887,92 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
         closeActionSubmitted = true;
         actionToRun = 'close';
       };
+      const rollbackTerminalAction = async () => {
+        setTerminalCloseRecoveryAvailable(false);
+        let parentCancelError: unknown;
+        let parentCancelSucceeded = !client.cancelCloseRequest;
+        for (
+          let attempt = 0;
+          client.cancelCloseRequest && attempt < NATIVE_DETACHED_CANCEL_CLOSE_ATTEMPTS;
+          attempt += 1
+        ) {
+          const cancelWorkbench = readWorkbenchSyncData();
+          const cancelPayload = {
+            ...buildActionPayload(
+              bootstrap,
+              readCurrentTab(),
+              currentSession,
+              false,
+              readUnsyncedSqlLogs(),
+              nextActionRevision(),
+              cancelWorkbench.workbenchState,
+              cancelWorkbench.workbenchStateBase,
+              cancelWorkbench.openedTabs,
+              sqlLogsClearPendingRef.current,
+              queryResultWindowRef.current,
+            ),
+            rollbackAction: actionToRun,
+          } satisfies NativeDetachedWindowActionPayload;
+          try {
+            await client.cancelCloseRequest(cancelPayload);
+            parentCancelSucceeded = true;
+            break;
+          } catch (error) {
+            parentCancelError = error;
+          }
+        }
+        if (!parentCancelSucceeded) {
+          console.error(
+            '[Native Detached Window] Failed to cancel parent close fallback',
+            parentCancelError,
+          );
+        }
+        if (!isCurrentTerminalAction()) return;
+        let localCancelError: unknown;
+        let localCancelSucceeded = false;
+        try {
+          await client.cancelClose?.();
+          localCancelSucceeded = true;
+        } catch (error) {
+          localCancelError = error;
+          console.error(
+            '[Native Detached Window] Failed to cancel local close fallback',
+            localCancelError,
+          );
+        }
+        if (!isCurrentTerminalAction()) return;
+        if (!parentCancelSucceeded || !localCancelSucceeded) {
+          try {
+            await client.closeCurrentWindow();
+          } catch (convergenceError) {
+            console.error(
+              '[Native Detached Window] Failed to converge after close rollback',
+              convergenceError,
+            );
+            setTerminalCloseRecoveryAvailable(true);
+          }
+          return;
+        }
+        terminalActionStartedRef.current = false;
+        terminalActionRequestedRef.current = false;
+        activeTerminalActionRef.current = null;
+        closePreemptionRequestedRef.current = false;
+        hideVisibilityRevisionRef.current = 0;
+        setTerminalCloseRecoveryAvailable(false);
+        setTerminalAction(null);
+        setContentMounted(true);
+      };
       try {
         await actionQueueRef.current;
+        if (!isCurrentTerminalAction()) return;
         if (bootstrap.kind === 'ai-chat') {
           const canTerminate = await aiTerminalGuardRef.current?.();
+          if (!isCurrentTerminalAction()) return;
           if (canTerminate === false) {
             throw new Error('AI stream did not stop before the detached window handoff');
           }
           await flushAIChatSessionPersistence();
+          if (!isCurrentTerminalAction()) return;
         }
         actionToRun = closePreemptionRequestedRef.current ? 'close' : terminalAction;
         if (actionToRun === 'attach' && bootstrap.kind === 'workbench') {
@@ -870,17 +1028,26 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
           let visibilityRevision = hideVisibilityRevisionRef.current;
           if (visibilityRevision > 0) {
             await client.sync(payload);
+            if (!isCurrentTerminalAction()) return;
           } else {
             if (!client.hide) throw new Error('Native detached hide action is unavailable');
             visibilityRevision = await client.hide(payload);
+            if (!isCurrentTerminalAction()) return;
+            hideVisibilityRevisionRef.current = Math.max(
+              hideVisibilityRevisionRef.current,
+              visibilityRevision,
+            );
           }
           if (closePreemptionRequestedRef.current) {
             await submitPreemptingClose();
+          } else if (openAISettingsAfterHideRef.current) {
+            await client.openAISettings(visibilityRevision);
           } else {
             if (!client.hideCurrentWindow) {
               throw new Error('Native detached hide control is unavailable');
             }
             await client.hideCurrentWindow(visibilityRevision);
+            if (!isCurrentTerminalAction()) return;
             if (closePreemptionRequestedRef.current) {
               await submitPreemptingClose();
             }
@@ -890,6 +1057,7 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
           closeActionSubmitted = true;
         }
       } catch (error) {
+        if (!isCurrentTerminalAction()) return;
         console.error(`[Native Detached Window] Failed to ${actionToRun}`, error);
         if (closePreemptionRequestedRef.current && !closeActionSubmitted) {
           try {
@@ -898,12 +1066,18 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
             console.error('[Native Detached Window] Failed to continue with requested close', closeError);
           }
         }
-        if (actionToRun === 'hide' && !closeActionSubmitted) {
+        if (
+          actionToRun === 'hide'
+          && !closeActionSubmitted
+          && !openAISettingsAfterHideRef.current
+        ) {
           const visibilityRevision = hideVisibilityRevisionRef.current;
           if (visibilityRevision > 0) {
             try {
               await client.hideCurrentWindow?.(visibilityRevision);
+              if (!isCurrentTerminalAction()) return;
             } catch (localHideError) {
+              if (!isCurrentTerminalAction()) return;
               console.error('[Native Detached Window] Failed to apply requested hide', localHideError);
             }
           }
@@ -915,61 +1089,32 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
             }
           }
         }
+        if (!isCurrentTerminalAction()) return;
         if (actionToRun === 'hide' && !closeActionSubmitted) {
+          openAISettingsAfterHideRef.current = false;
           terminalActionStartedRef.current = false;
           terminalActionRequestedRef.current = false;
           activeTerminalActionRef.current = null;
           closePreemptionRequestedRef.current = false;
           hideVisibilityRevisionRef.current = 0;
+          setTerminalCloseRecoveryAvailable(false);
           setTerminalAction(null);
           return;
         }
         if (!closeActionSubmitted) {
-          const cancelWorkbench = readWorkbenchSyncData();
-          const cancelPayload = buildActionPayload(
-            bootstrap,
-            readCurrentTab(),
-            currentSession,
-            false,
-            readUnsyncedSqlLogs(),
-            nextActionRevision(),
-            cancelWorkbench.workbenchState,
-            cancelWorkbench.workbenchStateBase,
-            cancelWorkbench.openedTabs,
-            sqlLogsClearPendingRef.current,
-            queryResultWindowRef.current,
-          );
-          try {
-            await client.cancelCloseRequest?.(cancelPayload);
-          } catch (parentCancelError) {
-            console.error(
-              '[Native Detached Window] Failed to cancel parent close fallback',
-              parentCancelError,
-            );
-          }
-          try {
-            await client.cancelClose?.();
-          } catch (localCancelError) {
-            console.error(
-              '[Native Detached Window] Failed to cancel local close fallback',
-              localCancelError,
-            );
-          }
-          terminalActionStartedRef.current = false;
-          terminalActionRequestedRef.current = false;
-          activeTerminalActionRef.current = null;
-          closePreemptionRequestedRef.current = false;
-          setTerminalAction(null);
-          setContentMounted(true);
+          await rollbackTerminalAction();
           return;
         }
       }
+      if (!isCurrentTerminalAction()) return;
       if (actionToRun === 'hide') {
+        openAISettingsAfterHideRef.current = false;
         terminalActionStartedRef.current = false;
         terminalActionRequestedRef.current = false;
         activeTerminalActionRef.current = null;
         closePreemptionRequestedRef.current = false;
         hideVisibilityRevisionRef.current = 0;
+        setTerminalCloseRecoveryAvailable(false);
         setTerminalAction(null);
         return;
       }
@@ -977,6 +1122,7 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
         await client.closeCurrentWindow();
       } catch (error) {
         console.error('[Native Detached Window] Failed to close native window', error);
+        await rollbackTerminalAction();
       }
     })();
   }, [
@@ -991,6 +1137,23 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
     readWorkbenchSyncData,
     terminalAction,
   ]);
+
+  const retryTerminalClose = useCallback(() => {
+    if (!terminalCloseRecoveryAvailable || terminalCloseRecoveryPendingRef.current) return;
+    terminalCloseRecoveryPendingRef.current = true;
+    setTerminalCloseRecoveryPending(true);
+    void client.closeCurrentWindow()
+      .then(() => {
+        setTerminalCloseRecoveryAvailable(false);
+      })
+      .catch((error) => {
+        console.error('[Native Detached Window] Failed to retry native window close', error);
+      })
+      .finally(() => {
+        terminalCloseRecoveryPendingRef.current = false;
+        setTerminalCloseRecoveryPending(false);
+      });
+  }, [client, terminalCloseRecoveryAvailable]);
 
   const requestWindowClose = useCallback(() => {
     requestTerminalAction(bootstrap?.kind === 'ai-chat' ? 'hide' : 'close');
@@ -1037,6 +1200,7 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
       >
         <style>{`
         .gn-native-detached-window {
+          position: relative;
           width: 100%;
           height: 100%;
           min-width: 0;
@@ -1072,6 +1236,13 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
           flex: 0 0 auto;
           display: inline-flex;
           gap: 2px;
+          --wails-draggable: no-drag;
+        }
+        .gn-native-detached-close-recovery {
+          position: absolute;
+          top: 6px;
+          right: 6px;
+          z-index: ${APP_OVERLAY_Z_INDEX_BASE + 1};
           --wails-draggable: no-drag;
         }
         .gn-native-detached-body {
@@ -1145,6 +1316,20 @@ const NativeDetachedWindowApp: React.FC<NativeDetachedWindowAppProps> = ({
           --wails-draggable: no-drag;
         }
         `}</style>
+        {terminalCloseRecoveryAvailable ? (
+          <Tooltip title={chromeLabels.close}>
+            <Button
+              className="gn-native-detached-close-recovery"
+              type="text"
+              size="small"
+              icon={<CloseOutlined />}
+              aria-label={chromeLabels.close}
+              data-native-close-recovery
+              loading={terminalCloseRecoveryPending}
+              onClick={retryTerminalClose}
+            />
+          </Tooltip>
+        ) : null}
         {bootstrap?.kind !== 'ai-chat' ? <div className="gn-native-detached-chrome">
           <div className="gn-native-detached-title" title={bootstrap?.title || ''}>
             {bootstrap?.title || ''}

@@ -2979,6 +2979,95 @@ describe('QueryEditor external SQL save', () => {
     expect(dataGridState.latestProps?.data).toEqual(expect.arrayContaining([expect.objectContaining({ a: 1 })]));
   });
 
+  it('removes only the inline result inserted by a rolled-back native attach', async () => {
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab()} />);
+    });
+
+    const restoreRegistrations = (window.addEventListener as any).mock.calls
+      .filter(([eventName]: [string]) => eventName === 'gonavi:restore-query-result');
+    const redetachRegistrations = (window.addEventListener as any).mock.calls
+      .filter(([eventName]: [string]) => eventName === 'gonavi:redetach-query-result');
+    expect(restoreRegistrations).toHaveLength(1);
+    expect(redetachRegistrations).toHaveLength(1);
+
+    await act(async () => {
+      restoreRegistrations[0][1](new CustomEvent('gonavi:restore-query-result', {
+        detail: {
+          windowId: 'query-result:tab-1:result-restored',
+          sourceQueryTabId: 'tab-1',
+          result: {
+            key: 'result-restored',
+            sql: 'select 1 as a',
+            columns: ['a'],
+            rows: [{ a: 1 }],
+            pkColumns: [],
+            readOnly: true,
+          },
+        },
+      }));
+      redetachRegistrations[0][1](new CustomEvent('gonavi:redetach-query-result', {
+        detail: {
+          windowId: 'query-result:tab-1:result-restored',
+          sourceQueryTabId: 'tab-1',
+          resultKey: 'result-restored',
+        },
+      }));
+    });
+
+    expect(renderer.root.findAll((node) =>
+      String(node.props?.className || '').split(/\s+/).includes('query-result-tab-label'),
+    )).toHaveLength(0);
+
+    await act(async () => {
+      restoreRegistrations[0][1](new CustomEvent('gonavi:restore-query-result', {
+        detail: {
+          sourceQueryTabId: 'tab-1',
+          result: {
+            key: 'result-existing',
+            sql: 'select existing',
+            columns: ['value'],
+            rows: [{ value: 'existing' }],
+            pkColumns: [],
+            readOnly: true,
+          },
+        },
+      }));
+      restoreRegistrations[0][1](new CustomEvent('gonavi:restore-query-result', {
+        detail: {
+          windowId: 'query-result:tab-1:result-existing',
+          sourceQueryTabId: 'tab-1',
+          result: {
+            key: 'result-existing',
+            sql: 'select detached',
+            columns: ['value'],
+            rows: [{ value: 'detached' }],
+            pkColumns: [],
+            readOnly: true,
+          },
+        },
+      }));
+      redetachRegistrations[0][1](new CustomEvent('gonavi:redetach-query-result', {
+        detail: {
+          windowId: 'query-result:tab-1:result-existing',
+          sourceQueryTabId: 'tab-1',
+          resultKey: 'result-existing',
+        },
+      }));
+    });
+
+    expect(renderer.root.findAll((node) =>
+      String(node.props?.className || '').split(/\s+/).includes('query-result-tab-label'),
+    )).toHaveLength(1);
+    expect(dataGridState.latestProps?.data).toEqual([
+      expect.objectContaining({ value: 'existing' }),
+    ]);
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
   it('closes the final result and synchronously hides the log tab on the next command', async () => {
     storeState.appearance.uiVersion = 'v2';
     backendApp.DBQueryMulti.mockResolvedValueOnce({

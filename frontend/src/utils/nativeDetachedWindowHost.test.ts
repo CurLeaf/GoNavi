@@ -11,6 +11,7 @@ import {
   shouldApplyNativeDetachedHideRevision,
   syncNativeAIChatHostState,
   syncNativeDetachedShortcutOptions,
+  toggleOrFocusNativeAIChatFromMainWindow,
   type NativeDetachedWindowManager,
 } from './nativeDetachedWindowHost';
 import { clearQueryTabDraft, setQueryTabDraft } from './sqlFileTabDrafts';
@@ -287,6 +288,28 @@ describe('nativeDetachedWindowHost', () => {
     }));
     expect(useStore.getState().aiChatHistory['session-warm'][0]?.content).toBe('kept');
     expect(shouldApplyNativeDetachedHideRevision('ai-chat', 3)).toBe(false);
+  });
+
+  it('focuses an already-visible native AI child from the main shortcut without closing it first', async () => {
+    useStore.setState({
+      aiPanelVisible: true,
+      detachedAIChatWindow: {
+        x: 20,
+        y: 30,
+        width: 440,
+        height: 720,
+        zIndex: 1201,
+        coordinateSpace: 'screen',
+      },
+    });
+
+    await expect(toggleOrFocusNativeAIChatFromMainWindow(manager)).resolves.toBe(true);
+
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    expect(manager.Focus).toHaveBeenCalledOnce();
+    expect(manager.Focus).toHaveBeenCalledWith('ai-chat');
+    expect(manager.Hide).not.toHaveBeenCalled();
+    expect(manager.Open).not.toHaveBeenCalled();
   });
 
   it('resends the latest AI shortcut after native open completes', async () => {

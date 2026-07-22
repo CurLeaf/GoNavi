@@ -401,7 +401,7 @@ describe('settings center tool entries', () => {
       ['switchToNextTab', 'switchActiveTabByOffset(1);'],
       ['switchToPreviousTab', 'switchActiveTabByOffset(-1);'],
       ['newConnection', 'handleCreateConnection();'],
-      ['toggleAIPanel', 'toggleAIPanel();'],
+      ['toggleAIPanel', 'toggleOrFocusNativeAIChatFromMainWindow()'],
       ['toggleLogPanel', 'handleToggleLogPanel();'],
       ['toggleTheme', 'selectPresetTheme('],
       ['openShortcutManager', "handleOpenToolCenterPane('workspace', 'shortcut-settings');"],
@@ -512,6 +512,11 @@ describe('settings center tool entries', () => {
   it('captures global shortcuts before Monaco/editor defaults consume them', () => {
     expect(appSource).toContain("window.addEventListener('keydown', handleGlobalShortcut, true);");
     expect(appSource).toContain("window.removeEventListener('keydown', handleGlobalShortcut, true);");
+  });
+
+  it('consumes repeated AI shortcut events without toggling the newly focused child again', () => {
+    expect(appSource).toContain("if (event.repeat && matchedAction === 'toggleAIPanel') {");
+    expect(appSource).toContain('event.stopImmediatePropagation();');
   });
 
   it('skips the native mac titlebar bridge when the current runtime does not expose it', () => {

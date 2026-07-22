@@ -785,7 +785,7 @@ describe('NativeDetachedWindowApp', () => {
     }
   });
 
-  it('opens AI settings in the main window without docking or closing the native AI window', async () => {
+  it('parks the native AI window before opening settings in the main window', async () => {
     const bootstrap: NativeDetachedWindowBootstrap = {
       id: 'ai-chat',
       kind: 'ai-chat',
@@ -797,9 +797,11 @@ describe('NativeDetachedWindowApp', () => {
       ready: vi.fn(async () => undefined),
       sync: vi.fn(async () => undefined),
       attach: vi.fn(async () => undefined),
+      hide: vi.fn(async () => 9),
       close: vi.fn(async () => undefined),
       openAISettings: vi.fn(async () => undefined),
       closeCurrentWindow: vi.fn(async () => undefined),
+      hideCurrentWindow: vi.fn(async () => undefined),
     };
 
     let renderer: TestRenderer.ReactTestRenderer;
@@ -811,12 +813,78 @@ describe('NativeDetachedWindowApp', () => {
     await act(async () => {
       renderer!.root.findByProps({ 'data-ai-chat-settings': true }).props.onClick();
       await flushEffects();
+      await flushEffects();
     });
 
-    expect(client.openAISettings).toHaveBeenCalledWith({ id: 'ai-chat', kind: 'ai-chat' });
+    expect(client.hide).toHaveBeenCalledOnce();
+    expect(client.openAISettings).toHaveBeenCalledWith(9);
+    expect(client.hide.mock.invocationCallOrder[0]).toBeLessThan(
+      client.openAISettings.mock.invocationCallOrder[0],
+    );
+    expect(client.hideCurrentWindow).not.toHaveBeenCalled();
     expect(client.attach).not.toHaveBeenCalled();
     expect(client.close).not.toHaveBeenCalled();
     expect(client.closeCurrentWindow).not.toHaveBeenCalled();
+  });
+
+  it('unlocks the AI window and allows retry when opening settings fails', async () => {
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      payload: { storeState: { appearance: { uiVersion: 'v2' }, theme: 'light' } },
+    };
+    const settingsError = new Error('parent settings unavailable');
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      hide: vi.fn()
+        .mockResolvedValueOnce(9)
+        .mockResolvedValueOnce(11),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn()
+        .mockRejectedValueOnce(settingsError)
+        .mockResolvedValueOnce(undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+      hideCurrentWindow: vi.fn(async () => undefined),
+    };
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let renderer: TestRenderer.ReactTestRenderer | undefined;
+
+    try {
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+
+      await act(async () => {
+        renderer!.root.findByProps({ 'data-ai-chat-settings': true }).props.onClick();
+        await flushEffects();
+        await flushEffects();
+      });
+
+      expect(client.openAISettings).toHaveBeenNthCalledWith(1, 9);
+      expect(renderer!.root.findByProps({
+        'data-ai-chat-presentation': 'detached',
+      }).props['data-ai-chat-interaction-disabled']).toBe('false');
+
+      await act(async () => {
+        renderer!.root.findByProps({ 'data-ai-chat-settings': true }).props.onClick();
+        await flushEffects();
+        await flushEffects();
+      });
+
+      expect(client.openAISettings).toHaveBeenNthCalledWith(2, 11);
+      expect(client.hideCurrentWindow).not.toHaveBeenCalled();
+      expect(renderer!.root.findByProps({
+        'data-ai-chat-presentation': 'detached',
+      }).props['data-ai-chat-interaction-disabled']).toBe('false');
+    } finally {
+      await act(async () => renderer?.unmount());
+      consoleError.mockRestore();
+    }
   });
 
   it('forwards AI child SQL actions to the main process', async () => {
@@ -885,15 +953,16 @@ describe('NativeDetachedWindowApp', () => {
   });
 
   it.each([
-    ['workbench', 'workbench:query-native-1', 'Meta+K', 'k', 'KeyK', true, false, false],
-    ['query-result', 'query-result:query-native-1:r1', 'Meta+J', 'j', 'KeyJ', true, false, false],
-    ['ai-chat', 'ai-chat', 'Meta+J', 'j', 'KeyJ', true, false, false],
-    ['workbench', 'workbench:query-native-disabled', 'Meta+J', 'j', 'KeyJ', false, false, false],
-    ['workbench', 'workbench:query-native-ime', 'Meta+J', 'j', 'KeyJ', true, true, false],
-    ['workbench', 'workbench:query-native-composition', 'Meta+J', 'j', 'KeyJ', true, false, true],
+    ['workbench', 'workbench:query-native-1', 'Meta+K', 'k', 'KeyK', true, false, false, false],
+    ['query-result', 'query-result:query-native-1:r1', 'Meta+J', 'j', 'KeyJ', true, false, false, false],
+    ['ai-chat', 'ai-chat', 'Meta+J', 'j', 'KeyJ', true, false, false, false],
+    ['ai-chat', 'ai-chat-repeat', 'Meta+J', 'j', 'KeyJ', true, false, false, true],
+    ['workbench', 'workbench:query-native-disabled', 'Meta+J', 'j', 'KeyJ', false, false, false, false],
+    ['workbench', 'workbench:query-native-ime', 'Meta+J', 'j', 'KeyJ', true, true, false, false],
+    ['workbench', 'workbench:query-native-composition', 'Meta+J', 'j', 'KeyJ', true, false, true, false],
   ] as const)(
     'handles the configured AI shortcut in a detached %s window (%s)',
-    async (kind, id, combo, key, code, enabled, isComposing, compositionActive) => {
+    async (kind, id, combo, key, code, enabled, isComposing, compositionActive, repeat) => {
       const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
       const eventTarget = new EventTarget();
       Object.defineProperty(globalThis, 'window', {
@@ -981,6 +1050,7 @@ describe('NativeDetachedWindowApp', () => {
           altKey: { value: false },
           shiftKey: { value: false },
           isComposing: { value: isComposing },
+          repeat: { value: repeat },
         });
         await act(async () => {
           if (compositionActive) {
@@ -990,9 +1060,10 @@ describe('NativeDetachedWindowApp', () => {
           await flushEffects();
         });
 
-        const shouldHandle = enabled && !isComposing && !compositionActive;
-        expect(event.defaultPrevented).toBe(shouldHandle);
-        if (shouldHandle) {
+        const shouldConsume = enabled && !isComposing && !compositionActive;
+        const shouldForward = shouldConsume && !repeat;
+        expect(event.defaultPrevented).toBe(shouldConsume);
+        if (shouldForward) {
           expect(client.hostEvent).toHaveBeenCalledWith(expect.objectContaining({
             id,
             kind,
@@ -1307,6 +1378,218 @@ describe('NativeDetachedWindowApp', () => {
     }
   });
 
+  it('unlocks a parked AI child when a newer focus arrives before native hide returns', async () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const eventTarget = new EventTarget();
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: Object.assign(eventTarget, {
+        clearTimeout: globalThis.clearTimeout,
+        innerWidth: 440,
+        outerHeight: 720,
+        outerWidth: 440,
+        screenX: 80,
+        screenY: 60,
+        setTimeout: globalThis.setTimeout,
+      }),
+    });
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      payload: { storeState: { appearance: { uiVersion: 'v2' }, theme: 'light' } },
+    };
+    let markNativeHideStarted: (() => void) | undefined;
+    const nativeHideStarted = new Promise<void>((resolve) => {
+      markNativeHideStarted = resolve;
+    });
+    let releaseFirstNativeHide: (() => void) | undefined;
+    let markSecondNativeHideStarted: (() => void) | undefined;
+    const secondNativeHideStarted = new Promise<void>((resolve) => {
+      markSecondNativeHideStarted = resolve;
+    });
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      hide: vi.fn()
+        .mockResolvedValueOnce(9)
+        .mockResolvedValueOnce(11),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+      hideCurrentWindow: vi.fn((visibilityRevision: number) => {
+        if (visibilityRevision === 9) {
+          markNativeHideStarted?.();
+          return new Promise<void>((resolve) => {
+            releaseFirstNativeHide = resolve;
+          });
+        }
+        markSecondNativeHideStarted?.();
+        return new Promise<void>(() => undefined);
+      }),
+    };
+
+    try {
+      let renderer: TestRenderer.ReactTestRenderer;
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+
+      await act(async () => {
+        renderer!.root.findByProps({ 'data-ai-chat-close': true }).props.onClick();
+        await flushEffects();
+      });
+      await nativeHideStarted;
+      expect(renderer!.root.findByProps({
+        'data-ai-chat-presentation': 'detached',
+      }).props['data-ai-chat-interaction-disabled']).toBe('true');
+
+      await act(async () => {
+        runtimeEventListeners.get('gonavi:native-detached-command')?.({
+          id: 'ai-chat',
+          action: 'focus',
+          payload: { visibilityRevision: 10 },
+        });
+        await flushEffects();
+      });
+
+      expect(renderer!.root.findByProps({
+        'data-ai-chat-presentation': 'detached',
+      }).props['data-ai-chat-interaction-disabled']).toBe('false');
+
+      await act(async () => {
+        runtimeEventListeners.get('gonavi:native-detached-command')?.({
+          id: 'ai-chat',
+          action: 'hide',
+          payload: { visibilityRevision: 9 },
+        });
+        const staleHideEvent = new Event('gonavi:native-detached-request-hide');
+        Object.defineProperty(staleHideEvent, 'detail', {
+          value: { visibilityRevision: 9 },
+        });
+        eventTarget.dispatchEvent(staleHideEvent);
+        await flushEffects();
+      });
+      expect(renderer!.root.findByProps({
+        'data-ai-chat-presentation': 'detached',
+      }).props['data-ai-chat-interaction-disabled']).toBe('false');
+
+      await act(async () => {
+        renderer!.root.findByProps({ 'data-ai-chat-close': true }).props.onClick();
+        await flushEffects();
+      });
+      await secondNativeHideStarted;
+      expect(renderer!.root.findByProps({
+        'data-ai-chat-presentation': 'detached',
+      }).props['data-ai-chat-interaction-disabled']).toBe('true');
+
+      await act(async () => {
+        releaseFirstNativeHide?.();
+        await flushEffects();
+      });
+      expect(renderer!.root.findByProps({
+        'data-ai-chat-presentation': 'detached',
+      }).props['data-ai-chat-interaction-disabled']).toBe('true');
+
+      await act(async () => {
+        runtimeEventListeners.get('gonavi:native-detached-command')?.({
+          id: 'ai-chat',
+          action: 'focus',
+          payload: { visibilityRevision: 12 },
+        });
+        await flushEffects();
+      });
+      expect(renderer!.root.findByProps({
+        'data-ai-chat-presentation': 'detached',
+      }).props['data-ai-chat-interaction-disabled']).toBe('false');
+      await act(async () => renderer!.unmount());
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('does not start a cancelled AI hide when focus arrives before its effect starts', async () => {
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const eventTarget = new EventTarget();
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: Object.assign(eventTarget, {
+        clearTimeout: globalThis.clearTimeout,
+        innerWidth: 440,
+        outerHeight: 720,
+        outerWidth: 440,
+        screenX: 80,
+        screenY: 60,
+        setTimeout: globalThis.setTimeout,
+      }),
+    });
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      payload: { storeState: { appearance: { uiVersion: 'v2' }, theme: 'light' } },
+    };
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      hide: vi.fn(async () => 9),
+      close: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn(async () => undefined),
+      hideCurrentWindow: vi.fn(async () => undefined),
+    };
+
+    try {
+      let renderer: TestRenderer.ReactTestRenderer;
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+
+      const flushableRenderer = renderer! as TestRenderer.ReactTestRenderer & {
+        unstable_flushSync: (callback: () => void) => void;
+      };
+      flushableRenderer.unstable_flushSync(() => {
+        renderer!.root.findByProps({ 'data-ai-chat-close': true }).props.onClick();
+      });
+      expect(renderer!.root.findByProps({
+        'data-ai-chat-presentation': 'detached',
+      }).props['data-ai-chat-interaction-disabled']).toBe('true');
+
+      runtimeEventListeners.get('gonavi:native-detached-command')?.({
+        id: 'ai-chat',
+        action: 'focus',
+        payload: { visibilityRevision: 10 },
+      });
+      await act(async () => {
+        await flushEffects();
+      });
+
+      expect(renderer!.root.findByProps({
+        'data-ai-chat-presentation': 'detached',
+      }).props['data-ai-chat-interaction-disabled']).toBe('false');
+      expect(client.hide).not.toHaveBeenCalled();
+      expect(client.sync).not.toHaveBeenCalled();
+      expect(client.hideCurrentWindow).not.toHaveBeenCalled();
+      await act(async () => renderer!.unmount());
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
   it('lets a graceful close preempt an in-flight AI hide', async () => {
     const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
     const eventTarget = new EventTarget();
@@ -1373,6 +1656,11 @@ describe('NativeDetachedWindowApp', () => {
 
       await act(async () => {
         eventTarget.dispatchEvent(new Event('gonavi:native-detached-request-close'));
+        runtimeEventListeners.get('gonavi:native-detached-command')?.({
+          id: 'ai-chat',
+          action: 'focus',
+          payload: { visibilityRevision: 16 },
+        });
         releaseHide?.();
         await flushEffects();
         await flushEffects();
@@ -1623,6 +1911,7 @@ describe('NativeDetachedWindowApp', () => {
         id: 'ai-chat',
         kind: 'ai-chat',
         revision: expect.any(Number),
+        rollbackAction: 'close',
       }));
       expect(client.cancelClose).toHaveBeenCalledOnce();
       expect(client.close).not.toHaveBeenCalled();
@@ -1637,6 +1926,142 @@ describe('NativeDetachedWindowApp', () => {
       } else {
         Reflect.deleteProperty(globalThis, 'window');
       }
+    }
+  });
+
+  it('recovers the AI child when the local close fails and allows a second attach', async () => {
+    const bootstrap: NativeDetachedWindowBootstrap = {
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      title: 'GoNavi AI',
+      actionRevision: 40,
+      payload: { storeState: { appearance: { uiVersion: 'v2' }, theme: 'light' } },
+    };
+    const closeError = new Error('native close failed');
+    const client = {
+      load: vi.fn(async () => bootstrap),
+      ready: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+      attach: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      cancelCloseRequest: vi.fn(async () => undefined),
+      openAISettings: vi.fn(async () => undefined),
+      closeCurrentWindow: vi.fn()
+        .mockRejectedValueOnce(closeError)
+        .mockResolvedValueOnce(undefined),
+      cancelClose: vi.fn(async () => undefined),
+    };
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let renderer: TestRenderer.ReactTestRenderer | undefined;
+
+    try {
+      await act(async () => {
+        renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+        await flushEffects();
+      });
+
+      await act(async () => {
+        renderer!.root.findByProps({ 'data-ai-chat-attach': true }).props.onClick();
+        await flushEffects();
+        await flushEffects();
+      });
+
+      expect(client.attach).toHaveBeenCalledWith(expect.objectContaining({ revision: 41 }));
+      expect(client.closeCurrentWindow).toHaveBeenCalledOnce();
+      expect(client.cancelCloseRequest).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'ai-chat',
+        kind: 'ai-chat',
+        revision: expect.any(Number),
+        rollbackAction: 'attach',
+      }));
+      expect(client.cancelClose).toHaveBeenCalledOnce();
+      expect(renderer!.root.findByProps({
+        'data-ai-chat-presentation': 'detached',
+      }).props['data-ai-chat-interaction-disabled']).toBe('false');
+
+      await act(async () => {
+        renderer!.root.findByProps({ 'data-ai-chat-attach': true }).props.onClick();
+        await flushEffects();
+        await flushEffects();
+      });
+
+      expect(client.attach).toHaveBeenNthCalledWith(2, expect.objectContaining({ revision: 43 }));
+      expect(client.closeCurrentWindow).toHaveBeenCalledTimes(2);
+      expect(client.cancelCloseRequest).toHaveBeenCalledOnce();
+      expect(client.cancelClose).toHaveBeenCalledOnce();
+      expect(consoleError).toHaveBeenCalledWith(
+        '[Native Detached Window] Failed to close native window',
+        closeError,
+      );
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
+      consoleError.mockRestore();
+    }
+  });
+
+  it('offers an explicit close retry when either side of close rollback cannot be confirmed', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      for (const failureTarget of ['parent', 'local'] as const) {
+        const bootstrap: NativeDetachedWindowBootstrap = {
+          id: 'ai-chat',
+          kind: 'ai-chat',
+          title: 'GoNavi AI',
+          payload: { storeState: { appearance: { uiVersion: 'v2' }, theme: 'light' } },
+        };
+        const closeError = new Error(`${failureTarget} convergence failed`);
+        const cancelError = new Error(`${failureTarget} cancel failed`);
+        const client = {
+          load: vi.fn(async () => bootstrap),
+          ready: vi.fn(async () => undefined),
+          sync: vi.fn(async () => undefined),
+          attach: vi.fn(async () => undefined),
+          close: vi.fn(async () => undefined),
+          cancelCloseRequest: failureTarget === 'parent'
+            ? vi.fn(async () => { throw cancelError; })
+            : vi.fn(async () => undefined),
+          openAISettings: vi.fn(async () => undefined),
+          closeCurrentWindow: vi.fn()
+            .mockRejectedValueOnce(closeError)
+            .mockRejectedValueOnce(closeError)
+            .mockResolvedValueOnce(undefined),
+          cancelClose: failureTarget === 'local'
+            ? vi.fn(async () => { throw cancelError; })
+            : vi.fn(async () => undefined),
+        };
+        let renderer: TestRenderer.ReactTestRenderer | undefined;
+
+        await act(async () => {
+          renderer = TestRenderer.create(<NativeDetachedWindowApp client={client} />);
+          await flushEffects();
+        });
+        await act(async () => {
+          renderer!.root.findByProps({ 'data-ai-chat-attach': true }).props.onClick();
+          await flushEffects();
+          await flushEffects();
+        });
+
+        expect(client.attach).toHaveBeenCalledOnce();
+        expect(client.cancelCloseRequest).toHaveBeenCalledTimes(failureTarget === 'parent' ? 2 : 1);
+        expect(client.cancelClose).toHaveBeenCalledOnce();
+        expect(client.closeCurrentWindow).toHaveBeenCalledTimes(2);
+        expect(renderer!.root.findByProps({
+          'data-ai-chat-presentation': 'detached',
+        }).props['data-ai-chat-interaction-disabled']).toBe('true');
+
+        await act(async () => {
+          renderer!.root.findByProps({ 'data-native-close-recovery': true }).props.onClick();
+          await flushEffects();
+        });
+        expect(client.attach).toHaveBeenCalledOnce();
+        expect(client.closeCurrentWindow).toHaveBeenCalledTimes(3);
+
+        await act(async () => renderer?.unmount());
+      }
+    } finally {
+      consoleError.mockRestore();
     }
   });
 

@@ -538,6 +538,18 @@ export const openNativeAIChatWindow = async (
   return opened;
 };
 
+export const toggleOrFocusNativeAIChatFromMainWindow = async (
+  managerOverride?: NativeDetachedWindowManager,
+): Promise<boolean> => {
+  const state = useStore.getState();
+  const manager = managerOverride ?? resolveNativeDetachedWindowManager();
+  if (manager && state.aiPanelVisible && state.detachedAIChatWindow) {
+    return openNativeAIChatWindow(undefined, manager);
+  }
+  state.toggleAIPanel();
+  return useStore.getState().aiPanelVisible;
+};
+
 const refreshNativeAIChatWindow = async (
   manager: NativeDetachedWindowManager,
 ): Promise<boolean> => {

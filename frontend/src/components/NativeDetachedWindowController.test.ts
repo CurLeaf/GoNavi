@@ -509,7 +509,7 @@ describe('NativeDetachedWindowController', () => {
     }
   });
 
-  it('routes AI settings requests to the main window without docking the child', () => {
+  it('parks the native AI child before routing settings to the main window', () => {
     const onOpenAISettings = vi.fn();
     useStore.setState({
       aiPanelVisible: true,
@@ -520,9 +520,11 @@ describe('NativeDetachedWindowController', () => {
       id: 'ai-chat',
       kind: 'ai-chat',
       action: 'open-ai-settings',
+      payload: { visibilityRevision: 7 },
     }, undefined, { onOpenAISettings });
 
     expect(onOpenAISettings).toHaveBeenCalledOnce();
+    expect(useStore.getState().aiPanelVisible).toBe(false);
     expect(useStore.getState().detachedAIChatWindow).not.toBeNull();
 
     applyNativeDetachedWindowEvent({
@@ -818,6 +820,63 @@ describe('NativeDetachedWindowController', () => {
     expect(useStore.getState().aiChatHistory['session-1'][0]?.content).toBe('kept');
   });
 
+  it('restores main-store visibility when the native AI child is focused again', () => {
+    const detachedAIChatWindow = {
+      x: 20,
+      y: 30,
+      width: 440,
+      height: 720,
+      zIndex: 1203,
+    };
+    useStore.setState({
+      aiPanelVisible: false,
+      detachedAIChatWindow,
+    });
+
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'focus',
+      payload: { visibilityRevision: 8 },
+    });
+
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    expect(useStore.getState().detachedAIChatWindow).toBe(detachedAIChatWindow);
+
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'hide',
+      payload: { visibilityRevision: 7 },
+    });
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+  });
+
+  it('ignores delayed AI settings events older than the latest native focus', () => {
+    const onOpenAISettings = vi.fn();
+    useStore.setState({
+      aiPanelVisible: false,
+      detachedAIChatWindow: { x: 20, y: 30, width: 440, height: 720, zIndex: 1203 },
+    });
+
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'focus',
+      payload: { visibilityRevision: 8 },
+    });
+    applyNativeDetachedWindowEvent({
+      id: 'ai-chat',
+      kind: 'ai-chat',
+      action: 'open-ai-settings',
+      payload: { visibilityRevision: 7 },
+    }, undefined, { onOpenAISettings });
+
+    expect(onOpenAISettings).not.toHaveBeenCalled();
+    expect(useStore.getState().aiPanelVisible).toBe(true);
+    expect(useStore.getState().detachedAIChatWindow).not.toBeNull();
+  });
+
   it('ignores a delayed hide event older than the latest native focus', () => {
     useStore.setState({
       aiPanelVisible: true,
@@ -987,6 +1046,76 @@ describe('NativeDetachedWindowController', () => {
       expect(useStore.getState().tabs.map((tab) => tab.id)).toEqual(['query-a', 'query-b']);
       expect(dispatchEvent).toHaveBeenCalledOnce();
       expect(dispatchEvent.mock.calls[0][0].detail.result.rows).toEqual([{ value: 42 }]);
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('re-detaches an inline result when a failed native close cancels attach', () => {
+    const resultWindow = {
+      id: 'query-result:query-a:r1',
+      sourceQueryTabId: 'query-a',
+      connectionId: 'conn-1',
+      title: 'Result 1',
+      x: 10,
+      y: 10,
+      width: 800,
+      height: 600,
+      zIndex: 1201,
+      result: {
+        key: 'r1',
+        sql: 'select 42',
+        rows: [{ value: 42 }],
+        columns: ['value'],
+        pkColumns: [],
+        readOnly: true,
+      },
+    };
+    const dispatchEvent = vi.fn();
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { dispatchEvent },
+    });
+    try {
+      useStore.setState({ detachedQueryResultWindows: [resultWindow] });
+      applyNativeDetachedWindowEvent({
+        id: resultWindow.id,
+        kind: 'query-result',
+        action: 'attach',
+      });
+      expect(useStore.getState().detachedQueryResultWindows).toEqual([]);
+
+      applyNativeDetachedWindowEvent({
+        id: resultWindow.id,
+        kind: 'query-result',
+        action: 'cancel-close',
+        payload: { resultWindow, rollbackAction: 'attach' },
+      });
+
+      expect(useStore.getState().detachedQueryResultWindows).toEqual([
+        expect.objectContaining({ id: resultWindow.id, result: resultWindow.result }),
+      ]);
+      expect(dispatchEvent).toHaveBeenCalledTimes(2);
+      expect(dispatchEvent.mock.calls[0][0]).toMatchObject({
+        type: 'gonavi:restore-query-result',
+        detail: {
+          sourceQueryTabId: 'query-a',
+          result: resultWindow.result,
+        },
+      });
+      expect(dispatchEvent.mock.calls[1][0]).toMatchObject({
+        type: 'gonavi:redetach-query-result',
+        detail: {
+          windowId: resultWindow.id,
+          sourceQueryTabId: 'query-a',
+          resultKey: 'r1',
+        },
+      });
     } finally {
       if (previousWindowDescriptor) {
         Object.defineProperty(globalThis, 'window', previousWindowDescriptor);

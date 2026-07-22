@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDetachedChildQueuesFocusUntilFrontendReadyHandshake(t *testing.T) {
@@ -220,6 +221,339 @@ func TestDetachedChildIgnoresLateHideAfterNewerFocus(t *testing.T) {
 	control.mu.RUnlock()
 	if !visible || revision != 2 {
 		t.Fatalf("final visibility state = visible %v revision %d", visible, revision)
+	}
+}
+
+func TestDetachedChildSerializesNativeHideBeforeNewerFocus(t *testing.T) {
+	_, control := newVisibilityTestChild()
+	ctx := context.Background()
+	InitializeControl(control, ctx)
+
+	steps := make(chan string, 8)
+	hideStarted := make(chan struct{})
+	releaseHide := make(chan struct{})
+	control.showWindow = func(context.Context) { steps <- "show" }
+	control.hideWindow = func(context.Context) {
+		steps <- "hide-start"
+		close(hideStarted)
+		<-releaseHide
+		steps <- "hide-end"
+	}
+	control.focusWindow = func(context.Context) { steps <- "focus" }
+	control.markDOMReady(ctx)
+	if result := control.markFrontendReady(); !result.Success {
+		t.Fatalf("markFrontendReady result = %#v", result)
+	}
+	if step := <-steps; step != "show" {
+		t.Fatalf("initial presentation step = %q, want show", step)
+	}
+
+	hideDone := make(chan OperationResult, 1)
+	go func() {
+		hideDone <- control.Hide(1)
+	}()
+	select {
+	case <-hideStarted:
+	case <-time.After(time.Second):
+		t.Fatal("native hide did not start")
+	}
+
+	focusCallStarted := make(chan struct{})
+	focusDone := make(chan OperationResult, 1)
+	go func() {
+		close(focusCallStarted)
+		focusDone <- control.FocusRevision(2)
+	}()
+	<-focusCallStarted
+	select {
+	case result := <-focusDone:
+		close(releaseHide)
+		<-hideDone
+		t.Fatalf("newer focus completed before the older native hide: %#v", result)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(releaseHide)
+	if result := <-hideDone; !result.Success || result.VisibilityRevision != 1 {
+		t.Fatalf("Hide result = %#v", result)
+	}
+	if result := <-focusDone; !result.Success || result.VisibilityRevision != 2 {
+		t.Fatalf("FocusRevision result = %#v", result)
+	}
+
+	sequence := make([]string, 0, 4)
+	for len(sequence) < 4 {
+		select {
+		case step := <-steps:
+			sequence = append(sequence, step)
+		case <-time.After(time.Second):
+			t.Fatalf("native visibility sequence stopped at %#v", sequence)
+		}
+	}
+	if got := strings.Join(sequence, ","); got != "hide-start,hide-end,show,focus" {
+		t.Fatalf("native visibility sequence = %q", got)
+	}
+}
+
+func TestDetachedChildDoesNotBlockHideWhileAcknowledgingFocus(t *testing.T) {
+	bridge, control := newVisibilityTestChild()
+	ctx := context.Background()
+	InitializeControl(control, ctx)
+	control.showWindow = func(context.Context) {}
+	control.focusWindow = func(context.Context) {}
+	hideCalled := make(chan struct{}, 1)
+	control.hideWindow = func(context.Context) { hideCalled <- struct{}{} }
+	control.markDOMReady(ctx)
+	if result := control.markFrontendReady(); !result.Success {
+		t.Fatalf("markFrontendReady result = %#v", result)
+	}
+
+	acknowledgementStarted := make(chan struct{})
+	releaseAcknowledgement := make(chan struct{})
+	bridge.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path == CommandStatePath {
+			close(acknowledgementStarted)
+			<-releaseAcknowledgement
+		}
+		return successfulVisibilityResponse(), nil
+	})
+
+	focusDone := make(chan OperationResult, 1)
+	go func() {
+		focusDone <- control.FocusRevision(1)
+	}()
+	select {
+	case <-acknowledgementStarted:
+	case <-time.After(time.Second):
+		t.Fatal("focus acknowledgement did not start")
+	}
+
+	hideDone := make(chan OperationResult, 1)
+	go func() {
+		hideDone <- control.Hide(2)
+	}()
+	select {
+	case result := <-hideDone:
+		if !result.Success || result.VisibilityRevision != 2 {
+			t.Fatalf("Hide result = %#v", result)
+		}
+	case <-time.After(25 * time.Millisecond):
+		close(releaseAcknowledgement)
+		<-focusDone
+		<-hideDone
+		t.Fatal("native hide waited for the focus acknowledgement network request")
+	}
+	select {
+	case <-hideCalled:
+	case <-time.After(time.Second):
+		t.Fatal("native hide callback was not called")
+	}
+
+	close(releaseAcknowledgement)
+	if result := <-focusDone; !result.Success || result.VisibilityRevision != 1 {
+		t.Fatalf("FocusRevision result = %#v", result)
+	}
+}
+
+func TestDetachedChildClosePreventsConcurrentHideFromCancellingExit(t *testing.T) {
+	_, control := newVisibilityTestChild()
+	ctx := context.Background()
+	InitializeControl(control, ctx)
+
+	quitStarted := make(chan struct{})
+	releaseQuit := make(chan struct{})
+	control.quit = func(context.Context) {
+		close(quitStarted)
+		<-releaseQuit
+	}
+	hideCalled := make(chan struct{}, 1)
+	control.hideWindow = func(context.Context) { hideCalled <- struct{}{} }
+
+	closeDone := make(chan OperationResult, 1)
+	go func() {
+		closeDone <- control.Close()
+	}()
+	select {
+	case <-quitStarted:
+	case <-time.After(time.Second):
+		t.Fatal("native close did not reach quit")
+	}
+	if !control.closeGate.isAllowed() {
+		t.Fatal("close gate was not opened before quit")
+	}
+
+	hideDone := make(chan OperationResult, 1)
+	go func() {
+		hideDone <- control.Hide(1)
+	}()
+	select {
+	case result := <-hideDone:
+		close(releaseQuit)
+		<-closeDone
+		t.Fatalf("hide completed while native close was in progress: %#v", result)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(releaseQuit)
+	if result := <-closeDone; !result.Success {
+		t.Fatalf("Close result = %#v", result)
+	}
+	if result := <-hideDone; result.Success || !strings.Contains(result.Message, "already committed") {
+		t.Fatalf("Hide result after committed close = %#v", result)
+	}
+	if !control.closeGate.isAllowed() {
+		t.Fatal("concurrent hide cancelled the committed close gate")
+	}
+	select {
+	case <-hideCalled:
+		t.Fatal("concurrent hide reached the native window after close committed")
+	default:
+	}
+}
+
+func TestDetachedChildCloseFallbackPreventsConcurrentHideFromCancellingExit(t *testing.T) {
+	_, control := newVisibilityTestChild()
+	ctx := context.Background()
+	InitializeControl(control, ctx)
+
+	control.closeFallbackDelay = time.Millisecond
+	quitStarted := make(chan struct{})
+	releaseQuit := make(chan struct{})
+	control.quit = func(context.Context) {
+		close(quitStarted)
+		<-releaseQuit
+	}
+	hideCalled := make(chan struct{}, 1)
+	control.hideWindow = func(context.Context) { hideCalled <- struct{}{} }
+
+	control.scheduleCloseFallback(ctx)
+	select {
+	case <-quitStarted:
+	case <-time.After(time.Second):
+		t.Fatal("native close fallback did not reach quit")
+	}
+	if !control.closeGate.isAllowed() {
+		t.Fatal("close fallback did not open the gate before quit")
+	}
+
+	hideDone := make(chan OperationResult, 1)
+	go func() {
+		hideDone <- control.Hide(1)
+	}()
+	select {
+	case result := <-hideDone:
+		close(releaseQuit)
+		t.Fatalf("hide completed while native close fallback was in progress: %#v", result)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(releaseQuit)
+	if result := <-hideDone; result.Success || !strings.Contains(result.Message, "already committed") {
+		t.Fatalf("Hide result after fallback committed close = %#v", result)
+	}
+	if !control.closeGate.isAllowed() {
+		t.Fatal("concurrent hide cancelled the fallback close gate")
+	}
+	select {
+	case <-hideCalled:
+		t.Fatal("concurrent hide reached the native window after fallback close committed")
+	default:
+	}
+}
+
+func TestDetachedChildStaleCloseFallbackKeepsNewerTimer(t *testing.T) {
+	_, control := newVisibilityTestChild()
+	ctx := context.Background()
+	InitializeControl(control, ctx)
+	control.closeFallbackDelay = time.Hour
+	quits := 0
+	control.quit = func(context.Context) { quits++ }
+
+	control.mu.Lock()
+	control.closeFallbackGeneration = 1
+	control.closeFallback = time.AfterFunc(time.Hour, func() {})
+	control.mu.Unlock()
+
+	control.visibilityOpMu.Lock()
+	staleFallbackDone := make(chan struct{})
+	go func() {
+		control.runCloseFallback(1, ctx)
+		close(staleFallbackDone)
+	}()
+
+	if result := control.CancelClose(); !result.Success {
+		control.visibilityOpMu.Unlock()
+		t.Fatalf("CancelClose result = %#v", result)
+	}
+	control.scheduleCloseFallback(ctx)
+	control.mu.RLock()
+	newGeneration := control.closeFallbackGeneration
+	newFallback := control.closeFallback
+	control.mu.RUnlock()
+	if newGeneration != 3 || newFallback == nil {
+		control.visibilityOpMu.Unlock()
+		t.Fatalf("new fallback state = generation %d timer %p, want 3/non-nil", newGeneration, newFallback)
+	}
+
+	control.visibilityOpMu.Unlock()
+	select {
+	case <-staleFallbackDone:
+	case <-time.After(time.Second):
+		t.Fatal("stale close fallback did not complete")
+	}
+	control.mu.RLock()
+	retainedFallback := control.closeFallback
+	retainedGeneration := control.closeFallbackGeneration
+	closeCommitted := control.closeCommitted
+	control.mu.RUnlock()
+	if retainedFallback != newFallback || retainedGeneration != newGeneration {
+		t.Fatalf(
+			"fallback after stale callback = generation %d timer %p, want %d/%p",
+			retainedGeneration,
+			retainedFallback,
+			newGeneration,
+			newFallback,
+		)
+	}
+	if closeCommitted || control.closeGate.isAllowed() || quits != 0 {
+		t.Fatalf(
+			"stale fallback exit state = committed %v gate %v quits %d, want false/false/0",
+			closeCommitted,
+			control.closeGate.isAllowed(),
+			quits,
+		)
+	}
+	if result := control.CancelClose(); !result.Success {
+		t.Fatalf("final CancelClose result = %#v", result)
+	}
+}
+
+func TestDetachedChildDoesNotPresentOrFocusAfterCloseCommitted(t *testing.T) {
+	_, control := newVisibilityTestChild()
+	ctx := context.Background()
+	InitializeControl(control, ctx)
+
+	shows := 0
+	focuses := 0
+	control.showWindow = func(context.Context) { shows++ }
+	control.focusWindow = func(context.Context) { focuses++ }
+	control.quit = func(context.Context) {}
+	control.markDOMReady(ctx)
+
+	if result := control.Close(); !result.Success {
+		t.Fatalf("Close result = %#v", result)
+	}
+	if result := control.markFrontendReady(); result.Success {
+		t.Fatalf("markFrontendReady after close = %#v, want failure", result)
+	}
+	if result := control.Present(); result.Success {
+		t.Fatalf("Present after close = %#v, want failure", result)
+	}
+	if result := control.FocusRevision(1); result.Success {
+		t.Fatalf("FocusRevision after close = %#v, want failure", result)
+	}
+	if shows != 0 || focuses != 0 {
+		t.Fatalf("post-close presentation = show %d focus %d, want 0/0", shows, focuses)
 	}
 }
 

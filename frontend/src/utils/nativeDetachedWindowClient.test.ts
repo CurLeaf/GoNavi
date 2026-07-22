@@ -15,8 +15,10 @@ import {
   buildNativeDetachedSyncStoreSnapshot,
   buildNativeDetachedWorkbenchMutableStoreSnapshot,
   buildNativeDetachedWorkbenchPayload,
+  closeCurrentNativeDetachedWindow,
   fetchNativeDetachedWindowBootstrap,
   hideCurrentNativeDetachedWindow,
+  hideCurrentNativeDetachedWindowForAISettings,
   hideNativeDetachedWindow,
   hydrateNativeDetachedStore,
   isNativeDetachedWindow,
@@ -578,6 +580,32 @@ describe('nativeDetachedWindowClient', () => {
     }
   });
 
+  it('rejects a terminal action that the parent ignored as stale', async () => {
+    const action = vi.fn(async () => ({
+      success: true,
+      applied: false,
+      message: 'stale detached action ignored',
+    }));
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { __GONAVI_DETACHED__: { action } },
+    });
+    try {
+      await expect(attachNativeDetachedWindow({
+        id: 'window-1',
+        kind: 'workbench',
+        tab: queryTab,
+      })).rejects.toThrow('stale detached action ignored');
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
   it('reuses the child runtime bootstrap cache instead of fetching the payload twice', async () => {
     const bootstrap = {
       id: 'workbench:query-1',
@@ -678,6 +706,48 @@ describe('nativeDetachedWindowClient', () => {
     try {
       await hideCurrentNativeDetachedWindow(11);
       expect(hide).toHaveBeenCalledWith(11);
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('uses the atomic native hide-and-open control for AI settings', async () => {
+    const hideForAISettings = vi.fn(async () => ({ success: true }));
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { go: { nativewindow: { Control: { HideForAISettings: hideForAISettings } } } },
+    });
+    try {
+      await hideCurrentNativeDetachedWindowForAISettings(13);
+      expect(hideForAISettings).toHaveBeenCalledWith(13);
+    } finally {
+      if (previousWindowDescriptor) {
+        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'window');
+      }
+    }
+  });
+
+  it('rejects when the native close control reports a failure', async () => {
+    const close = vi.fn(async () => ({
+      success: false,
+      message: 'native window is not ready',
+    }));
+    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { go: { nativewindow: { Control: { Close: close } } } },
+    });
+    try {
+      await expect(closeCurrentNativeDetachedWindow())
+        .rejects.toThrow('native window is not ready');
+      expect(close).toHaveBeenCalledOnce();
     } finally {
       if (previousWindowDescriptor) {
         Object.defineProperty(globalThis, 'window', previousWindowDescriptor);

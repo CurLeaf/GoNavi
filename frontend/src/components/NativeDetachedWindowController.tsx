@@ -10,6 +10,7 @@ import {
   forwardNativeDetachedHostEvent,
   hasNativeDetachedWindowManager,
   hideNativeDetachedWindowById,
+  recordNativeDetachedVisibilityRevision,
   shouldApplyNativeDetachedHideRevision,
   syncNativeAIChatHostState,
   syncNativeDetachedShortcutOptions,
@@ -20,6 +21,7 @@ import {
   mergeNativeDetachedAIContextsDelta,
   mergeNativeDetachedStoreDelta,
   NATIVE_DETACHED_HOST_EVENT_NAMES,
+  NATIVE_DETACHED_QUERY_RESULT_REDETACH_EVENT,
   type NativeDetachedHostEvent,
   type NativeDetachedHostEventName,
   type NativeDetachedStoreSnapshot,
@@ -40,6 +42,7 @@ export type NativeDetachedWindowEvent = {
     | 'opened'
     | 'sync'
     | 'attach'
+    | 'focus'
     | 'hide'
     | 'close'
     | 'cancel-close'
@@ -183,6 +186,7 @@ const restoreQueryResult = (windowId: string): void => {
   if (!restored || typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent('gonavi:restore-query-result', {
     detail: {
+      windowId,
       sourceQueryTabId: restored.sourceQueryTabId,
       result: restored.result,
     },
@@ -246,8 +250,41 @@ export const applyNativeDetachedWindowEvent = (
 
   if (event.action === 'open-ai-settings') {
     if (event.kind === 'ai-chat') {
+      const visibilityRevision = Math.trunc(Number(event.payload?.visibilityRevision));
+      const latestVisibilityRevision = recordNativeDetachedVisibilityRevision(
+        id,
+        visibilityRevision,
+      );
+      if (
+        Number.isFinite(visibilityRevision)
+        && visibilityRevision > 0
+        && visibilityRevision < latestVisibilityRevision
+      ) return;
+      const state = useStore.getState();
+      if (state.detachedAIChatWindow) {
+        state.setAIPanelVisible(false);
+      }
       showMainWindow();
       callbacks.onOpenAISettings?.();
+    }
+    return;
+  }
+
+  if (event.action === 'focus') {
+    if (event.kind === 'ai-chat') {
+      const visibilityRevision = Math.trunc(Number(event.payload?.visibilityRevision));
+      const latestVisibilityRevision = recordNativeDetachedVisibilityRevision(
+        id,
+        visibilityRevision,
+      );
+      if (
+        Number.isFinite(visibilityRevision)
+        && visibilityRevision > 0
+        && visibilityRevision < latestVisibilityRevision
+      ) return;
+      if (!useStore.getState().aiPanelVisible) {
+        useStore.setState({ aiPanelVisible: true });
+      }
     }
     return;
   }
@@ -359,6 +396,20 @@ export const applyNativeDetachedWindowEvent = (
       const latest = useStore.getState();
       if (latest.tabs.some((item) => item.id === tabId) && !latest.isWorkbenchTabDetached(tabId)) {
         latest.detachWorkbenchTab(tabId);
+      }
+    } else if (
+      event.payload?.rollbackAction === 'attach'
+      && event.payload.resultWindow
+      && typeof window !== 'undefined'
+    ) {
+      const resultWindow = event.payload.resultWindow;
+      const windowId = String(resultWindow.id || '').trim();
+      const sourceQueryTabId = String(resultWindow.sourceQueryTabId || '').trim();
+      const resultKey = String(resultWindow.result?.key || '').trim();
+      if (windowId === id && sourceQueryTabId && resultKey) {
+        window.dispatchEvent(new CustomEvent(NATIVE_DETACHED_QUERY_RESULT_REDETACH_EVENT, {
+          detail: { windowId, sourceQueryTabId, resultKey },
+        }));
       }
     }
     return;

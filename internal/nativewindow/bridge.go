@@ -180,13 +180,17 @@ func (b *Bridge) control(request controlRequest) OperationResult {
 // Action acknowledges child readiness or forwards sync, hide, attach, or close
 // state to the main window.
 func (b *Bridge) Action(action string, payload any) OperationResult {
+	return b.action(action, payload, true)
+}
+
+func (b *Bridge) action(action string, payload any, grantForeground bool) OperationResult {
 	normalizedAction := strings.ToLower(strings.TrimSpace(action))
 	if normalizedAction == "ready" {
 		if result := b.presentFrontendReady(); !result.Success {
 			return result
 		}
 	}
-	if normalizedAction == "open-ai-settings" && b.allowParentForeground != nil {
+	if grantForeground && normalizedAction == "open-ai-settings" && b.allowParentForeground != nil {
 		// The detached child owns the current user interaction on Windows. Grant
 		// the parent permission immediately before it attempts to take focus. This
 		// is best-effort so an OS rejection never blocks the settings action itself.
@@ -201,10 +205,13 @@ func (b *Bridge) Action(action string, payload any) OperationResult {
 	if status != http.StatusOK {
 		return operationFailure(fmt.Sprintf("detached action failed with status %d", status))
 	}
-	if result.Success {
+	if result.Success && (result.Applied == nil || *result.Applied) {
 		b.mu.Lock()
-		if normalizedAction == "attach" || normalizedAction == "close" {
+		switch normalizedAction {
+		case "attach", "close":
 			b.terminal = normalizedAction
+		case "cancel-close":
+			b.terminal = ""
 		}
 		b.mu.Unlock()
 	}
@@ -520,6 +527,7 @@ func (b *Bridge) emitRuntimeEvent(name string, args ...any) {
 // Wails window.
 type Control struct {
 	mu                      sync.RWMutex
+	visibilityOpMu          sync.Mutex
 	ctx                     context.Context
 	bridge                  *Bridge
 	closeGate               closeGate
@@ -581,6 +589,7 @@ func (c *Control) markDOMReady(ctx context.Context) {
 	if c == nil {
 		return
 	}
+	c.visibilityOpMu.Lock()
 	c.mu.Lock()
 	if c.ctx == nil {
 		c.ctx = ctx
@@ -588,22 +597,29 @@ func (c *Control) markDOMReady(ctx context.Context) {
 	c.domReady = true
 	presentation := c.takeInitialPresentationLocked()
 	c.mu.Unlock()
-	presentation.run()
+	c.runVisibilityPresentationLocked(presentation)
 }
 
 func (c *Control) markFrontendReady() OperationResult {
 	if c == nil {
 		return operationFailure("native window control is unavailable")
 	}
+	c.visibilityOpMu.Lock()
 	c.mu.Lock()
+	if c.closeCommitted {
+		c.mu.Unlock()
+		c.visibilityOpMu.Unlock()
+		return operationFailure("native window close is already committed")
+	}
 	if !c.domReady || c.ctx == nil || c.showWindow == nil {
 		c.mu.Unlock()
+		c.visibilityOpMu.Unlock()
 		return operationFailure("native window DOM is not ready")
 	}
 	c.frontendReady = true
 	presentation := c.takeInitialPresentationLocked()
 	c.mu.Unlock()
-	presentation.run()
+	c.runVisibilityPresentationLocked(presentation)
 	return OperationResult{Success: true}
 }
 
@@ -614,13 +630,21 @@ func (c *Control) Present() OperationResult {
 	if c == nil {
 		return operationFailure("native window control is unavailable")
 	}
+	c.visibilityOpMu.Lock()
 	c.mu.Lock()
+	if c.closeCommitted {
+		c.mu.Unlock()
+		c.visibilityOpMu.Unlock()
+		return operationFailure("native window close is already committed")
+	}
 	if !c.domReady || c.ctx == nil || c.showWindow == nil {
 		c.mu.Unlock()
+		c.visibilityOpMu.Unlock()
 		return operationFailure("native window DOM is not ready")
 	}
 	if c.visible {
 		c.mu.Unlock()
+		c.visibilityOpMu.Unlock()
 		return OperationResult{Success: true}
 	}
 	c.visible = true
@@ -633,7 +657,7 @@ func (c *Control) Present() OperationResult {
 		presentation.bridge = c.bridge
 	}
 	c.mu.Unlock()
-	presentation.run()
+	c.runVisibilityPresentationLocked(presentation)
 	return OperationResult{Success: true}
 }
 
@@ -645,23 +669,37 @@ type childWindowPresentation struct {
 	visibilityRevision uint64
 }
 
-func (p childWindowPresentation) run() {
+func (p childWindowPresentation) runNative() {
 	if p.show != nil {
 		p.show(p.ctx)
 	}
 	if p.focus != nil {
 		p.focus(p.ctx)
-		if p.bridge != nil && p.visibilityRevision > 0 {
-			// The parent must retain its pending focus until the native focus
-			// callback has actually run. A failed acknowledgement deliberately
-			// leaves that pending command available for the next SSE reconnect.
-			_ = p.bridge.acknowledgeFocus(p.ctx, p.visibilityRevision)
-		}
 	}
 }
 
+func (p childWindowPresentation) acknowledgeFocus() {
+	if p.focus == nil || p.bridge == nil || p.visibilityRevision == 0 {
+		return
+	}
+	// The parent must retain its pending focus until the native focus callback
+	// has actually run. A failed acknowledgement deliberately leaves that
+	// pending command available for the next SSE reconnect.
+	_ = p.bridge.acknowledgeFocus(p.ctx, p.visibilityRevision)
+}
+
+// runVisibilityPresentationLocked keeps state selection and native effects in
+// one visibility operation, then releases the lock before parent RPC.
+func (c *Control) runVisibilityPresentationLocked(presentation childWindowPresentation) {
+	func() {
+		defer c.visibilityOpMu.Unlock()
+		presentation.runNative()
+	}()
+	presentation.acknowledgeFocus()
+}
+
 func (c *Control) takeInitialPresentationLocked() childWindowPresentation {
-	if c.visible || !c.domReady || !c.frontendReady || c.ctx == nil || c.showWindow == nil {
+	if c.closeCommitted || c.visible || !c.domReady || !c.frontendReady || c.ctx == nil || c.showWindow == nil {
 		return childWindowPresentation{}
 	}
 	c.visible = true
@@ -680,6 +718,8 @@ func (c *Control) Close() OperationResult {
 	if c == nil {
 		return operationFailure("native window control is unavailable")
 	}
+	c.visibilityOpMu.Lock()
+	defer c.visibilityOpMu.Unlock()
 	c.mu.Lock()
 	ctx := c.ctx
 	quit := c.quit
@@ -705,6 +745,8 @@ func (c *Control) Hide(visibilityRevision uint64) OperationResult {
 	if c == nil {
 		return operationFailure("native window control is unavailable")
 	}
+	c.visibilityOpMu.Lock()
+	defer c.visibilityOpMu.Unlock()
 	c.mu.Lock()
 	if visibilityRevision < c.visibilityRevision {
 		currentRevision := c.visibilityRevision
@@ -734,6 +776,53 @@ func (c *Control) Hide(visibilityRevision uint64) OperationResult {
 	c.closeGate.cancel()
 	hide(ctx)
 	return OperationResult{Success: true, VisibilityRevision: visibilityRevision}
+}
+
+// HideForAISettings parks the child before asking the parent to render its
+// settings modal. The request runs in Go after WindowHide, so WebView suspension
+// cannot leave the modal behind the detached window.
+func (c *Control) HideForAISettings(visibilityRevision uint64) OperationResult {
+	if c == nil || c.bridge == nil {
+		return operationFailure("native window control is unavailable")
+	}
+	bridge := c.bridge
+	if bridge.allowParentForeground != nil {
+		// Windows requires the currently foreground child to grant activation to
+		// its parent before the child is hidden.
+		_ = bridge.allowParentForeground()
+	}
+	hideResult := c.Hide(visibilityRevision)
+	if !hideResult.Success {
+		return hideResult
+	}
+	if hideResult.VisibilityRevision != visibilityRevision {
+		failure := operationFailure("open AI settings was superseded by a newer window focus")
+		failure.VisibilityRevision = hideResult.VisibilityRevision
+		return failure
+	}
+	actionResult := bridge.action("open-ai-settings", map[string]any{
+		"id":                 bridge.windowID,
+		"kind":               bridge.kind,
+		"visibilityRevision": visibilityRevision,
+	}, false)
+	if actionResult.Success && (actionResult.Applied == nil || *actionResult.Applied) {
+		return OperationResult{
+			Success:            true,
+			ID:                 bridge.windowID,
+			VisibilityRevision: visibilityRevision,
+		}
+	}
+
+	// Do not strand the user in a hidden child when the parent request fails.
+	restoreResult := bridge.FocusWindow(bridge.windowID)
+	if restoreResult.Success {
+		_ = c.FocusRevision(restoreResult.VisibilityRevision)
+	} else {
+		_ = c.FocusRevision(visibilityRevision)
+	}
+	failure := operationFailure(fmt.Sprintf("open AI settings failed: %s", actionResult.Message))
+	failure.VisibilityRevision = visibilityRevision
+	return failure
 }
 
 // CancelClose keeps the child alive after a failed final frontend flush. It
@@ -799,32 +888,40 @@ func (c *Control) scheduleCloseFallback(fallbackCtx context.Context) {
 	c.closeFallbackGeneration++
 	generation := c.closeFallbackGeneration
 	c.closeFallback = time.AfterFunc(delay, func() {
-		c.mu.Lock()
-		if c.closeCommitted ||
-			c.closeFallbackGeneration != generation ||
-			c.closeGate.isAllowed() {
-			c.closeFallback = nil
-			c.mu.Unlock()
-			return
-		}
-		c.closeFallback = nil
-		c.closeCommitted = true
-		ctx := c.ctx
-		quit := c.quit
-		c.mu.Unlock()
-
-		c.closeGate.allow()
-		if c.bridge != nil {
-			c.bridge.notifyClosing()
-		}
-		if ctx == nil {
-			ctx = fallbackCtx
-		}
-		if ctx != nil && quit != nil {
-			quit(ctx)
-		}
+		c.runCloseFallback(generation, fallbackCtx)
 	})
 	c.mu.Unlock()
+}
+
+func (c *Control) runCloseFallback(generation uint64, fallbackCtx context.Context) {
+	c.visibilityOpMu.Lock()
+	defer c.visibilityOpMu.Unlock()
+	c.mu.Lock()
+	if c.closeFallbackGeneration != generation {
+		c.mu.Unlock()
+		return
+	}
+	if c.closeCommitted || c.closeGate.isAllowed() {
+		c.closeFallback = nil
+		c.mu.Unlock()
+		return
+	}
+	c.closeFallback = nil
+	c.closeCommitted = true
+	ctx := c.ctx
+	quit := c.quit
+	c.mu.Unlock()
+
+	c.closeGate.allow()
+	if c.bridge != nil {
+		c.bridge.notifyClosing()
+	}
+	if ctx == nil {
+		ctx = fallbackCtx
+	}
+	if ctx != nil && quit != nil {
+		quit(ctx)
+	}
 }
 
 func (c *Control) invalidateCloseFallbackLocked() {
@@ -851,10 +948,17 @@ func (c *Control) FocusRevision(visibilityRevision uint64) OperationResult {
 	if c == nil {
 		return operationFailure("native window control is unavailable")
 	}
+	c.visibilityOpMu.Lock()
 	c.mu.Lock()
+	if c.closeCommitted {
+		c.mu.Unlock()
+		c.visibilityOpMu.Unlock()
+		return operationFailure("native window close is already committed")
+	}
 	if visibilityRevision < c.visibilityRevision {
 		currentRevision := c.visibilityRevision
 		c.mu.Unlock()
+		c.visibilityOpMu.Unlock()
 		return OperationResult{
 			Success:            true,
 			Message:            "stale native window focus ignored",
@@ -866,6 +970,7 @@ func (c *Control) FocusRevision(visibilityRevision uint64) OperationResult {
 	focus := c.focusWindow
 	if ctx == nil || focus == nil {
 		c.mu.Unlock()
+		c.visibilityOpMu.Unlock()
 		return operationFailure("native window is not ready")
 	}
 	if !c.visible {
@@ -873,7 +978,7 @@ func (c *Control) FocusRevision(visibilityRevision uint64) OperationResult {
 		c.focusPendingRevision = visibilityRevision
 		presentation := c.takeInitialPresentationLocked()
 		c.mu.Unlock()
-		presentation.run()
+		c.runVisibilityPresentationLocked(presentation)
 		return OperationResult{Success: true, VisibilityRevision: visibilityRevision}
 	}
 	c.focusPending = false
@@ -885,6 +990,6 @@ func (c *Control) FocusRevision(visibilityRevision uint64) OperationResult {
 		visibilityRevision: visibilityRevision,
 	}
 	c.mu.Unlock()
-	presentation.run()
+	c.runVisibilityPresentationLocked(presentation)
 	return OperationResult{Success: true, VisibilityRevision: visibilityRevision}
 }

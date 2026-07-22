@@ -486,6 +486,13 @@ func TestManagerHideIsIdempotentAndFocusAdvancesVisibilityRevision(t *testing.T)
 		},
 	}
 	commands := make(chan childCommand, 3)
+	events := make(chan Event, 2)
+	manager.runtimeCtx = context.Background()
+	manager.emitToWails = func(_ context.Context, name string, args ...any) {
+		if name == MainEventName && len(args) == 1 {
+			events <- args[0].(Event)
+		}
+	}
 	manager.emitToChild = func(targetID string, name string, args ...any) {
 		if targetID != "ai-chat" || name != CommandEventName {
 			t.Fatalf("unexpected target event %q %q", targetID, name)
@@ -521,6 +528,11 @@ func TestManagerHideIsIdempotentAndFocusAdvancesVisibilityRevision(t *testing.T)
 	if focusCommand.Action != "focus" ||
 		focusCommand.Payload.(visibilityCommandPayload).VisibilityRevision != 2 {
 		t.Fatalf("focus command = %#v", focusCommand)
+	}
+	focusEvent := receiveEvent(t, events)
+	if focusEvent.ID != "ai-chat" || focusEvent.Kind != "ai-chat" || focusEvent.Action != "focus" ||
+		positiveVisibilityRevision(focusEvent.Payload) != 2 {
+		t.Fatalf("focus lifecycle event = %#v", focusEvent)
 	}
 	manager.mu.RLock()
 	hidden := manager.windows["ai-chat"].info.Hidden
@@ -762,6 +774,10 @@ func TestStaleHideActionCannotOverrideNewerFocus(t *testing.T) {
 	if result := manager.Focus("ai-chat"); !result.Success || result.VisibilityRevision != 2 {
 		t.Fatalf("Focus result = %#v", result)
 	}
+	focusEvent := receiveEvent(t, events)
+	if focusEvent.Action != "focus" || positiveVisibilityRevision(focusEvent.Payload) != 2 {
+		t.Fatalf("Focus event = %#v", focusEvent)
+	}
 	body := strings.NewReader(
 		`{"action":"hide","payload":{"id":"ai-chat","kind":"ai-chat","revision":2,"visibilityRevision":1}}`,
 	)
@@ -824,9 +840,10 @@ func TestAuthenticatedHostStateEndpointReturnsRetainedSnapshot(t *testing.T) {
 func TestAuthenticatedHandlerRequiresLoopbackTokenAndRegisteredWindow(t *testing.T) {
 	manager := newHTTPTestManager(t)
 	manager.windows["window-1"] = &windowEntry{
-		info:    WindowInfo{ID: "window-1", Kind: "query-result", Title: "Result"},
-		payload: map[string]any{"value": "shared"},
-		ready:   make(chan struct{}),
+		info:           WindowInfo{ID: "window-1", Kind: "query-result", Title: "Result"},
+		payload:        map[string]any{"value": "shared"},
+		actionRevision: 17,
+		ready:          make(chan struct{}),
 	}
 	handler := manager.authenticatedHandler()
 
@@ -862,7 +879,9 @@ func TestAuthenticatedHandlerRequiresLoopbackTokenAndRegisteredWindow(t *testing
 	if validRecorder.Code != http.StatusOK {
 		t.Fatalf("valid bootstrap status = %d body=%s", validRecorder.Code, validRecorder.Body.String())
 	}
-	if !strings.Contains(validRecorder.Body.String(), `"id":"window-1"`) || !strings.Contains(validRecorder.Body.String(), `"value":"shared"`) {
+	if !strings.Contains(validRecorder.Body.String(), `"id":"window-1"`) ||
+		!strings.Contains(validRecorder.Body.String(), `"value":"shared"`) ||
+		!strings.Contains(validRecorder.Body.String(), `"actionRevision":17`) {
 		t.Fatalf("unexpected bootstrap body: %s", validRecorder.Body.String())
 	}
 	select {
@@ -888,8 +907,9 @@ func TestAuthenticatedHandlerRequiresLoopbackTokenAndRegisteredWindow(t *testing
 func TestOpenAISettingsActionIsForwardedWithoutClosingTheChild(t *testing.T) {
 	manager := newHTTPTestManager(t)
 	manager.windows["ai-chat"] = &windowEntry{
-		info:  WindowInfo{ID: "ai-chat", Kind: "ai-chat", Title: "GoNavi AI"},
-		ready: make(chan struct{}),
+		info:               WindowInfo{ID: "ai-chat", Kind: "ai-chat", Title: "GoNavi AI", Hidden: true},
+		ready:              make(chan struct{}),
+		visibilityRevision: 7,
 	}
 	events := make(chan Event, 1)
 	manager.runtimeCtx = context.Background()
@@ -899,7 +919,7 @@ func TestOpenAISettingsActionIsForwardedWithoutClosingTheChild(t *testing.T) {
 		}
 	}
 
-	body := strings.NewReader(`{"action":"open-ai-settings","payload":{"id":"ai-chat","kind":"ai-chat"}}`)
+	body := strings.NewReader(`{"action":"open-ai-settings","payload":{"id":"ai-chat","kind":"ai-chat","visibilityRevision":7}}`)
 	request := authenticatedRequest(manager, http.MethodPost, ActionPath, "ai-chat", body)
 	recorder := httptest.NewRecorder()
 	manager.authenticatedHandler().ServeHTTP(recorder, request)
@@ -915,6 +935,50 @@ func TestOpenAISettingsActionIsForwardedWithoutClosingTheChild(t *testing.T) {
 	manager.mu.RUnlock()
 	if exitReason != "" {
 		t.Fatalf("open-ai-settings marked child terminal: %q", exitReason)
+	}
+}
+
+func TestOpenAISettingsActionIsIgnoredAfterANewerFocus(t *testing.T) {
+	manager := newHTTPTestManager(t)
+	manager.windows["ai-chat"] = &windowEntry{
+		info:               WindowInfo{ID: "ai-chat", Kind: "ai-chat", Hidden: true},
+		ready:              make(chan struct{}),
+		visibilityRevision: 7,
+	}
+	events := make(chan Event, 1)
+	manager.runtimeCtx = context.Background()
+	manager.emitToWails = func(_ context.Context, name string, args ...any) {
+		if name == MainEventName && len(args) == 1 {
+			events <- args[0].(Event)
+		}
+	}
+
+	focusResult := manager.Focus("ai-chat")
+	if !focusResult.Success || focusResult.VisibilityRevision != 8 {
+		t.Fatalf("Focus result = %#v", focusResult)
+	}
+	focusEvent := receiveEvent(t, events)
+	if focusEvent.Action != "focus" || positiveVisibilityRevision(focusEvent.Payload) != 8 {
+		t.Fatalf("Focus event = %#v", focusEvent)
+	}
+	body := strings.NewReader(`{"action":"open-ai-settings","payload":{"id":"ai-chat","kind":"ai-chat","visibilityRevision":7}}`)
+	request := authenticatedRequest(manager, http.MethodPost, ActionPath, "ai-chat", body)
+	recorder := httptest.NewRecorder()
+	manager.authenticatedHandler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("stale open-ai-settings status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var result OperationResult
+	if err := json.NewDecoder(recorder.Body).Decode(&result); err != nil {
+		t.Fatalf("decode stale open-ai-settings result: %v", err)
+	}
+	if !result.Success || result.Applied == nil || *result.Applied {
+		t.Fatalf("stale open-ai-settings result = %#v", result)
+	}
+	select {
+	case event := <-events:
+		t.Fatalf("stale open-ai-settings emitted event: %#v", event)
+	default:
 	}
 }
 
@@ -1240,6 +1304,90 @@ func TestCancelCloseActionClearsPendingStateAndNotifiesMainWindow(t *testing.T) 
 	}
 }
 
+func TestCancelCloseActionCannotRollbackNewerTerminalState(t *testing.T) {
+	manager := newHTTPTestManager(t)
+	manager.windows["workbench:query-1"] = &windowEntry{
+		info:            WindowInfo{ID: "workbench:query-1", Kind: "workbench", CloseSent: true},
+		exitReason:      ExitReasonRequested,
+		actionRevision:  12,
+		closeGeneration: 4,
+	}
+	events := make(chan Event, 1)
+	manager.runtimeCtx = context.Background()
+	manager.emitToWails = func(_ context.Context, name string, args ...any) {
+		if name == MainEventName && len(args) == 1 {
+			events <- args[0].(Event)
+		}
+	}
+
+	body := strings.NewReader(`{"action":"cancel-close","payload":{"id":"workbench:query-1","revision":11,"rollbackAction":"attach"}}`)
+	request := authenticatedRequest(manager, http.MethodPost, ActionPath, "workbench:query-1", body)
+	recorder := httptest.NewRecorder()
+	manager.authenticatedHandler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("stale cancel-close status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var result OperationResult
+	if err := json.NewDecoder(recorder.Body).Decode(&result); err != nil {
+		t.Fatalf("decode stale cancel-close result: %v", err)
+	}
+	if !result.Success || result.Applied == nil || *result.Applied {
+		t.Fatalf("stale cancel-close result = %#v, want ignored success", result)
+	}
+	manager.mu.RLock()
+	entry := manager.windows["workbench:query-1"]
+	closeSent := entry.info.CloseSent
+	exitReason := entry.exitReason
+	revision := entry.actionRevision
+	closeGeneration := entry.closeGeneration
+	manager.mu.RUnlock()
+	if !closeSent || exitReason != ExitReasonRequested || revision != 12 || closeGeneration != 4 {
+		t.Fatalf(
+			"stale cancel changed state: closeSent=%v reason=%q revision=%d generation=%d",
+			closeSent,
+			exitReason,
+			revision,
+			closeGeneration,
+		)
+	}
+	select {
+	case event := <-events:
+		t.Fatalf("stale cancel emitted event: %#v", event)
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
+func TestCancelCloseActionCannotCancelParentShutdown(t *testing.T) {
+	manager := newHTTPTestManager(t)
+	manager.closing = true
+	manager.windows["ai-chat"] = &windowEntry{
+		info:            WindowInfo{ID: "ai-chat", Kind: "ai-chat", CloseSent: true},
+		exitReason:      ExitReasonParentShutdown,
+		actionRevision:  8,
+		closeGeneration: 5,
+	}
+
+	body := strings.NewReader(`{"action":"cancel-close","payload":{"id":"ai-chat","revision":9,"rollbackAction":"close"}}`)
+	request := authenticatedRequest(manager, http.MethodPost, ActionPath, "ai-chat", body)
+	recorder := httptest.NewRecorder()
+	manager.authenticatedHandler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("shutdown cancel-close status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var result OperationResult
+	if err := json.NewDecoder(recorder.Body).Decode(&result); err != nil {
+		t.Fatalf("decode shutdown cancel-close result: %v", err)
+	}
+	if !result.Success || result.Applied == nil || *result.Applied {
+		t.Fatalf("shutdown cancel-close result = %#v, want ignored success", result)
+	}
+	entry := manager.windows["ai-chat"]
+	if !entry.info.CloseSent || entry.exitReason != ExitReasonParentShutdown ||
+		entry.actionRevision != 8 || entry.closeGeneration != 5 {
+		t.Fatalf("shutdown cancellation changed entry: %#v", entry)
+	}
+}
+
 func TestHostEventActionIsForwardedWithoutChangingTerminalState(t *testing.T) {
 	manager := newHTTPTestManager(t)
 	manager.windows["ai-chat"] = &windowEntry{
@@ -1404,6 +1552,37 @@ func TestActionRevisionPreventsStaleTerminalTransition(t *testing.T) {
 	manager.mu.RUnlock()
 	if exitReason != ExitReasonAttached || revision != 12 {
 		t.Fatalf("terminal state = reason %q revision %d", exitReason, revision)
+	}
+}
+
+func TestManagerDoesNotReuseChildAfterTerminalActionIsAccepted(t *testing.T) {
+	for _, action := range []string{"attach", "close"} {
+		t.Run(action, func(t *testing.T) {
+			manager := newHTTPTestManager(t)
+			manager.started = true
+			manager.endpoint = "http://127.0.0.1:43119"
+			manager.windows["ai-chat"] = &windowEntry{
+				info: WindowInfo{ID: "ai-chat", Kind: "ai-chat", Title: "GoNavi AI"},
+			}
+
+			body := strings.NewReader(fmt.Sprintf(
+				`{"action":%q,"payload":{"revision":1}}`,
+				action,
+			))
+			request := authenticatedRequest(manager, http.MethodPost, ActionPath, "ai-chat", body)
+			recorder := httptest.NewRecorder()
+			manager.authenticatedHandler().ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("%s action status = %d body=%s", action, recorder.Code, recorder.Body.String())
+			}
+
+			if result := manager.Focus("ai-chat"); result.Success || !strings.Contains(result.Message, "retry") {
+				t.Errorf("Focus after %s result = %#v, want retry failure", action, result)
+			}
+			if result := manager.Open(OpenRequest{ID: "ai-chat", Kind: "ai-chat", Title: "GoNavi AI"}); result.Success || !strings.Contains(result.Message, "retry") {
+				t.Errorf("Open after %s result = %#v, want retry failure", action, result)
+			}
+		})
 	}
 }
 

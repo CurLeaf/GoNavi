@@ -13,6 +13,7 @@ export const NATIVE_DETACHED_BOOTSTRAP_URL = '/__gonavi/detached/bootstrap';
 export const NATIVE_DETACHED_ACTION_URL = '/__gonavi/detached/action';
 export { NATIVE_DETACHED_WINDOW_QUERY_PARAM } from './nativeDetachedWindowRoute';
 export const NATIVE_DETACHED_WINDOW_COMMAND_EVENT = 'gonavi:native-detached-command';
+export const NATIVE_DETACHED_QUERY_RESULT_REDETACH_EVENT = 'gonavi:redetach-query-result';
 
 export const NATIVE_DETACHED_HOST_EVENTS_KEY = '__gonaviNativeHostEvents';
 
@@ -59,12 +60,14 @@ export interface NativeDetachedWindowBootstrap {
   kind: NativeDetachedWindowKind;
   title: string;
   payload: NativeDetachedWindowPayload;
+  actionRevision?: number;
 }
 
 export interface NativeDetachedWindowActionPayload {
   id: string;
   kind: NativeDetachedWindowKind;
   revision?: number;
+  rollbackAction?: 'attach' | 'hide' | 'close';
   storeState?: NativeDetachedStoreSnapshot;
   tab?: TabData;
   resultWindow?: DetachedQueryResultWindow;
@@ -113,6 +116,7 @@ export interface NativeDetachedWindowActionRequest {
 
 export interface NativeDetachedWindowActionResult {
   success: boolean;
+  applied?: boolean;
   message?: string;
   id?: string;
   visibilityRevision?: number;
@@ -123,6 +127,7 @@ export interface NativeDetachedHostStateCommand {
   action: 'sync-host-state' | string;
   payload?: {
     revision?: number;
+    visibilityRevision?: number;
     storeState?: NativeDetachedStoreSnapshot;
   };
 }
@@ -917,8 +922,12 @@ export const postNativeDetachedWindowAction = async (
     if (result?.success === false) {
       throw new Error(String(result.message || `Native detached ${action} failed`));
     }
+    if (result?.applied === false) {
+      throw new Error(String(result.message || `Native detached ${action} was ignored`));
+    }
     return {
       success: result?.success !== false,
+      ...(typeof result?.applied === 'boolean' ? { applied: result.applied } : {}),
       ...(result?.message ? { message: String(result.message) } : {}),
       ...(result?.id ? { id: String(result.id) } : {}),
       ...(Number.isFinite(Number(result?.visibilityRevision))
@@ -941,6 +950,9 @@ export const postNativeDetachedWindowAction = async (
   const result = JSON.parse(body) as NativeDetachedWindowActionResult;
   if (result?.success === false) {
     throw new Error(String(result.message || `Native detached ${action} failed`));
+  }
+  if (result?.applied === false) {
+    throw new Error(String(result.message || `Native detached ${action} was ignored`));
   }
   return result;
 };
@@ -1008,7 +1020,10 @@ export const closeCurrentNativeDetachedWindow = async (): Promise<void> => {
     ? (window as any).go?.nativewindow?.Control?.Close
     : undefined;
   if (typeof nativeClose === 'function') {
-    await nativeClose();
+    const result = await nativeClose();
+    if (result?.success === false) {
+      throw new Error(String(result.message || 'Failed to close native detached window'));
+    }
     return;
   }
   if (typeof window !== 'undefined' && typeof window.close === 'function') {
@@ -1028,6 +1043,21 @@ export const hideCurrentNativeDetachedWindow = async (
   const result = await nativeHide(Math.trunc(visibilityRevision));
   if (result?.success === false) {
     throw new Error(String(result.message || 'Failed to hide native detached window'));
+  }
+};
+
+export const hideCurrentNativeDetachedWindowForAISettings = async (
+  visibilityRevision: number,
+): Promise<void> => {
+  const hideForAISettings = typeof window !== 'undefined'
+    ? (window as any).go?.nativewindow?.Control?.HideForAISettings
+    : undefined;
+  if (typeof hideForAISettings !== 'function') {
+    throw new Error('Native detached AI settings control is unavailable');
+  }
+  const result = await hideForAISettings(Math.trunc(visibilityRevision));
+  if (result?.success === false) {
+    throw new Error(String(result.message || 'Failed to open AI settings from native window'));
   }
 };
 

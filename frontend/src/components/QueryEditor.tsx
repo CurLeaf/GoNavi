@@ -70,7 +70,10 @@ import {
 } from '../utils/queryEditorResultSessionCache';
 import { buildEditableTriggerSql } from '../utils/triggerEditSql';
 import { openNativeQueryResultWindow } from '../utils/nativeDetachedWindowHost';
-import { isNativeDetachedWindow } from '../utils/nativeDetachedWindowClient';
+import {
+    isNativeDetachedWindow,
+    NATIVE_DETACHED_QUERY_RESULT_REDETACH_EVENT,
+} from '../utils/nativeDetachedWindowClient';
 import {
     getColumnDefinitionComment,
     getColumnDefinitionKey,
@@ -1274,6 +1277,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   );
   const resultSetsRef = useRef(resultSets);
   const activeResultKeyRef = useRef(activeResultKey);
+  const nativeRestoredResultRefs = useRef(new Map<
+    string,
+    { resultKey: string; result: ResultSet }
+  >());
   resultSetsRef.current = resultSets;
   activeResultKeyRef.current = activeResultKey;
   const [loading, setLoading] = useState(false);
@@ -8740,43 +8747,78 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (!restored || typeof restored !== 'object') return;
           const restoredKey = String(restored.key || '').trim();
           if (!restoredKey) return;
-          setResultSets((prev) => {
-              if (prev.some((item) => item.key === restoredKey)) {
-                  return prev;
-              }
-              return [
-                  ...prev,
-                  {
-                      key: restoredKey,
-                      sql: String(restored.sql || ''),
-                      exportSql: restored.exportSql,
-                      sourceStatementIndex: restored.sourceStatementIndex,
-                      statementResultIndex: restored.statementResultIndex,
-                      rows: Array.isArray(restored.rows) ? restored.rows : [],
-                      columns: Array.isArray(restored.columns) ? restored.columns : [],
-                      messages: Array.isArray(restored.messages) ? restored.messages : undefined,
-                      resultType: restored.resultType === 'message' ? 'message' : 'grid',
-                      tableName: restored.tableName,
-                      metadataDbName: restored.metadataDbName,
-                      metadataTableName: restored.metadataTableName,
-                      ddlDbName: restored.ddlDbName,
-                      ddlTableName: restored.ddlTableName,
-                      pkColumns: Array.isArray(restored.pkColumns) ? restored.pkColumns : [],
-                      editLocator: restored.editLocator,
-                      readOnly: restored.readOnly !== false,
-                      showRowNumberColumn: restored.showRowNumberColumn,
-                      truncated: restored.truncated,
-                  } as ResultSet,
+          const windowId = String(detail.windowId || '').trim();
+          const expectedWindowId = `query-result:${sourceQueryTabId}:${restoredKey}`;
+          if (!resultSetsRef.current.some((item) => item.key === restoredKey)) {
+              const restoredResult = {
+                  key: restoredKey,
+                  sql: String(restored.sql || ''),
+                  exportSql: restored.exportSql,
+                  sourceStatementIndex: restored.sourceStatementIndex,
+                  statementResultIndex: restored.statementResultIndex,
+                  rows: Array.isArray(restored.rows) ? restored.rows : [],
+                  columns: Array.isArray(restored.columns) ? restored.columns : [],
+                  messages: Array.isArray(restored.messages) ? restored.messages : undefined,
+                  resultType: restored.resultType === 'message' ? 'message' : 'grid',
+                  tableName: restored.tableName,
+                  metadataDbName: restored.metadataDbName,
+                  metadataTableName: restored.metadataTableName,
+                  ddlDbName: restored.ddlDbName,
+                  ddlTableName: restored.ddlTableName,
+                  pkColumns: Array.isArray(restored.pkColumns) ? restored.pkColumns : [],
+                  editLocator: restored.editLocator,
+                  readOnly: restored.readOnly !== false,
+                  showRowNumberColumn: restored.showRowNumberColumn,
+                  truncated: restored.truncated,
+              } as ResultSet;
+              const nextResultSets = [
+                  ...resultSetsRef.current,
+                  restoredResult,
               ];
-          });
+              resultSetsRef.current = nextResultSets;
+              setResultSets(nextResultSets);
+              if (windowId === expectedWindowId) {
+                  nativeRestoredResultRefs.current.set(windowId, {
+                      resultKey: restoredKey,
+                      result: restoredResult,
+                  });
+              }
+          } else if (windowId) {
+              nativeRestoredResultRefs.current.delete(windowId);
+          }
+          activeResultKeyRef.current = restoredKey;
           setActiveResultKey(restoredKey);
           updateResultPanelVisibility(true);
       };
+      const handleRedetachQueryResult = (event: Event) => {
+          const detail = (event as CustomEvent).detail || {};
+          const sourceQueryTabId = String(detail.sourceQueryTabId || '').trim();
+          if (sourceQueryTabId !== tab.id) return;
+          const resultKey = String(detail.resultKey || '').trim();
+          const windowId = String(detail.windowId || '').trim();
+          if (!resultKey || windowId !== `query-result:${sourceQueryTabId}:${resultKey}`) return;
+          const restoredResult = nativeRestoredResultRefs.current.get(windowId);
+          nativeRestoredResultRefs.current.delete(windowId);
+          if (
+              !restoredResult
+              || restoredResult.resultKey !== resultKey
+              || resultSetsRef.current.find((item) => item.key === resultKey) !== restoredResult.result
+          ) return;
+          handleCloseResult(resultKey);
+      };
       window.addEventListener('gonavi:restore-query-result', handleRestoreQueryResult as EventListener);
+      window.addEventListener(
+          NATIVE_DETACHED_QUERY_RESULT_REDETACH_EVENT,
+          handleRedetachQueryResult as EventListener,
+      );
       return () => {
           window.removeEventListener('gonavi:restore-query-result', handleRestoreQueryResult as EventListener);
+          window.removeEventListener(
+              NATIVE_DETACHED_QUERY_RESULT_REDETACH_EVENT,
+              handleRedetachQueryResult as EventListener,
+          );
       };
-  }, [tab.id, updateResultPanelVisibility]);
+  }, [isV2Ui, tab.id, updateResultPanelVisibility]);
 
   const toggleQueryResultsPanelShortcutLabel =
       toggleQueryResultsPanelShortcutBinding.enabled && toggleQueryResultsPanelShortcutBinding.combo

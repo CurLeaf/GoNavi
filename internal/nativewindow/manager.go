@@ -41,6 +41,7 @@ const (
 const (
 	defaultGracefulCloseTimeout = 10 * time.Second
 	defaultOpenReadyTimeout     = 10 * time.Second
+	staleDetachedActionMessage  = "stale detached action ignored"
 )
 
 type processExit struct {
@@ -295,7 +296,7 @@ func (m *Manager) open(request OpenRequest, ownerID string) OperationResult {
 		return operationFailure("native window manager is not running")
 	}
 	if existing, exists := m.windows[request.ID]; exists {
-		if existing.info.CloseSent {
+		if windowEntryIsTerminating(existing) {
 			m.mu.Unlock()
 			return closingWindowRetryFailure(request.ID)
 		}
@@ -422,7 +423,7 @@ func (m *Manager) Focus(id string) OperationResult {
 		m.mu.Unlock()
 		return operationFailure("native window was not found")
 	}
-	if entry.info.CloseSent {
+	if windowEntryIsTerminating(entry) {
 		m.mu.Unlock()
 		return closingWindowRetryFailure(id)
 	}
@@ -434,6 +435,7 @@ func (m *Manager) Focus(id string) OperationResult {
 	entry.info.Hidden = false
 	entry.pendingFocusRevision = entry.visibilityRevision
 	visibilityRevision := entry.visibilityRevision
+	kind := entry.info.Kind
 	bounds := windowBoundsFromInfo(entry.info)
 	emitToChild := m.emitToChild
 	shared := m.shared
@@ -449,6 +451,14 @@ func (m *Manager) Focus(id string) OperationResult {
 		shared.EmitTo(id, CommandEventName, command)
 	}
 	if wasHidden {
+		m.emitDetached(Event{
+			ID:     id,
+			Kind:   kind,
+			Action: "focus",
+			Payload: visibilityCommandPayload{
+				VisibilityRevision: visibilityRevision,
+			},
+		})
 		publishDetachedDockMenuSnapshot(m)
 	}
 	return OperationResult{
@@ -591,6 +601,10 @@ func (m *Manager) CancelClose(id string) OperationResult {
 		m.mu.Unlock()
 		return operationFailure("native window was not found")
 	}
+	if m.closing || entry.exitReason == ExitReasonParentShutdown {
+		m.mu.Unlock()
+		return operationFailure("native window manager shutdown cannot be cancelled")
+	}
 	m.cancelCloseLocked(entry)
 	m.mu.Unlock()
 	publishDetachedDockMenuSnapshot(m)
@@ -601,9 +615,34 @@ func (m *Manager) cancelCloseLocked(entry *windowEntry) {
 	entry.closeGeneration++
 	entry.info.CloseSent = false
 	switch entry.exitReason {
-	case ExitReasonRequested, ExitReasonParentShutdown, ExitReasonAttached, ExitReasonWindowClosed:
+	case ExitReasonRequested, ExitReasonAttached, ExitReasonWindowClosed:
 		entry.exitReason = ""
 	}
+}
+
+func (m *Manager) cancelCloseActionLocked(entry *windowEntry, rollbackAction string) bool {
+	if m.closing || entry == nil || entry.exitReason == ExitReasonParentShutdown {
+		return false
+	}
+	switch rollbackAction {
+	case "attach":
+		if entry.info.CloseSent || (entry.exitReason != "" && entry.exitReason != ExitReasonAttached) {
+			return false
+		}
+	case "close":
+		validRequestedClose := entry.info.CloseSent && entry.exitReason == ExitReasonRequested
+		validWindowClose := !entry.info.CloseSent && entry.exitReason == ExitReasonWindowClosed
+		alreadyOpen := !entry.info.CloseSent && entry.exitReason == ""
+		if !validRequestedClose && !validWindowClose && !alreadyOpen {
+			return false
+		}
+	case "":
+		// Compatibility with children started before rollbackAction was added.
+	default:
+		return false
+	}
+	m.cancelCloseLocked(entry)
+	return true
 }
 
 // CloseAll requests graceful shutdown of every detached child.
@@ -831,6 +870,10 @@ func operationFailure(message string) OperationResult {
 	return OperationResult{Success: false, Message: message}
 }
 
+func windowEntryIsTerminating(entry *windowEntry) bool {
+	return entry != nil && (entry.info.CloseSent || entry.exitReason != "")
+}
+
 func closingWindowRetryFailure(id string) OperationResult {
 	return OperationResult{
 		Success: false,
@@ -993,7 +1036,13 @@ func (m *Manager) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown detached window", http.StatusNotFound)
 		return
 	}
-	bootstrap := Bootstrap{ID: entry.info.ID, Kind: entry.info.Kind, Title: entry.info.Title, Payload: entry.payload}
+	bootstrap := Bootstrap{
+		ID:             entry.info.ID,
+		Kind:           entry.info.Kind,
+		Title:          entry.info.Title,
+		Payload:        entry.payload,
+		ActionRevision: entry.actionRevision,
+	}
 	m.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -1146,11 +1195,43 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 
 	id := strings.TrimSpace(r.Header.Get(HeaderWindowID))
 	revision := positiveActionRevision(request.Payload)
+	requestedAISettingsVisibilityRevision := uint64(0)
 	m.mu.Lock()
 	entry, exists := m.windows[id]
 	if !exists {
 		m.mu.Unlock()
 		http.Error(w, "unknown detached window", http.StatusNotFound)
+		return
+	}
+	if request.Action == "open-ai-settings" {
+		requestedAISettingsVisibilityRevision = positiveVisibilityRevision(request.Payload)
+		if requestedAISettingsVisibilityRevision == 0 ||
+			requestedAISettingsVisibilityRevision != entry.visibilityRevision ||
+			!entry.info.Hidden {
+			visibilityRevision := entry.visibilityRevision
+			m.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(OperationResult{
+				Success:            true,
+				Applied:            operationApplied(false),
+				ID:                 id,
+				Message:            "open AI settings ignored after a newer visibility action",
+				VisibilityRevision: visibilityRevision,
+			})
+			return
+		}
+	}
+	if request.Action == "cancel-close" && (m.closing || entry.exitReason == ExitReasonParentShutdown) {
+		visibilityRevision := entry.visibilityRevision
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(OperationResult{
+			Success:            true,
+			Applied:            operationApplied(false),
+			ID:                 id,
+			Message:            "detached close cancellation ignored while parent is closing",
+			VisibilityRevision: visibilityRevision,
+		})
 		return
 	}
 	if actionUsesRevision(request.Action) && revision > 0 {
@@ -1160,8 +1241,9 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			_ = json.NewEncoder(w).Encode(OperationResult{
 				Success:            true,
+				Applied:            operationApplied(false),
 				ID:                 id,
-				Message:            "stale detached action ignored",
+				Message:            staleDetachedActionMessage,
 				VisibilityRevision: visibilityRevision,
 			})
 			return
@@ -1169,7 +1251,7 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 		entry.actionRevision = revision
 	}
 	eventAction := request.Action
-	visibilityRevision := uint64(0)
+	visibilityRevision := requestedAISettingsVisibilityRevision
 	if request.Action == "ready" {
 		entry.info.Ready = true
 		entry.readyOnce.Do(func() {
@@ -1178,7 +1260,9 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 			}
 		})
 	} else if request.Action == "attach" {
-		entry.exitReason = ExitReasonAttached
+		if entry.exitReason == "" {
+			entry.exitReason = ExitReasonAttached
+		}
 		entry.pendingFocusRevision = 0
 	} else if request.Action == "close" && entry.exitReason == "" {
 		entry.exitReason = ExitReasonWindowClosed
@@ -1206,7 +1290,19 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 		}
 		request.Payload = withVisibilityRevision(request.Payload, visibilityRevision)
 	} else if request.Action == "cancel-close" {
-		m.cancelCloseLocked(entry)
+		if !m.cancelCloseActionLocked(entry, rollbackActionFromPayload(request.Payload)) {
+			visibilityRevision = entry.visibilityRevision
+			m.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(OperationResult{
+				Success:            true,
+				Applied:            operationApplied(false),
+				ID:                 id,
+				Message:            "detached close cancellation no longer matches the active close",
+				VisibilityRevision: visibilityRevision,
+			})
+			return
+		}
 	}
 	info := entry.info
 	ownerID := entry.ownerID
@@ -1224,15 +1320,40 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	applied := revisionedActionApplied(request.Action, revision)
+	if request.Action == "open-ai-settings" {
+		applied = operationApplied(true)
+	}
 	_ = json.NewEncoder(w).Encode(OperationResult{
 		Success:            true,
+		Applied:            applied,
 		ID:                 id,
 		VisibilityRevision: visibilityRevision,
 	})
 }
 
 func actionUsesRevision(action string) bool {
-	return action == "sync" || action == "attach" || action == "close" || action == "hide"
+	return action == "sync" || action == "attach" || action == "close" || action == "hide" || action == "cancel-close"
+}
+
+func operationApplied(value bool) *bool {
+	return &value
+}
+
+func revisionedActionApplied(action string, revision int64) *bool {
+	if !actionUsesRevision(action) || revision <= 0 {
+		return nil
+	}
+	return operationApplied(true)
+}
+
+func rollbackActionFromPayload(payload any) string {
+	record, ok := payload.(map[string]any)
+	if !ok {
+		return ""
+	}
+	rollbackAction, _ := record["rollbackAction"].(string)
+	return strings.ToLower(strings.TrimSpace(rollbackAction))
 }
 
 func positiveVisibilityRevision(payload any) uint64 {
@@ -1355,7 +1476,7 @@ func (m *Manager) handleControl(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	case "focus":
-		if !m.ownsWindow(request.ID, ownerID) {
+		if !m.canFocusWindow(request.ID, ownerID) {
 			result = operationFailure("native window is not owned by this window")
 			break
 		}
@@ -1427,6 +1548,18 @@ func (m *Manager) ownsWindow(id string, ownerID string) bool {
 	defer m.mu.RUnlock()
 	entry, exists := m.windows[strings.TrimSpace(id)]
 	return exists && entry.ownerID == strings.TrimSpace(ownerID)
+}
+
+func (m *Manager) canFocusWindow(id string, ownerID string) bool {
+	id = strings.TrimSpace(id)
+	ownerID = strings.TrimSpace(ownerID)
+	if id == "" || ownerID == "" {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry, exists := m.windows[id]
+	return exists && (id == ownerID || entry.ownerID == ownerID)
 }
 
 func (m *Manager) closeOwned(ownerID string) OperationResult {

@@ -196,6 +196,7 @@ import { safeWindowRuntimeCall } from './utils/wailsRuntime';
 import {
   hasNativeDetachedWindowManager,
   openNativeAIChatWindow,
+  toggleOrFocusNativeAIChatFromMainWindow,
 } from './utils/nativeDetachedWindowHost';
 import {
   buildApplicationQuitUnsavedSQLLabel,
@@ -4044,6 +4045,12 @@ function App() {
               return;
           }
 
+          if (event.repeat && matchedAction === 'toggleAIPanel') {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              return;
+          }
+
           event.preventDefault();
           event.stopPropagation();
 
@@ -4067,7 +4074,9 @@ function App() {
                   handleCreateConnection();
                   break;
               case 'toggleAIPanel':
-                  toggleAIPanel();
+                  void toggleOrFocusNativeAIChatFromMainWindow().catch((error) => {
+                      void message.error(error instanceof Error ? error.message : String(error));
+                  });
                   break;
               case 'toggleLogPanel':
                   handleToggleLogPanel();

@@ -89,10 +89,11 @@ type WindowInfo struct {
 // Bootstrap is fetched by the child after Wails has installed its native
 // runtime and bindings.
 type Bootstrap struct {
-	ID      string `json:"id"`
-	Kind    string `json:"kind"`
-	Title   string `json:"title"`
-	Payload any    `json:"payload,omitempty"`
+	ID             string `json:"id"`
+	Kind           string `json:"kind"`
+	Title          string `json:"title"`
+	Payload        any    `json:"payload,omitempty"`
+	ActionRevision int64  `json:"actionRevision,omitempty"`
 }
 
 // OperationResult is returned by the Wails-bound Manager commands.
@@ -102,6 +103,9 @@ type OperationResult struct {
 	ID                 string        `json:"id,omitempty"`
 	Bounds             *WindowBounds `json:"bounds,omitempty"`
 	VisibilityRevision uint64        `json:"visibilityRevision,omitempty"`
+	// Applied is set only for revisioned child actions. A nil value preserves
+	// compatibility with ordinary manager/control results and older parents.
+	Applied *bool `json:"applied,omitempty"`
 }
 
 // HostStateRequest carries main-window state that an active detached child

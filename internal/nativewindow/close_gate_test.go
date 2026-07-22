@@ -156,6 +156,96 @@ func TestControlCancelCloseInvalidatesFallbackAndAllowsRetry(t *testing.T) {
 	}
 }
 
+func TestBridgeCancelCloseResetsTerminalFallback(t *testing.T) {
+	requests := make(chan actionRequest, 3)
+	bridge := newBridge(ChildOptions{
+		ParentURL: "http://127.0.0.1:43119",
+		Token:     "test-token",
+		ID:        "ai-chat",
+		Kind:      "ai-chat",
+	})
+	bridge.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		defer r.Body.Close()
+		var request actionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode fallback action: %v", err)
+		}
+		requests <- request
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"success":true,"id":"ai-chat"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})
+	control := newControl(bridge)
+
+	if result := bridge.Action("attach", map[string]any{"revision": 1}); !result.Success {
+		t.Fatalf("attach Action result = %#v", result)
+	}
+	if result := bridge.Action("cancel-close", map[string]any{"revision": 2}); !result.Success {
+		t.Fatalf("cancel-close Action result = %#v", result)
+	}
+	if result := control.CancelClose(); !result.Success {
+		t.Fatalf("CancelClose result = %#v", result)
+	}
+	bridge.notifyClosing()
+
+	for _, expectedAction := range []string{"attach", "cancel-close", "close"} {
+		select {
+		case request := <-requests:
+			if request.Action != expectedAction {
+				t.Fatalf("action = %q, want %q", request.Action, expectedAction)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("missing %q action after terminal rollback", expectedAction)
+		}
+	}
+}
+
+func TestBridgeIgnoredTerminalActionDoesNotSuppressCloseFallback(t *testing.T) {
+	requests := make(chan actionRequest, 2)
+	bridge := newBridge(ChildOptions{
+		ParentURL: "http://127.0.0.1:43119",
+		Token:     "test-token",
+		ID:        "ai-chat",
+		Kind:      "ai-chat",
+	})
+	bridge.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		defer r.Body.Close()
+		var request actionRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode action: %v", err)
+		}
+		requests <- request
+		body := `{"success":true,"id":"ai-chat"}`
+		if request.Action == "attach" {
+			body = `{"success":true,"applied":false,"message":"stale detached action ignored","id":"ai-chat"}`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     make(http.Header),
+		}, nil
+	})
+
+	result := bridge.Action("attach", map[string]any{"revision": 1})
+	if !result.Success || result.Applied == nil || *result.Applied {
+		t.Fatalf("ignored attach result = %#v", result)
+	}
+	bridge.notifyClosing()
+
+	for _, expectedAction := range []string{"attach", "close"} {
+		select {
+		case request := <-requests:
+			if request.Action != expectedAction {
+				t.Fatalf("action = %q, want %q", request.Action, expectedAction)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("missing %q action after ignored terminal action", expectedAction)
+		}
+	}
+}
+
 func TestNotifyClosingStillSendsOneFallbackAction(t *testing.T) {
 	requests := make(chan actionRequest, 2)
 	bridge := newBridge(ChildOptions{
