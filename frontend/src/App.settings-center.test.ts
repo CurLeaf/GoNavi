@@ -228,6 +228,14 @@ describe('settings center layout', () => {
     expect(appSource).toContain("gridTemplateColumns: 'minmax(0, 1fr) minmax(220px, 260px)'");
     expect(appSource).toContain('className="gonavi-about-update-channel"');
     expect(appSource).toContain('<Segmented');
+    expect(appSource).toContain("t('app.about.field.auto_check_updates')");
+    expect(appSource).toContain("t('app.about.field.auto_check_interval')");
+    expect(appSource).toContain("t('app.about.version_update.auto_check_hint')");
+    expect(appSource).toContain("t('app.about.version_update.auto_check_disabled_hint')");
+    expect(appSource).toContain('className="gonavi-about-auto-check-interval"');
+    expect(appSource).toContain('checked={autoCheckForUpdates}');
+    expect(appSource).toContain('setAutoCheckForUpdates(checked)');
+    expect(appSource).toContain('setAutoCheckForUpdatesIntervalMinutes(Number(value))');
     expect(appSource).toContain('maxWidth: 360');
     expect(appSource).toContain("alignItems: 'start'");
     expect(appSource).toContain("overflowWrap: 'anywhere'");

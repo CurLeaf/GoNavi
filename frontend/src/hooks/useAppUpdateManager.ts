@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { message } from 'antd';
 import { EventsOn } from '../../wailsjs/runtime';
+import { useStore } from '../store';
 import { resolveAboutDisplayVersion } from '../utils/appVersionDisplay';
 
 type Translator = (key: string, params?: Record<string, any>) => string;
@@ -181,6 +182,10 @@ export const useAppUpdateManager = ({
   t,
   updateCenterBridgeRef,
 }: UseAppUpdateManagerOptions) => {
+  const autoCheckForUpdates = useStore((state) => state.autoCheckForUpdates);
+  const autoCheckForUpdatesIntervalMinutes = useStore(
+    (state) => state.autoCheckForUpdatesIntervalMinutes,
+  );
   const updateCheckInFlightRef = useRef(false);
   const updateDownloadInFlightRef = useRef(false);
   const updateUserDismissedRef = useRef(false);
@@ -686,17 +691,21 @@ export const useAppUpdateManager = ({
   }, [loadUpdateChannel]);
 
   useEffect(() => {
+    if (!autoCheckForUpdates) {
+      return;
+    }
+    const intervalMs = Math.max(1, autoCheckForUpdatesIntervalMinutes) * 60 * 1000;
     const startupTimer = window.setTimeout(() => {
       void checkForUpdates(true);
     }, 2000);
     const interval = window.setInterval(() => {
       void checkForUpdates(true);
-    }, 30 * 60 * 1000);
+    }, intervalMs);
     return () => {
       window.clearTimeout(startupTimer);
       window.clearInterval(interval);
     };
-  }, [checkForUpdates]);
+  }, [autoCheckForUpdates, autoCheckForUpdatesIntervalMinutes, checkForUpdates]);
 
   useEffect(() => {
     let offDownloadProgress: any = null;

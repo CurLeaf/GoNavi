@@ -2950,6 +2950,57 @@ describe('store appearance persistence', () => {
     expect(reloaded.useStore.getState().startupFullscreen).toBe(true);
   });
 
+  it('defaults auto-check for updates to true and persists explicit disable', async () => {
+    const { useStore } = await importStore();
+
+    expect(useStore.getState().autoCheckForUpdates).toBe(true);
+
+    useStore.getState().setAutoCheckForUpdates(false);
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.autoCheckForUpdates).toBe(false);
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().autoCheckForUpdates).toBe(false);
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {},
+      version: 17,
+    }));
+    vi.resetModules();
+    const hydrated = await importStore();
+    expect(hydrated.useStore.getState().autoCheckForUpdates).toBe(true);
+  });
+
+  it('defaults auto-check interval to 30 minutes and sanitizes invalid values', async () => {
+    const { useStore } = await importStore();
+
+    expect(useStore.getState().autoCheckForUpdatesIntervalMinutes).toBe(30);
+
+    useStore.getState().setAutoCheckForUpdatesIntervalMinutes(60);
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.autoCheckForUpdatesIntervalMinutes).toBe(60);
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().autoCheckForUpdatesIntervalMinutes).toBe(60);
+
+    reloaded.useStore.getState().setAutoCheckForUpdatesIntervalMinutes(7);
+    expect(reloaded.useStore.getState().autoCheckForUpdatesIntervalMinutes).toBe(30);
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        autoCheckForUpdatesIntervalMinutes: 99,
+      },
+      version: 17,
+    }));
+    vi.resetModules();
+    const hydrated = await importStore();
+    expect(hydrated.useStore.getState().autoCheckForUpdatesIntervalMinutes).toBe(30);
+  });
+
   it('persists window state and bounds immediately so Windows reopen keeps maximise or size memory', async () => {
     const { useStore } = await importStore();
 

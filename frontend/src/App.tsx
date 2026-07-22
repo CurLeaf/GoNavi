@@ -40,6 +40,7 @@ import CustomThemeStyleHost, {
   type CustomThemeAntTokenSnapshot,
 } from './components/theme/CustomThemeStyleHost';
 import {
+  AUTO_CHECK_FOR_UPDATES_INTERVAL_OPTIONS,
   DEFAULT_APPEARANCE,
   MAX_V2_SIDEBAR_RAIL_SCALE,
   MIN_V2_SIDEBAR_RAIL_SCALE,
@@ -710,6 +711,10 @@ function App() {
   const setFontSize = useStore(state => state.setFontSize);
   const startupFullscreen = useStore(state => state.startupFullscreen);
   const setStartupFullscreen = useStore(state => state.setStartupFullscreen);
+  const autoCheckForUpdates = useStore(state => state.autoCheckForUpdates);
+  const setAutoCheckForUpdates = useStore(state => state.setAutoCheckForUpdates);
+  const autoCheckForUpdatesIntervalMinutes = useStore(state => state.autoCheckForUpdatesIntervalMinutes);
+  const setAutoCheckForUpdatesIntervalMinutes = useStore(state => state.setAutoCheckForUpdatesIntervalMinutes);
   const globalProxy = useStore(state => state.globalProxy);
   const replaceConnections = useStore(state => state.replaceConnections);
   const replaceGlobalProxy = useStore(state => state.replaceGlobalProxy);
@@ -5016,8 +5021,8 @@ function App() {
                       </div>
                       <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 24px' }}>
                           <div style={{ display: 'grid', gap: 8 }}>
-                              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(220px, 260px)', alignItems: 'center', gap: 16 }}>
-                                  <div style={{ fontSize: 15, fontWeight: 600, color: overlayTheme.titleText }}>{t('app.about.field.update_channel')}</div>
+                              <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', alignItems: 'center', gap: 16 }}>
+                                  <div style={{ fontSize: 15, fontWeight: 600, color: overlayTheme.titleText, whiteSpace: 'nowrap' }}>{t('app.about.field.update_channel')}</div>
                                   <Segmented
                                     className="gonavi-about-update-channel"
                                     value={updateChannel}
@@ -5034,11 +5039,41 @@ function App() {
                                         || updateDownloadProgress.status === 'start'
                                         || updateDownloadProgress.status === 'downloading'
                                     }
-                                    block
-                                    style={{ width: '100%' }}
+                                    style={{ flexShrink: 0 }}
                                   />
                               </div>
                               <div style={{ ...utilityMutedTextStyle, lineHeight: 1.55, maxWidth: 360 }}>{t('app.about.version_update.channel_hint')}</div>
+                              <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', alignItems: 'center', gap: 16, marginTop: 10 }}>
+                                  <div style={{ fontSize: 15, fontWeight: 600, color: overlayTheme.titleText, whiteSpace: 'nowrap' }}>{t('app.about.field.auto_check_updates')}</div>
+                                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                      <Switch
+                                        checked={autoCheckForUpdates}
+                                        onChange={(checked) => setAutoCheckForUpdates(checked)}
+                                      />
+                                  </div>
+                              </div>
+                              {autoCheckForUpdates ? (
+                                  <>
+                                      <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', alignItems: 'center', gap: 16, marginTop: 10 }}>
+                                          <div style={{ fontSize: 15, fontWeight: 600, color: overlayTheme.titleText, whiteSpace: 'nowrap' }}>{t('app.about.field.auto_check_interval')}</div>
+                                          <Select
+                                            className="gonavi-about-auto-check-interval"
+                                            value={autoCheckForUpdatesIntervalMinutes}
+                                            options={AUTO_CHECK_FOR_UPDATES_INTERVAL_OPTIONS.map((minutes) => ({
+                                              value: minutes,
+                                              label: minutes >= 60 && minutes % 60 === 0
+                                                ? t('app.about.auto_check_interval.hours', { hours: minutes / 60 })
+                                                : t('app.about.auto_check_interval.minutes', { minutes }),
+                                            }))}
+                                            onChange={(value) => setAutoCheckForUpdatesIntervalMinutes(Number(value))}
+                                            style={{ width: '100%' }}
+                                          />
+                                      </div>
+                                      <div style={{ ...utilityMutedTextStyle, lineHeight: 1.55, maxWidth: 360 }}>{t('app.about.version_update.auto_check_hint')}</div>
+                                  </>
+                              ) : (
+                                  <div style={{ ...utilityMutedTextStyle, lineHeight: 1.55, maxWidth: 360 }}>{t('app.about.version_update.auto_check_disabled_hint')}</div>
+                              )}
                           </div>
                           <div style={{ height: 1, background: dividerColor, margin: '18px 0' }} />
                           <div style={{ display: 'grid', gap: 13 }}>
