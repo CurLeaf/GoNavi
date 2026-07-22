@@ -14,10 +14,26 @@ const messageApi = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
+const storeApi = vi.hoisted(() => ({
+  autoCheckForUpdates: true,
+  autoCheckForUpdatesIntervalMinutes: 30,
+}));
+
 vi.mock('../../wailsjs/runtime', () => runtimeApi);
 
 vi.mock('antd', () => ({
   message: messageApi,
+}));
+
+vi.mock('../store', () => ({
+  useStore: (selector: (state: {
+    autoCheckForUpdates: boolean;
+    autoCheckForUpdatesIntervalMinutes: number;
+  }) => unknown) =>
+    selector({
+      autoCheckForUpdates: storeApi.autoCheckForUpdates,
+      autoCheckForUpdatesIntervalMinutes: storeApi.autoCheckForUpdatesIntervalMinutes,
+    }),
 }));
 
 type BackendAppMock = {
@@ -72,6 +88,8 @@ describe('useAppUpdateManager', () => {
     backendApp = createBackendAppMock();
     hook = null;
     renderer = null;
+    storeApi.autoCheckForUpdates = true;
+    storeApi.autoCheckForUpdatesIntervalMinutes = 30;
     runtimeApi.EventsOn.mockClear();
     messageApi.info.mockReset();
     messageApi.success.mockReset();
@@ -102,6 +120,82 @@ describe('useAppUpdateManager', () => {
     expect(resolveUpdateInstallAction({ packageType: 'portable', autoRelaunch: true })).toBe('restart');
     expect(resolveUpdateInstallAction({ packageType: 'msi', autoRelaunch: true })).toBe('install-and-restart');
     expect(resolveUpdateInstallAction({ packageType: 'msi', autoRelaunch: false })).toBe('launch-installer');
+  });
+
+  it('schedules silent update checks when auto-check is enabled', async () => {
+    backendApp.CheckForUpdatesSilently.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: false,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.1',
+      },
+    });
+
+    renderHook();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(backendApp.CheckForUpdatesSilently).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
+    });
+
+    expect(backendApp.CheckForUpdatesSilently).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses the configured auto-check interval for subsequent silent checks', async () => {
+    storeApi.autoCheckForUpdatesIntervalMinutes = 15;
+    backendApp.CheckForUpdatesSilently.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: false,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.1',
+      },
+    });
+
+    renderHook();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(backendApp.CheckForUpdatesSilently).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(14 * 60 * 1000);
+    });
+    expect(backendApp.CheckForUpdatesSilently).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60 * 1000);
+    });
+    expect(backendApp.CheckForUpdatesSilently).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not schedule silent update checks when auto-check is disabled', async () => {
+    storeApi.autoCheckForUpdates = false;
+    backendApp.CheckForUpdatesSilently.mockResolvedValue({
+      success: true,
+      data: {
+        hasUpdate: false,
+        currentVersion: '0.8.1',
+        latestVersion: '0.8.1',
+      },
+    });
+
+    renderHook();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
+    });
+
+    expect(backendApp.CheckForUpdatesSilently).not.toHaveBeenCalled();
+    expect(backendApp.CheckForUpdates).not.toHaveBeenCalled();
   });
 
   it('merges complete MSI download metadata returned by the backend', async () => {
