@@ -1375,6 +1375,7 @@ interface DataGridProps {
     enableSqlLogEvent?: boolean;
     initialViewMode?: GridViewMode;
     initialViewModeRequestId?: string;
+    initialViewModeScope?: 'shared' | 'local';
     onDataViewActivate?: () => void;
     onDataChange?: (rows: any[]) => void;
 }

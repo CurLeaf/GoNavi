@@ -2333,8 +2333,8 @@ describe('QueryEditor external SQL save', () => {
     renderer.unmount();
   });
 
-  it.each(['sqlite', 'clickhouse'])(
-    'activates the data result tab for %s after the sql log tab was open',
+  it.each(['sqlite', 'clickhouse', 'mongodb'])(
+    'activates the data result tab and requests data preview for %s after the sql log tab was open',
     async (dbType) => {
       storeState.appearance.uiVersion = 'v2';
       storeState.connections[0].config.type = dbType;
@@ -2350,14 +2350,22 @@ describe('QueryEditor external SQL save', () => {
         data: [{ name: 'id', key: 'PRI' }],
       });
       backendApp.DBGetIndexes.mockResolvedValue({ success: true, data: [] });
-      backendApp.DBQueryMulti.mockResolvedValueOnce({
-        success: true,
-        data: [{
-          columns: ['id', 'name'],
-          rows: [{ id: 1, name: 'alpha' }],
-          statementIndex: 1,
-        }],
-      });
+      if (dbType === 'mongodb') {
+        backendApp.DBQueryWithCancel.mockResolvedValue({
+          success: true,
+          data: [{ id: 1, name: 'alpha' }],
+          fields: ['id', 'name'],
+        });
+      } else {
+        backendApp.DBQueryMulti.mockResolvedValue({
+          success: true,
+          data: [{
+            columns: ['id', 'name'],
+            rows: [{ id: 1, name: 'alpha' }],
+            statementIndex: 1,
+          }],
+        });
+      }
 
       const windowListeners: Record<string, ((event?: any) => void)[]> = {};
       vi.stubGlobal('window', {
@@ -2400,8 +2408,56 @@ describe('QueryEditor external SQL save', () => {
       expect(textContent(renderer.toJSON())).toContain('结果 1');
       expect(dataGridState.latestProps?.columnNames).toEqual(['id', 'name']);
       expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ id: 1, name: 'alpha' });
+      expect(dataGridState.latestProps?.initialViewMode).toBe('table');
+      expect(dataGridState.latestProps?.initialViewModeScope).toBe('local');
+      const firstDataPreviewRequestId = dataGridState.latestProps?.initialViewModeRequestId;
+      expect(firstDataPreviewRequestId).toEqual(expect.any(String));
 
-      renderer.unmount();
+      await act(async () => {
+        await findButton(renderer, '运行').props.onClick();
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(dataGridState.latestProps?.initialViewMode).toBe('table');
+      expect(dataGridState.latestProps?.initialViewModeScope).toBe('local');
+      expect(dataGridState.latestProps?.initialViewModeRequestId).toEqual(expect.any(String));
+      expect(dataGridState.latestProps?.initialViewModeRequestId).not.toBe(firstDataPreviewRequestId);
+
+      const secondDataPreviewRequestId = dataGridState.latestProps?.initialViewModeRequestId;
+      if (dbType === 'mongodb') {
+        backendApp.DBQueryWithCancel.mockResolvedValueOnce({
+          success: true,
+          data: [],
+          fields: [],
+        });
+      } else {
+        backendApp.DBQueryMulti.mockResolvedValueOnce({
+          success: true,
+          data: [{ columns: [], rows: [], statementIndex: 1 }],
+        });
+      }
+
+      await act(async () => {
+        await findButton(renderer, '运行').props.onClick();
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(dataGridState.latestProps?.columnNames).toEqual([]);
+      expect(dataGridState.latestProps?.data).toEqual([]);
+      expect(dataGridState.latestProps?.initialViewMode).toBe('table');
+      expect(dataGridState.latestProps?.initialViewModeScope).toBe('local');
+      expect(dataGridState.latestProps?.initialViewModeRequestId).toEqual(expect.any(String));
+      expect(dataGridState.latestProps?.initialViewModeRequestId).not.toBe(secondDataPreviewRequestId);
+
+      await act(async () => {
+        renderer.unmount();
+      });
     },
   );
 

@@ -1285,6 +1285,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const [activeResultKey, setActiveResultKey] = useState<string>(
     () => restoredResultSessionRef.current?.activeResultKey || '',
   );
+  const [resultDataPreviewRequest, setResultDataPreviewRequest] = useState<{
+      resultKey: string;
+      requestId: string;
+  } | null>(null);
   const resultSetsRef = useRef(resultSets);
   const activeResultKeyRef = useRef(activeResultKey);
   const nativeRestoredResultRefs = useRef(new Map<
@@ -6355,6 +6359,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           ),
       );
 
+  const isQueryDataGridResultSet = (result?: ResultSet | null): boolean =>
+      Boolean(
+          result &&
+          result.resultType !== 'message' &&
+          !isAffectedRowsResultSet(result),
+      );
+
   const resolveActiveResultKeyAfterMerge = (merged: ResultSet[], executed: ResultSet[]): string => {
       const firstExecutedResult = executed.find((result) => isConcreteGridResultSet(result))
           || executed.find((result) => isMessageLikeResultSet(result))
@@ -6369,6 +6380,18 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           || firstExecutedResult.key
           || merged[0]?.key
           || '';
+  };
+
+  const activateExecutedResult = (merged: ResultSet[], executed: ResultSet[], requestSeq: number) => {
+      const nextActiveResultKey = resolveActiveResultKeyAfterMerge(merged, executed);
+      const nextActiveResult = merged.find((result) => result.key === nextActiveResultKey);
+      setActiveResultKey(nextActiveResultKey);
+      setResultDataPreviewRequest(isQueryDataGridResultSet(nextActiveResult)
+          ? {
+              resultKey: nextActiveResultKey,
+              requestId: `${tab.id}:${requestSeq}`,
+          }
+          : null);
   };
 
   const resolveExecutableSQLAtEditorPosition = (model: any, sqlText: string, position: any, dbType = ''): string => {
@@ -7085,7 +7108,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             const shouldReplaceAllResults = didExecuteWholeEditor;
             const mergedResultSets = mergeResultSets(resultSets, nextResultSets, shouldReplaceAllResults);
             setResultSets(mergedResultSets);
-            setActiveResultKey(resolveActiveResultKeyAfterMerge(mergedResultSets, nextResultSets));
+            activateExecutedResult(mergedResultSets, nextResultSets, runSeq);
             if (didExecuteAppendedSql || didExecuteWholeEditor) {
                 lastExecutedEditorQueryRef.current = currentQuery;
             }
@@ -7496,7 +7519,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             const shouldReplaceAllResults = didExecuteWholeEditor;
             const mergedResultSets = mergeResultSets(resultSets, nextResultSets, shouldReplaceAllResults);
             setResultSets(mergedResultSets);
-            setActiveResultKey(resolveActiveResultKeyAfterMerge(mergedResultSets, nextResultSets));
+            activateExecutedResult(mergedResultSets, nextResultSets, runSeq);
             if (didExecuteAppendedSql || didExecuteWholeEditor) {
                 lastExecutedEditorQueryRef.current = currentQuery;
             }
@@ -9079,6 +9102,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           isV2Ui={isV2Ui}
           currentDb={currentDb}
           currentConnectionId={currentConnectionId}
+          dataPreviewRequest={resultDataPreviewRequest}
           toggleShortcutLabel={toggleQueryResultsPanelShortcutLabel}
           onActiveResultKeyChange={setActiveResultKey}
           onHide={() => updateResultPanelVisibility(false)}

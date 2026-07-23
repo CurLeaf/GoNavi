@@ -79,6 +79,7 @@ interface QueryEditorResultsPanelProps {
     isV2Ui: boolean;
     currentDb: string;
     currentConnectionId: string;
+    dataPreviewRequest?: { resultKey: string; requestId: string } | null;
     toggleShortcutLabel: string;
     onActiveResultKeyChange: (key: string) => void;
     onHide: () => void;
@@ -140,6 +141,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     isV2Ui,
     currentDb,
     currentConnectionId,
+    dataPreviewRequest,
     toggleShortcutLabel,
     onActiveResultKeyChange,
     onHide,
@@ -601,6 +603,9 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                         ddlDbName={rs.ddlDbName}
                         ddlTableName={rs.ddlTableName}
                         connectionId={currentConnectionId}
+                        initialViewMode={dataPreviewRequest?.resultKey === rs.key ? 'table' : undefined}
+                        initialViewModeRequestId={dataPreviewRequest?.resultKey === rs.key ? dataPreviewRequest.requestId : undefined}
+                        initialViewModeScope={dataPreviewRequest?.resultKey === rs.key ? 'local' : undefined}
                         pkColumns={rs.pkColumns}
                         editLocator={rs.editLocator}
                         onReload={() => {

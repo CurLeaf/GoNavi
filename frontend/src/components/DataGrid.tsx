@@ -309,6 +309,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     scrollSnapshot, onScrollSnapshotChange, toolbarExtraActions, showRowNumberColumn, isActive = true, enableSqlLogEvent = false,
     initialViewMode,
     initialViewModeRequestId,
+    initialViewModeScope,
     onDataViewActivate,
     onDataChange,
 }) => {
@@ -1749,6 +1750,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       translate: translateDataGrid,
       initialViewMode,
       initialViewModeRequestId,
+      initialViewModeScope,
   });
 
   useEffect(() => {

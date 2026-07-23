@@ -4414,6 +4414,102 @@ describe('DataGrid DDL interactions', () => {
     expect(content).not.toContain('CREATE TABLE users');
   });
 
+  it('returns a query result to data preview when a fresh table view request arrives', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    backendApp.DBShowCreateTable
+      .mockResolvedValueOnce({
+        success: true,
+        data: 'CREATE TABLE users (`id` bigint)',
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: 'CREATE TABLE users (`id` bigint)',
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: 'CREATE TABLE orders (`id` bigint)',
+      });
+
+    const renderGrid = (initialViewModeRequestId?: string, rowId = 1) => (
+      <DataGrid
+        data={[{ __gonavi_row_key__: `row-${rowId}`, id: rowId }]}
+        columnNames={['id']}
+        loading={false}
+        tableName="users"
+        dbName="main"
+        connectionId="conn-1"
+        initialViewMode={initialViewModeRequestId ? 'table' : undefined}
+        initialViewModeRequestId={initialViewModeRequestId}
+        initialViewModeScope={initialViewModeRequestId ? 'local' : undefined}
+      />
+    );
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(renderGrid());
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      findButton(renderer!, '查看 DDL').props.onClick();
+    });
+    await waitForEffects();
+    expect(renderer!.root.findAll((node) => node.props['data-grid-ddl-view'])).toHaveLength(1);
+
+    await act(async () => {
+      renderer!.update(renderGrid('query-run-1', 2));
+    });
+    await waitForEffects();
+
+    expect(renderer!.root.findAll((node) => node.props['data-grid-ddl-view'])).toHaveLength(0);
+    expect(testRenderState.latestTableProps.dataSource[0]).toMatchObject({ id: 2 });
+    expect(backendApp.DBShowCreateTable).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      findButton(renderer!, '查看 DDL').props.onClick();
+    });
+    await waitForEffects();
+    expect(renderer!.root.findAll((node) => node.props['data-grid-ddl-view'])).toHaveLength(1);
+    expect(backendApp.DBShowCreateTable).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ type: 'mysql' }),
+      'main',
+      'users',
+    );
+
+    await act(async () => {
+      renderer!.update(renderGrid('query-run-2', 3));
+    });
+    await waitForEffects();
+    expect(renderer!.root.findAll((node) => node.props['data-grid-ddl-view'])).toHaveLength(0);
+    expect(testRenderState.latestTableProps.dataSource[0]).toMatchObject({ id: 3 });
+
+    await act(async () => {
+      renderer!.update(
+        <DataGrid
+          key="orders"
+          data={[{ __gonavi_row_key__: 'row-4', id: 4 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="orders"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    expect(renderer!.root.findAll((node) => node.props['data-grid-ddl-view'])).toHaveLength(1);
+    expect(backendApp.DBShowCreateTable).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ type: 'mysql' }),
+      'main',
+      'orders',
+    );
+    expect(textContent(renderer!.root)).toContain('CREATE TABLE orders');
+    expect(backendApp.DBShowCreateTable).toHaveBeenCalledTimes(3);
+  });
+
   it('keeps the v2 DDL sidebar open when switching to another table tab instance', async () => {
     storeState.appearance.uiVersion = 'v2';
     let resolveOrdersRequest: (value: any) => void = () => {};
