@@ -3477,6 +3477,21 @@ const createMemoizedPersistedStateProjection = () => {
 
 const partializePersistedState = createMemoizedPersistedStateProjection();
 
+const appPersistStorage = createDebouncedPersistStorage<AppState>(
+  () => localStorage,
+  {
+    debounceMs: PERSIST_WRITE_DEBOUNCE_MS,
+    enabled: !isFrontendTestRuntime(),
+  },
+);
+
+export const flushAppStatePersistence = async (): Promise<void> => {
+  const flush = (appPersistStorage as { flush?: () => Promise<void> } | undefined)?.flush;
+  if (typeof flush === "function") {
+    await flush();
+  }
+};
+
 export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -5685,10 +5700,7 @@ export const useStore = create<AppState>()(
     }),
     {
       name: PERSIST_STORAGE_KEY, // name of the item in the storage (must be unique)
-      storage: createDebouncedPersistStorage(() => localStorage, {
-        debounceMs: PERSIST_WRITE_DEBOUNCE_MS,
-        enabled: !isFrontendTestRuntime(),
-      }),
+      storage: appPersistStorage,
       skipHydration: isNativeDetachedWindowRoute(),
       version: PERSIST_VERSION,
       migrate: (persistedState: unknown, version: number) => {

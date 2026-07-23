@@ -7817,7 +7817,11 @@ describe('QueryEditor external SQL save', () => {
       renderer = create(<QueryEditor tab={createTab({ savedQueryId: 'saved-1' })} />);
     });
 
-    editorState.value = 'select 3;';
+    await act(async () => {
+      editorState.value = 'select 3;';
+      editorState.latestOnChange?.(editorState.value);
+    });
+    expect(getQueryTabDraft('tab-1')).toBe('select 3;');
 
     await act(async () => {
       findButton(renderer!, '保存').props.onClick();
@@ -7873,6 +7877,13 @@ describe('QueryEditor external SQL save', () => {
 
     expect(storeState.saveQuery).toHaveBeenCalledWith(expect.objectContaining({
       id: 'saved-1',
+    storeState.saveQuery.mockImplementationOnce(async (savedQuery: SavedQuery) => {
+      storeState.savedQueries = storeState.savedQueries.map((item) => (
+        item.id === savedQuery.id ? savedQuery : item
+      ));
+      storeSubscribers.forEach((subscriber) => subscriber());
+      return savedQuery;
+    });
       name: '無題のクエリ',
       sql: 'select 10;',
       connectionId: 'conn-1',
@@ -7891,9 +7902,218 @@ describe('QueryEditor external SQL save', () => {
     editorState.value = 'select 11;';
 
     await act(async () => {
-      findButton(renderer!, '保存').props.onClick();
+      await findButton(renderer!, '保存').props.onClick();
     });
 
+    expect(getQueryTabDraft('tab-1')).toBe('');
+  });
+
+  it('keeps edits made while a saved-query write is pending', async () => {
+    storeState.savedQueries = [
+      {
+        id: 'saved-1',
+        name: '常用查询',
+        sql: 'select 1;',
+        connectionId: 'conn-1',
+        dbName: 'main',
+        createdAt: 100,
+      },
+    ];
+    let finishSave!: () => void;
+    storeState.saveQuery.mockImplementationOnce((savedQuery: SavedQuery) => new Promise((resolve) => {
+      finishSave = () => {
+        storeState.savedQueries = storeState.savedQueries.map((item) => (
+          item.id === savedQuery.id ? savedQuery : item
+        ));
+        notifyStoreSubscribers();
+        resolve(savedQuery);
+      };
+    }));
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ savedQueryId: 'saved-1' })} />);
+    });
+
+    let savePromise!: Promise<void>;
+    await act(async () => {
+      editorState.value = 'select 2;';
+      editorState.latestOnChange?.(editorState.value);
+      savePromise = findButton(renderer, '保存').props.onClick();
+      await Promise.resolve();
+    });
+    expect(storeState.saveQuery).toHaveBeenCalledWith(expect.objectContaining({ sql: 'select 2;' }));
+
+    await act(async () => {
+      editorState.value = 'select 3;';
+      editorState.latestOnChange?.(editorState.value);
+      finishSave();
+      await savePromise;
+    });
+
+    expect(storeState.addTab).toHaveBeenLastCalledWith(expect.objectContaining({
+      savedQueryId: 'saved-1',
+      query: 'select 3;',
+    }));
+    expect(getQueryTabDraft('tab-1')).toBe('select 3;');
+  });
+
+  it('keeps edits made while an external SQL file write is pending', async () => {
+    const filePath = '/Users/me/Documents/gonavi-queries/report.sql';
+    let finishWrite!: () => void;
+    backendApp.WriteSQLFile.mockImplementationOnce(() => new Promise((resolve) => {
+      finishWrite = () => resolve({ success: true });
+    }));
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ filePath })} />);
+    });
+
+    let savePromise!: Promise<void>;
+    await act(async () => {
+      editorState.value = 'select 2;';
+      editorState.latestOnChange?.(editorState.value);
+      savePromise = findButton(renderer, '保存').props.onClick();
+      await Promise.resolve();
+    });
+    expect(backendApp.WriteSQLFile).toHaveBeenCalledWith(filePath, 'select 2;');
+
+    await act(async () => {
+      editorState.value = 'select 3;';
+      editorState.latestOnChange?.(editorState.value);
+      finishWrite();
+      await savePromise;
+    });
+
+    expect(storeState.addTab).toHaveBeenLastCalledWith(expect.objectContaining({
+      filePath,
+      query: 'select 3;',
+    }));
+    expect(getSQLFileTabDraft('tab-1')).toBe('select 3;');
+  });
+
+  it('does not reopen an external SQL file tab after a pending write outlives the editor', async () => {
+    const filePath = '/Users/me/Documents/gonavi-queries/report.sql';
+    let finishWrite!: () => void;
+    backendApp.WriteSQLFile.mockImplementationOnce(() => new Promise((resolve) => {
+      finishWrite = () => resolve({ success: true });
+    }));
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ filePath })} />);
+    });
+
+    let savePromise!: Promise<void>;
+    await act(async () => {
+      editorState.value = 'select 2;';
+      editorState.latestOnChange?.(editorState.value);
+      savePromise = findButton(renderer, '保存').props.onClick();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      renderer.unmount();
+    });
+    await act(async () => {
+      finishWrite();
+      await savePromise;
+    });
+
+    expect(storeState.addTab).not.toHaveBeenCalled();
+    expect(messageApi.success).not.toHaveBeenCalled();
+  });
+
+  it('serializes repeated saved-query writes so the newest content is persisted last', async () => {
+    storeState.savedQueries = [
+      {
+        id: 'saved-1',
+        name: '常用查询',
+        sql: 'select 1;',
+        connectionId: 'conn-1',
+        dbName: 'main',
+        createdAt: 100,
+      },
+    ];
+    const finishWrites: Array<() => void> = [];
+    storeState.saveQuery.mockImplementation((savedQuery: SavedQuery) => new Promise((resolve) => {
+      finishWrites.push(() => {
+        storeState.savedQueries = storeState.savedQueries.map((item) => (
+          item.id === savedQuery.id ? savedQuery : item
+        ));
+        notifyStoreSubscribers();
+        resolve(savedQuery);
+      });
+    }));
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ savedQueryId: 'saved-1' })} />);
+    });
+
+    let firstSavePromise!: Promise<void>;
+    await act(async () => {
+      editorState.value = 'select 2;';
+      editorState.latestOnChange?.(editorState.value);
+      firstSavePromise = findButton(renderer, '保存').props.onClick();
+      await Promise.resolve();
+    });
+
+    let secondSavePromise!: Promise<void>;
+    await act(async () => {
+      editorState.value = 'select 3;';
+      editorState.latestOnChange?.(editorState.value);
+      secondSavePromise = findButton(renderer, '保存').props.onClick();
+      await Promise.resolve();
+    });
+    expect(storeState.saveQuery).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finishWrites[0]();
+      await firstSavePromise;
+      await Promise.resolve();
+    });
+    expect(storeState.saveQuery).toHaveBeenCalledTimes(2);
+    expect(storeState.saveQuery).toHaveBeenLastCalledWith(expect.objectContaining({ sql: 'select 3;' }));
+
+    await act(async () => {
+      finishWrites[1]();
+      await secondSavePromise;
+    });
+    expect(storeState.savedQueries[0].sql).toBe('select 3;');
+    expect(getQueryTabDraft('tab-1')).toBe('');
+  });
+
+  it('keeps the latest editor draft when saved-query metadata rerenders', async () => {
+    storeState.savedQueries = [
+      {
+        id: 'saved-1',
+        name: '常用查询',
+        sql: 'select 1;',
+        connectionId: 'conn-1',
+        dbName: 'main',
+        createdAt: 100,
+      },
+    ];
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ savedQueryId: 'saved-1' })} />);
+    });
+
+    await act(async () => {
+      editorState.value = 'select 3;';
+      editorState.latestOnChange?.(editorState.value);
+    });
+    expect(getQueryTabDraft('tab-1')).toBe('select 3;');
+
+    await act(async () => {
+      renderer.update(
+        <QueryEditor tab={createTab({ title: '已重命名查询', savedQueryId: 'saved-1' })} />,
+      );
+    });
+
+    expect(getQueryTabDraft('tab-1')).toBe('select 3;');
     expect(storeState.saveQuery).toHaveBeenCalledWith(expect.objectContaining({
       id: 'saved-1',
       name: '無題のクエリ',

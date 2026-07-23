@@ -28,6 +28,35 @@ describe('restart-to-update unsaved SQL guard', () => {
     expect(actionAfterSaveIndex).toBeGreaterThan(saveIndex);
   });
 
+  it('waits for saved queries and flushes recovery state before quitting', () => {
+    const quitHandlerStart = appSource.indexOf('const handleApplicationQuitRequest = useCallback');
+    const quitHandlerEnd = appSource.indexOf('\n\n  const handleInstallUpdateRequest', quitHandlerStart);
+    const quitHandlerSource = appSource.slice(quitHandlerStart, quitHandlerEnd);
+    const ensureLoadedIndex = quitHandlerSource.indexOf('await ensureSavedQueriesLoaded();');
+    const readLatestStateIndex = quitHandlerSource.indexOf('const latestState = useStore.getState();');
+    const flushDraftsIndex = quitHandlerSource.indexOf('flushQueryTabDraftSnapshots();');
+    const flushStoreIndex = quitHandlerSource.indexOf('await flushAppStatePersistence();');
+    const confirmedActionIndex = quitHandlerSource.indexOf('accepted = await confirmedAction();');
+    const forceQuitIndex = quitHandlerSource.indexOf('await forceQuitApplication();');
+
+    expect(ensureLoadedIndex).toBeGreaterThan(-1);
+    expect(readLatestStateIndex).toBeGreaterThan(ensureLoadedIndex);
+    expect(flushDraftsIndex).toBeGreaterThan(-1);
+    expect(flushStoreIndex).toBeGreaterThan(flushDraftsIndex);
+    expect(confirmedActionIndex).toBeGreaterThan(flushStoreIndex);
+    expect(forceQuitIndex).toBeGreaterThan(flushStoreIndex);
+  });
+
+  it('does not block application quit on saved-query group refresh failures', () => {
+    const loaderStart = appSource.indexOf('const ensureSavedQueriesLoaded = useCallback');
+    const loaderEnd = appSource.indexOf('\n\n  useEffect(() => {', loaderStart);
+    const loaderSource = appSource.slice(loaderStart, loaderEnd);
+
+    expect(loaderSource).toContain('savedQueriesLoadedRef.current = true;');
+    expect(loaderSource).toContain('void reloadSavedQueryGroups().catch((error) => {');
+    expect(loaderSource).not.toContain('await reloadSavedQueryGroups();');
+  });
+
   it('confirms closing every Windows instance before entering the unsaved SQL guard', () => {
     expect(appSource).toContain('const handleInstallUpdateRequest = useCallback(async () => {');
     expect(appSource).toContain("if (installMode === 'portable' || installMode === 'msi') {");

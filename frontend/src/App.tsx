@@ -46,6 +46,7 @@ import {
   MIN_V2_SIDEBAR_RAIL_SCALE,
   sanitizeV2SidebarRailScale,
   type ThemePreference,
+  flushAppStatePersistence,
   useStore,
 } from './store';
 import { useCustomThemeStore } from './customThemeStore';
@@ -209,6 +210,7 @@ import {
   collectApplicationQuitUnsavedSQLTargets,
   saveApplicationQuitUnsavedSQLTargets,
 } from './utils/sqlEditorApplicationQuit';
+import { flushQueryTabDraftSnapshots } from './utils/sqlFileTabDrafts';
 import {
   APP_APPLICATION_QUIT_MODAL_Z_INDEX,
   APP_FOREGROUND_MODAL_Z_INDEX,
@@ -1019,6 +1021,8 @@ function App() {
   );
   const linuxCJKFontInstallHint = getLinuxCJKFontInstallHint(runtimePlatform, installedFontFamilies);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
+  const savedQueriesBootstrapPromiseRef = useRef<Promise<void> | null>(null);
+  const savedQueriesLoadedRef = useRef(false);
   const [hasLoadedSecureConfig, setHasLoadedSecureConfig] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth || 1280));
   const [securityUpdateStatus, setSecurityUpdateStatus] = useState<SecurityUpdateStatus>(() => createEmptySecurityUpdateStatus());
@@ -1180,35 +1184,41 @@ function App() {
       };
   }, [isStoreHydrated]);
 
+  const ensureSavedQueriesLoaded = useCallback(async (): Promise<void> => {
+      if (savedQueriesLoadedRef.current) {
+          return;
+      }
+      if (!savedQueriesBootstrapPromiseRef.current) {
+          savedQueriesBootstrapPromiseRef.current = (async () => {
+              await bootstrapSavedQueries({
+                  backend: (window as any).go?.app?.App,
+                  replaceSavedQueries,
+              });
+              savedQueriesLoadedRef.current = true;
+              void reloadSavedQueryGroups().catch((error) => {
+                  console.warn('Failed to reload saved query groups', error);
+              });
+          })();
+      }
+      const pending = savedQueriesBootstrapPromiseRef.current;
+      try {
+          await pending;
+      } catch (error) {
+          if (savedQueriesBootstrapPromiseRef.current === pending) {
+              savedQueriesBootstrapPromiseRef.current = null;
+          }
+          throw error;
+      }
+  }, [reloadSavedQueryGroups, replaceSavedQueries]);
+
   useEffect(() => {
       if (!isStoreHydrated) {
           return;
       }
-
-      let cancelled = false;
-      const loadSavedQueries = async () => {
-          try {
-              await bootstrapSavedQueries({
-                  backend: (window as any).go?.app?.App,
-                  replaceSavedQueries: (queries) => {
-                      if (!cancelled) {
-                          replaceSavedQueries(queries);
-                      }
-                  },
-              });
-              if (!cancelled) {
-                  await reloadSavedQueryGroups();
-              }
-          } catch (err) {
-              console.warn('Failed to bootstrap saved queries', err);
-          }
-      };
-
-      void loadSavedQueries();
-      return () => {
-          cancelled = true;
-      };
-  }, [isStoreHydrated, reloadSavedQueryGroups, replaceSavedQueries]);
+      void ensureSavedQueriesLoaded().catch((err) => {
+          console.warn('Failed to bootstrap saved queries', err);
+      });
+  }, [ensureSavedQueriesLoaded, isStoreHydrated]);
 
   const normalizeSecurityUpdateStatus = useCallback((status?: Partial<SecurityUpdateStatus> | null): SecurityUpdateStatus => {
       const fallback = createEmptySecurityUpdateStatus();
@@ -2563,6 +2573,8 @@ function App() {
       const runConfirmedAction = async (): Promise<boolean> => {
           let accepted = false;
           try {
+              flushQueryTabDraftSnapshots();
+              await flushAppStatePersistence();
               if (confirmedAction) {
                   accepted = await confirmedAction();
               } else {
@@ -2584,6 +2596,7 @@ function App() {
 
       let targets;
       try {
+          await ensureSavedQueriesLoaded();
           const latestState = useStore.getState();
           targets = await collectApplicationQuitUnsavedSQLTargets(
               latestState.tabs,
@@ -2649,7 +2662,7 @@ function App() {
       });
       destroyConfirm = confirmRef.destroy;
       applicationQuitConfirmRef.current = confirmRef;
-  }, [applicationQuitModalZIndex, forceQuitApplication, resetApplicationQuitRequest, saveQuery, t]);
+  }, [applicationQuitModalZIndex, ensureSavedQueriesLoaded, forceQuitApplication, resetApplicationQuitRequest, saveQuery, t]);
 
   const handleInstallUpdateRequest = useCallback(async () => {
       if (installMode === 'portable' || installMode === 'msi') {
