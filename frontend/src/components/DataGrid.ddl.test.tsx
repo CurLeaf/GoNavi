@@ -218,6 +218,7 @@ vi.mock('@ant-design/icons', () => {
     CloseOutlined: Icon,
     BugOutlined: Icon,
     ConsoleSqlOutlined: Icon,
+    ControlOutlined: Icon,
     FileTextOutlined: Icon,
     CopyOutlined: Icon,
     ClearOutlined: Icon,
@@ -508,7 +509,13 @@ const textContent = (node: any): string =>
     .join('');
 
 const findButton = (renderer: ReactTestRenderer, text: string) =>
-  renderer.root.findAll((node) => node.type === 'button' && textContent(node).includes(text))[0];
+  renderer.root.findAll((node) => (
+    node.type === 'button'
+    && (
+      textContent(node).includes(text)
+      || String(node.props['aria-label'] || '').includes(text)
+    )
+  ))[0];
 
 const renderHeaderText = (columnKey: string): string => {
   const column = testRenderState.latestColumns.find((item) => item.key === columnKey);

@@ -2135,6 +2135,7 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('gn-v2-toolbar-divider');
     expect(markup).toContain('gn-v2-commit-button');
     expect(markup).toContain('gn-v2-ai-insight-button');
+    expect(markup).toContain('gn-v2-data-grid-toolbar-action');
     expect(markup).toContain('gn-v2-smart-filter-panel');
     expect(markup).toContain('gn-v2-data-grid-table-shell');
     expect(markup).toContain('gn-v2-data-grid-table-wrap');
@@ -2142,6 +2143,39 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('提交事务');
     expect(markup).toContain('手动提交');
     expect(markup).toContain('AI 洞察');
+
+    const getButtonBody = (label: string) => {
+      const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const match = markup.match(new RegExp(`<button(?=[^>]*aria-label="${escapedLabel}")[^>]*>([\\s\\S]*?)<\\/button>`));
+      expect(match, `missing toolbar button: ${label}`).not.toBeNull();
+      return match?.[1] ?? '';
+    };
+
+    [
+      '刷新',
+      '筛选',
+      '新增行',
+      '删除选中',
+      '单元格编辑',
+      '提交事务',
+      '手动提交',
+      '导入',
+      '导出',
+      'AI 洞察',
+    ].forEach((label) => {
+      expect(getButtonBody(label)).not.toContain(label);
+    });
+    expect(markup).toContain('aria-haspopup="menu"');
+    expect(markup).toContain('aria-expanded="false"');
+
+    const css = readV2ThemeCss();
+    const iconActionCss = css.slice(
+      css.indexOf('body[data-ui-version="v2"] .gn-v2-data-grid .gn-v2-data-grid-toolbar-action {'),
+      css.indexOf('body[data-ui-version="v2"] .gn-v2-data-grid-toolbar-title {'),
+    );
+    expect(iconActionCss).toContain('width: 28px !important;');
+    expect(iconActionCss).toContain('min-width: 28px !important;');
+    expect(iconActionCss).toContain('padding-inline: 0 !important;');
   });
 
   it('renders a non-data row number column when enabled', () => {
@@ -2470,6 +2504,8 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('data-grid-query-copy-action="true"');
     expect(markup).not.toMatch(/data-grid-query-copy-action="true"[^>]*disabled/);
     expect(markup).toContain('复制');
+    expect(markup).toContain('aria-haspopup="menu"');
+    expect(markup).toContain('aria-expanded="false"');
     expect(markup.match(/data-grid-query-copy-action="true"/g)?.length).toBe(1);
   });
 

@@ -407,6 +407,7 @@ vi.mock('@ant-design/icons', () => {
     BugOutlined: Icon,
     ClearOutlined: Icon,
     CopyOutlined: Icon,
+    DiffOutlined: Icon,
     PlayCircleOutlined: Icon,
     SaveOutlined: Icon,
     FormatPainterOutlined: Icon,
@@ -420,6 +421,7 @@ vi.mock('@ant-design/icons', () => {
     EyeOutlined: Icon,
     EyeInvisibleOutlined: Icon,
     EnterOutlined: Icon,
+    EllipsisOutlined: Icon,
   };
 });
 
@@ -523,11 +525,18 @@ const textContent = (node: any): string => {
     .join('');
 };
 
-const findButton = (renderer: ReactTestRenderer, text: string) =>
-  renderer.root.findAll((node) => node.type === 'button' && textContent(node).includes(text))[0];
+const findButtons = (renderer: ReactTestRenderer, text: string) => {
+  const visibleTextMatches = renderer.root.findAll(
+    (node) => node.type === 'button' && textContent(node).includes(text),
+  );
+  return visibleTextMatches.length > 0
+    ? visibleTextMatches
+    : renderer.root.findAll((node) => (
+      node.type === 'button' && String(node.props?.['aria-label'] || '').includes(text)
+    ));
+};
 
-const findButtons = (renderer: ReactTestRenderer, text: string) =>
-  renderer.root.findAll((node) => node.type === 'button' && textContent(node).includes(text));
+const findButton = (renderer: ReactTestRenderer, text: string) => findButtons(renderer, text)[0];
 
 const findExactButton = (renderer: ReactTestRenderer, text: string) =>
   renderer.root.findAll((node) => node.type === 'button' && textContent(node) === text)[0];
@@ -3811,8 +3820,8 @@ describe('QueryEditor external SQL save', () => {
 
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-selects');
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-actions');
-    expect(css).toContain('width: 78px !important;');
-    expect(css).toContain('width: 104px !important;');
+    expect(css).toContain('width: 48px !important;');
+    expect(css).toContain('flex: 0 0 48px !important;');
     expect(css).toContain('flex: 0 0 auto !important;');
     expect(css).toContain('justify-content: flex-start;');
     expect(css).toContain('height: 32px !important;');

@@ -457,9 +457,13 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
 
     const toolbarHideButton = (
         <Tooltip title={hideTooltipTitle}>
-            <Button className={isV2Ui ? 'gn-v2-query-result-toolbar-hide' : undefined} icon={<EyeInvisibleOutlined />} onClick={onHide}>
-                <span>{t('query_editor.results_panel.action.hide')}</span>
-                {isV2Ui && toggleShortcutLabel && <span className="gn-v2-toolbar-kbd">{toggleShortcutLabel}</span>}
+            <Button
+                aria-label={t('query_editor.results_panel.aria.hide')}
+                className={isV2Ui ? 'gn-v2-data-grid-toolbar-action gn-v2-query-result-toolbar-hide' : undefined}
+                icon={<EyeInvisibleOutlined />}
+                onClick={onHide}
+            >
+                {!isV2Ui && <span>{t('query_editor.results_panel.action.hide')}</span>}
             </Button>
         </Tooltip>
     );

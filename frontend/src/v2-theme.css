@@ -3930,6 +3930,23 @@ body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-toolbar-scroll .ant-btn {
   border-radius: 7px !important;
 }
 
+body[data-ui-version="v2"] .gn-v2-data-grid .gn-v2-data-grid-toolbar-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px !important;
+  min-width: 28px !important;
+  padding-inline: 0 !important;
+  flex: 0 0 28px;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid .gn-v2-data-grid-toolbar-menu-trigger {
+  display: inline-flex;
+  width: 28px;
+  min-width: 28px;
+  flex: 0 0 28px;
+}
+
 body[data-ui-version="v2"] .gn-v2-data-grid-toolbar-title {
   display: inline-flex;
   align-items: center;

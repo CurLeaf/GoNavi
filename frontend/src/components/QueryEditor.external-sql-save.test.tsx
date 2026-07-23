@@ -474,6 +474,7 @@ vi.mock('@ant-design/icons', () => {
     BugOutlined: Icon,
     ClearOutlined: Icon,
     CopyOutlined: Icon,
+    DiffOutlined: Icon,
     PlayCircleOutlined: Icon,
     SaveOutlined: Icon,
     FormatPainterOutlined: Icon,
@@ -486,6 +487,7 @@ vi.mock('@ant-design/icons', () => {
     DownOutlined: Icon,
     EyeOutlined: Icon,
     EyeInvisibleOutlined: Icon,
+    EllipsisOutlined: Icon,
   };
 });
 
@@ -620,11 +622,18 @@ const queryResultMessageText = (renderer: ReactTestRenderer): string => {
   return values.join('\n');
 };
 
-const findButton = (renderer: ReactTestRenderer, text: string) =>
-  renderer.root.findAll((node) => node.type === 'button' && textContent(node).includes(text))[0];
+const findButtons = (renderer: ReactTestRenderer, text: string) => {
+  const visibleTextMatches = renderer.root.findAll(
+    (node) => node.type === 'button' && textContent(node).includes(text),
+  );
+  return visibleTextMatches.length > 0
+    ? visibleTextMatches
+    : renderer.root.findAll((node) => (
+      node.type === 'button' && String(node.props?.['aria-label'] || '').includes(text)
+    ));
+};
 
-const findButtons = (renderer: ReactTestRenderer, text: string) =>
-  renderer.root.findAll((node) => node.type === 'button' && textContent(node).includes(text));
+const findButton = (renderer: ReactTestRenderer, text: string) => findButtons(renderer, text)[0];
 
 const findExactButton = (renderer: ReactTestRenderer, text: string) =>
   renderer.root.findAll((node) => node.type === 'button' && textContent(node) === text)[0];
@@ -963,6 +972,42 @@ describe('QueryEditor external SQL save', () => {
     expect(textContent(renderer.toJSON())).not.toContain('等待执行 SQL');
   });
 
+  it('renders the v2 SQL toolbar actions as icon-only buttons', async () => {
+    storeState.appearance.uiVersion = 'v2';
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab()} />);
+    });
+
+    const exactLabels = [
+      '运行',
+      '保存',
+      'AI · 更多',
+      '更多',
+      '搜索',
+      '开启自动换行',
+      '美化 SQL',
+      '美化 SQL · 设置',
+    ];
+    const iconOnlyButtons = exactLabels.map((label) => renderer.root.find(
+      (node) => node.type === 'button' && node.props?.['aria-label'] === label,
+    ));
+    iconOnlyButtons.push(renderer.root.find(
+      (node) => node.type === 'button'
+        && String(node.props?.['aria-label'] || '').startsWith('触发 SQL AI 自动补全'),
+    ));
+
+    for (const button of iconOnlyButtons) {
+      expect(textContent(button)).toBe('');
+      expect(button.props.className).toContain('gn-v2-query-toolbar-icon-action');
+    }
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
   it('shows the empty query results panel after toggling the results button', async () => {
     storeState.appearance.uiVersion = 'v2';
 
@@ -1058,8 +1103,14 @@ describe('QueryEditor external SQL save', () => {
 
     expect(textContent(renderer.toJSON())).toContain('结果 1');
 
+    const hideButton = renderer.root.find(
+      (node) => node.type === 'button' && node.props['aria-label'] === '隐藏结果区',
+    );
+    expect(textContent(hideButton)).toBe('');
+    expect(hideButton.props.className).toContain('gn-v2-data-grid-toolbar-action');
+
     await act(async () => {
-      findButton(renderer, '隐藏').props.onClick();
+      hideButton.props.onClick();
     });
 
     expect(textContent(renderer.toJSON())).not.toContain('结果 1');
@@ -11590,8 +11641,8 @@ describe('QueryEditor external SQL save', () => {
 
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-selects');
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-actions');
-    expect(css).toContain('width: 78px !important;');
-    expect(css).toContain('width: 104px !important;');
+    expect(css).toContain('width: 48px !important;');
+    expect(css).toContain('flex: 0 0 48px !important;');
     expect(css).toContain('flex: 0 0 auto !important;');
     expect(css).toContain('justify-content: flex-start;');
     expect(css).toContain('height: 32px !important;');
