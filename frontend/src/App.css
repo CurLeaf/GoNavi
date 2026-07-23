@@ -1005,6 +1005,59 @@ body[data-ui-version="legacy"] .ant-layout-sider {
   max-width: min(960px, calc(100vw - 360px)) !important;
 }
 
+body[data-ui-version] .ant-layout-sider[data-sidebar-collapsed='true'] {
+  min-width: 0 !important;
+  max-width: 0 !important;
+  width: 0 !important;
+  flex: 0 0 0 !important;
+  border-right: 0 !important;
+}
+
+body[data-ui-version] .gonavi-sidebar-collapse-trigger.ant-btn {
+  display: inline-flex;
+  width: 26px;
+  min-width: 26px;
+  height: 26px !important;
+  flex: 0 0 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: transparent;
+  box-shadow: none;
+  -webkit-app-region: no-drag;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+body[data-ui-version] .gonavi-sidebar-collapse-trigger.ant-btn:focus-visible {
+  outline: 2px solid var(--gn-accent, #1677ff);
+  outline-offset: 2px;
+}
+
+body[data-ui-version='v2'] .gonavi-sidebar-collapse-trigger.ant-btn {
+  background: transparent;
+  color: var(--gn-fg-4);
+}
+
+body[data-ui-version='v2'] .gonavi-sidebar-collapse-trigger.ant-btn[data-sidebar-toggle-placement='explorer-header'] {
+  width: 24px;
+  min-width: 24px;
+  height: 24px !important;
+  flex: 0 0 24px;
+  border: 1px solid var(--gn-br-2) !important;
+  border-radius: 7px !important;
+}
+
+body[data-ui-version='v2'] .gonavi-sidebar-collapse-trigger.ant-btn:hover {
+  background: var(--gn-bg-hover);
+  color: var(--gn-fg-2);
+}
+
+body[data-ui-version='v2'] .gonavi-sidebar-collapse-trigger.ant-btn[data-sidebar-toggle-placement='explorer-header']:hover {
+  color: var(--gn-fg-1);
+}
+
 .gonavi-about-project-entry {
   transition: background-color 160ms ease, color 160ms ease;
 }

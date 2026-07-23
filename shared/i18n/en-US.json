@@ -2855,6 +2855,8 @@
   "app.shortcuts.reserved.editor_replace": "Editor Replace",
   "app.shortcuts.title": "Shortcut Manager",
   "app.sidebar.ai_assistant": "AI Assistant",
+  "app.sidebar.collapse": "Collapse sidebar tree",
+  "app.sidebar.expand": "Expand sidebar tree",
   "app.sidebar.resize_width": "Drag to resize width",
   "app.sidebar.settings": "Settings",
   "app.sidebar.sql_execution_log": "SQL Execution Log",

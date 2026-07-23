@@ -2855,6 +2855,8 @@
   "app.shortcuts.reserved.editor_replace": "エディター置換",
   "app.shortcuts.title": "ショートカット管理",
   "app.sidebar.ai_assistant": "AI アシスタント",
+  "app.sidebar.collapse": "左側ツリーを折りたたむ",
+  "app.sidebar.expand": "左側ツリーを展開する",
   "app.sidebar.resize_width": "ドラッグして幅を変更",
   "app.sidebar.settings": "設定",
   "app.sidebar.sql_execution_log": "SQL 実行ログ",

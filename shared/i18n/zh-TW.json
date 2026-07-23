@@ -2855,6 +2855,8 @@
   "app.shortcuts.reserved.editor_replace": "編輯器取代",
   "app.shortcuts.title": "快捷鍵管理",
   "app.sidebar.ai_assistant": "AI 助手",
+  "app.sidebar.collapse": "折疊左側樹",
+  "app.sidebar.expand": "展開左側樹",
   "app.sidebar.resize_width": "拖动调整宽度",
   "app.sidebar.settings": "設定",
   "app.sidebar.sql_execution_log": "SQL 執行日志",

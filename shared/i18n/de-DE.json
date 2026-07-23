@@ -2855,6 +2855,8 @@
   "app.shortcuts.reserved.editor_replace": "Editor Ersetzen",
   "app.shortcuts.title": "Tastenkürzelverwaltung",
   "app.sidebar.ai_assistant": "AI-Assistent",
+  "app.sidebar.collapse": "Linken Navigationsbaum einklappen",
+  "app.sidebar.expand": "Linken Navigationsbaum ausklappen",
   "app.sidebar.resize_width": "Ziehen, um die Breite zu ändern",
   "app.sidebar.settings": "Einstellungen",
   "app.sidebar.sql_execution_log": "SQL-Ausführungslog",

@@ -1,7 +1,7 @@
 ﻿import Modal from './components/common/ResizableDraggableModal';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip, Alert } from 'antd';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined, PoweroffOutlined, TagOutlined, UserOutlined, UpCircleOutlined, MessageOutlined, FileTextOutlined, SyncOutlined, SendOutlined, AuditOutlined } from '@ant-design/icons';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PoweroffOutlined, TagOutlined, UserOutlined, UpCircleOutlined, MessageOutlined, FileTextOutlined, SyncOutlined, SendOutlined, AuditOutlined } from '@ant-design/icons';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -1048,6 +1048,9 @@ function App() {
   const LazyAISettingsContent = useMemo(createLazyAISettingsContent, [aiSettingsRenderNonce]);
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const handleCollapseSidebarPanel = useCallback(() => setIsSidebarCollapsed(true), []);
+  const renderedSidebarWidth = isSidebarCollapsed ? 0 : sidebarWidth;
   const aiPanelVisible = useStore(state => state.aiPanelVisible);
   const detachedAIChatWindow = useStore(state => state.detachedAIChatWindow);
   const detachAIChatPanel = useStore(state => state.detachAIChatPanel);
@@ -3080,13 +3083,13 @@ function App() {
   const aiPanelOverlayActive = aiPanelVisible && shouldOverlayAIPanel({
       isV2Ui,
       viewportWidth,
-      sidebarWidth,
+      sidebarWidth: renderedSidebarWidth,
       panelWidth: DEFAULT_AI_PANEL_WIDTH,
   });
   const aiPanelRenderWidth = aiPanelOverlayActive
       ? resolveOverlayAIPanelWidth({
           viewportWidth,
-          sidebarWidth,
+          sidebarWidth: renderedSidebarWidth,
           panelWidth: DEFAULT_AI_PANEL_WIDTH,
       })
       : DEFAULT_AI_PANEL_WIDTH;
@@ -3448,7 +3451,10 @@ function App() {
       return SIDEBAR_UTILITY_ITEM_KEYS.map((key) => itemMap[key]);
   }, [handleOpenSettingsModal, t]);
   const handleFocusSidebarSearch = useCallback(() => {
-      window.dispatchEvent(new CustomEvent('gonavi:focus-sidebar-search'));
+      setIsSidebarCollapsed(false);
+      window.setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('gonavi:focus-sidebar-search'));
+      }, 0);
   }, []);
   const renderLegacyAIEdgeHandle = () => (
       <Tooltip title={t('app.sidebar.ai_assistant')}>
@@ -4225,7 +4231,7 @@ function App() {
                   window.dispatchEvent(new CustomEvent('gonavi:run-active-query'));
                   break;
               case 'focusSidebarSearch':
-                  window.dispatchEvent(new CustomEvent('gonavi:focus-sidebar-search'));
+                  handleFocusSidebarSearch();
                   break;
               case 'newQueryTab':
                   handleNewQuery();
@@ -4268,7 +4274,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleGlobalShortcut, true);
       };
-  }, [activeShortcutPlatform, capturingShortcutAction, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleOpenToolCenterPane, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, selectPresetTheme, shortcutOptions, switchActiveTabByOffset, themeMode, toggleAIPanel, useNativeMacWindowControls]);
+  }, [activeShortcutPlatform, capturingShortcutAction, handleCreateConnection, handleFocusSidebarSearch, handleManualResetWindowZoom, handleNewQuery, handleOpenToolCenterPane, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, selectPresetTheme, shortcutOptions, switchActiveTabByOffset, themeMode, toggleAIPanel, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!capturingShortcutAction) {
@@ -7250,6 +7256,8 @@ function App() {
       return null;
   };
 
+  const sidebarPanelToggleLabel = t(isSidebarCollapsed ? 'app.sidebar.expand' : 'app.sidebar.collapse');
+
   return (
     <ConfigProvider
         locale={getAntdLocale(language)}
@@ -7297,7 +7305,10 @@ function App() {
                 fontSize: tokenFontSize
             } as any}
           >
-              <div style={{ display: 'flex', alignItems: 'center', gap: Math.max(6, Math.round(8 * effectiveUiScale)), fontWeight: 600, minWidth: 0 }}>
+              <div
+                data-titlebar-brand-region="true"
+                style={{ display: 'flex', alignItems: 'center', gap: Math.max(6, Math.round(8 * effectiveUiScale)), fontWeight: 600, minWidth: 0 }}
+              >
                   <img
                     src={resolveBrandTitlebarSrc(brandIconId)}
                     alt="GoNavi"
@@ -7313,7 +7324,25 @@ function App() {
                       background: 'transparent',
                     }}
                   />
-                  GoNavi
+                  <span>GoNavi</span>
+                  {(!isV2Ui || isSidebarCollapsed) && (
+                      <Tooltip title={sidebarPanelToggleLabel} placement="bottom" mouseEnterDelay={0.35}>
+                          <Button
+                            type="text"
+                            size="small"
+                            className="gonavi-sidebar-collapse-trigger"
+                            data-sidebar-collapse-trigger="true"
+                            data-sidebar-toggle-placement="titlebar"
+                            data-no-titlebar-toggle="true"
+                            aria-label={sidebarPanelToggleLabel}
+                            aria-controls="gonavi-sidebar-tree-panel"
+                            aria-expanded={!isSidebarCollapsed}
+                            icon={isSidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                            onClick={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
+                            style={{ WebkitAppRegion: 'no-drag', '--wails-draggable': 'no-drag' } as any}
+                          />
+                      </Tooltip>
+                  )}
               </div>
               {isWebRuntime ? (
                   <div
@@ -7378,6 +7407,12 @@ function App() {
           <Sider
             ref={siderRef}
             width={sidebarWidth}
+            collapsible
+            collapsed={isSidebarCollapsed}
+            collapsedWidth={0}
+            trigger={null}
+            data-sidebar-panel="true"
+            data-sidebar-collapsed={isSidebarCollapsed}
             className={isV2Ui ? 'gn-v2-app-sider' : undefined}
             style={{
                 borderRight: isV2Ui ? 'none' : '1px solid rgba(128,128,128,0.2)',
@@ -7385,7 +7420,17 @@ function App() {
                 background: isV2Ui ? 'var(--gn-bg-panel-2)' : bgMain
             }}
           >
-            <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div
+                id="gonavi-sidebar-tree-panel"
+                aria-hidden={isSidebarCollapsed}
+                style={{
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                    visibility: isSidebarCollapsed ? 'hidden' : 'visible',
+                }}
+            >
                 {!isV2Ui && (
                 <>
                 <div style={{ padding: `12px ${sidebarHorizontalPadding}px 8px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
@@ -7420,6 +7465,8 @@ function App() {
                             onToggleLogPanel={handleToggleLogPanel}
                             uiVersion={appearance.uiVersion}
                             onFocusCommandSearch={handleFocusSidebarSearch}
+                            onCollapseSidebar={isV2Ui && !isSidebarCollapsed ? handleCollapseSidebarPanel : undefined}
+                            collapseSidebarLabel={sidebarPanelToggleLabel}
                         />
                     </div>
                     {!connectionWorkbenchState.ready && (
@@ -7539,7 +7586,7 @@ function App() {
              )}
              <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'row', position: 'relative' }}>
                <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? 'var(--gonavi-border-radius)' : 0, clipPath: isLogPanelOpen ? 'inset(0 round var(--gonavi-border-radius))' : 'none' }}>
-                  <TabManager />
+                  <TabManager onFocusSidebarSearch={handleFocusSidebarSearch} />
                   <FloatingWorkbenchWindows />
                   <FloatingQueryResultWindows />
                   <NativeDetachedWindowController onOpenAISettings={handleOpenAISettings} />
@@ -8773,7 +8820,7 @@ function App() {
               ref={logGhostRef}
               style={{
                   position: 'fixed',
-                  left: sidebarWidth, // Start from sidebar edge
+                  left: renderedSidebarWidth, // Start from the rendered sidebar edge
                   right: 0,
                   height: '4px',
                   background: resizeGuideColor,

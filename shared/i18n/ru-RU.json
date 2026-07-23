@@ -2855,6 +2855,8 @@
   "app.shortcuts.reserved.editor_replace": "Редактор замена",
   "app.shortcuts.title": "Управление горячими клавишами",
   "app.sidebar.ai_assistant": "AI-ассистент",
+  "app.sidebar.collapse": "Свернуть дерево слева",
+  "app.sidebar.expand": "Развернуть дерево слева",
   "app.sidebar.resize_width": "Перетащите, чтобы изменить ширину",
   "app.sidebar.settings": "Настройки",
   "app.sidebar.sql_execution_log": "Журнал выполнения SQL",

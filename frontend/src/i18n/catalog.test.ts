@@ -245,6 +245,8 @@ describe("i18n catalog", () => {
       "app.security_update.stage.updating_secure_storage",
       "app.security_update.stage.verifying_result",
       "app.sidebar.ai_assistant",
+      "app.sidebar.collapse",
+      "app.sidebar.expand",
       "app.sidebar.resize_width",
       "app.sidebar.settings",
       "app.sidebar.sql_execution_log",
@@ -922,6 +924,8 @@ describe("i18n catalog", () => {
     expect(sidebarUtilitySource).not.toContain("app.sidebar.tools");
     expect(sidebarUtilitySource).toContain("app.sidebar.settings");
     expect(sidebarUtilitySource).toContain("app.sidebar.ai_assistant");
+    expect(source).toContain("app.sidebar.collapse");
+    expect(source).toContain("app.sidebar.expand");
     expect(source).toContain("app.sidebar.resize_width");
     expect(source).toContain("app.sidebar.sql_execution_log");
     expect(sidebarUtilitySource).not.toContain("title: '工具'");

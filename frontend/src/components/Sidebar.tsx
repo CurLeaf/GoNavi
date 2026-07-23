@@ -105,6 +105,7 @@ import { APP_POPUP_Z_INDEX } from '../utils/overlayZIndex';
   WarningOutlined,
   AimOutlined,
   MoreOutlined,
+  MenuFoldOutlined,
   SettingOutlined
 	} from '@ant-design/icons';
 import {
@@ -509,6 +510,8 @@ const Sidebar: React.FC<{
   onToggleLogPanel?: () => void;
   uiVersion?: 'legacy' | 'v2';
   onFocusCommandSearch?: () => void;
+  onCollapseSidebar?: () => void;
+  collapseSidebarLabel?: string;
 }> = React.memo(({
   onCreateConnection,
   onEditConnection,
@@ -517,6 +520,8 @@ const Sidebar: React.FC<{
   onToggleLogPanel,
   uiVersion,
   onFocusCommandSearch,
+  onCollapseSidebar,
+  collapseSidebarLabel,
 }) => {
   const connections = useStore(state => state.connections);
   const savedQueries = useStore(state => state.savedQueries);
@@ -3060,6 +3065,22 @@ const Sidebar: React.FC<{
                             }}
                         />
                     </Tooltip>
+                    {onCollapseSidebar && collapseSidebarLabel && (
+                        <Tooltip title={collapseSidebarLabel} placement="bottom" mouseEnterDelay={0.35}>
+                            <Button
+                                size="small"
+                                type="text"
+                                className="gonavi-sidebar-collapse-trigger"
+                                data-sidebar-collapse-trigger="true"
+                                data-sidebar-toggle-placement="explorer-header"
+                                aria-label={collapseSidebarLabel}
+                                aria-controls="gonavi-sidebar-tree-panel"
+                                aria-expanded={true}
+                                icon={<MenuFoldOutlined />}
+                                onClick={onCollapseSidebar}
+                            />
+                        </Tooltip>
+                    )}
                 </div>
             </div>
         )}
