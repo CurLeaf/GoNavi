@@ -31,6 +31,7 @@ import { extractTableNameFromMetadataRow } from '../utils/tableMetadataRows';
 import { V2TableContextMenuView, type V2TableContextMenuActionKey } from './V2TableContextMenu';
 import { showSQLExportOptionsDialog } from './SQLExportOptionsDialog';
 import { confirmCopyTable } from './tableCopyAction';
+import { APP_POPUP_Z_INDEX } from '../utils/overlayZIndex';
 
 interface TableOverviewProps {
     tab: TabData;
@@ -1606,7 +1607,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                         position: 'fixed',
                         left: v2ContextMenu.x,
                         top: v2ContextMenu.y,
-                        zIndex: 10000,
+                        zIndex: APP_POPUP_Z_INDEX,
                         width: OVERVIEW_CONTEXT_MENU_WIDTH,
                         maxWidth: 'calc(100vw - 24px)',
                         ['--gn-v2-context-menu-max-height' as any]: `${v2ContextMenu.maxHeight}px`,

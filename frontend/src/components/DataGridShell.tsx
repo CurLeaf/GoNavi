@@ -2,6 +2,7 @@ import React from 'react';
 import { Button, message } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
 import { createPortal } from 'react-dom';
+import { APP_POPUP_Z_INDEX } from '../utils/overlayZIndex';
 
 import Modal from './common/ResizableDraggableModal';
 import ImportPreviewModal from './ImportPreviewModal';
@@ -882,7 +883,7 @@ const renderDataTableView = () => (
                     position: 'fixed',
                     left: cellContextMenu.x,
                     top: cellContextMenu.y,
-                    zIndex: 10000,
+                    zIndex: APP_POPUP_Z_INDEX,
                 }}
                 onClick={(e) => e.stopPropagation()}
             >

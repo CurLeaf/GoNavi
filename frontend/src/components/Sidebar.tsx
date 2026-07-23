@@ -71,6 +71,7 @@ export {
 import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
 import { Tree, message, Dropdown, MenuProps, Input, Button, Form, Popover, Radio, Select, Tooltip } from 'antd';
+import { APP_POPUP_Z_INDEX } from '../utils/overlayZIndex';
 	import {
 	  CaretDownFilled,
 	  DatabaseOutlined,
@@ -3369,7 +3370,7 @@ const Sidebar: React.FC<{
                     position: 'fixed',
                     left: contextMenu.x,
                     top: contextMenu.y,
-                    zIndex: 10000,
+                    zIndex: APP_POPUP_Z_INDEX,
                     width: contextMenu.overlayStyle?.width ?? SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH,
                     maxWidth: contextMenu.overlayStyle?.maxWidth ?? 'calc(100vw - 24px)',
                     ['--gn-v2-context-menu-max-height' as any]: `${contextMenu.maxHeight ?? SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT}px`,
