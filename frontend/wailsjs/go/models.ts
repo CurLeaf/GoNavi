@@ -1695,6 +1695,7 @@ export namespace nativewindow {
 	    id?: string;
 	    bounds?: WindowBounds;
 	    visibilityRevision?: number;
+	    applied?: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new OperationResult(source);
@@ -1707,6 +1708,7 @@ export namespace nativewindow {
 	        this.id = source["id"];
 	        this.bounds = this.convertValues(source["bounds"], WindowBounds);
 	        this.visibilityRevision = source["visibilityRevision"];
+	        this.applied = source["applied"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
