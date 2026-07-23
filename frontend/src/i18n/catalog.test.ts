@@ -509,6 +509,8 @@ describe("i18n catalog", () => {
     const dataGridDetachedChromeKeys = [
       "data_grid.page_find.tooltip",
       "data_grid.page_find.placeholder",
+      "data_grid.page_find.previous",
+      "data_grid.page_find.next",
       "data_grid.page_find.summary",
       "data_grid.pagination.result_set",
       "data_grid.pagination.page_size_aria",
@@ -536,9 +538,6 @@ describe("i18n catalog", () => {
       "data_grid.secondary.er_diagram",
       "data_grid.secondary.column_display",
       "data_grid.secondary.jump_column",
-      "data_grid.secondary.row_count",
-      "data_grid.secondary.pending_changes",
-      "data_grid.secondary.live",
       "data_grid.record_view.empty",
       "data_grid.record_view.json_record_count",
       "data_grid.record_view.edit_json",
@@ -612,8 +611,6 @@ describe("i18n catalog", () => {
     expect(t("en-US", "data_grid.pagination.page.current", { current: "<raw-current>" })).toContain("<raw-current>");
     expect(t("en-US", "data_grid.pagination.page.known", { current: "<raw-current>", totalPages: "<raw-total-pages>" })).toContain("<raw-current>");
     expect(t("en-US", "data_grid.pagination.page.known", { current: "<raw-current>", totalPages: "<raw-total-pages>" })).toContain("<raw-total-pages>");
-    expect(t("zh-CN", "data_grid.secondary.row_count", { count: "<raw-count>" })).toContain("<raw-count>");
-    expect(t("zh-CN", "data_grid.secondary.pending_changes", { count: "<raw-count>" })).toContain("<raw-count>");
     expect(t("zh-CN", "data_grid.secondary.view_ddl")).toContain("DDL");
     expect(t("ja-JP", "data_grid.secondary.er_diagram")).toContain("ER");
     expect(t("zh-CN", "data_grid.record_view.json_record_count", { count: "<raw-count>" })).toContain("<raw-count>");

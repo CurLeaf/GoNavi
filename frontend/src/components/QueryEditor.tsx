@@ -8463,6 +8463,19 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
           const editor = editorRef.current;
           const targetNode = resolveEventTargetNode(event.target);
+          const targetElement = targetNode
+              && typeof (targetNode as Element).closest === 'function'
+              ? targetNode as Element
+              : null;
+          const activeElement = document.activeElement;
+          const dataGridHasFocus = !!(
+              activeElement
+              && typeof activeElement.closest === 'function'
+              && activeElement.closest('.data-grid-root')
+          );
+          if (targetElement?.closest('.data-grid-root') || dataGridHasFocus) {
+              return;
+          }
           const editorHasFocus = !!editor?.hasTextFocus?.();
           const inEditorPane = !!(targetNode && editorPaneRef.current?.contains(targetNode));
           const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));

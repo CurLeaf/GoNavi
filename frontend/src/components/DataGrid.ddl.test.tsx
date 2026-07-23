@@ -217,6 +217,7 @@ vi.mock('@ant-design/icons', () => {
     FilterOutlined: Icon,
     CloseOutlined: Icon,
     BugOutlined: Icon,
+    CodeOutlined: Icon,
     ConsoleSqlOutlined: Icon,
     ControlOutlined: Icon,
     FileTextOutlined: Icon,
@@ -1349,6 +1350,161 @@ describe('DataGrid DDL interactions', () => {
         testRenderState.latestTableProps.rowClassName(row)
       )),
     ).toEqual(['row-deleted', 'row-deleted']);
+    renderer!.unmount();
+  });
+
+  it('navigates and closes the current-page finder from its keyboard controls', async () => {
+    const onCancel = vi.fn();
+    const onNavigatePrevious = vi.fn();
+    const onNavigateNext = vi.fn();
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGridPageFind
+          isV2Ui
+          darkMode={false}
+          pageFindText="Ada"
+          normalizedPageFindText="ada"
+          hasMatches
+          activePageFindPosition={1}
+          matchCount={2}
+          occurrenceCount={2}
+          matchedCellCount={2}
+          onPageFindTextChange={() => {}}
+          onCancel={onCancel}
+          onNavigatePrevious={onNavigatePrevious}
+          onNavigateNext={onNavigateNext}
+        />,
+      );
+    });
+    const input = renderer!.root.findByType('input');
+    const createKeyEvent = (key: string, shiftKey = false) => ({
+      key,
+      shiftKey,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    });
+
+    await act(async () => {
+      input.props.onKeyDown(createKeyEvent('Enter'));
+      input.props.onKeyDown(createKeyEvent('Enter', true));
+      input.props.onKeyDown(createKeyEvent('Escape'));
+    });
+
+    expect(onNavigateNext).toHaveBeenCalledTimes(1);
+    expect(onNavigatePrevious).toHaveBeenCalledTimes(1);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    renderer!.unmount();
+  });
+
+  it('opens the V2 current-page finder with Ctrl+F and closes it without duplicating the widget', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    Object.defineProperty(navigator, 'platform', {
+      configurable: true,
+      value: 'Win32',
+    });
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', id: 1, name: 'Ada' },
+            { __gonavi_row_key__: 'row-2', id: 2, name: 'Linus' },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    expect(renderer!.root.findAllByType(DataGridPageFind)).toHaveLength(0);
+    const keydownRegistrations = vi.mocked(window.addEventListener).mock.calls.filter(
+      ([type, _listener, options]) => type === 'keydown' && options === true,
+    );
+    expect(keydownRegistrations).toHaveLength(1);
+    const handlePageFindShortcut = keydownRegistrations[0][1] as EventListener;
+    const createFindShortcutEvent = () => ({
+      key: 'f',
+      code: 'KeyF',
+      metaKey: false,
+      ctrlKey: true,
+      altKey: false,
+      shiftKey: false,
+      isComposing: false,
+      target: document.body,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      stopImmediatePropagation: vi.fn(),
+    }) as unknown as KeyboardEvent;
+
+    const firstShortcut = createFindShortcutEvent();
+    await act(async () => {
+      handlePageFindShortcut(firstShortcut);
+    });
+    expect(firstShortcut.preventDefault).toHaveBeenCalledTimes(1);
+    expect(firstShortcut.stopPropagation).toHaveBeenCalledTimes(1);
+    expect(firstShortcut.stopImmediatePropagation).toHaveBeenCalledTimes(1);
+    expect(renderer!.root.findAllByType(DataGridPageFind)).toHaveLength(1);
+
+    const secondShortcut = createFindShortcutEvent();
+    await act(async () => {
+      handlePageFindShortcut(secondShortcut);
+    });
+    expect(renderer!.root.findAllByType(DataGridPageFind)).toHaveLength(1);
+
+    await act(async () => {
+      renderer!.root.findByType(DataGridPageFind).props.onCancel();
+    });
+    expect(renderer!.root.findAllByType(DataGridPageFind)).toHaveLength(0);
+    renderer!.unmount();
+  });
+
+  it('does not claim document-level Cmd+F for a query result without DataGrid focus', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1, name: 'Ada' }]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          exportScope="queryResult"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    const keydownRegistrations = vi.mocked(window.addEventListener).mock.calls.filter(
+      ([type, _listener, options]) => type === 'keydown' && options === true,
+    );
+    expect(keydownRegistrations).toHaveLength(1);
+    const event = {
+      key: 'f',
+      code: 'KeyF',
+      metaKey: true,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+      isComposing: false,
+      target: document.body,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      stopImmediatePropagation: vi.fn(),
+    } as unknown as KeyboardEvent;
+
+    await act(async () => {
+      (keydownRegistrations[0][1] as EventListener)(event);
+    });
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(renderer!.root.findAllByType(DataGridPageFind)).toHaveLength(0);
     renderer!.unmount();
   });
 
