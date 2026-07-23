@@ -167,6 +167,47 @@ describe("i18n catalog", () => {
     expect(catalogs["zh-CN"][devHintKey]).toBe("接收最新的开发版本");
   });
 
+  it("keeps data-root log directory copy complete across all catalogs", () => {
+    const logDirectoryKeys = [
+      "app.data_root.log_directory.backend.dialog.select_directory",
+      "app.data_root.log_directory.backend.error.desktop_only",
+      "app.data_root.log_directory.backend.error.directory_unavailable",
+      "app.data_root.log_directory.backend.error.environment_managed",
+      "app.data_root.log_directory.backend.error.open_directory_failed",
+      "app.data_root.log_directory.backend.error.open_directory_unsupported",
+      "app.data_root.log_directory.backend.error.save_failed",
+      "app.data_root.log_directory.backend.message.opened",
+      "app.data_root.log_directory.backend.message.unchanged",
+      "app.data_root.log_directory.backend.message.updated_restart",
+      "app.data_root.log_directory.current_file",
+      "app.data_root.log_directory.default_directory",
+      "app.data_root.log_directory.description",
+      "app.data_root.log_directory.environment_hint",
+      "app.data_root.log_directory.message.apply_failed_with_error",
+      "app.data_root.log_directory.message.open_failed_with_error",
+      "app.data_root.log_directory.message.select_failed_with_error",
+      "app.data_root.log_directory.message.select_valid_first",
+      "app.data_root.log_directory.message.updated",
+      "app.data_root.log_directory.pending_restart",
+      "app.data_root.log_directory.placeholder",
+      "app.data_root.log_directory.restart_hint",
+      "app.data_root.log_directory.title",
+    ] as const;
+    const base = catalogs["en-US"];
+
+    for (const language of SUPPORTED_LANGUAGES) {
+      for (const key of logDirectoryKeys) {
+        expect(catalogs[language]).toHaveProperty(key);
+        expect(catalogs[language][key]).toBeTruthy();
+        expect(getPlaceholders(catalogs[language][key])).toEqual(getPlaceholders(base[key]));
+      }
+    }
+
+    expect(catalogs["zh-CN"]["app.data_root.log_directory.title"]).toBe("日志目录");
+    expect(catalogs["zh-CN"]["app.data_root.log_directory.environment_hint"]).toContain("GONAVI_LOG_DIR");
+    expect(catalogs["en-US"]["app.data_root.log_directory.restart_hint"]).toContain("gonavi.log");
+  });
+
   it("includes App shell keys required by every supported language", () => {
     const appShellKeys = [
       "app.tools.title",

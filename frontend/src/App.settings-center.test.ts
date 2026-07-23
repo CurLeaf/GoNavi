@@ -90,6 +90,53 @@ describe('settings center layout', () => {
     expect(appSource).toContain("t('app.proxy.test.target_placeholder')");
   });
 
+  it('keeps log directory controls inside the data-root detail page', () => {
+    const embeddedDataRootStart = appSource.indexOf("if (activeSettingsCenterPane.key === 'data-root')");
+    const embeddedDataRootEnd = appSource.indexOf(
+      "if (activeSettingsCenterPane.key === 'security-update')",
+      embeddedDataRootStart,
+    );
+    const embeddedDataRootSource = appSource.slice(embeddedDataRootStart, embeddedDataRootEnd);
+    const standaloneDataRootStart = appSource.indexOf('{isDataRootModalOpen && (');
+    const standaloneDataRootEnd = appSource.indexOf(
+      '<ConnectionPackagePasswordModal',
+      standaloneDataRootStart,
+    );
+    const standaloneDataRootSource = appSource.slice(standaloneDataRootStart, standaloneDataRootEnd);
+    const logDirectoryRendererStart = appSource.indexOf('const renderLogDirectorySettings = () => {');
+    const logDirectoryRendererEnd = appSource.indexOf('\n  const {', logDirectoryRendererStart);
+    const logDirectoryRendererSource = appSource.slice(logDirectoryRendererStart, logDirectoryRendererEnd);
+
+    expect(embeddedDataRootStart).toBeGreaterThan(-1);
+    expect(embeddedDataRootEnd).toBeGreaterThan(embeddedDataRootStart);
+    expect(standaloneDataRootStart).toBeGreaterThan(-1);
+    expect(standaloneDataRootEnd).toBeGreaterThan(standaloneDataRootStart);
+    expect(appSource).toContain('ApplyLogDirectory');
+    expect(appSource).toContain('OpenLogDirectory');
+    expect(appSource).toContain('SelectLogDirectory');
+    expect(appSource).toContain("const [selectedLogDirectoryPath, setSelectedLogDirectoryPath] = useState('');");
+    expect(appSource).toContain('const directorySettingsApplying = dataRootApplying || logDirectoryApplying;');
+    expect(appSource).toContain('const handleSelectLogDirectory = useCallback(async () => {');
+    expect(appSource).toContain('const handleApplyLogDirectory = useCallback(async (useDefaultPath = false) => {');
+    expect(appSource).toContain('const handleOpenLogDirectory = useCallback(async () => {');
+    expect(appSource).toContain('const renderLogDirectorySettings = () => {');
+    expect(appSource).toContain('data-log-directory-settings="true"');
+    expect(appSource).toContain("dataRootInfo?.logDirectorySource === 'environment'");
+    expect(appSource).toContain('dataRootInfo?.logDirectoryRestartRequired === true');
+    expect(appSource).toContain("t('app.data_root.log_directory.environment_hint')");
+    expect(appSource).toContain("t('app.data_root.log_directory.pending_restart')");
+    expect(appSource).toContain("t('app.data_root.log_directory.restart_hint')");
+    expect(logDirectoryRendererSource).not.toContain("t('app.data_root.log_directory.target_directory')");
+    expect(logDirectoryRendererSource.match(/disabled={!editable \|\| directorySettingsApplying}/g)).toHaveLength(3);
+    expect(embeddedDataRootSource.match(/disabled={directorySettingsApplying}/g)).toHaveLength(4);
+    expect(standaloneDataRootSource.match(/disabled={directorySettingsApplying}/g)).toHaveLength(4);
+    expect(embeddedDataRootSource).toContain('{renderLogDirectorySettings()}');
+    expect(standaloneDataRootSource).toContain('{renderLogDirectorySettings()}');
+    expect(appSource).not.toContain("| 'log-directory'");
+    expect(appSource).not.toContain("key: 'log-directory'");
+    expect(appSource).not.toContain("handleOpenToolCenterPane('config', 'log-directory')");
+  });
+
   it('adds close and back-to-settings actions to settings center detail panes', () => {
     expect(appSource).toContain('const handleBackFromSettingsCenterPane = useCallback(() => {');
     expect(appSource).toContain('const handleCancelSettingsCenterPane = useCallback(() => {');

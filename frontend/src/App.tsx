@@ -219,7 +219,7 @@ import { useAppLogPanelResize } from './hooks/useAppLogPanelResize';
 import { useAppSidebarResize } from './hooks/useAppSidebarResize';
 import { useAppUtilityStyles } from './hooks/useAppUtilityStyles';
 import { useWorkbenchTabs } from './hooks/useWorkbenchTabs';
-import { ApplyDataRootDirectory, CancelApplicationQuit, ForceQuitApplication, GetDataRootDirectoryInfo, GetSavedConnections, ListInstalledFontFamilies, OpenDataRootDirectory, SelectDataRootDirectory, SetApplicationBrandIcon, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
+import { ApplyDataRootDirectory, ApplyLogDirectory, CancelApplicationQuit, ForceQuitApplication, GetDataRootDirectoryInfo, GetSavedConnections, ListInstalledFontFamilies, OpenDataRootDirectory, OpenLogDirectory, SelectDataRootDirectory, SelectLogDirectory, SetApplicationBrandIcon, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import { getAntdLocale } from './i18n/frameworkLocale';
 import { useI18n } from './i18n/provider';
 import './App.css';
@@ -3069,8 +3069,11 @@ function App() {
   const [isDataRootModalOpen, setIsDataRootModalOpen] = useState(false);
   const [dataRootInfo, setDataRootInfo] = useState<any>(null);
   const [selectedDataRootPath, setSelectedDataRootPath] = useState('');
+  const [selectedLogDirectoryPath, setSelectedLogDirectoryPath] = useState('');
   const [dataRootLoading, setDataRootLoading] = useState(false);
   const [dataRootApplying, setDataRootApplying] = useState(false);
+  const [logDirectoryApplying, setLogDirectoryApplying] = useState(false);
+  const directorySettingsApplying = dataRootApplying || logDirectoryApplying;
 
   const aiEntryPlacement = resolveAIEntryPlacement();
   const legacyAiEdgeHandleAttachment = resolveLegacyAIEdgeHandleAttachment(aiPanelVisible);
@@ -3471,6 +3474,7 @@ function App() {
           const data = (res?.data || {}) as any;
           setDataRootInfo(data);
           setSelectedDataRootPath(String(data.path || ''));
+          setSelectedLogDirectoryPath(String(data.logDirectory || data.defaultLogDirectory || ''));
       } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error || t('common.unknown'));
           void message.error(t('app.data_root.message.load_failed_with_error', { error: errMsg }));
@@ -3538,6 +3542,138 @@ function App() {
           void message.error(t('app.data_root.message.open_failed_with_error', { error: errMsg }));
       }
   }, [t]);
+
+  const handleSelectLogDirectory = useCallback(async () => {
+      try {
+          const res = await SelectLogDirectory(
+              selectedLogDirectoryPath || dataRootInfo?.logDirectory || dataRootInfo?.defaultLogDirectory || '',
+          );
+          if (!res?.success) {
+              if (String(res?.message || '') !== '已取消') {
+                  throw new Error(res?.message || t('common.unknown'));
+              }
+              return;
+          }
+          const data = (res?.data || {}) as any;
+          setSelectedLogDirectoryPath(String(data.directory || ''));
+      } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error || t('common.unknown'));
+          void message.error(t('app.data_root.log_directory.message.select_failed_with_error', { error: errMsg }));
+      }
+  }, [dataRootInfo?.defaultLogDirectory, dataRootInfo?.logDirectory, selectedLogDirectoryPath, t]);
+
+  const handleApplyLogDirectory = useCallback(async (useDefaultPath = false) => {
+      const nextPath = useDefaultPath
+          ? String(dataRootInfo?.defaultLogDirectory || '')
+          : String(selectedLogDirectoryPath || '').trim();
+      if (!nextPath) {
+          void message.warning(t('app.data_root.log_directory.message.select_valid_first'));
+          return;
+      }
+      setLogDirectoryApplying(true);
+      try {
+          const res = await ApplyLogDirectory(nextPath);
+          if (!res?.success) {
+              throw new Error(res?.message || t('common.unknown'));
+          }
+          const data = (res?.data || {}) as any;
+          setDataRootInfo(data);
+          setSelectedLogDirectoryPath(String(data.logDirectory || data.defaultLogDirectory || nextPath));
+          void message.success(res?.message || t('app.data_root.log_directory.message.updated'));
+      } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error || t('common.unknown'));
+          void message.error(t('app.data_root.log_directory.message.apply_failed_with_error', { error: errMsg }));
+      } finally {
+          setLogDirectoryApplying(false);
+      }
+  }, [dataRootInfo?.defaultLogDirectory, selectedLogDirectoryPath, t]);
+
+  const handleOpenLogDirectory = useCallback(async () => {
+      try {
+          const res = await OpenLogDirectory();
+          if (!res?.success) {
+              throw new Error(res?.message || t('common.unknown'));
+          }
+      } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error || t('common.unknown'));
+          void message.error(t('app.data_root.log_directory.message.open_failed_with_error', { error: errMsg }));
+      }
+  }, [t]);
+
+  const renderLogDirectorySettings = () => {
+      const editable = dataRootInfo?.logDirectoryEditable !== false;
+      const managedByEnvironment = dataRootInfo?.logDirectorySource === 'environment';
+      const restartRequired = dataRootInfo?.logDirectoryRestartRequired === true;
+      return (
+          <div style={utilityPanelStyle} data-log-directory-settings="true">
+              <div style={{ fontWeight: 600 }}>{t('app.data_root.log_directory.title')}</div>
+              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
+                  {t('app.data_root.log_directory.description')}
+              </div>
+              <div style={{ display: 'grid', gap: 10, marginTop: 14 }}>
+                  <Input
+                      readOnly
+                      disabled={!editable}
+                      value={selectedLogDirectoryPath}
+                      placeholder={t('app.data_root.log_directory.placeholder')}
+                      aria-label={t('app.data_root.log_directory.title')}
+                  />
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                      <Button
+                          icon={<FolderOpenOutlined />}
+                          disabled={!editable || directorySettingsApplying}
+                          onClick={() => void handleSelectLogDirectory()}
+                      >
+                          {t('app.data_root.action.select')}
+                      </Button>
+                      <Button onClick={() => void handleOpenLogDirectory()}>
+                          {t('app.data_root.action.open_current')}
+                      </Button>
+                      <Button
+                          disabled={!editable || directorySettingsApplying}
+                          loading={logDirectoryApplying}
+                          onClick={() => void handleApplyLogDirectory(true)}
+                      >
+                          {t('app.data_root.action.restore_default_directory')}
+                      </Button>
+                      <Button
+                          type="primary"
+                          disabled={!editable || directorySettingsApplying}
+                          loading={logDirectoryApplying}
+                          onClick={() => void handleApplyLogDirectory(false)}
+                      >
+                          {t('common.save')}
+                      </Button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+                      <div>
+                          <div style={{ marginBottom: 6, fontWeight: 500 }}>
+                              {t('app.data_root.log_directory.current_file')}
+                          </div>
+                          <div style={{ ...utilityMutedTextStyle, overflowWrap: 'anywhere' }}>
+                              {dataRootInfo?.logFilePath || '-'}
+                          </div>
+                      </div>
+                      <div>
+                          <div style={{ marginBottom: 6, fontWeight: 500 }}>
+                              {t('app.data_root.log_directory.default_directory')}
+                          </div>
+                          <div style={{ ...utilityMutedTextStyle, overflowWrap: 'anywhere' }}>
+                              {dataRootInfo?.defaultLogDirectory || '-'}
+                          </div>
+                      </div>
+                  </div>
+                  {managedByEnvironment ? (
+                      <Alert type="warning" showIcon message={t('app.data_root.log_directory.environment_hint')} />
+                  ) : restartRequired ? (
+                      <Alert type="info" showIcon message={t('app.data_root.log_directory.pending_restart')} />
+                  ) : (
+                      <div style={utilityMutedTextStyle}>{t('app.data_root.log_directory.restart_hint')}</div>
+                  )}
+              </div>
+          </div>
+      );
+  };
 
 
   const {
@@ -7877,13 +8013,21 @@ function App() {
                               placeholder={t('app.data_root.placeholder.select_new_directory')}
                             />
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                              <Button icon={<FolderOpenOutlined />} onClick={() => void handleSelectDataRoot()}>
+                              <Button
+                                icon={<FolderOpenOutlined />}
+                                disabled={directorySettingsApplying}
+                                onClick={() => void handleSelectDataRoot()}
+                              >
                                 {t('app.data_root.action.select')}
                               </Button>
                               <Button onClick={() => void handleOpenDataRoot()}>
                                 {t('app.data_root.action.open_current')}
                               </Button>
-                              <Button loading={dataRootApplying} onClick={() => void handleApplyDataRoot(false, true)}>
+                              <Button
+                                disabled={directorySettingsApplying}
+                                loading={dataRootApplying}
+                                onClick={() => void handleApplyDataRoot(false, true)}
+                              >
                                 {t('app.data_root.action.restore_default_directory')}
                               </Button>
                             </div>
@@ -7892,10 +8036,19 @@ function App() {
                         <div style={utilityPanelStyle}>
                           <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.data_root.apply_method')}</div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                            <Button loading={dataRootApplying} onClick={() => void handleApplyDataRoot(false)}>
+                            <Button
+                              disabled={directorySettingsApplying}
+                              loading={dataRootApplying}
+                              onClick={() => void handleApplyDataRoot(false)}
+                            >
                               {t('app.data_root.action.switch_only')}
                             </Button>
-                            <Button type="primary" loading={dataRootApplying} onClick={() => void handleApplyDataRoot(true)}>
+                            <Button
+                              type="primary"
+                              disabled={directorySettingsApplying}
+                              loading={dataRootApplying}
+                              onClick={() => void handleApplyDataRoot(true)}
+                            >
                               {t('app.data_root.action.migrate_and_switch')}
                             </Button>
                           </div>
@@ -7903,6 +8056,7 @@ function App() {
                             {t('app.data_root.restart_hint')}
                           </div>
                         </div>
+                        {renderLogDirectorySettings()}
                       </div>
                     )}
                   </Modal>
@@ -8352,13 +8506,21 @@ function App() {
                       placeholder={t('app.data_root.placeholder.select_new_directory')}
                     />
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                      <Button icon={<FolderOpenOutlined />} onClick={() => void handleSelectDataRoot()}>
+                      <Button
+                        icon={<FolderOpenOutlined />}
+                        disabled={directorySettingsApplying}
+                        onClick={() => void handleSelectDataRoot()}
+                      >
                         {t('app.data_root.action.select')}
                       </Button>
                       <Button onClick={() => void handleOpenDataRoot()}>
                         {t('app.data_root.action.open_current')}
                       </Button>
-                      <Button loading={dataRootApplying} onClick={() => void handleApplyDataRoot(false, true)}>
+                      <Button
+                        disabled={directorySettingsApplying}
+                        loading={dataRootApplying}
+                        onClick={() => void handleApplyDataRoot(false, true)}
+                      >
                         {t('app.data_root.action.restore_default_directory')}
                       </Button>
                     </div>
@@ -8367,10 +8529,19 @@ function App() {
                 <div style={utilityPanelStyle}>
                   <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.data_root.apply_method')}</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                    <Button loading={dataRootApplying} onClick={() => void handleApplyDataRoot(false)}>
+                    <Button
+                      disabled={directorySettingsApplying}
+                      loading={dataRootApplying}
+                      onClick={() => void handleApplyDataRoot(false)}
+                    >
                       {t('app.data_root.action.switch_only')}
                     </Button>
-                    <Button type="primary" loading={dataRootApplying} onClick={() => void handleApplyDataRoot(true)}>
+                    <Button
+                      type="primary"
+                      disabled={directorySettingsApplying}
+                      loading={dataRootApplying}
+                      onClick={() => void handleApplyDataRoot(true)}
+                    >
                       {t('app.data_root.action.migrate_and_switch')}
                     </Button>
                   </div>
@@ -8378,6 +8549,7 @@ function App() {
                     {t('app.data_root.restart_hint')}
                   </div>
                 </div>
+                {renderLogDirectorySettings()}
               </div>
             )}
           </Modal>
