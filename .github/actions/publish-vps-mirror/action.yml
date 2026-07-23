@@ -115,7 +115,12 @@ runs:
         )
         remote="${MIRROR_SSH_USER}@${MIRROR_SSH_HOST}"
         payload_bytes="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["payloadBytes"])' "${stage_dir}/deployment.json")"
-        available_bytes="$(ssh "${ssh_options[@]}" "${remote}" "df -PB1 --output=avail '${mirror_root}' | tail -n 1 | tr -d ' '")"
+        available_kib="$(ssh "${ssh_options[@]}" "${remote}" "LC_ALL=C df -Pk '${mirror_root}' | awk 'NR == 2 { print \$4 }'")"
+        [[ "${available_kib}" =~ ^[0-9]+$ ]] || {
+          echo "Mirror origin returned an invalid free space value: ${available_kib:-<empty>}" >&2
+          exit 1
+        }
+        available_bytes="$((available_kib * 1024))"
         required_bytes="$((payload_bytes + 2000000000))"
         if (( available_bytes < required_bytes )); then
           echo "Mirror origin has insufficient free space: available=${available_bytes} required=${required_bytes}" >&2

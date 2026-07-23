@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).with_name("prepare-vps-release-payload.py")
+PUBLISH_ACTION = SCRIPT.parents[1] / ".github/actions/publish-vps-mirror/action.yml"
 
 
 def sha256(value: bytes) -> str:
@@ -152,6 +153,14 @@ class PrepareVPSReleasePayloadTest(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("invalid app asset name", result.stderr)
+
+    def test_publish_action_reads_remote_capacity_with_posix_df(self) -> None:
+        source = PUBLISH_ACTION.read_text(encoding="utf-8")
+
+        self.assertIn("df -Pk '${mirror_root}'", source)
+        self.assertNotIn("--output=avail", source)
+        self.assertIn("available_kib", source)
+        self.assertIn("available_kib * 1024", source)
 
 
 if __name__ == "__main__":
