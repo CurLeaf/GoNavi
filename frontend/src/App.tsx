@@ -59,6 +59,12 @@ import {
   sanitizeSidebarTreeFontSize,
 } from './utils/dataGridDisplay';
 import {
+  MAX_SQL_EDITOR_FONT_SIZE,
+  MIN_SQL_EDITOR_FONT_SIZE,
+  resolveSqlEditorFontSize,
+  sanitizeSqlEditorFontSize,
+} from './utils/sqlEditorTypography';
+import {
   TAB_DISPLAY_SECONDARY_DEFAULT_KEYS,
   TAB_DISPLAY_ELEMENT_META,
   applyTabDisplaySettingsPatch,
@@ -271,6 +277,10 @@ const DATA_TABLE_FONT_SLIDER_MARKS: Record<number, string> = {
   14: '14',
   16: '16',
   18: '18',
+};
+const SQL_EDITOR_FONT_SLIDER_MARKS: Record<number, string> = {
+  ...DATA_TABLE_FONT_SLIDER_MARKS,
+  20: '20',
 };
 const DEFAULT_UI_SCALE = 1.0;
 const DEFAULT_FONT_SIZE = 14;
@@ -765,10 +775,16 @@ function App() {
   const tokenControlHeightSM = Math.max(20, Math.round(24 * effectiveUiScale));
   const tokenControlHeightLG = Math.max(30, Math.round(40 * effectiveUiScale));
   const dataTableFontSizeFollowsGlobal = appearance.dataTableFontSizeFollowGlobal !== false;
+  const sqlEditorFontSizeFollowsGlobal = appearance.sqlEditorFontSizeFollowGlobal !== false;
   const sidebarTreeFontSizeFollowsGlobal = appearance.sidebarTreeFontSizeFollowGlobal !== false;
   const effectiveDataTableFontSize = dataTableFontSizeFollowsGlobal
       ? effectiveFontSize
       : (sanitizeDataTableFontSize(appearance.dataTableFontSize) ?? effectiveFontSize);
+  const effectiveSqlEditorFontSize = resolveSqlEditorFontSize({
+      globalFontSize: effectiveFontSize,
+      sqlEditorFontSize: appearance.sqlEditorFontSize,
+      sqlEditorFontSizeFollowGlobal: appearance.sqlEditorFontSizeFollowGlobal,
+  });
   const effectiveSidebarTreeFontSize = sidebarTreeFontSizeFollowsGlobal
       ? effectiveFontSize
       : (sanitizeSidebarTreeFontSize(appearance.sidebarTreeFontSize) ?? effectiveFontSize);
@@ -5944,6 +5960,41 @@ function App() {
                                       {renderThemeSettingsRow({
                                           label: (
                                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                                  <span>{t('app.theme.data_table.sql_editor_font_size')}</span>
+                                                  <Button
+                                                      size="small"
+                                                      type={sqlEditorFontSizeFollowsGlobal ? 'primary' : 'default'}
+                                                      onClick={() => setAppearance({
+                                                          sqlEditorFontSizeFollowGlobal: !sqlEditorFontSizeFollowsGlobal,
+                                                          sqlEditorFontSize: sqlEditorFontSizeFollowsGlobal
+                                                              ? sanitizeSqlEditorFontSize(appearance.sqlEditorFontSize)
+                                                              : null,
+                                                      })}
+                                                  >
+                                                      {t('app.theme.data_table.follow_global')}
+                                                  </Button>
+                                              </span>
+                                          ),
+                                          stacked: true,
+                                          control: (
+                                              <ThemeSettingsSlider
+                                                  min={MIN_SQL_EDITOR_FONT_SIZE}
+                                                  max={MAX_SQL_EDITOR_FONT_SIZE}
+                                                  step={1}
+                                                  marks={SQL_EDITOR_FONT_SLIDER_MARKS}
+                                                  disabled={sqlEditorFontSizeFollowsGlobal}
+                                                  value={effectiveSqlEditorFontSize}
+                                                  unit="px"
+                                                  onChange={(value) => setAppearance({
+                                                      sqlEditorFontSize: sanitizeSqlEditorFontSize(value),
+                                                      sqlEditorFontSizeFollowGlobal: false,
+                                                  })}
+                                              />
+                                          ),
+                                      })}
+                                      {renderThemeSettingsRow({
+                                          label: (
+                                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                                                   <span>{t('app.theme.data_table.sidebar_tree_font_size')}</span>
                                                   <Button
                                                       size="small"
@@ -6680,6 +6731,38 @@ function App() {
                                           />
                                           <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
                                               {t('app.theme.data_table.density_hint')}
+                                          </div>
+                                      </div>
+                                      <div>
+                                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                                              <div style={{ fontWeight: 500 }}>{t('app.theme.data_table.sql_editor_font_size')}</div>
+                                              <Button
+                                                  size="small"
+                                                  type={sqlEditorFontSizeFollowsGlobal ? 'primary' : 'default'}
+                                                  onClick={() => setAppearance({
+                                                      sqlEditorFontSizeFollowGlobal: !sqlEditorFontSizeFollowsGlobal,
+                                                      sqlEditorFontSize: sqlEditorFontSizeFollowsGlobal
+                                                          ? sanitizeSqlEditorFontSize(appearance.sqlEditorFontSize)
+                                                          : null,
+                                                  })}
+                                              >
+                                                  {t('app.theme.data_table.follow_global')}
+                                              </Button>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                              <Slider
+                                                  min={MIN_SQL_EDITOR_FONT_SIZE}
+                                                  max={MAX_SQL_EDITOR_FONT_SIZE}
+                                                  step={1}
+                                                  disabled={sqlEditorFontSizeFollowsGlobal}
+                                                  value={effectiveSqlEditorFontSize}
+                                                  onChange={(value) => setAppearance({
+                                                      sqlEditorFontSize: sanitizeSqlEditorFontSize(value),
+                                                      sqlEditorFontSizeFollowGlobal: false,
+                                                  })}
+                                                  style={{ flex: 1 }}
+                                              />
+                                              <span style={{ width: 56 }}>{effectiveSqlEditorFontSize}px</span>
                                           </div>
                                       </div>
                                       <div>

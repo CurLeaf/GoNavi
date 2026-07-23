@@ -55,8 +55,16 @@ const storeState = vi.hoisted(() => ({
   savedQueries: [] as SavedQuery[],
   saveQuery: vi.fn(),
   theme: 'light',
+  fontSize: 14,
   languagePreference: 'zh-CN' as 'zh-CN' | 'en-US',
-  appearance: { uiVersion: 'legacy' as 'legacy' | 'v2' },
+  appearance: {
+    uiVersion: 'legacy' as 'legacy' | 'v2',
+    customMonoFontFamily: null as string | null,
+    dataTableFontSize: null as number | null,
+    dataTableFontSizeFollowGlobal: true,
+    sqlEditorFontSize: null as number | null,
+    sqlEditorFontSizeFollowGlobal: true,
+  },
   sqlFormatOptions: { keywordCase: 'upper' as const },
   setSqlFormatOptions: vi.fn(),
   queryOptions: {
@@ -813,7 +821,13 @@ describe('QueryEditor external SQL save', () => {
     storeState.clearSqlLogs.mockReset();
     storeState.connections[0].config.type = 'mysql';
     storeState.connections[0].config.database = 'main';
+    storeState.fontSize = 14;
     storeState.appearance.uiVersion = 'legacy';
+    storeState.appearance.customMonoFontFamily = null;
+    storeState.appearance.dataTableFontSize = null;
+    storeState.appearance.dataTableFontSizeFollowGlobal = true;
+    storeState.appearance.sqlEditorFontSize = null;
+    storeState.appearance.sqlEditorFontSizeFollowGlobal = true;
     autoFetchState.visible = false;
     dataGridState.latestProps = null;
     tabsState.activeKey = undefined;
@@ -968,7 +982,12 @@ describe('QueryEditor external SQL save', () => {
     renderer?.unmount();
   });
 
-  it('disables sticky scroll for object-edit query tabs', async () => {
+  it('disables sticky scroll for object-edit query tabs without overriding shared typography', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    storeState.appearance.dataTableFontSize = 11;
+    storeState.appearance.dataTableFontSizeFollowGlobal = false;
+    storeState.appearance.sqlEditorFontSize = 18;
+    storeState.appearance.sqlEditorFontSizeFollowGlobal = false;
     storeState.connections[0].config.type = 'oracle';
     storeState.connections[0].config.database = 'ORCLPDB1';
     const plsql = [
@@ -985,12 +1004,10 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(editorState.latestOptions?.stickyScroll?.enabled).toBe(false);
-    expect(editorState.latestOptions?.fontSize).toBe(14);
-    expect(editorState.latestOptions?.lineHeight).toBe(24);
+    expect(editorState.latestOptions?.fontSize).toBe(18);
+    expect(editorState.latestOptions?.lineHeight).toBe(29);
     expect(editorState.latestOptions?.lineNumbersMinChars).toBe(4);
     expect(editorState.editor.updateOptions).toHaveBeenCalledWith(expect.objectContaining({
-      fontSize: 14,
-      lineHeight: 24,
       lineNumbersMinChars: 4,
       stickyScroll: { enabled: false },
     }));

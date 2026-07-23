@@ -312,7 +312,11 @@ const buildQueryEditorInlineMemoryEntries = ({
         .map((entry) => ({ sql: entry.sql }));
 };
 
-const buildQueryEditorMonacoOptions = (isObjectEditQueryTab: boolean, wordWrapEnabled = false) => ({
+const buildQueryEditorMonacoOptions = (
+    isObjectEditQueryTab: boolean,
+    wordWrapEnabled = false,
+    preserveLegacyObjectEditTypography = false,
+) => ({
     minimap: { enabled: false },
     automaticLayout: true,
     fixedOverflowWidgets: true,
@@ -332,8 +336,9 @@ const buildQueryEditorMonacoOptions = (isObjectEditQueryTab: boolean, wordWrapEn
     inlineSuggest: buildQueryEditorAiInlineSuggestOptions(),
     ...(isObjectEditQueryTab
         ? {
-            fontSize: 14,
-            lineHeight: 24,
+            ...(preserveLegacyObjectEditTypography
+                ? { fontSize: 14, lineHeight: 24 }
+                : {}),
             lineNumbersMinChars: 4,
             stickyScroll: { enabled: false },
         }
@@ -1261,8 +1266,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const isExternalSQLFileTab = Boolean(String(tab.filePath || '').trim());
   const isObjectEditQueryTab = tab.type === 'query' && tab.queryMode === 'object-edit';
   const queryEditorMonacoOptions = useMemo(
-      () => buildQueryEditorMonacoOptions(isObjectEditQueryTab, wordWrapEnabled),
-      [isObjectEditQueryTab, wordWrapEnabled],
+      () => buildQueryEditorMonacoOptions(
+          isObjectEditQueryTab,
+          wordWrapEnabled,
+          appearance.uiVersion !== 'v2',
+      ),
+      [appearance.uiVersion, isObjectEditQueryTab, wordWrapEnabled],
   );
   
   type ResultSet = QueryEditorResultSet;
@@ -3721,7 +3730,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       if (mountedModel && typeof monaco?.editor?.setModelLanguage === 'function') {
           monaco.editor.setModelLanguage(mountedModel, 'sql');
       }
-      editor.updateOptions?.(buildQueryEditorMonacoOptions(isObjectEditQueryTab, wordWrapEnabled));
+      editor.updateOptions?.(buildQueryEditorMonacoOptions(
+          isObjectEditQueryTab,
+          wordWrapEnabled,
+          !isV2Ui,
+      ));
 
       aiInlineGhostVisibleContextKeyRef.current = editor.createContextKey?.(
           QUERY_EDITOR_AI_INLINE_CONTEXT_KEY,
@@ -8948,7 +8961,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         >
           <Editor 
             height="100%" 
-            gonaviTypography="code"
+            gonaviTypography="sql"
             language={queryEditorMonacoLanguage}
             theme={darkMode ? "transparent-dark" : "transparent-light"}
             defaultValue={query}

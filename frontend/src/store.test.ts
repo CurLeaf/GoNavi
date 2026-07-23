@@ -87,6 +87,8 @@ describe('store appearance persistence', () => {
     expect(appearance.dataTableDensity).toBe('comfortable');
     expect(appearance.dataTableFontSize).toBeNull();
     expect(appearance.dataTableFontSizeFollowGlobal).toBe(true);
+    expect(appearance.sqlEditorFontSize).toBeNull();
+    expect(appearance.sqlEditorFontSizeFollowGlobal).toBe(true);
     expect(appearance.sidebarTreeFontSize).toBeNull();
     expect(appearance.sidebarTreeFontSizeFollowGlobal).toBe(true);
     expect(appearance.customUIFontFamily).toBeNull();
@@ -97,6 +99,32 @@ describe('store appearance persistence', () => {
       primaryElements: ['connection', 'kind', 'object'],
       secondaryElements: [],
     });
+  });
+
+  it('migrates the coupled data-table font into an independent SQL editor font', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        appearance: {
+          uiVersion: 'v2',
+          dataTableFontSize: 18,
+          dataTableFontSizeFollowGlobal: false,
+        },
+      },
+      version: 18,
+    }));
+
+    const { useStore } = await importStore();
+    const appearance = useStore.getState().appearance;
+
+    expect(appearance.dataTableFontSize).toBe(18);
+    expect(appearance.dataTableFontSizeFollowGlobal).toBe(false);
+    expect(appearance.sqlEditorFontSize).toBe(17);
+    expect(appearance.sqlEditorFontSizeFollowGlobal).toBe(false);
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.version).toBe(19);
+    expect(persisted.state.appearance.sqlEditorFontSize).toBe(17);
+    expect(persisted.state.appearance.sqlEditorFontSizeFollowGlobal).toBe(false);
   });
 
   it('migrates an existing legacy UI selection to V2', async () => {
@@ -113,7 +141,7 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().appearance.uiVersion).toBe('v2');
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
-    expect(persisted.version).toBe(18);
+    expect(persisted.version).toBe(19);
     expect(persisted.state.appearance.uiVersion).toBe('v2');
   });
 
@@ -1293,7 +1321,7 @@ describe('store appearance persistence', () => {
     )).toEqual(legacyTag?.childOrder);
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
-    expect(persisted.version).toBe(18);
+    expect(persisted.version).toBe(19);
     expect(persisted.state.connectionTags[0].childOrder).toEqual([
       'connection:conn-a',
       'connection:conn-b',
@@ -3094,7 +3122,7 @@ describe('store appearance persistence', () => {
       mac: { combo: 'Meta+K', enabled: false },
       windows: { combo: 'Ctrl+K', enabled: true },
     });
-    expect(JSON.parse(storage.getItem('lite-db-storage') || '{}').version).toBe(18);
+    expect(JSON.parse(storage.getItem('lite-db-storage') || '{}').version).toBe(19);
 
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {

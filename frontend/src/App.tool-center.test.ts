@@ -553,6 +553,7 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain("t('app.theme.appearance.sidebar_rail_scale_hint')");
     expect(appSource).toContain('v2SidebarRailScale: sanitizeV2SidebarRailScale(value)');
     expect(appSource).toContain("t('app.theme.data_table.font_size')");
+    expect(appSource).toContain("t('app.theme.data_table.sql_editor_font_size')");
     expect(appSource).toContain("t('app.theme.data_table.sidebar_tree_font_size')");
     expect(v2ThemeCss).toContain('--gn-sidebar-rail-scale');
     expect(v2ThemeCss).toContain('font-size: calc(var(--gn-font-size-sm, 12px) * var(--gn-sidebar-rail-scale, 1));');
@@ -595,14 +596,19 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain('matchFontFamilyOption');
     expect(appSource).toContain('showSearch');
     expect(appSource).toContain('const dataTableFontSizeFollowsGlobal = appearance.dataTableFontSizeFollowGlobal !== false;');
+    expect(appSource).toContain('const sqlEditorFontSizeFollowsGlobal = appearance.sqlEditorFontSizeFollowGlobal !== false;');
     expect(appSource).toContain('const sidebarTreeFontSizeFollowsGlobal = appearance.sidebarTreeFontSizeFollowGlobal !== false;');
     expect(appSource).toContain('disabled={dataTableFontSizeFollowsGlobal}');
+    expect(appSource).toContain('disabled={sqlEditorFontSizeFollowsGlobal}');
     expect(appSource).toContain('disabled={sidebarTreeFontSizeFollowsGlobal}');
     expect(appSource).toContain("type={dataTableFontSizeFollowsGlobal ? 'primary' : 'default'}");
+    expect(appSource).toContain("type={sqlEditorFontSizeFollowsGlobal ? 'primary' : 'default'}");
     expect(appSource).toContain("type={sidebarTreeFontSizeFollowsGlobal ? 'primary' : 'default'}");
     expect(appSource).toContain('dataTableFontSizeFollowGlobal: !dataTableFontSizeFollowsGlobal');
+    expect(appSource).toContain('sqlEditorFontSizeFollowGlobal: !sqlEditorFontSizeFollowsGlobal');
     expect(appSource).toContain('sidebarTreeFontSizeFollowGlobal: !sidebarTreeFontSizeFollowsGlobal');
     expect(appSource).toContain('dataTableFontSize: dataTableFontSizeFollowsGlobal');
+    expect(appSource).toContain('sqlEditorFontSize: sqlEditorFontSizeFollowsGlobal');
     expect(appSource).toContain('sidebarTreeFontSize: sidebarTreeFontSizeFollowsGlobal');
   });
 
