@@ -239,6 +239,7 @@ vi.mock('@ant-design/icons', () => {
     DatabaseOutlined: Icon,
     NodeIndexOutlined: Icon,
     ThunderboltOutlined: Icon,
+    FormatPainterOutlined: Icon,
   };
 });
 
@@ -2167,6 +2168,61 @@ describe('DataGrid DDL interactions', () => {
     expect(viewer.findAll((node) => node.type === 'button' && textContent(node).includes(t('common.save')))).toHaveLength(0);
     expect(viewer.findAll((node) => node.type === 'button' && textContent(node).includes(t('common.close')))).toHaveLength(1);
     expect(viewer.findAll((node) => node.type === 'button')).toHaveLength(1);
+    renderer!.unmount();
+  });
+
+  it('formats a writable JSON cell from the toolbar before saving the draft', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    const compactJson = '{"billType":"YDApp","data":{"items":[{"count":100}]}}';
+    const formattedJson = JSON.stringify(JSON.parse(compactJson), null, 2);
+    const rows = [{ __gonavi_row_key__: 'row-1', id: 1, payload: compactJson }];
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={rows}
+          columnNames={['id', 'payload']}
+          loading={false}
+          tableName="orders"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    const doubleClickSurface = renderer!.root.findAll(
+      (node) => typeof node.props.onDoubleClickCapture === 'function',
+    )[0];
+    await act(async () => {
+      doubleClickSurface.props.onDoubleClickCapture({
+        target: createRenderedCellTarget('row-1', 'payload'),
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    const editorTitle = t('data_grid.cell_editor.title_with_column', { column: 'payload' });
+    const editor = renderer!.root.findByProps({ 'data-modal-title': editorTitle });
+    const toolbar = editor.findByProps({ 'data-grid-cell-editor-toolbar': 'true' });
+    const formatButton = toolbar.findByProps({ 'data-grid-cell-editor-format': 'true' });
+    expect(formatButton.props.disabled).not.toBe(true);
+    expect(textContent(editor.findByProps({ 'data-monaco-editor': 'true' }))).toBe(compactJson);
+
+    await act(async () => {
+      formatButton.props.onClick();
+    });
+
+    expect(textContent(editor.findByProps({ 'data-monaco-editor': 'true' }))).toBe(formattedJson);
+    expect(testRenderState.latestTableProps.dataSource[0].payload).toBe(compactJson);
+
+    await act(async () => {
+      findButton(renderer!, t('common.save')).props.onClick();
+    });
+
+    expect(testRenderState.latestTableProps.dataSource[0].payload).toBe(formattedJson);
     renderer!.unmount();
   });
 
