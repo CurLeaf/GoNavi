@@ -151,6 +151,22 @@ describe("i18n catalog", () => {
     }
   });
 
+  it("keeps latest and dev update channel descriptions distinct", () => {
+    const latestHintKey = "app.about.version_update.channel_hint.latest";
+    const devHintKey = "app.about.version_update.channel_hint.dev";
+
+    for (const language of SUPPORTED_LANGUAGES) {
+      expect(catalogs[language]).toHaveProperty(latestHintKey);
+      expect(catalogs[language]).toHaveProperty(devHintKey);
+      expect(catalogs[language][latestHintKey]).toBeTruthy();
+      expect(catalogs[language][devHintKey]).toBeTruthy();
+      expect(catalogs[language][latestHintKey]).not.toBe(catalogs[language][devHintKey]);
+    }
+
+    expect(catalogs["zh-CN"][latestHintKey]).toBe("接收最新的稳定版本");
+    expect(catalogs["zh-CN"][devHintKey]).toBe("接收最新的开发版本");
+  });
+
   it("includes App shell keys required by every supported language", () => {
     const appShellKeys = [
       "app.tools.title",

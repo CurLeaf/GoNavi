@@ -5046,7 +5046,11 @@ function App() {
                                     style={{ flexShrink: 0 }}
                                   />
                               </div>
-                              <div style={{ ...utilityMutedTextStyle, lineHeight: 1.55, maxWidth: 360 }}>{t('app.about.version_update.channel_hint')}</div>
+                              <div style={{ ...utilityMutedTextStyle, lineHeight: 1.55, maxWidth: 360 }}>
+                                  {updateChannel === 'dev'
+                                      ? t('app.about.version_update.channel_hint.dev')
+                                      : t('app.about.version_update.channel_hint.latest')}
+                              </div>
                               <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', alignItems: 'center', gap: 16, marginTop: 10 }}>
                                   <div style={{ fontSize: 15, fontWeight: 600, color: overlayTheme.titleText, whiteSpace: 'nowrap' }}>{t('app.about.field.auto_check_updates')}</div>
                                   <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -5070,7 +5074,6 @@ function App() {
                                                 : t('app.about.auto_check_interval.minutes', { minutes }),
                                             }))}
                                             onChange={(value) => setAutoCheckForUpdatesIntervalMinutes(Number(value))}
-                                            style={{ width: '100%' }}
                                           />
                                       </div>
                                       <div style={{ ...utilityMutedTextStyle, lineHeight: 1.55, maxWidth: 360 }}>{t('app.about.version_update.auto_check_hint')}</div>

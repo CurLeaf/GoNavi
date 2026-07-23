@@ -259,11 +259,30 @@ describe('settings center layout', () => {
     expect(appSource).toContain("[t('app.about.version.package_type'), t(`app.about.package_type.${packageType}`)]");
     expect(appSource).toContain('className="gonavi-about-update-channel"');
     expect(appSource).toContain('<Segmented');
+    expect(appSource).toContain("t('app.about.version_update.channel_hint.latest')");
+    expect(appSource).toContain("t('app.about.version_update.channel_hint.dev')");
+    expect(appSource).not.toContain("t('app.about.version_update.channel_hint')");
+    expect(appSource).toMatch(/updateChannel === 'dev'\s*\? t\('app\.about\.version_update\.channel_hint\.dev'\)\s*: t\('app\.about\.version_update\.channel_hint\.latest'\)/s);
+    expect(appCssSource).toMatch(/\.gonavi-about-pane\s*\{[^}]*--gn-about-update-control-width:\s*200px;/s);
+    expect(appCssSource).toMatch(/\.gonavi-about-update-channel\.ant-segmented\.ant-segmented\s*\{[^}]*width:\s*var\(--gn-about-update-control-width\);/s);
+    expect(appCssSource).toMatch(/\.gonavi-about-update-channel\.ant-segmented\.ant-segmented\s*\{[^}]*max-width:\s*100%;/s);
+    expect(appCssSource).toMatch(/\.gonavi-about-update-channel\.ant-segmented\.ant-segmented\s*\{[^}]*justify-self:\s*end;/s);
+    expect(appCssSource).toMatch(/\.gonavi-about-update-channel \.ant-segmented-item\s*\{[^}]*flex:\s*1 1 0;/s);
     expect(appSource).toContain("t('app.about.field.auto_check_updates')");
     expect(appSource).toContain("t('app.about.field.auto_check_interval')");
     expect(appSource).toContain("t('app.about.version_update.auto_check_hint')");
     expect(appSource).toContain("t('app.about.version_update.auto_check_disabled_hint')");
     expect(appSource).toContain('className="gonavi-about-auto-check-interval"');
+    const autoCheckIntervalSelectStart = aboutPaneSource.indexOf('className="gonavi-about-auto-check-interval"');
+    const autoCheckIntervalSelectSource = aboutPaneSource.slice(
+      autoCheckIntervalSelectStart,
+      aboutPaneSource.indexOf('/>', autoCheckIntervalSelectStart),
+    );
+    expect(autoCheckIntervalSelectStart).toBeGreaterThan(-1);
+    expect(autoCheckIntervalSelectSource).not.toContain("width: '100%'");
+    expect(appCssSource).toMatch(/\.gonavi-about-auto-check-interval\.ant-select\s*\{[^}]*width:\s*var\(--gn-about-update-control-width\);/s);
+    expect(appCssSource).toMatch(/\.gonavi-about-auto-check-interval\.ant-select\s*\{[^}]*max-width:\s*100%;/s);
+    expect(appCssSource).toMatch(/\.gonavi-about-auto-check-interval\.ant-select\s*\{[^}]*justify-self:\s*end;/s);
     expect(appSource).toContain('checked={autoCheckForUpdates}');
     expect(appSource).toContain('setAutoCheckForUpdates(checked)');
     expect(appSource).toContain('setAutoCheckForUpdatesIntervalMinutes(Number(value))');
