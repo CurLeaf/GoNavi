@@ -412,7 +412,7 @@ body[data-theme='light'] .redis-viewer-workbench .ant-radio-button-wrapper-check
 
 /* Custom Title Bar Close Button Hover */
 body[data-platform='windows'] .titlebar-window-controls {
-    gap: 4px;
+    gap: 8px;
 }
 
 .titlebar-close-btn:hover {

@@ -9,7 +9,7 @@ describe('Windows titlebar window controls spacing', () => {
     expect(appSource).toContain('className="titlebar-window-controls"');
     expect(appSource).toContain("document.body.setAttribute('data-platform', runtimePlatform || '')");
     expect(appCssSource).toMatch(
-      /body\[data-platform='windows'\]\s+\.titlebar-window-controls\s*\{[^}]*gap:\s*4px;/s,
+      /body\[data-platform='windows'\]\s+\.titlebar-window-controls\s*\{[^}]*gap:\s*8px;/s,
     );
   });
 });
