@@ -7111,6 +7111,7 @@ function App() {
                   <div style={{ minWidth: Math.max(40, Math.round(48 * effectiveUiScale)) }} />
               ) : (
                   <div
+                    className="titlebar-window-controls"
                     data-no-titlebar-toggle="true"
                     onDoubleClick={(e) => e.stopPropagation()}
                     style={{ display: 'flex', height: '100%', WebkitAppRegion: 'no-drag', '--wails-draggable': 'no-drag' } as any}
