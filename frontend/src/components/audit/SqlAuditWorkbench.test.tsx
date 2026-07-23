@@ -54,6 +54,35 @@ describe('SqlAuditWorkbench', () => {
     expect(styleSource).toMatch(/\.gn-sql-audit-table-panel\s*\{[\s\S]*?min-height:\s*280px;/);
   });
 
+  it('keeps pagination outside the table scroll region when records fill the panel', () => {
+    const source = readFileSync(new URL('./SqlAuditWorkbench.tsx', import.meta.url), 'utf8');
+    const styleSource = readFileSync(new URL('./SqlAuditWorkbench.css', import.meta.url), 'utf8');
+
+    expect(source).toContain("scroll={{ x: 1444, y: '100%' }}");
+    expect(source).not.toContain("y: 'calc(100vh - 540px)'");
+    expect(styleSource).toMatch(
+      /\.gn-sql-audit-table-panel \.ant-table-wrapper\s*\{[^}]*display:\s*flex;[^}]*height:\s*0;[^}]*min-height:\s*0;[^}]*flex:\s*1 1 auto;[^}]*flex-direction:\s*column;[^}]*overflow:\s*hidden;/,
+    );
+    expect(styleSource).toContain('.gn-sql-audit-table-panel .ant-table-wrapper > .ant-spin-nested-loading,');
+    expect(styleSource).toContain('.gn-sql-audit-table-panel .ant-table-wrapper > .ant-spin-nested-loading > .ant-spin-container,');
+    expect(styleSource).toContain('.gn-sql-audit-table-panel .ant-table-wrapper .ant-table,');
+    expect(styleSource).toMatch(
+      /\.gn-sql-audit-table-panel \.ant-table-wrapper \.ant-table-container\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;/,
+    );
+    expect(styleSource).toMatch(
+      /\.gn-sql-audit-table-panel \.ant-table-wrapper \.ant-table-container\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/,
+    );
+    expect(styleSource).toMatch(
+      /\.gn-sql-audit-table-panel \.ant-table-wrapper \.ant-table-header\s*\{[^}]*flex:\s*0 0 auto;/,
+    );
+    expect(styleSource).toMatch(
+      /\.gn-sql-audit-table-panel \.ant-table-wrapper \.ant-table-body\s*\{[^}]*min-height:\s*0;[^}]*flex:\s*1 1 auto;/,
+    );
+    expect(styleSource).toMatch(
+      /\.gn-sql-audit-pagination\s*\{[^}]*flex:\s*0 0 auto;/,
+    );
+  });
+
   it('keeps the fixed action column opaque while rows are hovered', () => {
     const styleSource = readFileSync(new URL('./SqlAuditWorkbench.css', import.meta.url), 'utf8');
 

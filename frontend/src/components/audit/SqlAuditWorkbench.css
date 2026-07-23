@@ -160,7 +160,34 @@
   margin: auto;
 }
 
+/* Prevent intrinsic row height from consuming the pagination slot. */
 .gn-sql-audit-table-panel .ant-table-wrapper {
+  display: flex;
+  height: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.gn-sql-audit-table-panel .ant-table-wrapper > .ant-spin-nested-loading,
+.gn-sql-audit-table-panel .ant-table-wrapper > .ant-spin-nested-loading > .ant-spin-container,
+.gn-sql-audit-table-panel .ant-table-wrapper .ant-table,
+.gn-sql-audit-table-panel .ant-table-wrapper .ant-table-container {
+  height: 100%;
+  min-height: 0;
+}
+
+.gn-sql-audit-table-panel .ant-table-wrapper .ant-table-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.gn-sql-audit-table-panel .ant-table-wrapper .ant-table-header {
+  flex: 0 0 auto;
+}
+
+.gn-sql-audit-table-panel .ant-table-wrapper .ant-table-body {
   min-height: 0;
   flex: 1 1 auto;
 }
