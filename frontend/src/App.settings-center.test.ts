@@ -59,6 +59,19 @@ describe('settings center layout', () => {
     expect(appSource).not.toContain("setIsLanguageModalOpen(true)");
   });
 
+  it('removes redundant framing lines from settings detail pages', () => {
+    const detailPanelStyleStart = appSource.indexOf('const activeSettingsCenterDetailPanelStyle');
+    const detailPanelStyleEnd = appSource.indexOf('const settingsCenterDetailBodyStyle', detailPanelStyleStart);
+    const detailPanelStyleSource = appSource.slice(detailPanelStyleStart, detailPanelStyleEnd);
+    const detailShellStart = appSource.indexOf('style={activeSettingsCenterDetailPanelStyle}');
+    const detailShellEnd = appSource.indexOf('className="gonavi-settings-center-entry"', detailShellStart);
+    const detailShellSource = appSource.slice(detailShellStart, detailShellEnd);
+
+    expect(detailPanelStyleSource).toContain("borderBottom: 'none'");
+    expect(detailShellSource).toContain('<div style={{ paddingBottom: 10 }}>');
+    expect(detailShellSource).not.toContain('borderTop: `1px solid ${overlayTheme.divider}`');
+  });
+
   it('adds persistent sidebar object visibility controls to preferences', () => {
     expect(appSource).toContain("key: 'sidebar-objects'");
     expect(appSource).toContain("title: t('app.settings.sidebar_objects.title')");
@@ -126,6 +139,9 @@ describe('settings center layout', () => {
     expect(appSource).toContain("t('app.data_root.log_directory.environment_hint')");
     expect(appSource).toContain("t('app.data_root.log_directory.pending_restart')");
     expect(appSource).toContain("t('app.data_root.log_directory.restart_hint')");
+    expect(logDirectoryRendererSource).not.toContain(
+      "<div style={{ fontWeight: 600 }}>{t('app.data_root.log_directory.title')}</div>",
+    );
     expect(logDirectoryRendererSource).not.toContain("t('app.data_root.log_directory.target_directory')");
     expect(logDirectoryRendererSource.match(/disabled={!editable \|\| directorySettingsApplying}/g)).toHaveLength(3);
     expect(embeddedDataRootSource.match(/disabled={directorySettingsApplying}/g)).toHaveLength(4);

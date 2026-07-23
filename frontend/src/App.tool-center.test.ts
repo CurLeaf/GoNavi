@@ -104,6 +104,36 @@ describe('settings center tool entries', () => {
     expect(appSource).not.toContain('const [isToolsModalOpen');
   });
 
+  it('uses whitespace instead of decorative rules for settings navigation and panels', () => {
+    const utilityPanelStyleSource = appUtilityStylesSource.slice(
+      appUtilityStylesSource.indexOf('const utilityPanelStyle'),
+      appUtilityStylesSource.indexOf('const toolCenterModalContentStyle'),
+    );
+    const navScrollStyleSource = appUtilityStylesSource.slice(
+      appUtilityStylesSource.indexOf('const toolCenterNavScrollStyle'),
+      appUtilityStylesSource.indexOf('const toolCenterContentPanelStyle'),
+    );
+    const scrollableListStyleSource = appUtilityStylesSource.slice(
+      appUtilityStylesSource.indexOf('const toolCenterScrollableListStyle'),
+      appUtilityStylesSource.indexOf('const utilityMutedTextStyle'),
+    );
+    const groupTabsStart = appSource.indexOf('combinedSettingsCenterGroups.map');
+    const groupTabSource = appSource.slice(groupTabsStart, appSource.indexOf('</button>', groupTabsStart));
+    const entryListStart = appSource.indexOf('activeSettingsCenterGroup.items.map');
+    const entryListSource = appSource.slice(entryListStart, appSource.indexOf('</Button>', entryListStart));
+
+    expect(utilityPanelStyleSource).toContain("border: 'none'");
+    expect(utilityPanelStyleSource).not.toContain('borderBottom');
+    expect(navScrollStyleSource).toContain('gap: 2');
+    expect(navScrollStyleSource).not.toContain('borderTop');
+    expect(scrollableListStyleSource).toContain('gap: 2');
+    expect(groupTabSource).not.toContain('borderBottom');
+    expect(entryListSource).not.toContain('borderTop');
+    expect(entryListSource).not.toContain('borderBottom');
+    expect(appCss).toMatch(/\.gonavi-settings-center-entry\.ant-btn\s*\{[^}]*border:\s*none !important;/s);
+    expect(appCss).toMatch(/\.gonavi-settings-center-entry\.ant-btn\s*\{[^}]*border-radius:\s*4px !important;/s);
+  });
+
   it('keeps the unified settings modal height fixed across group switches and scrolls the list area internally', () => {
     expect(appUtilityStylesSource).toContain('const toolCenterModalContentStyle = useMemo<React.CSSProperties>(() => ({');
     expect(appUtilityStylesSource).toContain("height: 'min(820px, calc(100vh - 64px))'");
@@ -120,8 +150,6 @@ describe('settings center tool entries', () => {
     expect(appSource).toContain('style={isActiveToolCenterPane ? toolCenterDetailBodyStyle : settingsCenterDetailBodyStyle}');
     expect(appSource).toContain('style={toolCenterScrollableListStyle}');
     expect(appUtilityStylesSource).toContain("overflowY: 'auto'");
-    expect(appSource).toContain("borderTop: index === 0 ? `1px solid ${overlayTheme.divider}` : 'none'");
-    expect(appSource).toContain("borderBottom: `1px solid ${overlayTheme.divider}`");
   });
 
   it('keeps browser-compatible connection transfer and mounted data-root entries available in the web runtime', () => {
@@ -396,7 +424,7 @@ describe('settings center tool entries', () => {
   it('executes every global shortcut action exposed in the shortcut manager', () => {
     const expectedHandlers = new Map([
       ['runQuery', 'gonavi:run-active-query'],
-      ['focusSidebarSearch', 'gonavi:focus-sidebar-search'],
+      ['focusSidebarSearch', 'handleFocusSidebarSearch();'],
       ['newQueryTab', 'handleNewQuery();'],
       ['switchToNextTab', 'switchActiveTabByOffset(1);'],
       ['switchToPreviousTab', 'switchActiveTabByOffset(-1);'],
@@ -415,7 +443,7 @@ describe('settings center tool entries', () => {
     expect(appSource).toContain('const switchActiveTabByOffset = useCallback((offset: 1 | -1) => {');
     expect(appSource).toContain('const nextIndex = (baseIndex + offset + tabs.length) % tabs.length;');
     expect(appSource).toContain('setActiveTab(tabs[nextIndex].id);');
-    expect(appSource).toContain('handleCreateConnection, handleManualResetWindowZoom');
+    expect(appSource).toContain('handleCreateConnection, handleFocusSidebarSearch, handleManualResetWindowZoom');
     expect(appSource).toContain('switchActiveTabByOffset, themeMode');
   });
 
@@ -619,6 +647,7 @@ describe('global appearance tokens', () => {
     expect(appCss).toContain('--gn-font-size-mono: calc(var(--gonavi-font-size, 14px) * var(--gn-ui-scale, 1) * 0.92);');
     expect(appCss).toContain('--gn-settings-font-secondary: var(--gn-font-size-sm);');
     expect(appCss).toMatch(/\.gonavi-settings-center-modal \.ant-btn\s*\{[^}]*font-size:\s*var\(--gn-settings-font-caption\)/s);
+    expect(appCss).toMatch(/\.gonavi-settings-center-modal \.gonavi-settings-center-entry\.ant-btn\s*\{[^}]*font-size:\s*var\(--gn-settings-font-body\) !important;/s);
     expect(appCss).toMatch(/\.gonavi-settings-center-modal \.gonavi-ai-provider-add\.ant-btn\s*\{[^}]*height:\s*var\(--gn-control-height, 32px\) !important;/s);
     expect(appCss).toMatch(/\.gonavi-theme-settings \.gonavi-settings-section-hint\s*\{[^}]*font-size:\s*var\(--gn-settings-font-secondary/s);
   });

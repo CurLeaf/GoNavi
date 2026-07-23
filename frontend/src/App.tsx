@@ -3632,8 +3632,7 @@ function App() {
       const restartRequired = dataRootInfo?.logDirectoryRestartRequired === true;
       return (
           <div style={utilityPanelStyle} data-log-directory-settings="true">
-              <div style={{ fontWeight: 600 }}>{t('app.data_root.log_directory.title')}</div>
-              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
+              <div style={utilityMutedTextStyle}>
                   {t('app.data_root.log_directory.description')}
               </div>
               <div style={{ display: 'grid', gap: 10, marginTop: 14 }}>
@@ -6087,41 +6086,6 @@ function App() {
                                       {renderThemeSettingsRow({
                                           label: (
                                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                                                  <span>{t('app.theme.data_table.font_size')}</span>
-                                                  <Button
-                                                      size="small"
-                                                      type={dataTableFontSizeFollowsGlobal ? 'primary' : 'default'}
-                                                      onClick={() => setAppearance({
-                                                          dataTableFontSizeFollowGlobal: !dataTableFontSizeFollowsGlobal,
-                                                          dataTableFontSize: dataTableFontSizeFollowsGlobal
-                                                              ? sanitizeDataTableFontSize(appearance.dataTableFontSize)
-                                                              : null,
-                                                      })}
-                                                  >
-                                                      {t('app.theme.data_table.follow_global')}
-                                                  </Button>
-                                              </span>
-                                          ),
-                                          stacked: true,
-                                          control: (
-                                              <ThemeSettingsSlider
-                                                  min={10}
-                                                  max={18}
-                                                  step={1}
-                                                  marks={DATA_TABLE_FONT_SLIDER_MARKS}
-                                                  disabled={dataTableFontSizeFollowsGlobal}
-                                                  value={effectiveDataTableFontSize}
-                                                  unit="px"
-                                                  onChange={(value) => setAppearance({
-                                                      dataTableFontSize: sanitizeDataTableFontSize(value),
-                                                      dataTableFontSizeFollowGlobal: false,
-                                                  })}
-                                              />
-                                          ),
-                                      })}
-                                      {renderThemeSettingsRow({
-                                          label: (
-                                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                                                   <span>{t('app.theme.data_table.sql_editor_font_size')}</span>
                                                   <Button
                                                       size="small"
@@ -6150,6 +6114,41 @@ function App() {
                                                   onChange={(value) => setAppearance({
                                                       sqlEditorFontSize: sanitizeSqlEditorFontSize(value),
                                                       sqlEditorFontSizeFollowGlobal: false,
+                                                  })}
+                                              />
+                                          ),
+                                      })}
+                                      {renderThemeSettingsRow({
+                                          label: (
+                                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                                  <span>{t('app.theme.data_table.font_size')}</span>
+                                                  <Button
+                                                      size="small"
+                                                      type={dataTableFontSizeFollowsGlobal ? 'primary' : 'default'}
+                                                      onClick={() => setAppearance({
+                                                          dataTableFontSizeFollowGlobal: !dataTableFontSizeFollowsGlobal,
+                                                          dataTableFontSize: dataTableFontSizeFollowsGlobal
+                                                              ? sanitizeDataTableFontSize(appearance.dataTableFontSize)
+                                                              : null,
+                                                      })}
+                                                  >
+                                                      {t('app.theme.data_table.follow_global')}
+                                                  </Button>
+                                              </span>
+                                          ),
+                                          stacked: true,
+                                          control: (
+                                              <ThemeSettingsSlider
+                                                  min={10}
+                                                  max={18}
+                                                  step={1}
+                                                  marks={DATA_TABLE_FONT_SLIDER_MARKS}
+                                                  disabled={dataTableFontSizeFollowsGlobal}
+                                                  value={effectiveDataTableFontSize}
+                                                  unit="px"
+                                                  onChange={(value) => setAppearance({
+                                                      dataTableFontSize: sanitizeDataTableFontSize(value),
+                                                      dataTableFontSizeFollowGlobal: false,
                                                   })}
                                               />
                                           ),
@@ -7161,6 +7160,7 @@ function App() {
       ...toolCenterDetailPanelStyle,
       padding: '0 4px 0 0',
       border: 'none',
+      borderBottom: 'none',
       borderRadius: 0,
       background: 'transparent',
   };
@@ -8352,9 +8352,8 @@ function App() {
                                 textAlign: 'left',
                                 width: '100%',
                                 padding: '10px 6px 10px 12px',
-                                borderRadius: 0,
+                                borderRadius: 4,
                                 border: 'none',
-                                borderBottom: `1px solid ${overlayTheme.divider}`,
                                 background: active
                                   ? overlayTheme.selectedBg
                                   : 'transparent',
@@ -8423,7 +8422,7 @@ function App() {
                     >
                       {activeSettingsCenterPane ? (
                         <div style={activeSettingsCenterDetailPanelStyle}>
-                          <div style={{ paddingBottom: 10, borderBottom: `1px solid ${overlayTheme.divider}` }}>
+                          <div style={{ paddingBottom: 10 }}>
                             <div style={{ minWidth: 0 }}>
                               <div style={{ fontSize: 'calc(var(--gn-font-size, 14px) * 1.14)', fontWeight: 700, color: overlayTheme.titleText }}>
                                 {activeSettingsCenterPaneItem?.title ?? activeSettingsCenterGroup.title}
@@ -8448,7 +8447,6 @@ function App() {
                                 gap: activeSettingsCenterPane.key === 'about-go-navi' ? 16 : 8,
                                 paddingTop: 10,
                                 marginTop: 10,
-                                borderTop: `1px solid ${overlayTheme.divider}`,
                                 flexShrink: 0,
                               }}
                             >
@@ -8474,17 +8472,13 @@ function App() {
                             <div style={utilityMutedTextStyle}>{activeSettingsCenterGroup.description}</div>
                           </div>
                           <div style={toolCenterScrollableListStyle}>
-                            {activeSettingsCenterGroup.items.map((item, index) => (
+                            {activeSettingsCenterGroup.items.map((item) => (
                               <Button
                                 className="gonavi-settings-center-entry"
                                 key={item.key}
                                 data-settings-pane-key={item.key}
                                 type="text"
-                                style={{
-                                  ...toolCenterRowStyle,
-                                  borderTop: index === 0 ? `1px solid ${overlayTheme.divider}` : 'none',
-                                  borderBottom: `1px solid ${overlayTheme.divider}`,
-                                }}
+                                style={toolCenterRowStyle}
                                 onClick={item.onClick}
                               >
                                 <span style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
