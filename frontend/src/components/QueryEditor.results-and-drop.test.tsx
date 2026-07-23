@@ -411,6 +411,7 @@ vi.mock('@ant-design/icons', () => {
     DatabaseOutlined: Icon,
     EyeOutlined: Icon,
     EyeInvisibleOutlined: Icon,
+    EnterOutlined: Icon,
   };
 });
 
@@ -444,6 +445,10 @@ vi.mock('antd', () => {
   );
   const Empty = ({ description }: { description?: React.ReactNode }) => <div>{description}</div>;
   (Empty as any).PRESENTED_IMAGE_SIMPLE = 'simple';
+  const Input: any = ({ value, onChange, placeholder }: any) => <input value={value} onChange={onChange} placeholder={placeholder} />;
+  Input.TextArea = ({ value, onChange, placeholder, disabled }: any) => (
+    <textarea value={value} onChange={onChange} placeholder={placeholder} disabled={disabled} />
+  );
 
   return {
     Button,
@@ -458,7 +463,7 @@ vi.mock('antd', () => {
         <button type="button" onClick={onOk}>{okText}</button>
       </section>
     ) : null),
-    Input: ({ value, onChange, placeholder }: any) => <input value={value} onChange={onChange} placeholder={placeholder} />,
+    Input,
     Segmented: () => null,
     Form,
     Dropdown: ({ children, menu }: any) => (
