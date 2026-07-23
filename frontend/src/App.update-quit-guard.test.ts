@@ -43,4 +43,21 @@ describe('restart-to-update unsaved SQL guard', () => {
     expect(appSource).toContain("updateInstallAction === 'launch-installer'");
     expect(appSource.match(/\{updateInstallActionLabel\}/g)).toHaveLength(2);
   });
+
+  it('keeps every update quit confirmation above active settings and update dialogs', () => {
+    const unsavedConfirmStart = appSource.indexOf('const confirmRef = Modal.confirm({');
+    const installRequestStart = appSource.indexOf('const handleInstallUpdateRequest = useCallback', unsavedConfirmStart);
+    const installRequestEnd = appSource.indexOf('\n\n  useEffect(() => {', installRequestStart);
+    const unsavedConfirmSource = appSource.slice(unsavedConfirmStart, installRequestStart);
+    const installRequestSource = appSource.slice(installRequestStart, installRequestEnd);
+
+    expect(unsavedConfirmStart).toBeGreaterThan(-1);
+    expect(installRequestStart).toBeGreaterThan(unsavedConfirmStart);
+    expect(installRequestEnd).toBeGreaterThan(installRequestStart);
+    expect(appSource).toContain('APP_APPLICATION_QUIT_MODAL_Z_INDEX,');
+    expect(appSource).toContain('const applicationQuitModalZIndex = Math.max(');
+    expect(appSource).toContain('settingsChildModalZIndex + 100,');
+    expect(unsavedConfirmSource).toContain('zIndex: applicationQuitModalZIndex');
+    expect(installRequestSource).toContain('zIndex: applicationQuitModalZIndex');
+  });
 });

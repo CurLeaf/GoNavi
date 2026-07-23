@@ -210,6 +210,7 @@ import {
   saveApplicationQuitUnsavedSQLTargets,
 } from './utils/sqlEditorApplicationQuit';
 import {
+  APP_APPLICATION_QUIT_MODAL_Z_INDEX,
   APP_FOREGROUND_MODAL_Z_INDEX,
   APP_NESTED_MODAL_Z_INDEX,
   APP_OVERLAY_Z_INDEX_BASE,
@@ -1063,6 +1064,10 @@ function App() {
   const settingsChildModalZIndex = Math.max(
     APP_NESTED_MODAL_Z_INDEX,
     settingsCenterModalZIndex + 100,
+  );
+  const applicationQuitModalZIndex = Math.max(
+    APP_APPLICATION_QUIT_MODAL_Z_INDEX,
+    settingsChildModalZIndex + 100,
   );
   const toggleAIPanel = useStore(state => state.toggleAIPanel);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
@@ -2608,6 +2613,7 @@ function App() {
           cancelText: t('app.quit.unsaved_sql.cancel'),
           closable: true,
           maskClosable: false,
+          zIndex: applicationQuitModalZIndex,
           okButtonProps: { danger: true, type: 'primary' },
           footer: (_, { OkBtn, CancelBtn }) => (
               <>
@@ -2643,7 +2649,7 @@ function App() {
       });
       destroyConfirm = confirmRef.destroy;
       applicationQuitConfirmRef.current = confirmRef;
-  }, [forceQuitApplication, resetApplicationQuitRequest, saveQuery, t]);
+  }, [applicationQuitModalZIndex, forceQuitApplication, resetApplicationQuitRequest, saveQuery, t]);
 
   const handleInstallUpdateRequest = useCallback(async () => {
       if (installMode === 'portable' || installMode === 'msi') {
@@ -2654,6 +2660,7 @@ function App() {
               cancelText: t('common.cancel'),
               closable: true,
               maskClosable: false,
+              zIndex: applicationQuitModalZIndex,
               okButtonProps: { danger: true, type: 'primary' },
               onOk: async () => {
                   await handleApplicationQuitRequest(() => handleInstallFromProgress(true));
@@ -2662,7 +2669,7 @@ function App() {
           return;
       }
       await handleApplicationQuitRequest(() => handleInstallFromProgress(false));
-  }, [handleApplicationQuitRequest, handleInstallFromProgress, installMode, t]);
+  }, [applicationQuitModalZIndex, handleApplicationQuitRequest, handleInstallFromProgress, installMode, t]);
 
   useEffect(() => {
       const offBeforeClose = EventsOn('app:before-close-request', () => {

@@ -5,6 +5,7 @@ import * as ts from 'typescript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  APP_APPLICATION_QUIT_MODAL_Z_INDEX,
   APP_COMMAND_PALETTE_Z_INDEX,
   APP_DETACHED_WINDOW_Z_INDEX_BASE,
   APP_FOREGROUND_MODAL_Z_INDEX,
@@ -110,6 +111,7 @@ describe('application overlay z-index policy', () => {
     expect(APP_FOREGROUND_MODAL_Z_INDEX).toBeGreaterThan(APP_POPUP_Z_INDEX);
     expect(APP_NESTED_MODAL_Z_INDEX).toBeGreaterThan(APP_FOREGROUND_MODAL_Z_INDEX);
     expect(APP_COMMAND_PALETTE_Z_INDEX).toBeGreaterThan(APP_NESTED_MODAL_Z_INDEX);
+    expect(APP_APPLICATION_QUIT_MODAL_Z_INDEX).toBeGreaterThan(APP_COMMAND_PALETTE_Z_INDEX);
   });
 
   it('configures static Ant Design APIs with the same popup base', () => {
