@@ -5051,13 +5051,16 @@ body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-paginatio
   line-height: 26px !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input .ant-input-number-input-wrap,
-body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input .ant-input-number-input {
-  height: 26px !important;
-  line-height: 26px !important;
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input .ant-input-number-input-wrap {
+  display: flex !important;
+  align-items: center !important;
+  height: 100% !important;
+  line-height: normal !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input .ant-input-number-input {
+  height: 100% !important;
+  line-height: 1 !important;
   padding: 0 4px !important;
   color: var(--gn-fg-1) !important;
   font-family: var(--gn-font-mono);

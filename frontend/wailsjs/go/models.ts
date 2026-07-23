@@ -5,11 +5,11 @@ export namespace ai {
 	    temperature?: number;
 	    maxTokens?: number;
 	    thinkingIntensity?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ChatSendOptions(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.model = source["model"];
@@ -25,11 +25,11 @@ export namespace ai {
 	    configPath?: string;
 	    command?: string;
 	    args?: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new MCPClientInstallResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.success = source["success"];
@@ -529,11 +529,11 @@ export namespace app {
 	export class ImportFileOptions {
 	    columnMappings?: Record<string, string>;
 	    jobId?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ImportFileOptions(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.columnMappings = source["columnMappings"];
@@ -1303,11 +1303,11 @@ export namespace connection {
 	export class SchemaVisibilityRule {
 	    mode: string;
 	    schemas?: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SchemaVisibilityRule(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.mode = source["mode"];
@@ -1476,11 +1476,11 @@ export namespace connection {
 	    parentGroupId: string;
 	    queryIds: string[];
 	    childOrder: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SavedQueryGroup(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1524,7 +1524,7 @@ export namespace connection {
 		    return a;
 		}
 	}
-
+	
 	export class TestGlobalProxyInput {
 	    proxy: SaveGlobalProxyInput;
 	    url: string;
@@ -1628,16 +1628,16 @@ export namespace jvm {
 }
 
 export namespace nativewindow {
-
+	
 	export class HostStateRequest {
 	    id: string;
 	    revision: number;
 	    storeState: Record<string, any>;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new HostStateRequest(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1654,11 +1654,11 @@ export namespace nativewindow {
 	    y: number;
 	    width: number;
 	    height: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new OpenRequest(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1676,11 +1676,11 @@ export namespace nativewindow {
 	    y: number;
 	    width: number;
 	    height: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new WindowBounds(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.x = source["x"];
@@ -1696,11 +1696,11 @@ export namespace nativewindow {
 	    bounds?: WindowBounds;
 	    visibilityRevision?: number;
 	    applied?: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new OperationResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.success = source["success"];
@@ -1710,7 +1710,7 @@ export namespace nativewindow {
 	        this.visibilityRevision = source["visibilityRevision"];
 	        this.applied = source["applied"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1729,7 +1729,7 @@ export namespace nativewindow {
 		    return a;
 		}
 	}
-
+	
 	export class WindowInfo {
 	    id: string;
 	    kind: string;
@@ -1743,11 +1743,11 @@ export namespace nativewindow {
 	    ready: boolean;
 	    closeSent: boolean;
 	    hidden?: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new WindowInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1868,7 +1868,7 @@ export namespace resultdiff {
 }
 
 export namespace sqlaudit {
-
+	
 	export class Filter {
 	    search: string;
 	    connectionId: string;
@@ -1882,11 +1882,11 @@ export namespace sqlaudit {
 	    toTimestamp: number;
 	    page: number;
 	    pageSize: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Filter(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.search = source["search"];
@@ -1908,11 +1908,11 @@ export namespace sqlaudit {
 	    captureMode: string;
 	    retentionDays: number;
 	    maxRecords: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enabled = source["enabled"];
@@ -1923,6 +1923,7 @@ export namespace sqlaudit {
 	}
 
 }
+
 export namespace sync {
 	
 	export class TableOptions {
@@ -2031,3 +2032,4 @@ export namespace sync {
 	}
 
 }
+
