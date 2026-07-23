@@ -104,7 +104,7 @@ func TestMethodInvokerRejectsDesktopOnlyAppMethodsBeforeReflection(t *testing.T)
 
 	for _, method := range []string{
 		"Shutdown", "ExportSQLAuditFile", "OpenSQLFile", "ExecuteSQLFile", "ReadSQLFile",
-		"PreviewImportFile", "ImportDataWithProgress", "ImportDataWithProgressOptions", "GetDataRootDirectoryInfo",
+		"PreviewImportFile", "ImportDatabaseSQL", "ImportDataWithProgress", "ImportDataWithProgressOptions", "GetDataRootDirectoryInfo",
 		"ExportDatabaseSQLWithOptions", "ExportSchemaSQLWithOptions",
 		"ApplyDataRootDirectory", "OpenDataRootDirectory", "SelectLogDirectory", "ApplyLogDirectory", "OpenLogDirectory", "SetApplicationBrandIcon",
 	} {

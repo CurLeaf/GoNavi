@@ -14,7 +14,6 @@ import { buildSqlServerObjectDefinitionQueries } from '../../utils/sqlServerObje
 import { buildStarRocksMaterializedViewPreviewSql } from '../tableDesignerSchemaSql';
 import type { ExportRunResult, RunExportWithProgressOptions } from '../useExportProgressRunner';
 import { getTableDataDangerActionMeta, type TableDataDangerActionKind } from '../tableDataDangerActions';
-import { showSQLExportOptionsDialog } from '../SQLExportOptionsDialog';
 import { confirmCopyTable } from '../tableCopyAction';
 import {
   buildDuckDBMacroDDL,
@@ -281,20 +280,17 @@ export const useSidebarObjectActions = ({
       message.warning(t('sidebar.message.table_export_target_missing'));
       return;
     }
-    const exportOptions = mode === 'backup'
-      ? await showSQLExportOptionsDialog()
-      : { includeDropIfExists: false };
-    if (!exportOptions) return;
     const connectionId = resolveSidebarNodeConnectionId(node, connectionIds)
       || String(node?.dataRef?.id || '').trim();
     const dbName = String(node?.dataRef?.dbName || '').trim();
+    const launchKey = `table-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     addTab(buildBatchTableExportWorkbenchTab({
       connectionId,
       dbName,
       initialObjectNames: [tableName],
       contentMode: mode,
-      includeDropIfExists: exportOptions.includeDropIfExists,
-      requestKey: `table-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      includeDropIfExists: false,
+      ...(mode === 'backup' ? { launchKey } : { requestKey: launchKey }),
       title: t('file.backend.dialog.export_table', { table: tableName }),
     }));
   };

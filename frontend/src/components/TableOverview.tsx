@@ -30,7 +30,6 @@ import { buildBatchTableExportWorkbenchTab, buildTableExportTab } from '../utils
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { extractTableNameFromMetadataRow } from '../utils/tableMetadataRows';
 import { V2TableContextMenuView, type V2TableContextMenuActionKey } from './V2TableContextMenu';
-import { showSQLExportOptionsDialog } from './SQLExportOptionsDialog';
 import { confirmCopyTable } from './tableCopyAction';
 import { APP_POPUP_Z_INDEX } from '../utils/overlayZIndex';
 
@@ -612,18 +611,15 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const openTableSQLExportWorkbench = useCallback(async (tableName: string, mode: 'backup' | 'dataOnly') => {
         const normalizedTableName = String(tableName || '').trim();
         if (!normalizedTableName) return;
-        const resolvedOptions = mode === 'backup'
-            ? await showSQLExportOptionsDialog()
-            : { includeDropIfExists: false };
-        if (!resolvedOptions) return;
+        const launchKey = `table-overview-${mode}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         addTab(buildBatchTableExportWorkbenchTab({
             connectionId: tab.connectionId,
             dbName: tab.dbName,
             initialObjectNames: [normalizedTableName],
             contentMode: mode,
-            requestKey: `table-overview-${mode}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            includeDropIfExists: false,
+            ...(mode === 'backup' ? { launchKey } : { requestKey: launchKey }),
             title: t('file.backend.dialog.export_table', { table: normalizedTableName }),
-            ...resolvedOptions,
         }));
     }, [addTab, tab.connectionId, tab.dbName]);
 

@@ -69,6 +69,7 @@ var desktopOnlyAppMethods = map[string]struct{}{
 	"SelectCertificateFile":         {},
 	"SelectDatabaseFile":            {},
 	"ImportData":                    {},
+	"ImportDatabaseSQL":             {},
 	"PreviewImportFile":             {},
 	"ImportDataWithProgress":        {},
 	"ImportDataWithProgressOptions": {},

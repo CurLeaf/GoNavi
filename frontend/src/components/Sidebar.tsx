@@ -2931,11 +2931,12 @@ const Sidebar: React.FC<{
           ? activeTab.tableName || ''
           : '',
     ).trim();
+    const mode = node?.type === 'database' ? 'database' : 'table';
 
     const existingImportTab = tabs.find((tab) => tab.id === DATA_IMPORT_WORKBENCH_TAB_ID);
     addTab(resolveDataImportWorkbenchLaunchTab(
       existingImportTab,
-      { connectionId, dbName, tableName },
+      { connectionId, dbName, tableName, mode },
     ));
   }, [activeContext?.connectionId, activeContext?.dbName, activeTabId, addTab, tabs]);
 

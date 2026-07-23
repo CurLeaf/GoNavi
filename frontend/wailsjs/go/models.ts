@@ -500,6 +500,7 @@ export namespace app {
 	    totalRowsHint?: number;
 	    totalRowsKnown?: boolean;
 	    includeDropIfExists?: boolean;
+	    includeDatabaseContext?: boolean;
 	    insertSQLDialect?: string;
 	    insertSQLTargetTable?: string;
 	    insertSQLColumnTypes?: Record<string, string>;
@@ -519,6 +520,7 @@ export namespace app {
 	        this.totalRowsHint = source["totalRowsHint"];
 	        this.totalRowsKnown = source["totalRowsKnown"];
 	        this.includeDropIfExists = source["includeDropIfExists"];
+	        this.includeDatabaseContext = source["includeDatabaseContext"];
 	        this.insertSQLDialect = source["insertSQLDialect"];
 	        this.insertSQLTargetTable = source["insertSQLTargetTable"];
 	        this.insertSQLColumnTypes = source["insertSQLColumnTypes"];
