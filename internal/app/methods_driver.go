@@ -364,7 +364,6 @@ const (
 	driverReleaseLatestAPIURL            = "https://api.github.com/repos/" + driverReleaseRepo + "/releases/latest"
 	driverReleaseDevTag                  = "dev-latest"
 	optionalDriverBundleAssetName        = "GoNavi-DriverAgents.zip"
-	duckDBWindowsDriverZipAssetName      = "duckdb-driver.zip"
 	optionalDriverBundleIndexAssetName   = "GoNavi-DriverAgents-Index.json"
 	optionalDriverBundleDownloadTimeout  = 15 * time.Minute
 	optionalDriverBundleCacheMaxAge      = 7 * 24 * time.Hour
@@ -1160,7 +1159,7 @@ func (a *App) GetDriverVersionPackageSize(driverType string, version string) con
 	if err := a.localizeDriverSelectionError(definition, validateDriverSelectedVersion(definition, normalizedVersion)); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	assetName := optionalDriverReleaseAssetNameForVersion(normalizedType, normalizedVersion)
+	assetName := optionalDriverReleaseZipAssetNameForVersion(normalizedType, normalizedVersion)
 	if strings.TrimSpace(assetName) == "" {
 		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.asset_name_empty", nil)}
 	}
@@ -2372,28 +2371,7 @@ func resolvePublishedDriverDownloadURLForTag(definition driverDefinition, select
 }
 
 func resolvePublishedDriverReleaseAssetName(driverType string, version string, tag string) (string, bool) {
-	if shouldUseDuckDBWindowsDynamicLibrary(driverType) {
-		cacheKey := "tag:" + strings.TrimSpace(tag)
-		if sizeByAsset, publishedAssets, ok := readReleaseAssetSizesFromCache(cacheKey); ok {
-			if publishedAssets[duckDBWindowsDriverZipAssetName] && sizeByAsset[duckDBWindowsDriverZipAssetName] > 0 {
-				return duckDBWindowsDriverZipAssetName, true
-			}
-			return "", false
-		}
-
-		sizeByAsset, publishedAssets, err := loadReleaseAssetSizesCached(cacheKey, func() (*githubRelease, error) {
-			return fetchReleaseByTag(tag)
-		})
-		if err != nil {
-			return "", false
-		}
-		if publishedAssets[duckDBWindowsDriverZipAssetName] && sizeByAsset[duckDBWindowsDriverZipAssetName] > 0 {
-			return duckDBWindowsDriverZipAssetName, true
-		}
-		return "", false
-	}
-
-	assetNames := optionalDriverReleaseAssetNamesForVersion(driverType, version)
+	assetNames := optionalDriverReleaseZipAssetNamesForVersion(driverType, version)
 	if len(assetNames) == 0 {
 		return "", false
 	}
@@ -2435,7 +2413,7 @@ func resolveDriverVersionPackageSizeBytes(definition driverDefinition, option dr
 	if version == "" {
 		return 0
 	}
-	assetNames := optionalDriverReleaseAssetNamesForVersion(driverType, version)
+	assetNames := optionalDriverReleaseZipAssetNamesForVersion(driverType, version)
 	if len(assetNames) == 0 {
 		return 0
 	}
@@ -2767,8 +2745,8 @@ func resolveDriverVersionOptionsFromReleases(definition driverDefinition) []driv
 		if tag == "" || version == "" {
 			continue
 		}
-		assetName := optionalDriverReleaseAssetNameForVersion(driverType, version)
-		assetNames := optionalDriverReleaseAssetNamesForVersion(driverType, version)
+		assetName := optionalDriverReleaseZipAssetNameForVersion(driverType, version)
+		assetNames := optionalDriverReleaseZipAssetNamesForVersion(driverType, version)
 		if !releaseContainsAnyAsset(release, assetNames) {
 			continue
 		}
@@ -4154,12 +4132,13 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 	}
 
 	if !forceSourceBuild {
+		downloadURLs = reorderOptionalDriverDownloadURLsBySpeed(downloadURLs)
 		if len(downloadURLs) > 0 {
 			for _, candidateURL := range downloadURLs {
 				if a != nil {
 					a.emitDriverDownloadProgress(driverType, "downloading", 20, 100, a.appText("driver_manager.progress.download_prebuilt_agent", map[string]any{"name": displayName}))
 				}
-				hash, dlErr := downloadOptionalDriverAgentBinary(a, definition, candidateURL, executablePath)
+				hash, dlErr := downloadOptionalDriverAgentBinary(a, definition, candidateURL, executablePath, selectedVersion)
 				if dlErr == nil {
 					if revisionErr := validateCandidateRevision(); revisionErr != nil {
 						logger.Warnf("预编译 %s 驱动代理 revision 校验失败，url=%s err=%v", displayName, candidateURL, revisionErr)
@@ -4264,13 +4243,10 @@ func formatOptionalDriverAttemptError(a *App, source string, err error) string {
 }
 
 func shouldUseOptionalDriverBundleFallback(driverType string, restrictToExplicitArtifact bool, directURLCount int) bool {
-	if restrictToExplicitArtifact {
-		return false
-	}
-	if shouldSkipDirectOptionalDriverDownloads(driverType) {
-		return true
-	}
-	return directURLCount == 0
+	_ = driverType
+	_ = restrictToExplicitArtifact
+	_ = directURLCount
+	return false
 }
 
 func isOptionalDriverDownloadZipURL(urlText string) bool {
@@ -4290,7 +4266,7 @@ func isOptionalDriverDownloadZipURL(urlText string) bool {
 	return strings.EqualFold(filepath.Ext(trimmedURL), ".zip")
 }
 
-func downloadOptionalDriverAgentBinary(a *App, definition driverDefinition, urlText string, executablePath string) (string, error) {
+func downloadOptionalDriverAgentBinary(a *App, definition driverDefinition, urlText string, executablePath string, selectedVersion string) (string, error) {
 	driverType := normalizeDriverType(definition.Type)
 	displayName := resolveDriverDisplayName(definition)
 	trimmedURL := strings.TrimSpace(urlText)
@@ -4312,7 +4288,7 @@ func downloadOptionalDriverAgentBinary(a *App, definition driverDefinition, urlT
 			return "", newLocalizedDriverBackendError("driver_manager.backend.error.download_failed", nil, err)
 		}
 
-		if _, err := installOptionalDriverAgentFromLocalZip(tempPath, definition, executablePath, ""); err != nil {
+		if _, err := installOptionalDriverAgentFromLocalZip(tempPath, definition, executablePath, selectedVersion); err != nil {
 			_ = os.Remove(tempPath)
 			_ = os.Remove(executablePath)
 			for _, supportName := range optionalDriverSupportFileNames(driverType) {

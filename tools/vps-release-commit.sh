@@ -48,6 +48,19 @@ case "${staging_dir}" in
         ;;
 esac
 
+lock_dir=""
+cleanup() {
+    local exit_code=$?
+    trap - EXIT
+    set +e
+    if [[ -n "${lock_dir}" ]]; then
+        rmdir "${lock_dir}" 2>/dev/null || true
+    fi
+    rm -rf -- "${staging_dir}"
+    exit "${exit_code}"
+}
+trap cleanup EXIT
+
 [[ "${channel}" == "stable" || "${channel}" == "dev" ]] || {
     echo "invalid channel: ${channel}" >&2
     exit 1
@@ -77,7 +90,6 @@ if command -v flock >/dev/null 2>&1; then
 else
     lock_dir="${root}/.deploy.lock.d"
     mkdir "${lock_dir}"
-    trap 'rmdir "${lock_dir}" 2>/dev/null || true' EXIT
 fi
 
 if command -v sha256sum >/dev/null 2>&1; then

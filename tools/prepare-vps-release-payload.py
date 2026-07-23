@@ -16,6 +16,9 @@ from typing import Any
 
 TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"^[A-Za-z]:/")
+DRIVER_CI_BUNDLE_NAME = "GoNavi-DriverAgents.zip"
+DRIVER_MUTABLE_INDEX_FIELDS = frozenset(("tagName", "mirrorTagName"))
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,6 +61,89 @@ def validate_asset_name(value: Any, label: str) -> str:
     if value in {".", ".."} or "/" in value or "\\" in value:
         fail(f"invalid {label} asset name: {value!r}")
     return value
+
+
+def is_nonnegative_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def validate_sha256(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
+        fail(f"invalid {label} sha256: {value!r}")
+    return value.lower()
+
+
+def validate_driver_entry_path(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value or "\\" in value:
+        fail(f"invalid {label} path: {value!r}")
+    parts = value.split("/")
+    if (
+        value.startswith("/")
+        or WINDOWS_ABSOLUTE_PATH_RE.match(value)
+        or any(part in {"", ".", ".."} for part in parts)
+    ):
+        fail(f"invalid {label} path: {value!r}")
+    return value
+
+
+def validate_driver_index(index: dict[str, Any], label: str) -> None:
+    assets = index.get("assets")
+    asset_sha256 = index.get("assetSha256")
+    entries = index.get("entries")
+    if not isinstance(assets, dict) or not assets:
+        fail(f"{label} assets must be a non-empty object")
+    if not isinstance(asset_sha256, dict) or not asset_sha256:
+        fail(f"{label} assetSha256 must be a non-empty object")
+    if not isinstance(entries, dict) or not entries:
+        fail(f"{label} entries must be a non-empty object")
+    if set(asset_sha256) != set(assets):
+        fail(f"{label} assets and assetSha256 reference different archives")
+
+    archive_names: set[str] = set()
+    for raw_name, expected_size in sorted(assets.items()):
+        name = validate_asset_name(raw_name, f"{label} driver")
+        if name == DRIVER_CI_BUNDLE_NAME:
+            fail(f"driver CI bundle must not be mirrored: {name}")
+        if Path(name).suffix.lower() != ".zip":
+            fail(f"driver mirror asset must be a zip archive: {name}")
+        if not is_nonnegative_int(expected_size):
+            fail(f"invalid driver asset size for {name}")
+        validate_sha256(asset_sha256.get(name), f"driver asset {name}")
+        archive_names.add(name)
+
+    referenced_archives: set[str] = set()
+    for raw_name, raw_entry in sorted(entries.items()):
+        name = validate_asset_name(raw_name, f"{label} driver entry")
+        if not isinstance(raw_entry, dict):
+            fail(f"invalid {label} driver entry metadata for {name}")
+        archive = validate_asset_name(
+            raw_entry.get("archive"),
+            f"{label} driver entry archive",
+        )
+        if archive not in archive_names:
+            fail(f"driver entry references an unknown archive: {name} -> {archive}")
+        validate_driver_entry_path(
+            raw_entry.get("path"),
+            f"{label} driver entry {name}",
+        )
+        if not is_nonnegative_int(raw_entry.get("size")):
+            fail(f"invalid {label} driver entry size for {name}")
+        validate_sha256(
+            raw_entry.get("sha256"),
+            f"{label} driver entry {name}",
+        )
+        referenced_archives.add(archive)
+
+    if referenced_archives != archive_names:
+        fail(f"{label} entries do not cover every driver archive")
+
+
+def normalized_driver_index(index: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in index.items()
+        if key not in DRIVER_MUTABLE_INDEX_FIELDS
+    }
 
 
 def sha256_file(path: Path) -> str:
@@ -114,19 +200,18 @@ def verify_and_copy_driver_assets(
     index: dict[str, Any],
     destination: Path,
 ) -> None:
-    assets = index.get("assets")
-    if not isinstance(assets, dict) or not assets:
-        fail("driver index assets must be a non-empty object")
+    assets = index["assets"]
+    asset_sha256 = index["assetSha256"]
 
     for raw_name, expected_size in sorted(assets.items()):
         name = validate_asset_name(raw_name, "driver")
-        if not isinstance(expected_size, int) or expected_size < 0:
-            fail(f"invalid driver asset size for {name}")
         source = driver_dir / name
         if not source.is_file():
             fail(f"driver asset is missing: {source}")
         if source.stat().st_size != expected_size:
             fail(f"driver asset size mismatch: {name}")
+        if sha256_file(source) != asset_sha256[name].lower():
+            fail(f"driver asset sha256 mismatch: {name}")
         copy_file(source, destination / name)
 
 
@@ -198,8 +283,10 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         driver_tag = validate_tag(args.driver_tag, "driver tag")
         version_index = load_object(args.driver_version_index, "driver version index")
         latest_index = load_object(args.driver_latest_index, "driver latest index")
-        if version_index.get("assets") != latest_index.get("assets"):
-            fail("driver version and latest indexes reference different assets")
+        validate_driver_index(version_index, "driver version index")
+        validate_driver_index(latest_index, "driver latest index")
+        if normalized_driver_index(version_index) != normalized_driver_index(latest_index):
+            fail("driver version and latest indexes differ outside tag metadata")
 
         driver_version_dir, driver_latest_path = driver_layout(args.channel, driver_tag)
         verify_and_copy_driver_assets(

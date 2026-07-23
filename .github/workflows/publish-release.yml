@@ -159,6 +159,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Prepare and verify stable mirror payload
+        id: mirror_payload
         env:
           GH_TOKEN: ${{ github.token }}
           DRIVER_RELEASE_TOKEN: ${{ secrets.DRIVER_RELEASE_TOKEN }}
@@ -201,6 +202,7 @@ jobs:
               exit 1
               ;;
           esac
+          echo "has_driver_release=${has_driver_release}" >> "$GITHUB_OUTPUT"
 
           jq -e \
             --arg tag "${RELEASE_TAG}" \
@@ -325,6 +327,7 @@ jobs:
           app-tag: ${{ steps.validate.outputs.tag }}
           app-dir: ${{ runner.temp }}/gonavi-release
           app-manifest: ${{ runner.temp }}/gonavi-release/latest.json
+          driver-enabled: ${{ steps.mirror_payload.outputs.has_driver_release }}
           driver-tag: ${{ steps.validate.outputs.tag }}
           driver-dir: ${{ runner.temp }}/driver-release
           driver-version-index: ${{ runner.temp }}/driver-release/GoNavi-DriverAgents-Index.json

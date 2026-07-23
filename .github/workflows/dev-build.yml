@@ -1492,6 +1492,7 @@ jobs:
           app-tag: ${{ steps.version.outputs.version }}
           app-dir: release-assets
           app-manifest: release-assets/latest-dev.json
+          driver-enabled: ${{ steps.driver_assets.outputs.has_driver_assets }}
           driver-tag: ${{ steps.version.outputs.version }}
           driver-dir: driver-release-assets
           driver-version-index: ${{ runner.temp }}/driver-dev-latest-index.json
