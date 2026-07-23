@@ -83,6 +83,21 @@ describe('SqlAuditWorkbench', () => {
     );
   });
 
+  it('anchors filter actions opposite the time range instead of leaving them in the middle', () => {
+    const styleSource = readFileSync(new URL('./SqlAuditWorkbench.css', import.meta.url), 'utf8');
+
+    expect(styleSource).toMatch(
+      /\.gn-sql-audit-filter-time\s*\{[^}]*grid-column:\s*1 \/ span 2;/,
+    );
+    expect(styleSource).toMatch(
+      /\.gn-sql-audit-toolbar-actions\s*\{[^}]*grid-column:\s*-3 \/ -1;[^}]*justify-content:\s*flex-end;/,
+    );
+    expect(styleSource).toMatch(
+      /@media \(max-width: 1100px\)[\s\S]*?\.gn-sql-audit-filter-search,[\s\S]*?\.gn-sql-audit-toolbar-actions\s*\{[^}]*grid-column:\s*1 \/ -1;/,
+    );
+    expect(styleSource).toContain('@media (max-width: 1600px)');
+  });
+
   it('keeps the fixed action column opaque while rows are hovered', () => {
     const styleSource = readFileSync(new URL('./SqlAuditWorkbench.css', import.meta.url), 'utf8');
 
