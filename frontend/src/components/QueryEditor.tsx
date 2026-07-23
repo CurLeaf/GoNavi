@@ -1346,12 +1346,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const toggleQueryResultsPanelActionRef = useRef<any>(null);
   const lastExternalQueryRef = useRef<string>(getTabQueryValue(tab));
   const lastLocalQueryRef = useRef<string>(query);
+  const saveOperationQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const queryEditorMountedRef = useRef(true);
   const imeCompositionFallbackRef = useRef<{
       editor: any;
       valueBefore: string;
       selectionBefore: any;
-  const saveOperationQueueRef = useRef<Promise<unknown>>(Promise.resolve());
-  const queryEditorMountedRef = useRef(true);
       positionBefore: { lineNumber: number; column: number } | null;
       committedText: string;
   } | null>(null);
@@ -1869,10 +1869,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return savedQueries.find((item) => item.id === tabId) || null;
   }, [savedQueries, tab.id, tab.savedQueryId]);
 
-  const syncQueryDraft = useCallback((nextQuery: string) => {
-      const next = String(nextQuery ?? '');
-      lastLocalQueryRef.current = next;
-      persistQueryTabDraftSnapshot(draftSnapshotTab, next, {
   useEffect(() => {
       queryEditorMountedRef.current = true;
       return () => {
@@ -1889,6 +1885,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return queued;
   }, []);
 
+  const syncQueryDraft = useCallback((nextQuery: string) => {
+      const next = String(nextQuery ?? '');
+      lastLocalQueryRef.current = next;
+      persistQueryTabDraftSnapshot(draftSnapshotTab, next, {
           connectionId: currentConnectionIdRef.current,
           dbName: currentDbRef.current,
       });
@@ -8238,6 +8238,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   const persistQuery = async (payload: { id: string; name: string; createdAt?: number }): Promise<boolean> => {
       const sql = getCurrentQuery();
+      lastLocalQueryRef.current = sql;
       const saved = {
           id: payload.id,
           name: payload.name,
@@ -8284,7 +8285,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   const openSaveQueryModal = (mode: 'save' | 'rename') => {
       setSaveModalMode(mode);
-      lastLocalQueryRef.current = sql;
       saveForm.setFieldsValue({ name: currentSavedQuery?.name || resolveDefaultQueryName() });
       setIsSaveModalOpen(true);
   };
@@ -8665,6 +8665,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               name: String(values.name || '').trim() || translate('query_editor.save_modal.unnamed'),
               createdAt: existed?.createdAt,
           });
+          if (!applied) {
+              return;
+          }
           message.success(translate(
               saveModalMode === 'rename' ? 'query_editor.message.renamed' : 'query_editor.message.saved'
           ));
@@ -8688,9 +8691,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           currentResultSets,
           activeResultKeyRef.current,
           isV2Ui,
-          if (!applied) {
-              return;
-          }
       );
       const nextResultSets = currentResultSets.filter(result => result.key !== key);
       const nextActiveKey = currentActiveKey && currentActiveKey !== key

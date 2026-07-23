@@ -7862,6 +7862,13 @@ describe('QueryEditor external SQL save', () => {
         createdAt: 100,
       },
     ];
+    storeState.saveQuery.mockImplementationOnce(async (savedQuery: SavedQuery) => {
+      storeState.savedQueries = storeState.savedQueries.map((item) => (
+        item.id === savedQuery.id ? savedQuery : item
+      ));
+      storeSubscribers.forEach((subscriber) => subscriber());
+      return savedQuery;
+    });
 
     let renderer!: ReactTestRenderer;
     await act(async () => {
@@ -7875,7 +7882,7 @@ describe('QueryEditor external SQL save', () => {
     expect(getQueryTabDraft('tab-1')).toBe('select 3;');
 
     await act(async () => {
-      findButton(renderer!, '保存').props.onClick();
+      await findButton(renderer!, '保存').props.onClick();
     });
 
     expect(backendApp.WriteSQLFile).not.toHaveBeenCalled();
@@ -7887,75 +7894,6 @@ describe('QueryEditor external SQL save', () => {
       dbName: 'main',
       createdAt: 100,
     }));
-  });
-
-  it('keeps untitled fallback when the new query tab title is localized', async () => {
-    setCurrentLanguage('en-US');
-
-    let renderer!: ReactTestRenderer;
-    await act(async () => {
-      renderer = create(<QueryEditor tab={createTab({ title: 'New Query', savedQueryId: 'saved-1' })} />);
-    });
-
-    editorState.value = 'select 8;';
-
-    await act(async () => {
-      findButton(renderer!, 'Save').props.onClick();
-    });
-
-    expect(storeState.saveQuery).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'saved-1',
-      name: 'Untitled query',
-      sql: 'select 8;',
-      connectionId: 'conn-1',
-      dbName: 'main',
-    }));
-  });
-
-  it('keeps untitled fallback after a language switch when the tab title came from another locale', async () => {
-    setCurrentLanguage('ja-JP');
-
-    let renderer!: ReactTestRenderer;
-    await act(async () => {
-      renderer = create(<QueryEditor tab={createTab({ title: 'New Query', savedQueryId: 'saved-1' })} />);
-    });
-
-    editorState.value = 'select 10;';
-
-    await act(async () => {
-      findButton(renderer!, '保存').props.onClick();
-    });
-
-    expect(storeState.saveQuery).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'saved-1',
-    storeState.saveQuery.mockImplementationOnce(async (savedQuery: SavedQuery) => {
-      storeState.savedQueries = storeState.savedQueries.map((item) => (
-        item.id === savedQuery.id ? savedQuery : item
-      ));
-      storeSubscribers.forEach((subscriber) => subscriber());
-      return savedQuery;
-    });
-      name: '無題のクエリ',
-      sql: 'select 10;',
-      connectionId: 'conn-1',
-      dbName: 'main',
-    }));
-  });
-
-  it('keeps untitled fallback for database-scoped new query titles after a language switch', async () => {
-    setCurrentLanguage('ja-JP');
-
-    let renderer!: ReactTestRenderer;
-    await act(async () => {
-      renderer = create(<QueryEditor tab={createTab({ title: 'New query (main)', savedQueryId: 'saved-1' })} />);
-    });
-
-    editorState.value = 'select 11;';
-
-    await act(async () => {
-      await findButton(renderer!, '保存').props.onClick();
-    });
-
     expect(getQueryTabDraft('tab-1')).toBe('');
   });
 
@@ -8165,6 +8103,68 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(getQueryTabDraft('tab-1')).toBe('select 3;');
+  });
+
+  it('keeps untitled fallback when the new query tab title is localized', async () => {
+    setCurrentLanguage('en-US');
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ title: 'New Query', savedQueryId: 'saved-1' })} />);
+    });
+
+    editorState.value = 'select 8;';
+
+    await act(async () => {
+      findButton(renderer!, 'Save').props.onClick();
+    });
+
+    expect(storeState.saveQuery).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'saved-1',
+      name: 'Untitled query',
+      sql: 'select 8;',
+      connectionId: 'conn-1',
+      dbName: 'main',
+    }));
+  });
+
+  it('keeps untitled fallback after a language switch when the tab title came from another locale', async () => {
+    setCurrentLanguage('ja-JP');
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ title: 'New Query', savedQueryId: 'saved-1' })} />);
+    });
+
+    editorState.value = 'select 10;';
+
+    await act(async () => {
+      findButton(renderer!, '保存').props.onClick();
+    });
+
+    expect(storeState.saveQuery).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'saved-1',
+      name: '無題のクエリ',
+      sql: 'select 10;',
+      connectionId: 'conn-1',
+      dbName: 'main',
+    }));
+  });
+
+  it('keeps untitled fallback for database-scoped new query titles after a language switch', async () => {
+    setCurrentLanguage('ja-JP');
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ title: 'New query (main)', savedQueryId: 'saved-1' })} />);
+    });
+
+    editorState.value = 'select 11;';
+
+    await act(async () => {
+      findButton(renderer!, '保存').props.onClick();
+    });
+
     expect(storeState.saveQuery).toHaveBeenCalledWith(expect.objectContaining({
       id: 'saved-1',
       name: '無題のクエリ',
