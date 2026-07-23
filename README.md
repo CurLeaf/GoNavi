@@ -496,13 +496,10 @@ Issues and PRs welcome. Branch from **`dev`**, PR against **`dev`**.
 ## ⭐ Star History
 
 <!-- star-history:start -->
-<a href="https://www.star-history.com/#Syngnat/GoNavi&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="assets/star-history/star-history-dark.svg" />
-   <source media="(prefers-color-scheme: light)" srcset="assets/star-history/star-history-light.svg" />
-   <img alt="Star History Chart" src="assets/star-history/star-history-light.svg" />
- </picture>
-</a>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/star-history/star-history-dark.svg">
+  <img alt="Star history" src="assets/star-history/star-history-light.svg">
+</picture>
 <!-- star-history:end -->
 
 ---
