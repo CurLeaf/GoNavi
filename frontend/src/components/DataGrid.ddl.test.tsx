@@ -5,11 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import DataGrid, {
   attachDataGridVirtualEditRenderVersion,
+  buildColumnMetaMap,
   buildDataGridCommitChangeSet,
   collectDataGridCellSelectionRowKeys,
   formatCellDisplayText,
   GONAVI_ROW_KEY,
   hasDataGridVirtualEditRenderVersionChanged,
+  shouldOmitBlankDataGridInsertValue,
 } from './DataGrid';
 import { resetDataGridDdlViewSharedStateForTests } from './useDataGridDdlView';
 import DataGridPageFind from './DataGridPageFind';
@@ -558,6 +560,79 @@ describe('DataGrid cell selection row keys', () => {
 });
 
 describe('DataGrid commit change set', () => {
+  it('omits blank generated columns from inserts while preserving ordinary blank values', () => {
+    const columnMetaMap = buildColumnMetaMap([
+      {
+        name: 'id',
+        type: 'bigint',
+        nullable: 'NO',
+        key: 'PRI',
+        default: "nextval('users_id_seq'::regclass)",
+        extra: 'auto_increment',
+        comment: '',
+      },
+      {
+        name: 'display_name',
+        type: 'text',
+        nullable: 'NO',
+        key: '',
+        extra: '',
+        comment: '',
+      },
+    ]);
+    const normalizeInsertValue = (columnName: string, value: any, mode: 'insert' | 'update') => (
+      shouldOmitBlankDataGridInsertValue(value, mode, columnMetaMap[columnName])
+        ? undefined
+        : value
+    );
+
+    const result = buildDataGridCommitChangeSet({
+      addedRows: [{ [GONAVI_ROW_KEY]: 'new-1', id: '', display_name: '' }],
+      modifiedRows: {},
+      deletedRowKeys: new Set(),
+      data: [],
+      editLocator: {
+        strategy: 'primary-key',
+        columns: ['id'],
+        valueColumns: ['id'],
+        readOnly: false,
+      },
+      visibleColumnNames: ['id', 'display_name'],
+      rowKeyToString,
+      normalizeCommitCellValue: normalizeInsertValue,
+      shouldCommitColumn: commitColumnGuard,
+    });
+
+    expect(columnMetaMap.id).toMatchObject({
+      default: "nextval('users_id_seq'::regclass)",
+      extra: 'auto_increment',
+      nullable: 'NO',
+    });
+    expect(result).toEqual({
+      ok: true,
+      changes: {
+        inserts: [{ display_name: '' }],
+        updates: [],
+        deletes: [],
+      },
+    });
+  });
+
+  it('does not omit generated-column nulls or blank values during updates', () => {
+    const generatedMeta = {
+      type: 'bigint',
+      comment: '',
+      default: "nextval('users_id_seq'::regclass)",
+      extra: 'auto_increment',
+      nullable: 'NO',
+    };
+
+    expect(shouldOmitBlankDataGridInsertValue('', 'insert', generatedMeta)).toBe(true);
+    expect(shouldOmitBlankDataGridInsertValue(null, 'insert', generatedMeta)).toBe(false);
+    expect(shouldOmitBlankDataGridInsertValue('', 'update', generatedMeta)).toBe(false);
+    expect(shouldOmitBlankDataGridInsertValue('', 'insert', { ...generatedMeta, default: '', extra: '' })).toBe(false);
+  });
+
   it('uses unique locator values instead of falling back to the whole row', () => {
     const result = buildDataGridCommitChangeSet({
       addedRows: [],

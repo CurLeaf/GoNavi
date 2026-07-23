@@ -238,6 +238,7 @@ import {
     ContextMenuRow,
     buildColumnMetaMap,
     hasUsableColumnMeta,
+    shouldOmitBlankDataGridInsertValue,
     EXACT_GRID_FILTER_OPERATOR,
     CONTAINS_GRID_FILTER_OPERATOR,
     FILTER_FIELD_SELECT_STYLE,
@@ -291,6 +292,8 @@ export {
     buildGridFieldSelectOptions,
     buildDataGridCommitChangeSet,
     collectDataGridCellSelectionRowKeys,
+    buildColumnMetaMap,
+    shouldOmitBlankDataGridInsertValue,
 } from './DataGridCore';
 
 // Native scroll events can outlive a pointer gesture on macOS. Wait for a brief
@@ -1290,6 +1293,9 @@ const DataGrid: React.FC<DataGridProps> = ({
           }
           const normalizedName = String(columnName || '').trim();
           const meta = columnMetaMap[normalizedName] || columnMetaMapByLowerName[normalizedName.toLowerCase()];
+          if (shouldOmitBlankDataGridInsertValue(value, mode, meta)) {
+              return undefined;
+          }
           const temporal = isTemporalColumnType(meta?.type, dbType);
 
           if (!temporal) {
