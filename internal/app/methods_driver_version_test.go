@@ -55,6 +55,27 @@ func TestDriverNetworkProbeItemJSONIncludesStableProbeCode(t *testing.T) {
 	}
 }
 
+func TestDriverDownloadMirrorProbeUsesProviderNeutralIdentity(t *testing.T) {
+	item := driverNetworkProbeItem{
+		ProbeCode: driverNetworkProbeCodeDownloadMirror,
+		Name:      driverNetworkProbeNameDownloadMirror,
+		URL:       "https://download.syngnat.top/health.txt",
+	}
+
+	payload, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("marshal download mirror network probe item: %v", err)
+	}
+
+	serialized := string(payload)
+	if !strings.Contains(serialized, `"probeCode":"download_mirror"`) {
+		t.Fatalf("expected provider-neutral mirror probeCode, got %s", serialized)
+	}
+	if !strings.Contains(serialized, `"name":"GoNavi Mirror"`) {
+		t.Fatalf("expected provider-neutral mirror name, got %s", serialized)
+	}
+}
+
 func TestResolveVersionedDriverOptionUsesPublishedMongoV1Release(t *testing.T) {
 	definition, ok := resolveDriverDefinition("mongodb")
 	if !ok {

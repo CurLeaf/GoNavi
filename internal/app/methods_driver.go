@@ -250,7 +250,8 @@ type driverNetworkProbeItem struct {
 
 const (
 	driverStatusReasonSlimBuildMissingDriver = "slim_build_missing_driver"
-	driverNetworkProbeCodeCloudflareR2       = "cloudflare_r2"
+	driverNetworkProbeCodeDownloadMirror     = "download_mirror"
+	driverNetworkProbeNameDownloadMirror     = "GoNavi Mirror"
 	driverNetworkProbeCodeGitHubAPI          = "github_api"
 	driverNetworkProbeCodeGitHubRelease      = "github_release"
 	driverNetworkProbeCodeGitHubReleaseAsset = "github_release_asset"
@@ -1297,8 +1298,8 @@ func (a *App) GetDriverStatusList(downloadDir string, manifestURL string) connec
 func (a *App) CheckDriverNetworkStatus() connection.QueryResult {
 	checks := []driverNetworkProbeItem{
 		{
-			ProbeCode: driverNetworkProbeCodeCloudflareR2,
-			Name:      "Cloudflare R2",
+			ProbeCode: driverNetworkProbeCodeDownloadMirror,
+			Name:      driverNetworkProbeNameDownloadMirror,
 			URL:       "https://download.syngnat.top/health.txt",
 		},
 		{
@@ -1339,11 +1340,11 @@ func (a *App) CheckDriverNetworkStatus() connection.QueryResult {
 		}
 		return driverNetworkProbeItem{}, false
 	}
-	r2Check, _ := findProbe(driverNetworkProbeCodeCloudflareR2)
+	mirrorCheck, _ := findProbe(driverNetworkProbeCodeDownloadMirror)
 	githubAPICheck, _ := findProbe(driverNetworkProbeCodeGitHubAPI)
 	githubReleaseCheck, _ := findProbe(driverNetworkProbeCodeGitHubRelease)
 	releaseAssetsCheck, _ := findProbe(driverNetworkProbeCodeGitHubReleaseAsset)
-	downloadChainReachable := r2Check.Reachable || (githubReleaseCheck.Reachable && releaseAssetsCheck.Reachable)
+	downloadChainReachable := mirrorCheck.Reachable || (githubReleaseCheck.Reachable && releaseAssetsCheck.Reachable)
 
 	proxyEnv := collectDriverProxyEnv()
 	proxyConfigured := len(proxyEnv) > 0

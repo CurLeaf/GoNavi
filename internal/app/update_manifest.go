@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	// 静态清单优先走 R2 自定义域名，GitHub Release 作为故障回退。
+	// 静态清单优先走自建下载镜像，GitHub Release 作为故障回退。
 	updateMirrorLatestManifestURL = "https://download.syngnat.top/gonavi/releases/latest/latest.json"
 	updateMirrorDevManifestURL    = "https://download.syngnat.top/gonavi/dev/releases/latest/latest-dev.json"
 	updateGitHubLatestManifestURL = "https://github.com/" + updateRepo + "/releases/latest/download/latest.json"
