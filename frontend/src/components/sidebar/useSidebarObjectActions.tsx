@@ -3,6 +3,7 @@ import { message } from 'antd';
 import type { FormInstance } from 'antd/es/form';
 
 import Modal from '../common/ResizableDraggableModal';
+import { showCountdownDangerConfirm } from '../common/countdownDangerConfirm';
 import type { SavedConnection, SavedQuery } from '../../types';
 import { useStore } from '../../store';
 import { t } from '../../i18n';
@@ -598,10 +599,9 @@ export const useSidebarObjectActions = ({
     const conn = node.dataRef;
     const dbName = String(conn.dbName || '').trim();
     if (!dbName) return;
-    Modal.confirm({
+    showCountdownDangerConfirm({
       title: t('sidebar.modal.confirm_delete_database.title'),
       content: t('sidebar.modal.confirm_delete_database.content', { name: dbName }),
-      okButtonProps: { danger: true },
       onOk: async () => {
         const config = buildRuntimeConfig(conn, conn.dbName);
         const res = await DropDatabase(buildRpcConnectionConfig(config) as any, dbName);
@@ -653,10 +653,9 @@ export const useSidebarObjectActions = ({
     const conn = node.dataRef;
     const tableName = String(conn.tableName || '').trim();
     if (!tableName) return;
-    Modal.confirm({
+    showCountdownDangerConfirm({
       title: t('sidebar.modal.confirm_delete_table.title'),
       content: t('sidebar.modal.confirm_delete_table.content', { name: tableName }),
-      okButtonProps: { danger: true },
       onOk: async () => {
         const config = buildRuntimeConfig(conn, conn.dbName);
         const res = await DropTable(buildRpcConnectionConfig(config) as any, conn.dbName, tableName);

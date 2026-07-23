@@ -1,4 +1,5 @@
 import Modal from './common/ResizableDraggableModal';
+import { showCountdownDangerConfirm } from './common/countdownDangerConfirm';
 import React, { useState, useEffect, useMemo, useCallback, useDeferredValue, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Input, Spin, Empty, Dropdown, message, Tooltip, Button } from 'antd';
@@ -646,10 +647,9 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const handleDeleteTable = useCallback((tableName: string) => {
         const config = buildConfig();
         if (!config) return;
-        Modal.confirm({
+        showCountdownDangerConfirm({
             title: t('table_overview.modal.delete_table.title'),
             content: t('table_overview.modal.delete_table.content', { table: tableName }),
-            okButtonProps: { danger: true },
             onOk: async () => {
                 const res = await DropTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tableName);
                 if (res.success) {
