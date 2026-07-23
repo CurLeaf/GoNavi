@@ -1054,8 +1054,27 @@ function App() {
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const handleCollapseSidebarPanel = useCallback(() => setIsSidebarCollapsed(true), []);
-  const renderedSidebarWidth = isSidebarCollapsed ? 0 : sidebarWidth;
+  const sidebarTitlebarToggleRef = useRef<HTMLButtonElement>(null);
+  const sidebarExplorerToggleRef = useRef<HTMLButtonElement>(null);
+  const pendingSidebarToggleFocusRef = useRef<'titlebar' | 'explorer' | null>(null);
+  const handleCollapseSidebarPanel = useCallback(() => {
+      pendingSidebarToggleFocusRef.current = 'titlebar';
+      setIsSidebarCollapsed(true);
+  }, []);
+  const handleTitlebarSidebarToggle = useCallback(() => {
+      if (isV2Ui && isSidebarCollapsed) {
+          pendingSidebarToggleFocusRef.current = 'explorer';
+      }
+      setIsSidebarCollapsed((collapsed) => !collapsed);
+  }, [isSidebarCollapsed, isV2Ui]);
+  useEffect(() => {
+      const target = pendingSidebarToggleFocusRef.current;
+      if (!target) return;
+      pendingSidebarToggleFocusRef.current = null;
+      (target === 'titlebar' ? sidebarTitlebarToggleRef : sidebarExplorerToggleRef).current?.focus();
+  }, [isSidebarCollapsed]);
+  const sidebarCollapsedWidth = isV2Ui ? 38 * effectiveUiScale * effectiveSidebarRailScale : 0;
+  const renderedSidebarWidth = isSidebarCollapsed ? sidebarCollapsedWidth : sidebarWidth;
   const aiPanelVisible = useStore(state => state.aiPanelVisible);
   const detachedAIChatWindow = useStore(state => state.detachedAIChatWindow);
   const detachAIChatPanel = useStore(state => state.detachAIChatPanel);
@@ -7348,6 +7367,7 @@ function App() {
                   {(!isV2Ui || isSidebarCollapsed) && (
                       <Tooltip title={sidebarPanelToggleLabel} placement="bottom" mouseEnterDelay={0.35}>
                           <Button
+                            ref={sidebarTitlebarToggleRef}
                             type="text"
                             size="small"
                             className="gonavi-sidebar-collapse-trigger"
@@ -7358,7 +7378,7 @@ function App() {
                             aria-controls="gonavi-sidebar-tree-panel"
                             aria-expanded={!isSidebarCollapsed}
                             icon={isSidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-                            onClick={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
+                            onClick={handleTitlebarSidebarToggle}
                             style={{ WebkitAppRegion: 'no-drag', '--wails-draggable': 'no-drag' } as any}
                           />
                       </Tooltip>
@@ -7429,7 +7449,7 @@ function App() {
             width={sidebarWidth}
             collapsible
             collapsed={isSidebarCollapsed}
-            collapsedWidth={0}
+            collapsedWidth={sidebarCollapsedWidth}
             trigger={null}
             data-sidebar-panel="true"
             data-sidebar-collapsed={isSidebarCollapsed}
@@ -7437,18 +7457,19 @@ function App() {
             style={{
                 borderRight: isV2Ui ? 'none' : '1px solid rgba(128,128,128,0.2)',
                 position: 'relative',
-                background: isV2Ui ? 'var(--gn-bg-panel-2)' : bgMain
+                background: isV2Ui ? 'var(--gn-bg-panel-2)' : bgMain,
+                ['--gonavi-sidebar-collapsed-width' as any]: `${sidebarCollapsedWidth}px`,
             }}
           >
             <div
-                id="gonavi-sidebar-tree-panel"
-                aria-hidden={isSidebarCollapsed}
+                id={isV2Ui ? undefined : 'gonavi-sidebar-tree-panel'}
+                aria-hidden={!isV2Ui ? isSidebarCollapsed : undefined}
                 style={{
                     height: '100%',
                     display: 'flex',
                     flexDirection: 'column',
                     overflow: 'hidden',
-                    visibility: isSidebarCollapsed ? 'hidden' : 'visible',
+                    visibility: !isV2Ui && isSidebarCollapsed ? 'hidden' : 'visible',
                 }}
             >
                 {!isV2Ui && (
@@ -7475,7 +7496,7 @@ function App() {
                 </>
                 )}
 
-                <div style={{ flex: 1, overflow: 'hidden', paddingBottom: isV2Ui ? 0 : 58, paddingRight: sidebarResizeHandleWidth, position: 'relative' }}>
+                <div style={{ flex: 1, overflow: 'hidden', paddingBottom: isV2Ui ? 0 : 58, paddingRight: isSidebarCollapsed ? 0 : sidebarResizeHandleWidth, position: 'relative' }}>
                     <div style={{ height: '100%', opacity: connectionWorkbenchState.ready ? 1 : 0.72, pointerEvents: connectionWorkbenchState.ready ? 'auto' : 'none' }}>
                         <Sidebar
                             onCreateConnection={handleCreateConnection}
@@ -7487,6 +7508,8 @@ function App() {
                             onFocusCommandSearch={handleFocusSidebarSearch}
                             onCollapseSidebar={isV2Ui && !isSidebarCollapsed ? handleCollapseSidebarPanel : undefined}
                             collapseSidebarLabel={sidebarPanelToggleLabel}
+                            collapseSidebarButtonRef={sidebarExplorerToggleRef}
+                            isTreePanelCollapsed={isV2Ui && isSidebarCollapsed}
                         />
                     </div>
                     {!connectionWorkbenchState.ready && (
@@ -7523,7 +7546,7 @@ function App() {
                             </div>
                         </div>
                     )}
-                    <div
+                    {!isSidebarCollapsed && <div
                         onMouseDown={handleSidebarMouseDown}
                         onContextMenu={(event) => {
                             event.preventDefault();
@@ -7545,7 +7568,7 @@ function App() {
                             WebkitUserSelect: 'none',
                             background: 'transparent',
                         }}
-                    />
+                    />}
                 </div>
 
                 {/* Floating SQL Log Toggle */}

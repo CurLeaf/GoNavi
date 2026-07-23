@@ -1006,10 +1006,10 @@ body[data-ui-version="legacy"] .ant-layout-sider {
 }
 
 body[data-ui-version] .ant-layout-sider[data-sidebar-collapsed='true'] {
-  min-width: 0 !important;
-  max-width: 0 !important;
-  width: 0 !important;
-  flex: 0 0 0 !important;
+  min-width: var(--gonavi-sidebar-collapsed-width, 0px) !important;
+  max-width: var(--gonavi-sidebar-collapsed-width, 0px) !important;
+  width: var(--gonavi-sidebar-collapsed-width, 0px) !important;
+  flex: 0 0 var(--gonavi-sidebar-collapsed-width, 0px) !important;
   border-right: 0 !important;
 }
 

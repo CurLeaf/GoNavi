@@ -512,6 +512,8 @@ const Sidebar: React.FC<{
   onFocusCommandSearch?: () => void;
   onCollapseSidebar?: () => void;
   collapseSidebarLabel?: string;
+  collapseSidebarButtonRef?: React.Ref<HTMLButtonElement>;
+  isTreePanelCollapsed?: boolean;
 }> = React.memo(({
   onCreateConnection,
   onEditConnection,
@@ -522,6 +524,8 @@ const Sidebar: React.FC<{
   onFocusCommandSearch,
   onCollapseSidebar,
   collapseSidebarLabel,
+  collapseSidebarButtonRef,
+  isTreePanelCollapsed = false,
 }) => {
   const connections = useStore(state => state.connections);
   const savedQueries = useStore(state => state.savedQueries);
@@ -2995,13 +2999,31 @@ const Sidebar: React.FC<{
       openSettings: onOpenSettings ?? (() => {}),
     },
     canLocateActiveTab,
+    workbenchActions: (
+      <>
+        <SlowQueryRailButton
+          className="gn-v2-rail-tool gn-v2-rail-sql-analysis-button"
+          tooltipPlacement="right"
+        />
+        <SqlAuditRailButton
+          className="gn-v2-rail-tool gn-v2-rail-sql-audit-button"
+          tooltipPlacement="right"
+        />
+      </>
+    ),
   };
 
   return (
     <div className={isV2Ui ? 'gn-v2-sidebar-redesign' : undefined} style={{ display: 'flex', height: '100%', minHeight: 0 }}>
         {exportProgressModal}
         {isV2Ui && <SidebarConnectionRail {...v2ConnectionRailProps} />}
-        <div className={isV2Ui ? 'gn-v2-object-explorer' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0, flex: 1 }}>
+        <div
+            id={isV2Ui ? 'gonavi-sidebar-tree-panel' : undefined}
+            className={isV2Ui ? 'gn-v2-object-explorer' : undefined}
+            data-sidebar-tree-panel={isV2Ui ? 'true' : undefined}
+            aria-hidden={isV2Ui ? isTreePanelCollapsed : undefined}
+            style={{ display: isV2Ui && isTreePanelCollapsed ? 'none' : 'flex', flexDirection: 'column', height: '100%', minWidth: 0, flex: 1 }}
+        >
         {isV2Ui && (
             <div className="gn-v2-active-connection-header" data-object-count={activeConnectionObjectCount}>
                 <div className="gn-v2-active-connection-trigger" aria-label={v2ActiveConnectionHeaderLabel}>
@@ -3069,6 +3091,7 @@ const Sidebar: React.FC<{
                     {onCollapseSidebar && collapseSidebarLabel && (
                         <Tooltip title={collapseSidebarLabel} placement="bottom" mouseEnterDelay={0.35}>
                             <Button
+                                ref={collapseSidebarButtonRef}
                                 size="small"
                                 type="text"
                                 className="gonavi-sidebar-collapse-trigger"
@@ -3367,18 +3390,6 @@ const Sidebar: React.FC<{
             </div>
         </div>
 
-        {isV2Ui && (
-            <div className="gn-v2-sidebar-log-footer">
-                <SlowQueryRailButton
-                    className="gn-v2-sidebar-slow-query-button"
-                    tooltipPlacement="top"
-                />
-                <SqlAuditRailButton
-                    className="gn-v2-sidebar-sql-audit-button"
-                    tooltipPlacement="top"
-                />
-            </div>
-        )}
         </div>
         <SidebarSearchPanel {...v2CommandSearchPanelProps} />
 
