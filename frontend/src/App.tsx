@@ -2583,11 +2583,19 @@ function App() {
       }
   }, [t]);
 
-  const handleApplicationQuitRequest = useCallback(async (confirmedAction?: ApplicationQuitConfirmedAction) => {
+  const handleApplicationQuitRequest = useCallback(async (
+      confirmedAction?: ApplicationQuitConfirmedAction,
+      cancelledAction?: () => void,
+  ) => {
       if (applicationQuitHandlingRef.current) {
           return;
       }
       applicationQuitHandlingRef.current = true;
+
+      const cancelRequest = () => {
+          resetApplicationQuitRequest();
+          cancelledAction?.();
+      };
 
       const runConfirmedAction = async (): Promise<boolean> => {
           let accepted = false;
@@ -2601,14 +2609,14 @@ function App() {
                   accepted = true;
               }
           } catch (error) {
-              resetApplicationQuitRequest();
+              cancelRequest();
               message.error(t('app.quit.message.quit_failed', {
                   detail: error instanceof Error ? error.message : String(error),
               }));
               return false;
           }
           if (!accepted) {
-              resetApplicationQuitRequest();
+              cancelRequest();
           }
           return accepted;
       };
@@ -2622,7 +2630,7 @@ function App() {
               latestState.savedQueries,
           );
       } catch (error) {
-          resetApplicationQuitRequest();
+          cancelRequest();
           message.error(t('app.quit.unsaved_sql.inspect_failed', {
               detail: error instanceof Error ? error.message : String(error),
           }));
@@ -2663,14 +2671,14 @@ function App() {
               </>
           ),
           onCancel: () => {
-              resetApplicationQuitRequest();
+              cancelRequest();
           },
           onOk: async () => {
               try {
                   await saveApplicationQuitUnsavedSQLTargets(targets, saveQuery);
                   message.success(t('app.quit.unsaved_sql.saved'));
               } catch (error) {
-                  resetApplicationQuitRequest();
+                  cancelRequest();
                   message.error(t('app.quit.unsaved_sql.save_failed_cancel_exit', {
                       detail: error instanceof Error ? error.message : String(error),
                   }));
@@ -2684,24 +2692,12 @@ function App() {
   }, [applicationQuitModalZIndex, ensureSavedQueriesLoaded, forceQuitApplication, resetApplicationQuitRequest, saveQuery, t]);
 
   const handleInstallUpdateRequest = useCallback(async () => {
-      if (installMode === 'portable' || installMode === 'msi') {
-          Modal.confirm({
-              title: t('app.about.update_install_confirm.close_instances_title'),
-              content: t('app.about.update_install_confirm.close_instances_content'),
-              okText: t('app.about.update_install_confirm.close_instances_ok'),
-              cancelText: t('common.cancel'),
-              closable: true,
-              maskClosable: false,
-              zIndex: applicationQuitModalZIndex,
-              okButtonProps: { danger: true, type: 'primary' },
-              onOk: async () => {
-                  await handleApplicationQuitRequest(() => handleInstallFromProgress(true));
-              },
-          });
-          return;
-      }
-      await handleApplicationQuitRequest(() => handleInstallFromProgress(false));
-  }, [applicationQuitModalZIndex, handleApplicationQuitRequest, handleInstallFromProgress, installMode, t]);
+      hideUpdateDownloadProgress();
+      await handleApplicationQuitRequest(
+          () => handleInstallFromProgress(false),
+          showUpdateDownloadProgress,
+      );
+  }, [handleApplicationQuitRequest, handleInstallFromProgress, hideUpdateDownloadProgress, showUpdateDownloadProgress]);
 
   useEffect(() => {
       const offBeforeClose = EventsOn('app:before-close-request', () => {
