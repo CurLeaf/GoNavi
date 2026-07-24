@@ -243,18 +243,21 @@ func TestInstallUpdateAndRestartRequiresCloseConfirmationOnWindows(t *testing.T)
 	}
 
 	originalResolveTarget := updateResolveInstallTarget
+	originalResolveInstallMode := updateResolveInstallMode
 	originalFindOtherInstances := updateFindOtherWindowsInstances
 	originalConfirmCloseInstances := updateConfirmCloseWindowsInstances
 	originalAcquireMaintenance := updateAcquireWindowsMaintenance
 	originalLaunch := updateLaunchInstallScript
 	t.Cleanup(func() {
 		updateResolveInstallTarget = originalResolveTarget
+		updateResolveInstallMode = originalResolveInstallMode
 		updateFindOtherWindowsInstances = originalFindOtherInstances
 		updateConfirmCloseWindowsInstances = originalConfirmCloseInstances
 		updateAcquireWindowsMaintenance = originalAcquireMaintenance
 		updateLaunchInstallScript = originalLaunch
 	})
 	updateResolveInstallTarget = func() string { return filepath.Join(dir, "GoNavi.exe") }
+	updateResolveInstallMode = func() updateInstallMode { return updateInstallModeMSI }
 	maintenanceAcquired := false
 	updateAcquireWindowsMaintenance = func(string) (windowsUpdateMaintenanceLease, error) {
 		maintenanceAcquired = true
@@ -314,6 +317,7 @@ func TestInstallUpdateAndRestartSkipsCloseConfirmationForSingleWindowsInstance(t
 	}
 
 	originalResolveTarget := updateResolveInstallTarget
+	originalResolveInstallMode := updateResolveInstallMode
 	originalFindOtherInstances := updateFindOtherWindowsInstances
 	originalConfirmCloseInstances := updateConfirmCloseWindowsInstances
 	originalAcquireMaintenance := updateAcquireWindowsMaintenance
@@ -322,6 +326,7 @@ func TestInstallUpdateAndRestartSkipsCloseConfirmationForSingleWindowsInstance(t
 	originalExitProcess := updateExitProcess
 	t.Cleanup(func() {
 		updateResolveInstallTarget = originalResolveTarget
+		updateResolveInstallMode = originalResolveInstallMode
 		updateFindOtherWindowsInstances = originalFindOtherInstances
 		updateConfirmCloseWindowsInstances = originalConfirmCloseInstances
 		updateAcquireWindowsMaintenance = originalAcquireMaintenance
@@ -330,6 +335,7 @@ func TestInstallUpdateAndRestartSkipsCloseConfirmationForSingleWindowsInstance(t
 		updateExitProcess = originalExitProcess
 	})
 	updateResolveInstallTarget = func() string { return filepath.Join(dir, "GoNavi.exe") }
+	updateResolveInstallMode = func() updateInstallMode { return updateInstallModeMSI }
 	maintenanceAcquired := false
 	findCalls := 0
 	updateFindOtherWindowsInstances = func([]string, int) ([]windowsUpdateProcess, error) {
