@@ -1956,6 +1956,10 @@ describe('Sidebar locate toolbar', () => {
     expect(renameHandlerSource).toContain("message.error(t('query_editor.save_modal.name_required'))");
     expect(renameHandlerSource).toContain("message.warning(t('sidebar.message.saved_query_name_unchanged'))");
     expect(renameHandlerSource).toContain("message.success(t('sidebar.message.saved_query_renamed'))");
+    expect(renameHandlerSource).toContain("typeof backendApp?.RenameSavedQuery === 'function'");
+    expect(renameHandlerSource).toContain('backendApp.RenameSavedQuery(renameSavedQueryTarget.id, nextName)');
+    expect(renameHandlerSource).toContain('latestState.replaceSavedQueries(latestState.savedQueries.map');
+    expect(renameHandlerSource).toContain('persisted = await saveQuery({');
     expect(savedQueryMenuSource).toContain("key: 'rename-query'");
     expect(savedQueryMenuSource).toContain("label: t('sidebar.menu.rename_query')");
     expect(savedQueryMenuSource).toContain("label: t('sidebar.menu.open_query')");
@@ -1982,6 +1986,25 @@ describe('Sidebar locate toolbar', () => {
     expect(renameModalSource).not.toContain('cancelText="取消"');
     expect(renameModalSource).not.toContain('label="查询名称"');
     expect(renameModalSource).not.toContain("message: '请输入查询名称'");
+  });
+
+  it('reveals a saved query file from its context menu', () => {
+    const source = readSidebarSource();
+    const handlerStart = source.indexOf('const handleRevealSavedQueryInFolder = useCallback(async (query: SavedQuery) =>');
+    const handlerEnd = source.indexOf('const isSavedQueryUnmatched', handlerStart);
+    const savedQueryMenuStart = source.indexOf('// \u5df2\u5b58\u67e5\u8be2\u8282\u70b9\u7684\u53f3\u952e\u83dc\u5355');
+    const savedQueryMenuEnd = source.indexOf("if (node.type === 'external-sql-root') {", savedQueryMenuStart);
+    const handlerSource = source.slice(handlerStart, handlerEnd);
+    const savedQueryMenuSource = source.slice(savedQueryMenuStart, savedQueryMenuEnd);
+
+    expect(handlerStart).toBeGreaterThanOrEqual(0);
+    expect(handlerEnd).toBeGreaterThan(handlerStart);
+    expect(handlerSource).toContain('await RevealSavedQueryInFolder(query.id)');
+    expect(handlerSource).toContain("t('sidebar.message.saved_query_revealed')");
+    expect(handlerSource).toContain("t('sidebar.message.saved_query_reveal_failed'");
+    expect(savedQueryMenuSource).toContain("key: 'reveal-saved-query-in-folder'");
+    expect(savedQueryMenuSource).toContain("label: t('sidebar.menu.reveal_saved_query_in_folder')");
+    expect(savedQueryMenuSource).toContain('onClick: () => void handleRevealSavedQueryInFolder(q)');
   });
 
   it('renders the v2 table context menu with the redesigned table layout', () => {

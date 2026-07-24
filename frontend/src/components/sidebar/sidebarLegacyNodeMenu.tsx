@@ -199,6 +199,7 @@ export const buildSidebarLegacyNodeMenuItems = (
     connections,
     handleRebindSavedQuery,
     openRenameSavedQueryModal,
+    handleRevealSavedQueryInFolder,
     resolveSavedQueryDisplayName,
     deleteQuery,
     savedQueryGroups,
@@ -1159,6 +1160,12 @@ export const buildSidebarLegacyNodeMenuItems = (
                         savedQueryId: q.id,
                     });
                 }
+            },
+            {
+                key: 'reveal-saved-query-in-folder',
+                label: t('sidebar.menu.reveal_saved_query_in_folder'),
+                icon: <FolderOpenOutlined />,
+                onClick: () => void handleRevealSavedQueryInFolder(q),
             },
             ...rebindMenuItems,
             {

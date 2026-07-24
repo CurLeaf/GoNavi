@@ -222,7 +222,26 @@ import { useAppLogPanelResize } from './hooks/useAppLogPanelResize';
 import { useAppSidebarResize } from './hooks/useAppSidebarResize';
 import { useAppUtilityStyles } from './hooks/useAppUtilityStyles';
 import { useWorkbenchTabs } from './hooks/useWorkbenchTabs';
-import { ApplyDataRootDirectory, ApplyLogDirectory, CancelApplicationQuit, ForceQuitApplication, GetDataRootDirectoryInfo, GetSavedConnections, ListInstalledFontFamilies, OpenDataRootDirectory, OpenLogDirectory, SelectDataRootDirectory, SelectLogDirectory, SetApplicationBrandIcon, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
+import {
+  ApplyDataRootDirectory,
+  ApplyLogDirectory,
+  ApplySavedQueryDirectory,
+  CancelApplicationQuit,
+  ForceQuitApplication,
+  GetDataRootDirectoryInfo,
+  GetSavedConnections,
+  GetSavedQueries,
+  ListInstalledFontFamilies,
+  OpenDataRootDirectory,
+  OpenLogDirectory,
+  OpenSavedQueryDirectory,
+  SelectDataRootDirectory,
+  SelectLogDirectory,
+  SelectSavedQueryDirectory,
+  SetApplicationBrandIcon,
+  SetMacNativeWindowControls,
+  SetWindowTranslucency,
+} from '../wailsjs/go/app/App';
 import { getAntdLocale } from './i18n/frameworkLocale';
 import { useI18n } from './i18n/provider';
 import './App.css';
@@ -3108,10 +3127,12 @@ function App() {
   const [dataRootInfo, setDataRootInfo] = useState<any>(null);
   const [selectedDataRootPath, setSelectedDataRootPath] = useState('');
   const [selectedLogDirectoryPath, setSelectedLogDirectoryPath] = useState('');
+  const [selectedSavedQueryDirectoryPath, setSelectedSavedQueryDirectoryPath] = useState('');
   const [dataRootLoading, setDataRootLoading] = useState(false);
   const [dataRootApplying, setDataRootApplying] = useState(false);
   const [logDirectoryApplying, setLogDirectoryApplying] = useState(false);
-  const directorySettingsApplying = dataRootApplying || logDirectoryApplying;
+  const [savedQueryDirectoryApplying, setSavedQueryDirectoryApplying] = useState(false);
+  const directorySettingsApplying = dataRootApplying || logDirectoryApplying || savedQueryDirectoryApplying;
 
   const aiEntryPlacement = resolveAIEntryPlacement();
   const legacyAiEdgeHandleAttachment = resolveLegacyAIEdgeHandleAttachment(aiPanelVisible);
@@ -3516,6 +3537,9 @@ function App() {
           setDataRootInfo(data);
           setSelectedDataRootPath(String(data.path || ''));
           setSelectedLogDirectoryPath(String(data.logDirectory || data.defaultLogDirectory || ''));
+          setSelectedSavedQueryDirectoryPath(String(
+              data.savedQueryDirectory || data.defaultSavedQueryDirectory || '',
+          ));
       } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error || t('common.unknown'));
           void message.error(t('app.data_root.message.load_failed_with_error', { error: errMsg }));
@@ -3640,6 +3664,144 @@ function App() {
           void message.error(t('app.data_root.log_directory.message.open_failed_with_error', { error: errMsg }));
       }
   }, [t]);
+
+  const handleSelectSavedQueryDirectory = useCallback(async () => {
+      try {
+          const res = await SelectSavedQueryDirectory(
+              selectedSavedQueryDirectoryPath
+                  || dataRootInfo?.savedQueryDirectory
+                  || dataRootInfo?.defaultSavedQueryDirectory
+                  || '',
+          );
+          if (!res?.success) {
+              const data = (res?.data || {}) as any;
+              if (data.cancelled === true) return;
+              throw new Error(res?.message || t('common.unknown'));
+          }
+          const data = (res?.data || {}) as any;
+          setSelectedSavedQueryDirectoryPath(String(data.directory || ''));
+      } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error || t('common.unknown'));
+          void message.error(t('app.data_root.saved_query_directory.message.select_failed_with_error', { error: errMsg }));
+      }
+  }, [
+      dataRootInfo?.defaultSavedQueryDirectory,
+      dataRootInfo?.savedQueryDirectory,
+      selectedSavedQueryDirectoryPath,
+      t,
+  ]);
+
+  const handleApplySavedQueryDirectory = useCallback(async (useDefaultPath = false) => {
+      const nextPath = useDefaultPath
+          ? String(dataRootInfo?.defaultSavedQueryDirectory || '')
+          : String(selectedSavedQueryDirectoryPath || '').trim();
+      if (!nextPath) {
+          void message.warning(t('app.data_root.saved_query_directory.message.select_valid_first'));
+          return;
+      }
+      setSavedQueryDirectoryApplying(true);
+      try {
+          const res = await ApplySavedQueryDirectory(nextPath);
+          if (!res?.success) {
+              throw new Error(res?.message || t('common.unknown'));
+          }
+          const data = (res?.data || {}) as any;
+          setDataRootInfo(data);
+          setSelectedSavedQueryDirectoryPath(String(
+              data.savedQueryDirectory || data.defaultSavedQueryDirectory || nextPath,
+          ));
+          try {
+              const queries = await GetSavedQueries();
+              replaceSavedQueries(Array.isArray(queries) ? queries : []);
+              await reloadSavedQueryGroups();
+          } catch (refreshError) {
+              console.warn('Failed to refresh saved queries after changing their directory', refreshError);
+          }
+          void message.success(res?.message || t('app.data_root.saved_query_directory.message.updated'));
+      } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error || t('common.unknown'));
+          void message.error(t('app.data_root.saved_query_directory.message.apply_failed_with_error', { error: errMsg }));
+      } finally {
+          setSavedQueryDirectoryApplying(false);
+      }
+  }, [
+      dataRootInfo?.defaultSavedQueryDirectory,
+      reloadSavedQueryGroups,
+      replaceSavedQueries,
+      selectedSavedQueryDirectoryPath,
+      t,
+  ]);
+
+  const handleOpenSavedQueryDirectory = useCallback(async () => {
+      try {
+          const res = await OpenSavedQueryDirectory();
+          if (!res?.success) {
+              throw new Error(res?.message || t('common.unknown'));
+          }
+      } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error || t('common.unknown'));
+          void message.error(t('app.data_root.saved_query_directory.message.open_failed_with_error', { error: errMsg }));
+      }
+  }, [t]);
+
+  const renderSavedQueryDirectorySettings = (readOnly = false) => (
+      <div style={utilityPanelStyle} data-saved-query-directory-settings="true">
+          <div style={{ fontWeight: 600 }}>{t('app.data_root.saved_query_directory.title')}</div>
+          <div style={{ ...utilityMutedTextStyle, marginTop: 6 }}>
+              {t('app.data_root.saved_query_directory.description')}
+          </div>
+          <div style={{ display: 'grid', gap: 10, marginTop: 14 }}>
+              <div>
+                  <div style={{ marginBottom: 6, fontWeight: 500 }}>
+                      {t('app.data_root.saved_query_directory.current_directory')}
+                  </div>
+                  <Input
+                      readOnly
+                      value={selectedSavedQueryDirectoryPath}
+                      placeholder={t('app.data_root.saved_query_directory.placeholder')}
+                      aria-label={t('app.data_root.saved_query_directory.title')}
+                  />
+              </div>
+              {!readOnly && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                      <Button
+                          icon={<FolderOpenOutlined />}
+                          disabled={directorySettingsApplying}
+                          onClick={() => void handleSelectSavedQueryDirectory()}
+                      >
+                          {t('app.data_root.action.select')}
+                      </Button>
+                      <Button onClick={() => void handleOpenSavedQueryDirectory()}>
+                          {t('app.data_root.action.open_current')}
+                      </Button>
+                      <Button
+                          disabled={directorySettingsApplying}
+                          loading={savedQueryDirectoryApplying}
+                          onClick={() => void handleApplySavedQueryDirectory(true)}
+                      >
+                          {t('app.data_root.action.restore_default_directory')}
+                      </Button>
+                      <Button
+                          type="primary"
+                          disabled={directorySettingsApplying}
+                          loading={savedQueryDirectoryApplying}
+                          onClick={() => void handleApplySavedQueryDirectory(false)}
+                      >
+                          {t('common.save')}
+                      </Button>
+                  </div>
+              )}
+              <div>
+                  <div style={{ marginBottom: 6, fontWeight: 500 }}>
+                      {t('app.data_root.saved_query_directory.default_directory')}
+                  </div>
+                  <div style={{ ...utilityMutedTextStyle, overflowWrap: 'anywhere' }}>
+                      {dataRootInfo?.defaultSavedQueryDirectory || '-'}
+                  </div>
+              </div>
+          </div>
+      </div>
+  );
 
   const renderLogDirectorySettings = () => {
       const editable = dataRootInfo?.logDirectoryEditable !== false;
@@ -8044,6 +8206,7 @@ function App() {
                           </div>
                         </div>
                       </div>
+                      {renderSavedQueryDirectorySettings(true)}
                     </div>
                   );
                 }
@@ -8142,6 +8305,7 @@ function App() {
                             {t('app.data_root.restart_hint')}
                           </div>
                         </div>
+                        {renderSavedQueryDirectorySettings()}
                         {renderLogDirectorySettings()}
                       </div>
                     )}
@@ -8629,6 +8793,7 @@ function App() {
                     {t('app.data_root.restart_hint')}
                   </div>
                 </div>
+                {renderSavedQueryDirectorySettings()}
                 {renderLogDirectorySettings()}
               </div>
             )}
