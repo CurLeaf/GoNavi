@@ -1674,6 +1674,7 @@ export interface SqlLog {
   sql: string;
   status: "success" | "error";
   duration: number;
+  hiddenFromRecent?: boolean;
   message?: string;
   dbName?: string;
   affectedRows?: number;
@@ -1964,6 +1965,8 @@ interface AppState {
   resetBuiltinSqlSnippet: (id: string) => void;
 
   addSqlLog: (log: SqlLog) => void;
+  hideSqlLogFromRecent: (id: string) => void;
+  clearRecentSqlLogs: () => void;
   clearSqlLogs: () => void;
   upsertTableExportHistory: (
     historyKey: string,
@@ -2626,6 +2629,9 @@ const sanitizeSqlLogEntry = (
 
   if (message) {
     log.message = message;
+  }
+  if (raw.hiddenFromRecent === true) {
+    log.hiddenFromRecent = true;
   }
   if (Number.isFinite(affectedRows)) {
     log.affectedRows = affectedRows;
@@ -5130,6 +5136,18 @@ export const useStore = create<AppState>()(
 
       addSqlLog: (log) =>
         set((state) => ({ sqlLogs: appendRuntimeSqlLog(state.sqlLogs, log) })),
+      hideSqlLogFromRecent: (id) =>
+        set((state) => ({
+          sqlLogs: state.sqlLogs.map((log) => (
+            log.id === id ? { ...log, hiddenFromRecent: true } : log
+          )),
+        })),
+      clearRecentSqlLogs: () =>
+        set((state) => ({
+          sqlLogs: state.sqlLogs.map((log) => (
+            log.hiddenFromRecent ? log : { ...log, hiddenFromRecent: true }
+          )),
+        })),
       clearSqlLogs: () => set({ sqlLogs: [] }),
       upsertTableExportHistory: (historyKey, entry) =>
         set((state) => {

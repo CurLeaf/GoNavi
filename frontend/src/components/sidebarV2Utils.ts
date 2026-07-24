@@ -637,6 +637,7 @@ export type V2CommandSearchItem =
       title: string;
       meta: string;
       icon: ReactNode;
+      logId: string;
       sql: string;
       connectionId?: string;
       dbName?: string;
