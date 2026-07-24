@@ -3707,9 +3707,9 @@ body[data-ui-version="v2"] .gn-v2-main-tabs-double .ant-tabs-nav-list {
 }
 
 body[data-ui-version="v2"] .gn-v2-main-tabs .ant-tabs-tab {
-  width: 260px;
-  min-width: 260px;
-  max-width: 260px;
+  width: var(--gn-v2-tab-width, 260px);
+  min-width: var(--gn-v2-tab-width, 260px);
+  max-width: var(--gn-v2-tab-width, 260px);
   height: 36px;
   margin: 0 !important;
   padding: 0 !important;
