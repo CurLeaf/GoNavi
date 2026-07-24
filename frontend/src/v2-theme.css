@@ -2431,8 +2431,15 @@ body[data-ui-version="v2"] .gn-v2-command-section {
   margin-bottom: 16px;
 }
 
-body[data-ui-version="v2"] .gn-v2-command-section-title {
+body[data-ui-version="v2"] .gn-v2-command-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 0 22px 8px;
+}
+
+body[data-ui-version="v2"] .gn-v2-command-section-title {
   color: var(--gn-fg-4);
   font-family: var(--gn-font-mono);
   font-size: 12px;
@@ -2441,9 +2448,38 @@ body[data-ui-version="v2"] .gn-v2-command-section-title {
   text-transform: uppercase;
 }
 
-body[data-ui-version="v2"] .gn-v2-command-row {
+body[data-ui-version="v2"] .gn-v2-command-section-clear {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--gn-fg-4);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+body[data-ui-version="v2"] .gn-v2-command-section-clear:hover,
+body[data-ui-version="v2"] .gn-v2-command-section-clear:focus-visible {
+  color: var(--gn-danger);
+}
+
+body[data-ui-version="v2"] .gn-v2-command-row-shell {
   width: 100%;
   min-height: 48px;
+  display: flex;
+  align-items: stretch;
+}
+
+body[data-ui-version="v2"] .gn-v2-command-row-shell:hover,
+body[data-ui-version="v2"] .gn-v2-command-row-shell.is-active {
+  background: var(--gn-bg-hover);
+}
+
+body[data-ui-version="v2"] .gn-v2-command-row {
+  min-width: 0;
+  min-height: 48px;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -2455,9 +2491,22 @@ body[data-ui-version="v2"] .gn-v2-command-row {
   text-align: left;
 }
 
-body[data-ui-version="v2"] .gn-v2-command-row:hover,
-body[data-ui-version="v2"] .gn-v2-command-row.is-active {
-  background: var(--gn-bg-hover);
+body[data-ui-version="v2"] .gn-v2-command-row-remove {
+  width: 44px;
+  flex: 0 0 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--gn-fg-5);
+  cursor: pointer;
+}
+
+body[data-ui-version="v2"] .gn-v2-command-row-remove:hover,
+body[data-ui-version="v2"] .gn-v2-command-row-remove:focus-visible {
+  color: var(--gn-danger);
 }
 
 body[data-ui-version="v2"] .gn-v2-command-row-icon {

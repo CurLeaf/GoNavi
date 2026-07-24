@@ -2942,6 +2942,47 @@ describe('store appearance persistence', () => {
     expect(reloaded.useStore.getState().sqlLogs[0]?.sql.length).toBe(12 * 1024);
   });
 
+  it('hides recent queries without deleting their SQL execution logs', async () => {
+    const { useStore } = await importStore();
+    const makeLog = (id: string) => ({
+      id,
+      timestamp: 100,
+      sql: `select '${id}'`,
+      status: 'success' as const,
+      duration: 12,
+    });
+
+    useStore.getState().addSqlLog(makeLog('log-1'));
+    useStore.getState().addSqlLog(makeLog('log-2'));
+    useStore.getState().addSqlLog(makeLog('log-3'));
+    useStore.getState().hideSqlLogFromRecent('log-2');
+
+    expect(useStore.getState().sqlLogs.map((log) => log.id)).toEqual(['log-3', 'log-2', 'log-1']);
+    expect(useStore.getState().sqlLogs.find((log) => log.id === 'log-2')).toMatchObject({
+      hiddenFromRecent: true,
+    });
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.sqlLogs.map((log: { id: string }) => log.id)).toEqual(['log-3', 'log-2', 'log-1']);
+    expect(persisted.state.sqlLogs.find((log: { id: string }) => log.id === 'log-2')).toMatchObject({
+      hiddenFromRecent: true,
+    });
+
+    useStore.getState().clearRecentSqlLogs();
+    expect(useStore.getState().sqlLogs).toHaveLength(3);
+    expect(useStore.getState().sqlLogs.every((log) => log.hiddenFromRecent === true)).toBe(true);
+
+    useStore.getState().addSqlLog(makeLog('log-4'));
+    expect(useStore.getState().sqlLogs[0]).toMatchObject({ id: 'log-4' });
+    expect(useStore.getState().sqlLogs[0]?.hiddenFromRecent).toBeUndefined();
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().sqlLogs).toHaveLength(4);
+    expect(reloaded.useStore.getState().sqlLogs.find((log) => log.id === 'log-2')).toMatchObject({
+      hiddenFromRecent: true,
+    });
+  });
+
   it('preserves SQL transaction log metadata across persistence', async () => {
     const { useStore } = await importStore();
 

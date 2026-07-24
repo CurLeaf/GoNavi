@@ -572,6 +572,8 @@ const Sidebar: React.FC<{
   const queryOptions = useStore(state => state.queryOptions);
   const setQueryOptions = useStore(state => state.setQueryOptions);
   const addSqlLog = useStore(state => state.addSqlLog);
+  const hideSqlLogFromRecent = useStore(state => state.hideSqlLogFromRecent);
+  const clearRecentSqlLogs = useStore(state => state.clearRecentSqlLogs);
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const languagePreference = useStore(state => state.languagePreference);
   const setAppearance = useStore(state => state.setAppearance);
@@ -2970,6 +2972,10 @@ const Sidebar: React.FC<{
       onClose: closeV2CommandSearch,
       onItemSelect: (item: V2CommandSearchItem) => runCommandSearchItem(item),
       onItemHover: (key: string) => setV2CommandActiveIndex(commandSearchFlatItems.findIndex((entry) => entry.key === key)),
+      onRemoveRecentItem: (item: V2CommandSearchItem) => {
+        if (item.kind === 'recent') hideSqlLogFromRecent(item.logId);
+      },
+      onClearRecentItems: clearRecentSqlLogs,
       onTogglePersistentFilter: toggleV2CommandSearchPersistentFilter,
       onResetFilter: resetV2SidebarFilter,
     },
