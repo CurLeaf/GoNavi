@@ -167,6 +167,7 @@ import {
     queryCompletionMetadataRowsBySpecs,
     readSidebarSqlDropText,
     matchLeadingSelectTableReference,
+    maskQueryEditorSqlLiteralsAndComments,
     materializeBoundedQueryEditorCompletionBatches,
     resolveNewQueryDefaultTemplate,
     resolveEventTargetNode,
@@ -6253,7 +6254,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   };
 
   const containsOraclePlsqlDefinition = (statements: string[]): boolean => (
-      statements.some((statement) => /^\s*(?:(?:--[^\n]*|\/\*[\s\S]*?\*\/)\s*)*CREATE\s+(?:OR\s+REPLACE\s+)?(?:EDITIONABLE\s+|NONEDITIONABLE\s+)?(?:PROCEDURE|FUNCTION|PACKAGE|TRIGGER)\b/i.test(statement))
+      statements.some((statement) => /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:EDITIONABLE\s+|NONEDITIONABLE\s+)?(?:PROCEDURE|FUNCTION|PACKAGE|TRIGGER)\b/i.test(
+          maskQueryEditorSqlLiteralsAndComments(statement),
+      ))
   );
 
   const normalizeOracleSqlPlusSlashTerminators = (sql: string): string => (
