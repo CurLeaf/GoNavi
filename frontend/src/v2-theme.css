@@ -1820,6 +1820,18 @@ body[data-ui-version="v2"] .gn-v2-connection-rail {
   background: transparent;
 }
 
+body[data-ui-version="v2"] .gn-v2-rail-sidebar-toggle-slot {
+  width: 100%;
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+}
+
+body[data-ui-version="v2"] .gn-v2-rail-sidebar-toggle:focus-visible {
+  outline: 2px solid var(--gn-accent);
+  outline-offset: 1px;
+}
+
 body[data-ui-version="v2"] .gn-v2-rail-items {
   flex: 1 1 auto;
   min-height: 0;

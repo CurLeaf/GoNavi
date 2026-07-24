@@ -511,8 +511,11 @@ const Sidebar: React.FC<{
   uiVersion?: 'legacy' | 'v2';
   onFocusCommandSearch?: () => void;
   onCollapseSidebar?: () => void;
+  onExpandSidebar?: () => void;
   collapseSidebarLabel?: string;
   collapseSidebarButtonRef?: React.Ref<HTMLButtonElement>;
+  expandSidebarLabel?: string;
+  expandSidebarButtonRef?: React.Ref<HTMLButtonElement>;
   isTreePanelCollapsed?: boolean;
 }> = React.memo(({
   onCreateConnection,
@@ -523,8 +526,11 @@ const Sidebar: React.FC<{
   uiVersion,
   onFocusCommandSearch,
   onCollapseSidebar,
+  onExpandSidebar,
   collapseSidebarLabel,
   collapseSidebarButtonRef,
+  expandSidebarLabel,
+  expandSidebarButtonRef,
   isTreePanelCollapsed = false,
 }) => {
   const connections = useStore(state => state.connections);
@@ -3007,6 +3013,11 @@ const Sidebar: React.FC<{
       openSettings: onOpenSettings ?? (() => {}),
     },
     canLocateActiveTab,
+    sidebarExpandAction: onExpandSidebar && expandSidebarLabel ? {
+      label: expandSidebarLabel,
+      onClick: onExpandSidebar,
+      buttonRef: expandSidebarButtonRef,
+    } : undefined,
     workbenchActions: (
       <>
         <SlowQueryRailButton
