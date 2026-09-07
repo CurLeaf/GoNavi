@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"GoNavi-Wails/internal/ai"
 )
 
 const codexModelCatalogMaxAge = 24 * time.Hour
@@ -23,12 +25,16 @@ type CLIModelCatalog struct {
 }
 
 func (c CLICapability) ModelCatalog(ctx context.Context) (CLIModelCatalog, error) {
+	return c.ModelCatalogWithConfig(ctx, ai.ProviderConfig{})
+}
+
+func (c CLICapability) ModelCatalogWithConfig(ctx context.Context, config ai.ProviderConfig) (CLIModelCatalog, error) {
 	result := CLIModelCatalog{Models: []string{}, Source: "none"}
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
 	if len(c.ModelDiscoveryArgs) > 0 {
-		models, err := c.DiscoverModels(ctx)
+		models, err := c.DiscoverModelsWithConfig(ctx, config)
 		if err != nil {
 			return result, err
 		}
@@ -43,7 +49,10 @@ func (c CLICapability) ModelCatalog(ctx context.Context) (CLIModelCatalog, error
 	if c.ModelCatalogSource != "codex-cache" {
 		return result, nil
 	}
-	codexDir := strings.TrimSpace(os.Getenv("CODEX_HOME"))
+	codexDir := strings.TrimSpace(config.CLIEnv["CODEX_HOME"])
+	if codexDir == "" {
+		codexDir = strings.TrimSpace(os.Getenv("CODEX_HOME"))
+	}
 	if codexDir == "" {
 		userDir, err := os.UserHomeDir()
 		if err != nil {

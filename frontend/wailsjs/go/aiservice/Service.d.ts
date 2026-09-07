@@ -23,7 +23,7 @@ export function AIGetBuiltinPrompts():Promise<Record<string, string>>;
 
 export function AIGetCLICapabilities():Promise<Array<ai.CLICapabilityView>>;
 
-export function AIGetCLIModelCatalog(arg1:string):Promise<Record<string, any>>;
+export function AIGetCLIModelCatalog(arg1:ai.ProviderConfig):Promise<Record<string, any>>;
 
 export function AIGetContextLevel():Promise<string>;
 

@@ -27,6 +27,7 @@ func TestProviderConfigStoreLoadMigratesPlaintextProviderSecrets(t *testing.T) {
 					"Authorization": "Bearer test",
 					"X-Team":        "platform",
 				},
+				CLIEnv: map[string]string{"OPENAI_API_KEY": "cli-secret"},
 			},
 		},
 	}
@@ -51,6 +52,9 @@ func TestProviderConfigStoreLoadMigratesPlaintextProviderSecrets(t *testing.T) {
 	if snapshot.Providers[0].Headers["Authorization"] != "Bearer test" {
 		t.Fatalf("expected runtime provider to restore sensitive header, got %#v", snapshot.Providers[0].Headers)
 	}
+	if snapshot.Providers[0].CLIEnv["OPENAI_API_KEY"] != "cli-secret" {
+		t.Fatalf("expected runtime provider to restore CLI environment, got %#v", snapshot.Providers[0].CLIEnv)
+	}
 
 	stored, ok, err := configStore.dailySecrets.GetAIProvider("openai-main")
 	if err != nil {
@@ -61,6 +65,9 @@ func TestProviderConfigStoreLoadMigratesPlaintextProviderSecrets(t *testing.T) {
 	}
 	if stored.APIKey != "sk-test" {
 		t.Fatalf("expected migrated apiKey in store, got %q", stored.APIKey)
+	}
+	if stored.CLIEnv["OPENAI_API_KEY"] != "cli-secret" {
+		t.Fatalf("expected migrated CLI environment in store, got %#v", stored.CLIEnv)
 	}
 
 	rewritten, err := os.ReadFile(filepath.Join(configStore.configDir, aiConfigFileName))
@@ -73,6 +80,9 @@ func TestProviderConfigStoreLoadMigratesPlaintextProviderSecrets(t *testing.T) {
 	}
 	if strings.Contains(text, "Bearer test") {
 		t.Fatalf("expected rewritten config to remove sensitive headers, got %s", text)
+	}
+	if strings.Contains(text, "cli-secret") || strings.Contains(text, "OPENAI_API_KEY") {
+		t.Fatalf("expected rewritten config to remove CLI environment, got %s", text)
 	}
 }
 

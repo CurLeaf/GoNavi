@@ -26,7 +26,7 @@ func TestProviderManagementCatalogWithoutEnumeration(t *testing.T) {
 		{"claude-cli", "aliases", []string{"sonnet", "opus", "haiku"}},
 		{"unregistered-cli", "none", []string{}},
 	} {
-		result, err := service.AIGetCLIModelCatalog(test.apiFormat)
+		result, err := service.AIGetCLIModelCatalog(ai.ProviderConfig{APIFormat: test.apiFormat})
 		if err != nil || result["source"] != test.source || result["stale"] != false {
 			t.Fatalf("catalog must not invent a source: %+v %v", result, err)
 		}
@@ -38,6 +38,30 @@ func TestProviderManagementCatalogWithoutEnumeration(t *testing.T) {
 	models, err := service.AIListCLIModels("claude-cli")
 	if err != nil || !reflect.DeepEqual(models, []string{"sonnet", "opus", "haiku"}) {
 		t.Fatalf("the list interface must expose the same aliases: %v %v", models, err)
+	}
+}
+
+func TestProviderManagementCLIModelCatalogRestoresHiddenExecutionEnvironment(t *testing.T) {
+	service := newProviderManagementTestService(t)
+	service.configDir = t.TempDir()
+	codexHome := t.TempDir()
+	cache := `{"models":[{"slug":"configured-model","visibility":"list"}]}`
+	if err := os.WriteFile(filepath.Join(codexHome, "models_cache.json"), []byte(cache), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.AISaveProvider(ai.ProviderConfig{
+		ID: "codex-catalog", Type: "custom", AuthMode: "local-cli", APIFormat: "codex-cli",
+		CLIEnv: map[string]string{"CODEX_HOME": codexHome},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	view := service.AIGetProviders()[0]
+	result, err := service.AIGetCLIModelCatalog(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := result["models"].([]string); !ok || !reflect.DeepEqual(got, []string{"configured-model"}) {
+		t.Fatalf("catalog did not use hidden CLI environment: %#v", result)
 	}
 }
 

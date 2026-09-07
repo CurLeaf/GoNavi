@@ -665,6 +665,12 @@ func cloneAgentProviderConfig(config ai.ProviderConfig) ai.ProviderConfig {
 			clone.Headers[key] = value
 		}
 	}
+	if config.CLIEnv != nil {
+		clone.CLIEnv = make(map[string]string, len(config.CLIEnv))
+		for key, value := range config.CLIEnv {
+			clone.CLIEnv[key] = value
+		}
+	}
 	return clone
 }
 

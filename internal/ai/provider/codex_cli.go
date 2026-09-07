@@ -20,7 +20,7 @@ import (
 var codexLookPath = lookupLocalCLICommand
 var codexCommandContext = exec.CommandContext
 var codexEvalSymlinks = filepath.EvalSymlinks
-var codexCLIChatGPTAuthCheck = CheckCodexCLIAuth
+var codexCLIChatGPTAuthCheck = CheckCodexCLIAuthWithConfig
 
 const codexCLIMaxJSONLineBytes = 8 * 1024 * 1024
 const codexCLILoginConfigOverride = `model_reasoning_effort="high"`
@@ -137,7 +137,13 @@ func (p *CodexCLIProvider) Validate() error {
 // CheckCodexCLIAuth verifies that the official CLI is installed and has a
 // usable local login. It deliberately does not send a model request.
 func CheckCodexCLIAuth(ctx context.Context) error {
-	command, err := resolveCodexCLICommand(runtime.GOOS, runtime.GOARCH, codexLookPath, fileExists)
+	return CheckCodexCLIAuthWithConfig(ctx, ai.ProviderConfig{AuthMode: "local-cli"})
+}
+
+// CheckCodexCLIAuthWithConfig validates the exact CLI executable/environment
+// selected for the provider while preserving subscription authentication.
+func CheckCodexCLIAuthWithConfig(ctx context.Context, config ai.ProviderConfig) error {
+	command, err := resolveCodexCLICommand(runtime.GOOS, runtime.GOARCH, lookPathWithOverride(config.CLIPath, codexLookPath), fileExists)
 	if err != nil {
 		return err
 	}
@@ -146,7 +152,7 @@ func CheckCodexCLIAuth(ctx context.Context) error {
 		"login", "status", "-c", codexCLILoginConfigOverride,
 	)
 	cmd := codexCommandContext(ctx, command.Path, args...)
-	cmd.Env = buildCodexCLIEnv(cmd.Environ(), command.Path)
+	cmd.Env = buildCodexCLIEnvWithConfig(cmd.Environ(), command.Path, config.CLIEnv)
 	output, err := cmd.CombinedOutput()
 	detail := strings.TrimSpace(string(output))
 	if err != nil {
@@ -202,7 +208,7 @@ func (p *CodexCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, c
 func (p *CodexCLIProvider) run(ctx context.Context, req ai.ChatRequest, onChunk func(ai.StreamChunk)) (codexCLIResult, error) {
 	ctx, watchdog := startCLIIdleWatchdog(ctx, cliStreamIdleTimeout, cliStreamMaxTimeout)
 	defer watchdog.Close()
-	if err := codexCLIChatGPTAuthCheck(ctx); err != nil {
+	if err := codexCLIChatGPTAuthCheck(ctx, p.config); err != nil {
 		return codexCLIResult{}, err
 	}
 
@@ -226,7 +232,7 @@ func (p *CodexCLIProvider) run(ctx context.Context, req ai.ChatRequest, onChunk 
 	cmd := codexCommandContext(ctx, command.Path, args...)
 	cmd.Dir = workDir
 	cmd.Stdin = strings.NewReader(prompt)
-	cmd.Env = MergeProviderCLIEnv(buildCodexCLIEnv(cmd.Environ(), command.Path), p.config.CLIEnv)
+	cmd.Env = buildCodexCLIEnvWithConfig(cmd.Environ(), command.Path, p.config.CLIEnv)
 
 	requestLog := logAIUpstreamRequestStart(
 		p.Name(),
@@ -360,6 +366,10 @@ func buildCodexCLIArgs(config ai.ProviderConfig) []string {
 
 func buildCodexCLIEnv(baseEnv []string, commandPath string) []string {
 	return EnrichCLICommandPATH(removeEnvKeys(baseEnv, "CODEX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL"), commandPath)
+}
+
+func buildCodexCLIEnvWithConfig(baseEnv []string, commandPath string, extra map[string]string) []string {
+	return buildCodexCLIEnv(MergeProviderCLIEnv(baseEnv, extra), commandPath)
 }
 
 type codexCLIStreamDelta struct {

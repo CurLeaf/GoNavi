@@ -100,6 +100,29 @@ func TestBuildClaudeCLIEnv_LocalAuthRemovesAPIOverrides(t *testing.T) {
 	}
 }
 
+func TestClaudeCLIProviderCustomEnvironmentCannotRestoreLocalAuthOverrides(t *testing.T) {
+	provider := &ClaudeCLIProvider{config: ai.ProviderConfig{
+		AuthMode: "local-cli",
+		CLIEnv: map[string]string{
+			"GONAVI_CLAUDE_CUSTOM": "configured",
+			"ANTHROPIC_API_KEY":    "must-stay-blocked",
+			"ANTHROPIC_BASE_URL":   "https://must-stay-blocked.invalid",
+		},
+	}}
+	command := exec.Command(os.Args[0])
+	if err := provider.setEnv(command); err != nil {
+		t.Fatal(err)
+	}
+	if got := envValue(command.Env, "GONAVI_CLAUDE_CUSTOM"); got != "configured" {
+		t.Fatalf("custom environment = %q, want configured", got)
+	}
+	for _, key := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"} {
+		if got := envValue(command.Env, key); got != "" {
+			t.Fatalf("%s was restored after subscription isolation: %q", key, got)
+		}
+	}
+}
+
 func TestBuildClaudeCLIArgs_LocalAuthKeepsPromptOutOfArgvAndDisablesTools(t *testing.T) {
 	args := buildClaudeCLIArgs(ai.ProviderConfig{AuthMode: "local-cli"}, "private prompt", true)
 	if strings.Contains(strings.Join(args, " "), "private prompt") {

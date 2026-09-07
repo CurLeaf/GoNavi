@@ -86,11 +86,16 @@ func (p *GrokCLIProvider) Validate() error {
 // CheckGrokCLIModels checks the CLI model-list command without sending a chat
 // message. A readable list is not proof that the selected model can respond.
 func CheckGrokCLIModels(ctx context.Context) error {
+	return CheckGrokCLIModelsWithConfig(ctx, ai.ProviderConfig{AuthMode: "local-cli"})
+}
+
+// CheckGrokCLIModelsWithConfig checks the exact configured CLI invocation.
+func CheckGrokCLIModelsWithConfig(ctx context.Context, config ai.ProviderConfig) error {
 	capability, ok := LookupCLICapability("grok-cli")
 	if !ok || len(capability.ModelDiscoveryArgs) == 0 {
 		return fmt.Errorf("Grok CLI model-list check is unavailable")
 	}
-	_, err := capability.DiscoverModels(ctx)
+	_, err := capability.DiscoverModelsWithConfig(ctx, config)
 	return err
 }
 

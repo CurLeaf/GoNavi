@@ -18,6 +18,7 @@ import {
   type ProviderPresetEndpoint,
 } from '../../utils/aiProviderPresets';
 import { isProviderSecretRequirementSatisfied } from '../../utils/providerSecretDraft';
+import { recordFromRows } from '../../utils/aiProviderKeyValue';
 import { AIGetCLICapabilities, AIGetCLIModelCatalog } from '../../../wailsjs/go/aiservice/Service';
 import type { ai } from '../../../wailsjs/go/models';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
@@ -243,11 +244,16 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
   React.useEffect(() => {
     if (editorReady && !duplicateCLI && activeCLICapability) onCLIDefaults?.(activeCLICapability);
   }, [editorReady, duplicateCLI, activeCLICapability, onCLIDefaults]);
-  const catalogScope = `${cliScope}:${watchedApiFormat || ''}`;
+  const watchedCLIPath = String(Form.useWatch('cliPath', form) || '').trim();
+  const watchedCLIEnvRows = Form.useWatch('cliEnvRows', { form, preserve: true });
+  const watchedCLIEnv = recordFromRows(Array.isArray(watchedCLIEnvRows) ? watchedCLIEnvRows : []);
+  const cliExecutionScope = JSON.stringify({ path: watchedCLIPath, env: Object.entries(watchedCLIEnv || {}).sort(([a], [b]) => a.localeCompare(b)) });
+  const hasCustomCLIExecution = watchedCLIPath !== '' || Boolean(watchedCLIEnv && Object.keys(watchedCLIEnv).length);
+  const catalogScope = `${cliScope}:${watchedApiFormat || ''}:${cliExecutionScope}`;
   const [catalogRefresh, setCatalogRefresh] = React.useState(0);
   const catalogRefreshForced = React.useRef(false);
   const [catalogResponse, setCatalogResponse] = React.useState<{ scope: string; cliScope: string; catalog: CLIModelCatalog } | null>(null);
-  const modelCatalog = catalogResponse?.cliScope === cliScope ? catalogResponse.catalog : null;
+  const modelCatalog = catalogResponse?.scope === catalogScope ? catalogResponse.catalog : null;
   const [modelsLoading, setModelsLoading] = React.useState(false);
   const [modelDiscoveryError, setModelDiscoveryError] = React.useState(false);
   React.useEffect(() => {
@@ -256,27 +262,30 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
     if (!editorReady || !usesLocalCLI || duplicateCLI || !watchedApiFormat) return;
     const forced = catalogRefreshForced.current;
     catalogRefreshForced.current = false;
-    const cached = forced ? null : readCachedCLIModelCatalog(watchedApiFormat);
+    const cached = forced || hasCustomCLIExecution ? null : readCachedCLIModelCatalog(watchedApiFormat);
     if (cached) { setCatalogResponse({ scope: catalogScope, cliScope, catalog: cached }); return; }
     let cancelled = false;
     setModelsLoading(true);
-    Promise.resolve().then(() => AIGetCLIModelCatalog(watchedApiFormat))
+    Promise.resolve().then(() => AIGetCLIModelCatalog({
+      id: editingProvider?.id || '', type: 'custom', name: '', apiKey: '', baseUrl: '', model: '', maxTokens: 0, temperature: 0,
+      apiFormat: watchedApiFormat, authMode: 'local-cli', cliPath: watchedCLIPath, cliEnv: watchedCLIEnv,
+    } as ai.ProviderConfig))
       .then((value) => {
         if (cancelled) return;
         const catalog = parseCLIModelCatalog(value);
         if (!catalog) throw new Error('Invalid model catalog');
-        writeCachedCLIModelCatalog(watchedApiFormat, catalog);
+        if (!hasCustomCLIExecution) writeCachedCLIModelCatalog(watchedApiFormat, catalog);
         setCatalogResponse({ scope: catalogScope, cliScope, catalog });
         setModelDiscoveryError(catalog.stale || (catalog.source !== 'none' && !catalog.models.length));
       })
       .catch(() => {
         if (cancelled) return;
         setModelDiscoveryError(true);
-        setCatalogResponse((previous) => (previous?.cliScope === cliScope ? previous : null));
+        setCatalogResponse((previous) => (previous?.scope === catalogScope ? previous : null));
       })
       .finally(() => { if (!cancelled) setModelsLoading(false); });
     return () => { cancelled = true; };
-  }, [catalogScope, cliScope, catalogRefresh, editorReady, usesLocalCLI, duplicateCLI, watchedApiFormat]);
+  }, [catalogScope, cliScope, catalogRefresh, editorReady, usesLocalCLI, duplicateCLI, watchedApiFormat, watchedCLIPath, hasCustomCLIExecution, editingProvider?.id]);
   const supportsAdvancedEndpoint = presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama' || presetKeyFromForm === 'codebuddy' || presetKeyFromForm === 'cursor';
   const supportsModelList = supportsAdvancedEndpoint || usesLocalCLI;
   const codeBuddyUsesOptionalSecret = presetKeyFromForm === 'codebuddy';

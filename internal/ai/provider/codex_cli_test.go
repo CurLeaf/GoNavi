@@ -147,6 +147,44 @@ func TestCodexCLIProviderChatReadsPromptFromStdinAndParsesJSONL(t *testing.T) {
 	}
 }
 
+func TestCodexCLIProviderCustomEnvironmentCannotRestoreAPIOverrides(t *testing.T) {
+	restore := overrideCodexCLIForTest(t, "success")
+	defer restore()
+
+	helperCommandContext := codexCommandContext
+	var modelCommand *exec.Cmd
+	codexCommandContext = func(ctx context.Context, path string, args ...string) *exec.Cmd {
+		command := helperCommandContext(ctx, path, args...)
+		modelCommand = command
+		return command
+	}
+	provider, err := NewCodexCLIProvider(ai.ProviderConfig{
+		AuthMode: "local-cli",
+		CLIEnv: map[string]string{
+			"GONAVI_CODEX_CUSTOM": "configured",
+			"OPENAI_API_KEY":      "must-stay-blocked",
+			"OPENAI_BASE_URL":     "https://must-stay-blocked.invalid",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Chat(context.Background(), ai.ChatRequest{Messages: []ai.Message{{Role: "user", Content: "hello"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if modelCommand == nil {
+		t.Fatal("model command was not created")
+	}
+	if got := envValue(modelCommand.Env, "GONAVI_CODEX_CUSTOM"); got != "configured" {
+		t.Fatalf("custom environment = %q, want configured", got)
+	}
+	for _, key := range []string{"CODEX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL"} {
+		if got := envValue(modelCommand.Env, key); got != "" {
+			t.Fatalf("%s was restored after subscription isolation: %q", key, got)
+		}
+	}
+}
+
 func TestCodexCLIProviderChatRejectsNonSubscriptionAuthBeforeModelRequest(t *testing.T) {
 	originalAuthCheck := codexCLIChatGPTAuthCheck
 	originalCommandContext := codexCommandContext
@@ -155,7 +193,7 @@ func TestCodexCLIProviderChatRejectsNonSubscriptionAuthBeforeModelRequest(t *tes
 		codexCommandContext = originalCommandContext
 	}()
 
-	codexCLIChatGPTAuthCheck = func(context.Context) error {
+	codexCLIChatGPTAuthCheck = func(context.Context, ai.ProviderConfig) error {
 		return errors.New("Codex CLI is not logged in with a ChatGPT subscription; API key login detected")
 	}
 	modelStarted := false
@@ -422,7 +460,7 @@ func overrideCodexCLIForTest(t *testing.T, mode string) func() {
 		cmd.Env = append(os.Environ(), "GO_WANT_CODEX_HELPER=1", "GO_CODEX_HELPER_MODE="+mode)
 		return cmd
 	}
-	codexCLIChatGPTAuthCheck = func(context.Context) error { return nil }
+	codexCLIChatGPTAuthCheck = func(context.Context, ai.ProviderConfig) error { return nil }
 	return func() {
 		codexLookPath = originalLookPath
 		codexCommandContext = originalCommandContext

@@ -251,6 +251,18 @@ describe('provider settings mounted controls', () => {
     expect(bridge.models).toHaveBeenCalledTimes(1);
   });
 
+  it('bypasses the shared catalog cache and sends custom CLI execution settings', async () => {
+    stored.set('gonavi.ai.providers.modelCatalog.v1', JSON.stringify({ 'grok-cli': { catalog: { models: ['cached-grok'], source: 'cli', stale: false }, fetchedAt: 1 } }));
+    values.cliPath = '/custom/bin/grok';
+    values.cliEnvRows = [{ id: '1', name: 'GROK_HOME', value: '/custom/home' }];
+    await render({ isEditing: true, providers: [], editingProvider: { id: 'custom-grok' } });
+    expect(bridge.models).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'custom-grok', apiFormat: 'grok-cli', cliPath: '/custom/bin/grok', cliEnv: { GROK_HOME: '/custom/home' },
+    }));
+    expect(modelPickers()[0].props.options).toContainEqual({ value: 'discovered-model', label: 'discovered-model' });
+    expect(JSON.parse(stored.get('gonavi.ai.providers.modelCatalog.v1') || '{}')['grok-cli'].catalog.models).toEqual(['cached-grok']);
+  });
+
   it('does not reuse the prior editor session defaults while fresh capabilities are loading', async () => {
     await render({ isEditing: true, providers: [], editingProvider: { id: '' }, editorSessionKey: 1 });
     expect(props.onCLIDefaults).toHaveBeenCalledTimes(1);

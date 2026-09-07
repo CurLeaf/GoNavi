@@ -352,11 +352,17 @@ var cliModelCommandOutput = func(ctx context.Context, command string, args ...st
 // 只有声明了 ModelDiscoveryArgs 的 CLI 才可枚举；其余返回空列表而不是错误，
 // 因为「不可枚举」是能力事实，不是故障。
 func (c CLICapability) DiscoverModels(ctx context.Context) ([]string, error) {
+	return c.DiscoverModelsWithConfig(ctx, ai.ProviderConfig{})
+}
+
+// DiscoverModelsWithConfig applies provider-specific executable and
+// environment overrides to model enumeration.
+func (c CLICapability) DiscoverModelsWithConfig(ctx context.Context, config ai.ProviderConfig) ([]string, error) {
 	if len(c.ModelDiscoveryArgs) == 0 {
 		return nil, nil
 	}
 	if c.APIFormat == "cursor-cli" {
-		return discoverCursorCLIModels(ctx)
+		return discoverCursorCLIModelsWithConfig(ctx, config)
 	}
 	ctx, cancel := context.WithTimeout(ctx, modelDiscoveryTimeout)
 	defer cancel()
@@ -364,14 +370,23 @@ func (c CLICapability) DiscoverModels(ctx context.Context) ([]string, error) {
 	var command string
 	var err error
 	if c.APIFormat == "grok-cli" {
-		command, err = resolveGrokCLICommand(runtime.GOOS, cliModelLookPath)
+		command, err = resolveGrokCLICommand(runtime.GOOS, lookPathWithOverride(config.CLIPath, cliModelLookPath))
 	} else {
-		command, err = cliModelLookPath(c.Command)
+		command, err = lookPathWithOverride(config.CLIPath, cliModelLookPath)(c.Command)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%s 未安装或不在 PATH 中", c.Command)
 	}
-	output, runErr := cliModelCommandOutput(ctx, command, c.ModelDiscoveryArgs...)
+	var output []byte
+	var runErr error
+	if strings.TrimSpace(config.CLIPath) == "" && len(config.CLIEnv) == 0 {
+		output, runErr = cliModelCommandOutput(ctx, command, c.ModelDiscoveryArgs...)
+	} else {
+		cmd := exec.CommandContext(ctx, command, c.ModelDiscoveryArgs...)
+		cmd.WaitDelay = time.Second
+		cmd.Env = MergeProviderCLIEnv(EnrichCLICommandPATH(cmd.Environ(), command), config.CLIEnv)
+		output, runErr = cmd.CombinedOutput()
+	}
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("%s 模型枚举失败：%w", c.Command, ctx.Err())
 	}

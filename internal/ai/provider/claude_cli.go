@@ -148,7 +148,14 @@ func (p *ClaudeCLIProvider) Validate() error {
 // CheckClaudeCLILocalAuth validates the local Claude Code subscription login
 // without sending a model request or consuming subscription quota.
 func CheckClaudeCLILocalAuth(ctx context.Context) error {
-	command, err := resolveClaudeCLICommand(runtime.GOOS, runtime.GOARCH, claudeLookPath, fileExists)
+	return CheckClaudeCLILocalAuthWithConfig(ctx, ai.ProviderConfig{AuthMode: "local-cli"})
+}
+
+// CheckClaudeCLILocalAuthWithConfig applies the same executable override and
+// environment policy as the model request it validates.
+func CheckClaudeCLILocalAuthWithConfig(ctx context.Context, config ai.ProviderConfig) error {
+	config.AuthMode = "local-cli"
+	command, err := resolveClaudeCLICommand(runtime.GOOS, runtime.GOARCH, lookPathWithOverride(config.CLIPath, claudeLookPath), fileExists)
 	if err != nil {
 		return err
 	}
@@ -158,7 +165,7 @@ func CheckClaudeCLILocalAuth(ctx context.Context) error {
 
 	args := append(buildClaudeCLILocalAuthIsolationArgs(), "auth", "status", "--json")
 	cmd := newClaudeCLICommand(ctx, command.Path, args...)
-	env, err := buildClaudeCLIEnv(ai.ProviderConfig{AuthMode: "local-cli"}, cmd.Environ(), runtime.GOOS, claudeLookPath, fileExists)
+	env, err := buildClaudeCLIEnv(config, cmd.Environ(), runtime.GOOS, claudeLookPath, fileExists)
 	if err != nil {
 		return err
 	}
@@ -236,7 +243,7 @@ func (p *ClaudeCLIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 		return nil, err
 	}
 	if isLocalCLIAuthMode(p.config) {
-		if err := CheckClaudeCLILocalAuth(ctx); err != nil {
+		if err := CheckClaudeCLILocalAuthWithConfig(ctx, p.config); err != nil {
 			return nil, err
 		}
 	}
@@ -313,7 +320,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		return err
 	}
 	if isLocalCLIAuthMode(p.config) {
-		if err := CheckClaudeCLILocalAuth(ctx); err != nil {
+		if err := CheckClaudeCLILocalAuthWithConfig(ctx, p.config); err != nil {
 			return err
 		}
 	}
@@ -729,12 +736,14 @@ func (p *ClaudeCLIProvider) setEnv(cmd *exec.Cmd) error {
 	if err != nil {
 		return err
 	}
-	cmd.Env = MergeProviderCLIEnv(env, p.config.CLIEnv)
+	cmd.Env = env
 	return nil
 }
 
 func buildClaudeCLIEnv(config ai.ProviderConfig, baseEnv []string, goos string, lookPath func(string) (string, error), exists func(string) bool) ([]string, error) {
-	env := append([]string(nil), baseEnv...)
+	// Apply custom values before subscription isolation so API credentials can
+	// never be restored by a later merge.
+	env := MergeProviderCLIEnv(baseEnv, config.CLIEnv)
 	if strings.EqualFold(strings.TrimSpace(config.AuthMode), "local-cli") {
 		// 订阅模式必须交给 Claude Code 自身的登录态，避免进程环境中的 API Key 抢占认证。
 		env = removeEnvKeys(env, claudeCLILocalAuthBlockedEnvKeys...)

@@ -134,24 +134,24 @@ var claudeCLIHealthCheckFunc = func(config ai.ProviderConfig) error {
 	return err
 }
 
-var claudeCLILocalAuthCheckFunc = func(_ ai.ProviderConfig) error {
+var claudeCLILocalAuthCheckFunc = func(config ai.ProviderConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return provider.CheckClaudeCLILocalAuth(ctx)
+	return provider.CheckClaudeCLILocalAuthWithConfig(ctx, config)
 }
 
 var codexCLIHealthCheckFunc = func(config ai.ProviderConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return provider.CheckCodexCLIAuth(ctx)
+	return provider.CheckCodexCLIAuthWithConfig(ctx, config)
 }
 
-var grokCLIHealthCheckFunc = func(_ ai.ProviderConfig) error {
-	return provider.CheckGrokCLIModels(context.Background())
+var grokCLIHealthCheckFunc = func(config ai.ProviderConfig) error {
+	return provider.CheckGrokCLIModelsWithConfig(context.Background(), config)
 }
 
-var cursorCLIHealthCheckFunc = func(_ ai.ProviderConfig) error {
-	return provider.CheckCursorCLIAuth(context.Background())
+var cursorCLIHealthCheckFunc = func(config ai.ProviderConfig) error {
+	return provider.CheckCursorCLIAuthWithConfig(context.Background(), config)
 }
 
 var codebuddyCLIHealthCheckFunc = func(config ai.ProviderConfig) error {
@@ -516,11 +516,13 @@ func (s *Service) AISaveProvider(config ai.ProviderConfig) error {
 	}
 
 	meta, bundle := splitProviderSecrets(config)
+	preserveExistingSecrets := found && ((!localCLIAuth && !isLocalCLIAuthProvider(existing)) ||
+		(localCLIAuth && singletonCLIProviderIdentity(existing) == singletonCLIProviderIdentity(config)))
 	var runtimeConfig ai.ProviderConfig
 	switch {
 	case bundle.hasAny():
 		mergedBundle := bundle
-		if found && existing.HasSecret {
+		if preserveExistingSecrets && existing.HasSecret {
 			_, existingBundle := splitProviderSecrets(existing)
 			mergedBundle = mergeProviderSecretBundles(existingBundle, bundle)
 		}
@@ -532,7 +534,7 @@ func (s *Service) AISaveProvider(config ai.ProviderConfig) error {
 			return s.serviceErrorLocked("ai_service.backend.error.provider_secret_save_failed", nil, err)
 		}
 		runtimeConfig = mergeProviderSecrets(storedMeta, mergedBundle)
-	case found && !localCLIAuth && (config.HasSecret || existing.HasSecret):
+	case preserveExistingSecrets && (config.HasSecret || existing.HasSecret):
 		meta.SecretRef = existing.SecretRef
 		meta.HasSecret = config.HasSecret || existing.HasSecret
 		meta, existingBundle := applyExistingRuntimeProviderSecrets(meta, existing)
@@ -617,6 +619,7 @@ func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{
 	localCLIAuth := isLocalCLIAuthProvider(config)
 	if localCLIAuth {
 		config = clearLocalCLIProviderSecrets(config)
+		config = s.applyStoredLocalCLIExecutionConfig(config)
 	} else if isMaskedAPIKey(config.APIKey) {
 		config.APIKey = ""
 		config.HasSecret = true
@@ -849,6 +852,25 @@ func clearLocalCLIProviderSecrets(config ai.ProviderConfig) ai.ProviderConfig {
 	config.HasSecret = false
 	config.BaseURL = ""
 	config.Headers = nil
+	return config
+}
+
+// applyStoredLocalCLIExecutionConfig restores only the hidden CLI environment
+// when a public, secretless provider view is submitted back by the settings UI.
+// API credentials stay cleared and can never cross into subscription checks.
+func (s *Service) applyStoredLocalCLIExecutionConfig(config ai.ProviderConfig) ai.ProviderConfig {
+	if !isLocalCLIAuthProvider(config) || len(config.CLIEnv) > 0 || strings.TrimSpace(config.ID) == "" {
+		config.CLIEnv = cloneStringMap(config.CLIEnv)
+		return config
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, existing := range s.providers {
+		if existing.ID == config.ID && singletonCLIProviderIdentity(existing) == singletonCLIProviderIdentity(config) {
+			config.CLIEnv = cloneStringMap(existing.CLIEnv)
+			break
+		}
+	}
 	return config
 }
 
@@ -1506,12 +1528,15 @@ func (s *Service) AIListCLIModels(apiFormat string) ([]string, error) {
 
 // AIGetCLIModelCatalog distinguishes documented aliases, local caches, and CLI enumeration.
 // Suggestions do not attest to login, entitlement, or a model response.
-func (s *Service) AIGetCLIModelCatalog(apiFormat string) (map[string]interface{}, error) {
+func (s *Service) AIGetCLIModelCatalog(config ai.ProviderConfig) (map[string]interface{}, error) {
+	if isLocalCLIAuthProvider(config) {
+		config = s.applyStoredLocalCLIExecutionConfig(clearLocalCLIProviderSecrets(config))
+	}
 	catalog := provider.CLIModelCatalog{Models: []string{}, Source: "none"}
-	capability, ok := provider.LookupCLICapability(apiFormat)
+	capability, ok := provider.LookupCLICapability(config.APIFormat)
 	var err error
 	if ok {
-		catalog, err = capability.ModelCatalog(context.Background())
+		catalog, err = capability.ModelCatalogWithConfig(context.Background(), config)
 	}
 	return map[string]interface{}{"models": catalog.Models, "source": catalog.Source, "stale": catalog.Stale}, err
 }
