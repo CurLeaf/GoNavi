@@ -4253,6 +4253,8 @@
   "data_export.dialog.action.start": "Start export",
   "data_export.dialog.field.columns": "Export columns",
   "data_export.dialog.field.columns_help": "Choose the fields to include in the exported file",
+  "data_export.dialog.field.columns_placeholder": "Search and select export columns",
+  "data_export.dialog.field.columns_selected": "{{selected}} of {{total}} columns selected",
   "data_export.dialog.field.format": "Export format",
   "data_export.dialog.field.scope": "Export scope",
   "data_export.dialog.field.xlsx_max_rows": "Max rows per worksheet",

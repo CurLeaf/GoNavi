@@ -4253,6 +4253,8 @@
   "data_export.dialog.action.start": "エクスポートを開始",
   "data_export.dialog.field.columns": "エクスポート列",
   "data_export.dialog.field.columns_help": "エクスポートファイルに含める列を選択します",
+  "data_export.dialog.field.columns_placeholder": "エクスポート列を検索して選択",
+  "data_export.dialog.field.columns_selected": "{{total}} 列中 {{selected}} 列を選択",
   "data_export.dialog.field.format": "エクスポート形式",
   "data_export.dialog.field.scope": "エクスポート範囲",
   "data_export.dialog.field.xlsx_max_rows": "ワークシートごとの最大行数",
