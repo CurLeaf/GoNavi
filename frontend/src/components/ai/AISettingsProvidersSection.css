@@ -291,3 +291,46 @@ body.gonavi-ai-provider-dragging, body.gonavi-ai-provider-dragging * { cursor: g
   .gonavi-ai-model-management button:active { transform: none; }
   .gonavi-ai-provider-chip-remove:hover, .gonavi-ai-provider-chip-remove:focus-visible { animation: none; transform: scale(1.2); }
 }
+.gonavi-ai-provider-logo { width: 16px; height: 16px; object-fit: contain; flex-shrink: 0; display: inline-grid; place-items: center; }
+.gonavi-ai-provider-logo.is-fallback { width: 16px; height: 16px; border-radius: 3px; background: var(--provider-active-bg, #edf7f0); color: var(--provider-active, #00984a); font-size: 9px; font-weight: 700; }
+.gonavi-ai-provider-config-list { display: flex; flex-direction: column; gap: 12px; min-height: 0; flex: 1; }
+.gonavi-ai-provider-config-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.gonavi-ai-provider-config-list-heading h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.gonavi-ai-provider-config-empty { border: 1px dashed var(--provider-line); border-radius: 6px; padding: 24px; text-align: center; color: var(--provider-muted); }
+.gonavi-ai-provider-config-empty p { margin: 0 0 8px; font-size: 13px; }
+.gonavi-ai-provider-config-cards { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; }
+.gonavi-ai-provider-config-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--provider-line); border-radius: 6px; }
+.gonavi-ai-provider-config-card.is-default { border-color: var(--provider-active); background: var(--provider-active-bg); }
+.gonavi-ai-provider-config-card-main { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+.gonavi-ai-provider-config-card-main > div { min-width: 0; flex: 1; }
+.gonavi-ai-provider-config-card-title { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%; }
+.gonavi-ai-provider-config-card-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 12px; }
+.gonavi-ai-provider-config-card-preset { font-size: 11px; color: var(--provider-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gonavi-ai-provider-config-card-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.gonavi-ai-provider-editor.is-list-edit { flex: 1; min-height: 0; }
+.gonavi-ai-provider-editor-heading.is-edit-nav { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; margin-bottom: 12px; }
+.gonavi-ai-provider-editor-heading.is-edit-nav h3 { margin: 0; text-align: center; font-size: 13px; font-weight: 600; }
+.gonavi-ai-provider-form.ant-form-horizontal .ant-form-item { margin-bottom: 12px; width: 100%; }
+.gonavi-ai-provider-form.ant-form-horizontal .ant-form-item-row { flex-wrap: nowrap; width: 100%; }
+.gonavi-ai-provider-form.ant-form-horizontal .ant-form-item-label { overflow: visible; }
+.gonavi-ai-provider-form.ant-form-horizontal .ant-form-item-label > label { height: auto; max-width: 100%; white-space: normal; overflow: visible; line-height: 1.35; }
+.gonavi-ai-provider-form.ant-form-horizontal .ant-form-item-control { min-width: 0; max-width: 100%; }
+.gonavi-ai-provider-form.ant-form-horizontal .ant-form-item-control-input,
+.gonavi-ai-provider-form.ant-form-horizontal .ant-select,
+.gonavi-ai-provider-form.ant-form-horizontal .ant-input-affix-wrapper,
+.gonavi-ai-provider-form.ant-form-horizontal .ant-input { width: 100%; max-width: 100%; }
+.gonavi-ai-provider-form .gonavi-ai-provider-model-label { flex-direction: column; align-items: flex-end; justify-content: flex-start; gap: 2px; }
+.gonavi-ai-provider-kv { display: grid; gap: 8px; }
+.gonavi-ai-provider-kv-row { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.3fr) 2rem; gap: 8px; align-items: center; }
+.gonavi-ai-provider-preset-option { display: inline-flex; align-items: center; gap: 8px; min-width: 0; width: 100%; }
+.gonavi-ai-provider-preset-option > span:last-child { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ant-select-dropdown.gonavi-ai-provider-preset-dropdown { width: max-content !important; min-width: 0 !important; padding: 4px 0; }
+.gonavi-ai-provider-preset-dropdown .rc-virtual-list,
+.gonavi-ai-provider-preset-dropdown .rc-virtual-list-holder { min-width: 18rem; }
+.gonavi-ai-provider-preset-dropdown .ant-select-item { padding-inline-end: 16px; }
+.gonavi-ai-provider-preset-dropdown-grid { display: grid; grid-template-columns: minmax(18rem, max-content) 9rem; width: max-content; max-width: min(32rem, calc(100vw - 2rem)); }
+.ant-select-dropdown.gonavi-ai-provider-form-popup { width: max-content !important; min-width: 12rem !important; max-width: min(36rem, calc(100vw - 2rem)); }
+.gonavi-ai-provider-preset-col { min-width: 0; padding: 4px 8px 8px; }
+.gonavi-ai-provider-preset-col.is-partner { border-left: 1px solid var(--provider-line, #e8eeeb); }
+.gonavi-ai-provider-preset-col-title { padding: 6px 8px 8px; font-size: 11px; color: var(--provider-muted, #6b7280); }
+.gonavi-ai-provider-preset-empty { padding: 8px; font-size: 12px; color: var(--provider-muted, #6b7280); }

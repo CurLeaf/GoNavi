@@ -1097,7 +1097,9 @@ func newModelsRequest(config ai.ProviderConfig, localizer *i18n.Localizer) (*htt
 
 	switch normalizedProviderType(config) {
 	case "anthropic":
-		if isDashScopeBailianAnthropicProvider(config) {
+		if strings.EqualFold(strings.TrimSpace(config.AuthMode), "bearer") {
+			req.Header.Set("Authorization", "Bearer "+config.APIKey)
+		} else if isDashScopeBailianAnthropicProvider(config) {
 			req.Header.Set("Authorization", "Bearer "+config.APIKey)
 		} else {
 			provider.ApplyAnthropicAuthHeaders(req.Header, config.BaseURL, config.APIKey)
@@ -1156,7 +1158,11 @@ func newAnthropicMessagesHealthCheckRequest(config ai.ProviderConfig) (*http.Req
 		return nil, fmt.Errorf("create request failed: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	provider.ApplyAnthropicAuthHeaders(req.Header, config.BaseURL, config.APIKey)
+	if strings.EqualFold(strings.TrimSpace(config.AuthMode), "bearer") {
+		req.Header.Set("Authorization", "Bearer "+config.APIKey)
+	} else {
+		provider.ApplyAnthropicAuthHeaders(req.Header, config.BaseURL, config.APIKey)
+	}
 	for k, v := range config.Headers {
 		req.Header.Set(k, v)
 	}

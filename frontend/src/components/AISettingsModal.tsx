@@ -21,6 +21,7 @@ import {
     isProviderSecretRequirementSatisfied,
     resolveProviderSecretDraft,
 } from '../utils/providerSecretDraft';
+import { recordFromRows, rowsFromRecord } from '../utils/aiProviderKeyValue';
 import { buildAddProviderEditorSession, buildClosedProviderEditorSession, buildEditProviderEditorSession, type ProviderEditorSession } from '../utils/aiProviderEditorState';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { useI18n } from '../i18n/provider';
@@ -602,6 +603,9 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
                     presetKey: matchedPreset.key,
                     apiFormat: resolvedTransport.apiFormat || (resolvedTransport.type === 'custom' ? editableProvider.apiFormat || 'openai' : resolvedTransport.type),
                     authMode: matchedPreset.authMode || editableProvider.authMode || 'api-key',
+                    headerRows: rowsFromRecord(editableProvider.headers),
+                    cliEnvRows: rowsFromRecord(editableProvider.cliEnv),
+                    cliPath: editableProvider.cliPath || '',
                 },
             }));
         } catch (e: any) {
@@ -638,9 +642,12 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
         // validateFields only returns mounted fields. Preserve stored options
         // that have no editor control (for example maxTokens and temperature).
         values = { ...form.getFieldsValue(true), ...values };
+        const { headerRows, cliEnvRows, ...formFields } = values;
         const presetKey = values.presetKey || 'openai';
         const preset = findPreset(presetKey);
-        const authMode = preset.authMode || 'api-key';
+        const authMode = preset.authMode === 'local-cli'
+            ? 'local-cli'
+            : (formFields.authMode === 'bearer' ? 'bearer' : 'api-key');
         const { model, models } = resolvePresetModelSelection({
             presetKey,
             presetDefaultModel: preset.defaultModel,
@@ -674,7 +681,7 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
         });
         const payload = {
             ...editingProvider,
-            ...values,
+            ...formFields,
             ...transport,
             name: String(values.name || '').trim() ? values.name : localizeProviderPreset(preset, t).label,
             apiKey: secret.apiKey,
@@ -689,6 +696,10 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
             inlineCompletionModel: String(values.inlineCompletionModel || '').trim(),
             maxTokens: Number.isFinite(Number(values.maxTokens)) ? Number(values.maxTokens) : 4096,
             temperature: Number.isFinite(Number(values.temperature)) ? Number(values.temperature) : 0.7,
+            contextWindow: Number(values.contextWindow) > 0 ? Number(values.contextWindow) : 0,
+            headers: recordFromRows(headerRows),
+            cliPath: String(values.cliPath || '').trim(),
+            cliEnv: recordFromRows(cliEnvRows),
         } as AIProviderConfig;
         if (payload.disabledModels?.includes(model) || (payload.inlineCompletionModel && payload.disabledModels?.includes(payload.inlineCompletionModel))) {
             throw new Error(t('ai_settings.models.required_disabled'));
@@ -1151,7 +1162,12 @@ export const AISettingsContent: React.FC<AISettingsContentProps> = ({ active, da
             inlineCompletionModel: '',
             effort: undefined,
             authMode,
-            ...(authMode === 'local-cli' ? { apiKey: '' } : {}),
+            apiKey: '',
+            headerRows: [],
+            cliEnvRows: [],
+            cliPath: '',
+            contextWindow: undefined,
+            maxTokens: 4096,
         });
         refreshProviderDirty();
     };
