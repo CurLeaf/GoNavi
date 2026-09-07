@@ -1277,6 +1277,50 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('aria-pressed="true"');
   });
 
+  it('keeps relational object-kind filters when the SQL host is not connected or another tab is active', () => {
+    mocks.state.connections = [{
+      id: 'pg-1',
+      name: 'PostGreSQL',
+      config: { type: 'postgres', host: 'localhost', port: 5432 },
+    }];
+    mocks.state.activeContext = null;
+    mocks.state.activeTabId = 'settings';
+    mocks.state.tabs = [{
+      id: 'settings',
+      title: 'Settings',
+      type: 'settings',
+    }];
+
+    const markup = renderSidebarMarkup({ uiVersion: 'v2' });
+
+    expect(markup).toContain('gn-v2-explorer-filter-tabs');
+    expect(markup).toContain(`>${t('sidebar.command_search.object_kind.all')}<`);
+    expect(markup).toContain(`>${t('sidebar.command_search.object_kind.tables')}<`);
+  });
+
+  it('keeps relational object-kind filters hidden without an active host when only dedicated workbenches exist', () => {
+    mocks.state.connections = [{
+      id: 'nacos-1',
+      name: 'Nacos',
+      config: { type: 'nacos', host: 'localhost', port: 8848 },
+    }, {
+      id: 'mqtt-1',
+      name: 'MQTT',
+      config: { type: 'mqtt', host: 'localhost', port: 1883 },
+    }];
+    mocks.state.activeContext = null;
+    mocks.state.activeTabId = 'settings';
+    mocks.state.tabs = [{
+      id: 'settings',
+      title: 'Settings',
+      type: 'settings',
+    }];
+
+    const markup = renderSidebarMarkup({ uiVersion: 'v2' });
+
+    expect(markup).not.toContain('gn-v2-explorer-filter-tabs');
+  });
+
   it('hides relational object-kind filters for Nacos and other dedicated workbenches', () => {
     mocks.state.connections = [{
       id: 'nacos-1',
@@ -1509,11 +1553,12 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).not.toContain('data-gonavi-create-connection-action="true"');
   });
 
-  it('keeps v2 explorer filter tabs on a single line when Oracle object filters are present', () => {
+  it('evenly distributes v2 explorer filter tabs while keeping narrow sidebars horizontally scrollable', () => {
     const css = readV2ThemeCss();
 
     expect(css).toMatch(/\.gn-v2-explorer-filter-tabs \{[^}]*flex-wrap: nowrap;[^}]*overflow-x: auto;[^}]*overflow-y: hidden;[^}]*overscroll-behavior-x: contain;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-filter-tabs button \{[^}]*flex: 0 0 auto;[^}]*white-space: nowrap;[^}]*cursor: pointer;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-filter-tabs button \{[^}]*flex: 1 0 calc\(3em \+ 4px \* var\(--gn-v2-explorer-scale\)\);[^}]*min-width: calc\(3em \+ 4px \* var\(--gn-v2-explorer-scale\)\);[^}]*height: calc\(28px \* var\(--gn-v2-explorer-scale\)\);/s);
+    expect(css).toMatch(/\.gn-v2-explorer-filter-tabs button \{[^}]*font-size: var\(--gn-sidebar-tree-font-size, var\(--gn-font-size-sm, 12px\)\);[^}]*white-space: nowrap;[^}]*cursor: pointer;/s);
   });
 
   it('shows a pending state while a database node is loading', () => {

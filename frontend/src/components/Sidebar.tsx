@@ -3870,8 +3870,13 @@ const Sidebar: React.FC<{
       };
   }, [displayTreeData, expandedKeys, isV2Ui, sidebarTreeScrollRequest, v2VisibleTreeData]);
 
+  const hasRelationalObjectKindFilterConnection = connections.some(
+      (connection) => getDataSourceCapabilities(connection.config).supportsRelationalObjectKindFilter,
+  );
   const showV2ObjectKindFilters = isV2Ui
-      && getDataSourceCapabilities(activeConnection?.config).supportsRelationalObjectKindFilter;
+      && (activeConnection
+          ? getDataSourceCapabilities(activeConnection.config).supportsRelationalObjectKindFilter
+          : hasRelationalObjectKindFilterConnection);
   useEffect(() => {
       if (!showV2ObjectKindFilters && v2ExplorerFilter !== 'all') {
           setV2ExplorerFilter('all');
