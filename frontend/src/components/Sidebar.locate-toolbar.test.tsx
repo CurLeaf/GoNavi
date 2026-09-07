@@ -40,6 +40,8 @@ import Sidebar, {
   V2ExplorerContextSummary,
   resolveSidebarTableNameForCopy,
   resolveSidebarDatabaseNameForCopy,
+  resolveSidebarTreeHorizontalScrollLeft,
+  resolveSidebarTreeHorizontalWheelDelta,
   shouldKeepSidebarSwitcherCollapsedWhileLoading,
   shouldClearSidebarActiveContextOnEmptySelect,
   shouldSkipSidebarLoadOnExpandWhileDragging,
@@ -1608,6 +1610,49 @@ describe('Sidebar locate toolbar', () => {
     expect(css).not.toMatch(
       /\.ant-tree-treenode\.ant-tree-treenode-selected:has\(\.gn-v2-tree-title:not\(\.is-mono\)\)/,
     );
+  });
+
+  it('keeps v2 tree rows and trailing indicators pinned to the viewport while horizontally scrolling', () => {
+    const css = readV2ThemeCss();
+    const source = readSidebarSource();
+
+    expect(css).toMatch(
+      /\.gn-v2-explorer-tree-shell \.ant-tree-treenode \{[^}]*width: calc\(100% \+ var\(--gn-v2-tree-horizontal-offset, 0px\)\) !important;/s,
+    );
+    expect(source).toContain("style.setProperty('--gn-v2-tree-horizontal-offset'");
+    expect(source).toContain("querySelector<HTMLElement>('.ant-tree-list-holder-inner')");
+    expect(source).toContain("attributeFilter: ['style']");
+    expect(source).not.toContain("'--gn-v2-tree-row-width'");
+  });
+
+  it('normalizes Shift+wheel to horizontal scrolling without a selected table', () => {
+    const source = readSourceFile('./Sidebar.tsx');
+
+    expect(resolveSidebarTreeHorizontalWheelDelta({
+      deltaX: 0,
+      deltaY: 96,
+      shiftKey: true,
+    })).toBe(96);
+    expect(resolveSidebarTreeHorizontalWheelDelta({
+      deltaX: 24,
+      deltaY: 96,
+      shiftKey: true,
+    })).toBe(24);
+    expect(resolveSidebarTreeHorizontalScrollLeft({
+      currentLeft: 0,
+      delta: 96,
+      scrollWidth: 1200,
+      viewportWidth: 360,
+    })).toBe(96);
+    expect(resolveSidebarTreeHorizontalScrollLeft({
+      currentLeft: 840,
+      delta: 96,
+      scrollWidth: 1200,
+      viewportWidth: 360,
+    })).toBeNull();
+    expect(source).toContain('resolveSidebarTreeHorizontalWheelDelta(event)');
+    expect(source).toContain("shell.querySelector<HTMLElement>('.ant-tree-list-holder')");
+    expect(source).toContain('event.stopPropagation()');
   });
 
   it('shows the v2 tree vertical scrollbar only during user scrolling', () => {

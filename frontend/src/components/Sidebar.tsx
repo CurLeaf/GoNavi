@@ -365,6 +365,54 @@ const NACOS_SERVICES_CHANGED_EVENT = 'gonavi:nacos-services-changed';
 const SIDEBAR_GROUP_HOVER_EXPAND_DELAY_MS = 500;
 const SIDEBAR_TREE_SCROLL_IDLE_DELAY_MS = 2000;
 
+type SidebarTreeHorizontalWheelInput = {
+  deltaX?: number;
+  deltaY?: number;
+  shiftKey?: boolean;
+};
+
+/**
+ * Normalize wheel input to the horizontal intent used by the virtual tree.
+ * On macOS, Shift+wheel commonly reports the vertical wheel amount in
+ * `deltaY`, so relying on `deltaX` alone makes the gesture work only when the
+ * browser happens to retarget it to a focused tree row.
+ */
+export const resolveSidebarTreeHorizontalWheelDelta = ({
+  deltaX = 0,
+  deltaY = 0,
+  shiftKey = false,
+}: SidebarTreeHorizontalWheelInput): number => {
+  const safeDeltaX = Number.isFinite(deltaX) ? Number(deltaX) : 0;
+  const safeDeltaY = Number.isFinite(deltaY) ? Number(deltaY) : 0;
+
+  if (shiftKey) {
+    return safeDeltaX !== 0 ? safeDeltaX : safeDeltaY;
+  }
+
+  return Math.abs(safeDeltaX) > Math.abs(safeDeltaY) ? safeDeltaX : 0;
+};
+
+export const resolveSidebarTreeHorizontalScrollLeft = ({
+  currentLeft,
+  delta,
+  scrollWidth,
+  viewportWidth,
+}: {
+  currentLeft: number;
+  delta: number;
+  scrollWidth: number;
+  viewportWidth: number;
+}): number | null => {
+  const safeCurrentLeft = Number.isFinite(currentLeft) ? currentLeft : 0;
+  const safeDelta = Number.isFinite(delta) ? delta : 0;
+  const safeScrollWidth = Number.isFinite(scrollWidth) ? scrollWidth : 0;
+  const safeViewportWidth = Number.isFinite(viewportWidth) ? viewportWidth : 0;
+  const maxLeft = Math.max(0, safeScrollWidth - safeViewportWidth);
+  const nextLeft = Math.min(maxLeft, Math.max(0, safeCurrentLeft + safeDelta));
+
+  return Math.abs(nextLeft - safeCurrentLeft) > 0.5 ? nextLeft : null;
+};
+
 const buildOptionalSchemaContext = (value: unknown): { schemaName?: string } => {
   const schemaName = String(value ?? '').trim();
   return schemaName ? { schemaName } : {};
@@ -1295,12 +1343,6 @@ const Sidebar: React.FC<{
           setIsTreeScrolling(false);
       }, SIDEBAR_TREE_SCROLL_IDLE_DELAY_MS);
   }, [isV2Ui]);
-
-  const handleTreeWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-      if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
-          markTreeScrollActivity();
-      }
-  }, [markTreeScrollActivity]);
 
   useEffect(() => () => {
       if (treeScrollIdleTimerRef.current !== null) {
@@ -3674,6 +3716,77 @@ const Sidebar: React.FC<{
       setAIPanelVisible,
       extractObjectName,
   });
+
+  const handleTreeWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+      const horizontalDelta = resolveSidebarTreeHorizontalWheelDelta(event);
+      if (isV2Ui && horizontalDelta !== 0 && v2TreeHorizontalScrollWidth) {
+          const shell = event.currentTarget;
+          const holder = shell.querySelector<HTMLElement>('.ant-tree-list-holder');
+          const holderInner = shell.querySelector<HTMLElement>('.ant-tree-list-holder-inner');
+          const viewportWidth = holder?.clientWidth || treeViewportWidth;
+          const currentLeft = holderInner
+              ? Math.max(0, -(Number.parseFloat(holderInner.style.marginLeft || '0') || 0))
+              : 0;
+          const nextLeft = resolveSidebarTreeHorizontalScrollLeft({
+              currentLeft,
+              delta: horizontalDelta,
+              scrollWidth: v2TreeHorizontalScrollWidth,
+              viewportWidth,
+          });
+
+          if (nextLeft !== null && treeRef.current?.scrollTo) {
+              // The rc-virtual-list listener is attached to the holder only.
+              // Stop propagation here so blank tree space and the scrollbar
+              // reserve use the same virtual offset without double-applying
+              // the wheel delta when the event target is inside the holder.
+              event.preventDefault();
+              event.stopPropagation();
+              treeRef.current.scrollTo({ left: nextLeft });
+              return;
+          }
+      }
+
+      if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+          markTreeScrollActivity();
+      }
+  }, [
+      isV2Ui,
+      markTreeScrollActivity,
+      treeViewportWidth,
+      v2TreeHorizontalScrollWidth,
+  ]);
+
+  useEffect(() => {
+      if (!isV2Ui) return;
+      const shell = treeContainerRef.current;
+      const holderInner = shell?.querySelector<HTMLElement>('.ant-tree-list-holder-inner');
+      if (!shell || !holderInner) return;
+
+      const syncHorizontalViewportOffset = () => {
+          const marginLeft = Number.parseFloat(holderInner.style.marginLeft || '0');
+          const horizontalOffset = Number.isFinite(marginLeft)
+              ? Math.max(0, -marginLeft)
+              : 0;
+          shell.style.setProperty('--gn-v2-tree-horizontal-offset', `${horizontalOffset}px`);
+      };
+
+      syncHorizontalViewportOffset();
+      const observer = new MutationObserver(syncHorizontalViewportOffset);
+      observer.observe(holderInner, {
+          attributes: true,
+          attributeFilter: ['style'],
+      });
+
+      return () => {
+          observer.disconnect();
+          shell.style.removeProperty('--gn-v2-tree-horizontal-offset');
+      };
+  }, [
+      isV2Ui,
+      sidebarObjectVisibilitySignature,
+      v2ExplorerFilter,
+      v2TreeHorizontalScrollWidth,
+  ]);
 
   // 侧栏改宽时复位虚拟列表横滚（offsetLeft / marginLeft），避免左侧被拉空。
   // rc-virtual-list 不用 DOM scrollLeft，必须走 Tree.scrollTo({ left })。

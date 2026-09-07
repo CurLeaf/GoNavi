@@ -3198,6 +3198,7 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-list-holder-inne
 
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode {
   position: relative;
+  width: calc(100% + var(--gn-v2-tree-horizontal-offset, 0px)) !important;
   min-height: 26px !important;
   padding: 0 6px !important;
   align-items: center;
