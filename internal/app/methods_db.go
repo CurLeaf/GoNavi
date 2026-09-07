@@ -3292,7 +3292,7 @@ func tryGetOceanBaseOracleShowCreateStatement(dbInst db.Database, schemaName str
 
 func supportsCreateStatementFallback(dbType string) bool {
 	switch dbType {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "dameng":
 		return true
 	default:
 		return false
@@ -3467,7 +3467,7 @@ func buildFallbackCreateStatementWithText(dbType string, schemaName string, tabl
 		colName := quoteIdentByType(dbType, colNameRaw)
 		defParts := []string{fmt.Sprintf("%s %s", colName, colType)}
 
-		if dbType == "sqlserver" && strings.Contains(strings.ToLower(strings.TrimSpace(col.Extra)), "auto_increment") {
+		if supportsFallbackIdentityColumn(dbType, colType, col.Extra) {
 			defParts = append(defParts, "IDENTITY(1,1)")
 		}
 		if strings.EqualFold(strings.TrimSpace(col.Nullable), "NO") {
@@ -3512,6 +3512,28 @@ func buildFallbackCreateStatementWithText(dbType string, schemaName string, tabl
 		ddl.WriteString(strings.Join(columnCommentLines, "\n"))
 	}
 	return ddl.String(), nil
+}
+
+func supportsFallbackIdentityColumn(dbType string, columnType string, extra string) bool {
+	if !strings.Contains(strings.ToLower(strings.TrimSpace(extra)), "auto_increment") {
+		return false
+	}
+	if dbType == "sqlserver" {
+		return true
+	}
+	if dbType != "dameng" {
+		return false
+	}
+
+	// 达梦只允许整数列声明 IDENTITY；NUMBER 等类型强行追加会触发
+	// Error -2713（非法 IDENTITY 列类型）。GetColumns 对真实自增列会返回
+	// SMALLINT、INTEGER 或 BIGINT，因此仅在这些合法类型上还原该属性。
+	switch strings.ToUpper(strings.TrimSpace(columnType)) {
+	case "SMALLINT", "INTEGER", "BIGINT":
+		return true
+	default:
+		return false
+	}
 }
 
 type fallbackIndexGroup struct {
