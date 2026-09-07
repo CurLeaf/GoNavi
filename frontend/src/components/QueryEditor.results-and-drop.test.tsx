@@ -1099,6 +1099,45 @@ describe('QueryEditor external SQL save', () => {
     renderer.unmount();
   });
 
+  it('places the Dameng row limit before a trailing WITH UR clause', async () => {
+    storeState.connections[0].config.type = 'dameng';
+    storeState.connections[0].config.database = 'GXCM';
+    storeState.queryOptions.maxRows = 500;
+    const sql = [
+      'SELECT DISTINCT v.emp_id, v.emp_name, s.stru_order',
+      'FROM pub_stru s, pub_emp_view_all v',
+      'WHERE s.organ_id = v.emp_id',
+      '  AND v.emp_id IN (',
+      '    SELECT b.organ_id',
+      '    FROM pub_organ_view a, pub_organ_role b',
+      "    WHERE locate(',' || a.organ_id || ',', ',' || b.range_ids || ',') > 0",
+      '  )',
+      'ORDER BY s.stru_order WITH ur;',
+    ].join('\n');
+    editorState.value = sql;
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['emp_id'], rows: [{ emp_id: '1' }] }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'GXCM', query: sql })} />);
+    });
+    await act(async () => {
+      await findButton(renderer, '运行').props.onClick();
+      for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'dameng' }),
+      'GXCM',
+      sql.replace(' WITH ur;', ' LIMIT 500 OFFSET 0 WITH ur'),
+      'query-1',
+    );
+    renderer.unmount();
+  });
+
   it('executes a long commented Oracle anonymous block without blocking the UI thread', async () => {
     storeState.appearance.uiVersion = 'v2';
     storeState.connections[0].config.type = 'oracle';
