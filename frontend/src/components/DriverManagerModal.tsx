@@ -687,7 +687,8 @@ const DriverManagerModal: React.FC<{
   onClose: () => void;
   onBack?: () => void;
   onOpenGlobalProxySettings?: () => void;
-  onOpenDownloadSourceSettings?: () => void;
+  onSwitchDownloadSource?: () => void;
+  downloadSourceSwitching?: boolean;
   downloadSource?: string;
   embedded?: boolean;
 }> = ({
@@ -695,7 +696,8 @@ const DriverManagerModal: React.FC<{
   onClose,
   onBack,
   onOpenGlobalProxySettings,
-  onOpenDownloadSourceSettings,
+  onSwitchDownloadSource,
+  downloadSourceSwitching = false,
   downloadSource,
   embedded = false,
 }) => {
@@ -2539,7 +2541,7 @@ const DriverManagerModal: React.FC<{
           )
         ) : null}
 
-        {!embedded && onOpenDownloadSourceSettings ? (
+        {!embedded && onSwitchDownloadSource ? (
           <div
             className="driver-manager-mirror-chip"
             data-download-source={downloadSource}
@@ -2565,7 +2567,9 @@ const DriverManagerModal: React.FC<{
             <Button
               type="link"
               size="small"
-              onClick={onOpenDownloadSourceSettings}
+              onClick={onSwitchDownloadSource}
+              loading={downloadSourceSwitching}
+              disabled={downloadSourceSwitching}
               style={{ padding: 0, height: 'auto', fontWeight: 600 }}
             >
               {t('driver_manager.mirror_source.switch')}
@@ -2734,7 +2738,7 @@ const DriverManagerModal: React.FC<{
                     </Button>
                   </Tooltip>
                 </div>
-                {onOpenDownloadSourceSettings ? (
+                {onSwitchDownloadSource ? (
                   <div
                     className="driver-manager-mirror-chip is-compact"
                     data-download-source={downloadSource}
@@ -2758,7 +2762,9 @@ const DriverManagerModal: React.FC<{
                     <Button
                       type="link"
                       size="small"
-                      onClick={onOpenDownloadSourceSettings}
+                      onClick={onSwitchDownloadSource}
+                      loading={downloadSourceSwitching}
+                      disabled={downloadSourceSwitching}
                       style={{ padding: 0, height: 'auto', fontWeight: 600 }}
                     >
                       {t('driver_manager.mirror_source.switch')}

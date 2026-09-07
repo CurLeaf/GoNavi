@@ -14,6 +14,14 @@ const sidebarSource = readFileSync(
   fileURLToPath(new globalThis.URL('./components/Sidebar.tsx', import.meta.url)),
   'utf8',
 );
+const driverWorkbenchSource = readFileSync(
+  fileURLToPath(new globalThis.URL('./components/DriverManagerWorkbench.tsx', import.meta.url)),
+  'utf8',
+);
+const driverModalSource = readFileSync(
+  fileURLToPath(new globalThis.URL('./components/DriverManagerModal.tsx', import.meta.url)),
+  'utf8',
+);
 
 describe('settings center tool entries', () => {
 
@@ -187,6 +195,25 @@ describe('settings center tool entries', () => {
     expect(appCss).toMatch(
       /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.gonavi-settings-center-modal \.ant-btn-loading-icon \.anticon-spin \{[^}]*animation-duration: 1s !important;[^}]*animation-iteration-count: infinite !important;[^}]*\}/,
     );
+  });
+
+  it('switches mirrors in place from About and Driver Manager without navigating settings', () => {
+    const aboutStart = appSource.indexOf('className="gonavi-about-download-source"');
+    const aboutEnd = appSource.indexOf('</section>', aboutStart);
+    const aboutSource = appSource.slice(aboutStart, aboutEnd);
+    const driverPaneStart = appSource.indexOf("activeSettingsCenterPane.key === 'drivers'");
+    const driverPaneEnd = appSource.indexOf("activeSettingsCenterPane.key === 'snippet-settings'", driverPaneStart);
+    const driverPaneSource = appSource.slice(driverPaneStart, driverPaneEnd);
+
+    expect(aboutSource).toContain('getNextDownloadSource(downloadSource)');
+    expect(aboutSource).toContain('handleDownloadSourceChange');
+    expect(aboutSource).not.toContain('handleOpenDownloadSourceSettings');
+    expect(driverPaneSource).toContain('onSwitchDownloadSource');
+    expect(driverPaneSource).not.toContain("handleOpenSettingsCenterPane('services', 'download-source')");
+    expect(driverWorkbenchSource).toContain('handleSwitchDownloadSource');
+    expect(driverWorkbenchSource).not.toContain('requestDownloadSourceSettings');
+    expect(driverModalSource).toContain('onSwitchDownloadSource');
+    expect(driverModalSource).not.toContain('onOpenDownloadSourceSettings');
   });
 
   it('waits for the unsaved SQL confirmation before continuing an update install request', () => {

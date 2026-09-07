@@ -4,9 +4,9 @@ import {
   buildDriverManagerWorkbenchTab,
   DOWNLOAD_SOURCE_CHANGED_EVENT,
   DRIVER_MANAGER_WORKBENCH_TAB_ID,
+  getNextDownloadSource,
+  normalizeDownloadSource,
   notifyDownloadSourceChanged,
-  OPEN_DOWNLOAD_SOURCE_SETTINGS_EVENT,
-  requestDownloadSourceSettings,
 } from './driverManagerTab';
 
 describe('driverManagerTab', () => {
@@ -26,22 +26,13 @@ describe('driverManagerTab', () => {
     expect(buildDriverManagerWorkbenchTab().title).toBe(t('app.tools.entry.drivers.title'));
   });
 
-  it('requests download source settings from the workbench host', () => {
-    const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
-    const eventTarget = new EventTarget();
-    const listener = vi.fn();
-    Object.defineProperty(globalThis, 'window', { configurable: true, value: eventTarget });
-    try {
-      window.addEventListener(OPEN_DOWNLOAD_SOURCE_SETTINGS_EVENT, listener);
-      requestDownloadSourceSettings();
-      expect(listener).toHaveBeenCalledOnce();
-    } finally {
-      if (previousWindowDescriptor) {
-        Object.defineProperty(globalThis, 'window', previousWindowDescriptor);
-      } else {
-        Reflect.deleteProperty(globalThis, 'window');
-      }
-    }
+  it('cycles mirrors in place instead of opening the download source settings page', () => {
+    expect(normalizeDownloadSource(' BERO ')).toBe('bero');
+    expect(normalizeDownloadSource('GitHub')).toBe('github');
+    expect(getNextDownloadSource('cst')).toBe('bero');
+    expect(getNextDownloadSource('bero')).toBe('github');
+    expect(getNextDownloadSource('github')).toBe('cst');
+    expect(getNextDownloadSource('unknown')).toBe('bero');
   });
 
   it('notifies the workbench when the download source changes', () => {

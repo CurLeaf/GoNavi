@@ -127,9 +127,12 @@ import { downloadBrowserTextFile } from './utils/browserFileTransfer';
 import { buildDataSyncWorkbenchTab } from './utils/dataSyncTab';
 import {
   buildDriverManagerWorkbenchTab,
+  DOWNLOAD_SOURCE_CHANGED_EVENT,
+  getNextDownloadSource,
+  normalizeDownloadSource,
   notifyDownloadSourceChanged,
-  OPEN_DOWNLOAD_SOURCE_SETTINGS_EVENT,
   OPEN_GLOBAL_PROXY_SETTINGS_EVENT,
+  type DownloadSourceId,
 } from './utils/driverManagerTab';
 import {
   buildSettingsCenterWorkbenchTab,
@@ -633,13 +636,6 @@ type SettingsCenterPaneKey =
 type SettingsCenterPaneState = {
   key: SettingsCenterPaneKey;
   group: SettingsCenterGroupKey;
-};
-
-type DownloadSourceId = 'cst' | 'bero' | 'github';
-
-const normalizeDownloadSourceId = (value: unknown): DownloadSourceId => {
-  const normalized = String(value || '').trim().toLowerCase();
-  return normalized === 'bero' || normalized === 'github' ? normalized : 'cst';
 };
 
 const isToolCenterGroupKey = (group: SettingsCenterGroupKey): group is ToolCenterGroupKey => (
@@ -1579,7 +1575,7 @@ function App() {
       void backendApp.GetDownloadSourceConfig()
           .then((result: { source?: string } | undefined) => {
               if (!cancelled) {
-                  setDownloadSource(normalizeDownloadSourceId(result?.source));
+                  setDownloadSource(normalizeDownloadSource(result?.source));
               }
           })
           .catch((error: unknown) => {
@@ -1592,8 +1588,16 @@ function App() {
       };
   }, []);
 
+  useEffect(() => {
+      const syncDownloadSource = (event: Event) => {
+          setDownloadSource(normalizeDownloadSource((event as CustomEvent<{ source?: unknown }>).detail?.source));
+      };
+      window.addEventListener(DOWNLOAD_SOURCE_CHANGED_EVENT, syncDownloadSource);
+      return () => window.removeEventListener(DOWNLOAD_SOURCE_CHANGED_EVENT, syncDownloadSource);
+  }, []);
+
   const handleDownloadSourceChange = useCallback(async (value: DownloadSourceId) => {
-      const nextSource = normalizeDownloadSourceId(value);
+      const nextSource = normalizeDownloadSource(value);
       const previousSource = downloadSource;
       setDownloadSource(nextSource);
       notifyDownloadSourceChanged(nextSource);
@@ -1604,7 +1608,7 @@ function App() {
       setDownloadSourceSaving(true);
       try {
           const result = await backendApp.SaveDownloadSourceConfig(nextSource);
-          const savedSource = normalizeDownloadSourceId(result?.source ?? nextSource);
+          const savedSource = normalizeDownloadSource(result?.source ?? nextSource);
           setDownloadSource(savedSource);
           notifyDownloadSourceChanged(savedSource);
           void message.success(t('app.download_source.message.saved'));
@@ -4899,16 +4903,6 @@ function App() {
       return () => window.removeEventListener(OPEN_GLOBAL_PROXY_SETTINGS_EVENT, openGlobalProxySettings);
   }, [handleOpenGlobalProxySettings]);
 
-  const handleOpenDownloadSourceSettings = useCallback(() => {
-      handleOpenSettingsCenterPane('services', 'download-source');
-  }, [handleOpenSettingsCenterPane]);
-
-  useEffect(() => {
-      const openDownloadSourceSettings = () => handleOpenDownloadSourceSettings();
-      window.addEventListener(OPEN_DOWNLOAD_SOURCE_SETTINGS_EVENT, openDownloadSourceSettings);
-      return () => window.removeEventListener(OPEN_DOWNLOAD_SOURCE_SETTINGS_EVENT, openDownloadSourceSettings);
-  }, [handleOpenDownloadSourceSettings]);
-
   const handleCloseGlobalProxySettings = useCallback(() => {
       const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
       setIsProxyModalOpen(false);
@@ -6619,7 +6613,9 @@ function App() {
                     <Button
                       type="link"
                       size="small"
-                      onClick={handleOpenDownloadSourceSettings}
+                      onClick={() => void handleDownloadSourceChange(getNextDownloadSource(downloadSource))}
+                      loading={downloadSourceSaving}
+                      disabled={downloadSourceSaving}
                       className="gonavi-about-download-source-switch"
                     >
                         {t('driver_manager.mirror_source.switch')}
@@ -8769,7 +8765,8 @@ function App() {
                       open
                       onClose={handleCancelSettingsCenterPane}
                       onOpenGlobalProxySettings={() => handleOpenSettingsCenterPane('services', 'proxy')}
-                      onOpenDownloadSourceSettings={() => handleOpenSettingsCenterPane('services', 'download-source')}
+                      onSwitchDownloadSource={() => void handleDownloadSourceChange(getNextDownloadSource(downloadSource))}
+                      downloadSourceSwitching={downloadSourceSaving}
                       downloadSource={downloadSource}
                     />
                   </div>
