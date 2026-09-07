@@ -2007,18 +2007,6 @@ export const DataSyncWorkbenchShell: React.FC<DataSyncWorkbenchShellProps> = ({
                       {t('workbench.task_actions')}
                     </summary>
                     <div className="gn-data-sync-task-menu__panel" role="group">
-                      {selectedTask.lifecycle === 'draft' ? (
-                        <button
-                          type="button"
-                          disabled={saving || preflighting}
-                          onClick={() => {
-                            setTaskMenuOpen(false);
-                            void publishTask();
-                          }}
-                        >
-                          {t('lifecycle.publish_ready')}
-                        </button>
-                      ) : null}
                       {selectedTask.lifecycle === 'ready' &&
                       selectedTask.trigger.mode !== 'manual' ? (
                         <button
@@ -2144,10 +2132,17 @@ export const DataSyncWorkbenchShell: React.FC<DataSyncWorkbenchShellProps> = ({
                     disabled={
                       saving ||
                       preflighting ||
-                      !dirtyTaskIds.has(selectedTask.id) ||
+                      (!dirtyTaskIds.has(selectedTask.id) &&
+                        selectedTask.lifecycle !== 'draft') ||
                       !saveApprovalReady
                     }
-                    onClick={() => void saveTask()}
+                    onClick={() => {
+                      if (selectedTask.lifecycle === 'draft') {
+                        void publishTask();
+                        return;
+                      }
+                      void saveTask();
+                    }}
                   >
                     {saving ? t('workbench.saving') : t('workbench.save')}
                   </button>

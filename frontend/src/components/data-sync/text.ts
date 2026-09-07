@@ -21,7 +21,7 @@ const zhCN = {
   'workbench.delete_confirm_title': '删除任务',
   'workbench.delete_confirm':
     '确定永久删除该任务吗？任务的运行记录、检查点和错误行将一并删除，且无法恢复。',
-  'workbench.lifecycle_before_run': '任务尚未发布为就绪，请先发布再运行',
+  'workbench.lifecycle_before_run': '任务尚未保存为就绪，请先保存草稿再运行',
   'workbench.save_before_run': '当前预检已通过，请先保存任务',
   'workbench.preflight_then_save_before_run': '请先运行预检，再保存任务',
   'workbench.preflight_before_run': '请先运行预检并确认任务版本有效',
@@ -50,7 +50,6 @@ const zhCN = {
   'task_list.lifecycle.enabled': '已启用',
   'task_list.lifecycle.paused': '已暂停',
   'task_list.lifecycle.archived': '已归档',
-  'lifecycle.publish_ready': '发布为就绪',
   'lifecycle.enable_schedule': '启用调度',
   'lifecycle.pause': '暂停任务',
   'lifecycle.resume_schedule': '重新启用',
@@ -571,7 +570,7 @@ const enUS: Record<DataSyncWorkbenchTextKey, string> = {
   'workbench.delete_confirm_title': 'Delete task',
   'workbench.delete_confirm':
     'Permanently delete this task? Its runs, checkpoints, and error rows will be removed together, and this cannot be undone.',
-  'workbench.lifecycle_before_run': 'Publish the task as ready before running it',
+  'workbench.lifecycle_before_run': 'Save the draft as ready before running it',
   'workbench.save_before_run': 'Current preflight passed; save the task first',
   'workbench.preflight_then_save_before_run': 'Run preflight before saving the task',
   'workbench.preflight_before_run': 'Run preflight and confirm the task revision before starting',
@@ -600,7 +599,6 @@ const enUS: Record<DataSyncWorkbenchTextKey, string> = {
   'task_list.lifecycle.enabled': 'Enabled',
   'task_list.lifecycle.paused': 'Paused',
   'task_list.lifecycle.archived': 'Archived',
-  'lifecycle.publish_ready': 'Publish as ready',
   'lifecycle.enable_schedule': 'Enable schedule',
   'lifecycle.pause': 'Pause task',
   'lifecycle.resume_schedule': 'Re-enable',
