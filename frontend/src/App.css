@@ -2994,7 +2994,7 @@ body[data-ui-version="v2"] .gn-v2-titlebar .titlebar-window-controls > .ant-btn.
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    width: max-content;
+    width: 232px;
     max-width: 100%;
     margin-top: 10px;
     padding: 6px 10px 6px 12px;
@@ -3081,13 +3081,18 @@ body[data-theme='dark'] .gonavi-about-download-source:hover {
     color: var(--ant-color-primary, #1677ff);
 }
 
+.driver-manager-mirror-chip.is-compact > .ant-btn,
+.gonavi-about-download-source > .ant-btn {
+    margin-left: auto;
+}
+
 /* 工具栏内嵌镜像源：按内容收窄，不拉满整行 */
 .driver-manager-mirror-chip.is-compact {
     display: inline-flex;
     align-items: center;
     justify-content: flex-start;
     flex-wrap: nowrap;
-    width: max-content;
+    width: 232px;
     min-width: 0;
     max-width: 100%;
     gap: 8px;
@@ -3095,7 +3100,7 @@ body[data-theme='dark'] .gonavi-about-download-source:hover {
     padding: 0 12px 0 14px;
     margin-left: auto;
     margin-right: 0;
-    flex: 0 0 auto;
+    flex: 0 0 232px;
     overflow: hidden;
     border-radius: 8px;
     box-sizing: border-box;
@@ -3144,7 +3149,7 @@ body[data-theme='dark'] .gonavi-about-download-source:hover {
     justify-content: space-between;
     align-items: center;
     flex-wrap: nowrap;
-    gap: 8px;
+    gap: 6px;
     width: 100%;
     max-width: 100%;
     min-width: 0;
@@ -3160,8 +3165,12 @@ body[data-theme='dark'] .gonavi-about-download-source:hover {
 .driver-manager-list-search-row-left {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     flex: 0 0 auto;
+}
+
+.driver-manager-list-search-row.is-embedded .driver-manager-list-search-row-left .ant-btn {
+    padding-inline: 12px;
 }
 
 .driver-manager-list-search-row {
@@ -3360,7 +3369,7 @@ body[data-theme='dark'] .gonavi-about-download-source:hover {
 /* ── 双栏：左驱动清单 + 右详情面板 ── */
 .driver-manager-columns {
     display: grid;
-    grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
+    grid-template-columns: minmax(300px, 440px) minmax(0, 1fr);
     gap: 0;
     align-items: stretch;
     flex: 1 1 auto;

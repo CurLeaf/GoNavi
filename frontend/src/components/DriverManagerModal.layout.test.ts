@@ -78,7 +78,7 @@ describe('DriverManagerModal embedded layout', () => {
   it('keeps the two-pane master-detail driver workbench layout', () => {
     // Two-pane body: fixed-width driver list pane + fluid detail pane.
     expect(appCss).toMatch(
-      /\.driver-manager-columns\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(300px, 400px\) minmax\(0, 1fr\)/s,
+      /\.driver-manager-columns\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(300px, 440px\) minmax\(0, 1fr\)/s,
     );
     expect(appCss).toMatch(
       /\.driver-manager-list-pane\s*\{[^}]*padding-right:\s*16px[^}]*border-right:\s*1px solid/s,
@@ -103,6 +103,18 @@ describe('DriverManagerModal embedded layout', () => {
     );
     expect(appCss).toContain('.driver-manager-footer-actions.is-status-only');
     expect(appCss).toContain('.driver-manager-bulkbar.is-embedded-toolbar');
+    expect(appCss).toMatch(
+      /\.driver-manager-list-search-row\.is-embedded\s*\{[^}]*flex-wrap:\s*nowrap[^}]*gap:\s*6px/s,
+    );
+    expect(appCss).toMatch(
+      /\.driver-manager-mirror-chip\.is-compact\s*\{[^}]*width:\s*232px[^}]*flex:\s*0 0 232px/s,
+    );
+    expect(appCss).toMatch(
+      /\.gonavi-about-download-source\s*\{[^}]*width:\s*232px/s,
+    );
+    expect(appCss).toMatch(
+      /\.driver-manager-mirror-chip\.is-compact\s*>\s*\.ant-btn,\s*\.gonavi-about-download-source\s*>\s*\.ant-btn\s*\{[^}]*margin-left:\s*auto/s,
+    );
     expect(appCss).toMatch(/\.driver-manager-filterbar\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/s);
     expect(appCss).toMatch(/\.driver-manager-filter-chip\s*\{[^}]*padding:\s*6px 8px/s);
     // The old single-column card list chrome is gone.
