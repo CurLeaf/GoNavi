@@ -313,6 +313,7 @@ type ConnectionConfig struct {
 	JVM                      JVMConfig                  `json:"jvm,omitempty"`                      // JVM connector config
 	runtimeDBOverride        string                     // App-only selected database; never persisted or sent over RPC.
 	runtimeDBOverrideSet     bool                       // Distinguishes an explicit server-level override from no override.
+	oracleSchema             string                     // App-only selected Oracle schema; never persisted or sent over RPC.
 	resolvedSavedSnapshot    bool                       // App-only marker for one lock-consistent metadata and secret snapshot.
 }
 
@@ -339,6 +340,24 @@ func (c ConnectionConfig) HasRuntimeDatabaseOverride() bool {
 func (c ConnectionConfig) WithoutRuntimeDatabaseOverride() ConnectionConfig {
 	c.runtimeDBOverride = ""
 	c.runtimeDBOverrideSet = false
+	return c
+}
+
+// WithRuntimeOracleCurrentSchema carries the caller-selected Oracle schema
+// without replacing the connection's service name or SID.
+func (c ConnectionConfig) WithRuntimeOracleCurrentSchema(schema string) ConnectionConfig {
+	c.oracleSchema = strings.TrimSpace(schema)
+	return c
+}
+
+// RuntimeOracleCurrentSchema returns the caller-selected Oracle schema.
+func (c ConnectionConfig) RuntimeOracleCurrentSchema() string {
+	return c.oracleSchema
+}
+
+// WithoutRuntimeOracleCurrentSchema removes the app-only Oracle schema context.
+func (c ConnectionConfig) WithoutRuntimeOracleCurrentSchema() ConnectionConfig {
+	c.oracleSchema = ""
 	return c
 }
 

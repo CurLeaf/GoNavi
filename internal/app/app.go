@@ -720,7 +720,18 @@ func resolveFileDatabaseDSN(config connection.ConnectionConfig) string {
 // Helper: Generate a unique key for the connection config
 func getCacheKey(config connection.ConnectionConfig) string {
 	normalized := normalizeCacheKeyConfig(config)
-	b, _ := json.Marshal(normalized)
+	var b []byte
+	if currentSchema := db.QuoteOracleSchemaIdentifier(normalized.RuntimeOracleCurrentSchema()); normalized.Type == "oracle" && currentSchema != "" {
+		b, _ = json.Marshal(struct {
+			Connection          connection.ConnectionConfig `json:"connection"`
+			OracleCurrentSchema string                      `json:"oracleCurrentSchema"`
+		}{
+			Connection:          normalized,
+			OracleCurrentSchema: currentSchema,
+		})
+	} else {
+		b, _ = json.Marshal(normalized)
+	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
