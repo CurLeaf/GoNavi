@@ -71,7 +71,7 @@ const supportsSqlHashLineComment = (dbType: string): boolean => {
   return !normalized || normalized === 'clickhouse' || MYSQL_DASH_COMMENT_DIALECTS.has(normalized);
 };
 
-const isSqlDashLineCommentStart = (dbType: string, next2: string): boolean => {
+export const isSqlDashLineCommentStart = (dbType: string, next2: string): boolean => {
   const normalized = normalizeSqlLexicalDbType(dbType);
   return !MYSQL_DASH_COMMENT_DIALECTS.has(normalized) || !next2 || isWhitespace(next2);
 };

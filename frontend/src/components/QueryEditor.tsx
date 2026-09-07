@@ -9835,8 +9835,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       if (!conn) return;
       const executionDbName = target?.executionDbName ?? currentDb;
       if (!target?.page?.baseSql || !canUseQueryEditorDatabaseContext(conn, executionDbName) || resultTotalCountRequestsRef.current[resultKey]) return;
-      const countSql = buildQueryResultCountSql(target.page.baseSql);
-      if (!countSql) return;
       const config = {
           ...conn.config,
           port: Number(conn.config.port),
@@ -9851,6 +9849,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           String((config as any).driver || ''),
           { oceanBaseProtocol: String((config as any).oceanBaseProtocol || '') },
       )).toLowerCase();
+      const countSql = buildQueryResultCountSql(target.page.baseSql, normalizedDbType);
+      if (!countSql) return;
       const sequence = ++resultTotalCountSeqRef.current;
       resultTotalCountRequestsRef.current[resultKey] = { sequence, queryId: '' };
       setResultSets(prev => prev.map(rs =>
