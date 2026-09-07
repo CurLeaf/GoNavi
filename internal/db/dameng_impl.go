@@ -314,8 +314,7 @@ func (d *DamengDB) GetCreateStatement(dbName, tableName string) (string, error) 
 	}
 
 	if len(data) > 0 {
-		if val, ok := data[0]["DDL"]; ok {
-			ddl := fmt.Sprintf("%v", val)
+		if ddl := getDamengRowString(data[0], "DDL"); ddl != "" {
 			commentData, _, commentErr := d.Query(buildDamengTableCommentQuery(dbName, tableName))
 			if commentErr != nil {
 				logger.Warnf("达梦 GetCreateStatement 表注释元数据查询失败，已返回基础 DDL：%v", commentErr)
