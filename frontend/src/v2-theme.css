@@ -24,17 +24,18 @@ body[data-ui-version="v2"][data-theme="light"] {
   --gn-font-sans: "Inter", "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", "Ubuntu", sans-serif;
   --gn-font-mono: "JetBrains Mono", "Noto Sans Mono CJK SC", "Noto Sans Mono", ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
 
-  --gn-bg-app:      #f6f6f4;
-  --gn-bg-chrome:   #ececea;
-  --gn-bg-chrome-strong: #e8eeeb;
-  --gn-bg-panel:    #ffffff;
-  --gn-bg-panel-2:  #fafaf8;
+  --gn-bg-app:      rgb(246 246 244 / var(--gn-window-opacity, 1));
+  --gn-bg-chrome:   rgb(236 236 234 / var(--gn-window-opacity, 1));
+  --gn-bg-chrome-strong: rgb(232 238 235 / var(--gn-window-opacity, 1));
+  --gn-bg-titlebar: rgb(250 250 248 / var(--gn-window-opacity, 1));
+  --gn-bg-panel:    rgb(255 255 255 / var(--gn-window-opacity, 1));
+  --gn-bg-panel-2:  rgb(250 250 248 / var(--gn-window-opacity, 1));
   /* All Monaco editors share this surface token (see .gn-monaco-surface). */
   --gn-monaco-bg:   var(--gn-bg-panel);
   --gn-bg-hover:    rgba(15, 23, 42, 0.045);
   --gn-bg-active:   rgba(15, 23, 42, 0.075);
   --gn-bg-selected: rgba(34, 197, 94, 0.10);
-  --gn-bg-input:    #ffffff;
+  --gn-bg-input:    rgb(255 255 255 / var(--gn-window-opacity, 1));
 
   --gn-fg-1: #0c1322;
   --gn-fg-2: #1f2937;
@@ -77,22 +78,23 @@ body[data-ui-version="v2"][data-theme="dark"] {
   --gn-font-sans: "Inter", "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", "Ubuntu", sans-serif;
   --gn-font-mono: "JetBrains Mono", "Noto Sans Mono CJK SC", "Noto Sans Mono", ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
 
-  --gn-bg-app:      #0c0e12;
-  --gn-bg-chrome:   #14171c;
-  --gn-bg-chrome-strong: #11161b;
-  --gn-bg-panel:    #161a21;
-  --gn-bg-panel-2:  #1b1f27;
+  --gn-bg-app:      rgb(12 14 18 / var(--gn-window-opacity, 1));
+  --gn-bg-chrome:   rgb(20 23 28 / var(--gn-window-opacity, 1));
+  --gn-bg-chrome-strong: rgb(17 22 27 / var(--gn-window-opacity, 1));
+  --gn-bg-titlebar: rgb(27 31 39 / var(--gn-window-opacity, 1));
+  --gn-bg-panel:    rgb(22 26 33 / var(--gn-window-opacity, 1));
+  --gn-bg-panel-2:  rgb(27 31 39 / var(--gn-window-opacity, 1));
   --gn-monaco-bg:   var(--gn-bg-panel);
   --gn-bg-hover:    rgba(255, 255, 255, 0.05);
   --gn-bg-active:   rgba(255, 255, 255, 0.08);
   --gn-bg-selected: rgba(34, 197, 94, 0.14);
-  --gn-bg-input:    #0f1217;
+  --gn-bg-input:    rgb(15 18 23 / var(--gn-window-opacity, 1));
 
-  --gn-fg-1: #f1f3f5;
-  --gn-fg-2: #d6dade;
-  --gn-fg-3: #a8aeb5;
-  --gn-fg-4: #80868f;
-  --gn-fg-5: #5a6068;
+  --gn-fg-1: #ffffff;
+  --gn-fg-2: #f5f5f5;
+  --gn-fg-3: #e6e6e6;
+  --gn-fg-4: #d9d9d9;
+  --gn-fg-5: #cccccc;
 
   --gn-br-1: rgba(255, 255, 255, 0.06);
   --gn-br-2: rgba(255, 255, 255, 0.10);
@@ -191,7 +193,7 @@ body[data-ui-version="v2"] [class*="monospace"] {
    ────────────────────────────────────────────────────────── */
 
 body[data-ui-version="v2"] .ant-layout {
-  background: var(--gn-bg-app) !important;
+  background: transparent !important;
 }
 
 /* 主内容区与左侧 sider 同用 panel-2：原先 app 近黑、panel 更深一档，
@@ -2149,7 +2151,7 @@ body[data-ui-version="v2"] h4.ant-typography {
 
 /* ─── V2 structural shell: redesigned sidebar / workbench ─ */
 body[data-ui-version="v2"] .gn-v2-sidebar-shell {
-  background: var(--gn-bg-panel-2);
+  background: transparent;
 }
 
 body[data-ui-version="v2"] .gn-v2-app-sider {
@@ -2161,7 +2163,7 @@ body[data-ui-version="v2"] .gn-v2-sidebar-redesign {
   --gn-v2-rail-scale: calc(var(--gn-ui-scale, 1) * var(--gn-sidebar-rail-scale, 1));
   --gn-v2-explorer-scale: calc(var(--gn-ui-scale, 1) * var(--gn-sidebar-rail-scale, 1));
   width: 100%;
-  background: var(--gn-bg-panel-2);
+  background: transparent;
   overflow: hidden;
 }
 
@@ -2535,7 +2537,7 @@ body[data-ui-version="v2"] .gn-v2-rail-create-label {
 body[data-ui-version="v2"] .gn-v2-object-explorer {
   min-width: 0;
   flex: 1 1 0;
-  background: var(--gn-bg-panel-2);
+  background: transparent;
   overflow: hidden;
   container-type: inline-size;
   container-name: gn-v2-object-explorer;
@@ -2554,7 +2556,7 @@ body[data-ui-version="v2"] .gn-v2-explorer-actions {
   overflow-x: auto;
   overflow-y: hidden;
   border-bottom: none;
-  background: var(--gn-bg-panel-2);
+  background: transparent;
   scrollbar-width: none;
 }
 
@@ -4053,7 +4055,7 @@ body[data-ui-version="v2"] .gn-v2-empty-workbench {
   flex-direction: column;
   gap: 0;
   padding: 0;
-  background: var(--gn-bg-panel-2);
+  background: transparent;
   overflow: auto;
   overscroll-behavior: contain;
 }
@@ -4073,7 +4075,7 @@ body[data-ui-version="v2"] .gn-v2-empty-hero {
   flex-direction: column;
   justify-content: flex-start;
   min-height: 0;
-  background: var(--gn-bg-panel-2);
+  background: transparent;
   padding: 24px 28px 18px 30px;
 }
 
@@ -4141,7 +4143,7 @@ body[data-ui-version="v2"] .gn-v2-empty-resource-card {
   flex-direction: column;
   border: 0.5px solid var(--gn-br-1);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--gn-bg-panel-2) 90%, var(--gn-bg-panel) 10%);
+  background: transparent;
   overflow: hidden;
 }
 
@@ -4405,7 +4407,7 @@ body[data-ui-version="v2"] .gn-v2-app-root {
 body[data-ui-version="v2"] .gn-v2-titlebar {
   position: relative;
   overflow: visible;
-  background: var(--gn-bg-panel-2) !important;
+  background: var(--gn-bg-titlebar) !important;
   border: 0 !important;
   box-shadow: none !important;
 }
@@ -4461,7 +4463,7 @@ body[data-ui-version="v2"] .gn-v2-titlebar-brand {
 }
 
 body[data-ui-version="v2"] .gn-v2-app-shell {
-  background: var(--gn-bg-app) !important;
+  background: transparent !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-app-sider {
@@ -4469,11 +4471,11 @@ body[data-ui-version="v2"] .gn-v2-app-sider {
 }
 
 body[data-ui-version="v2"] .gn-v2-workspace-shell {
-  background: var(--gn-bg-app) !important;
+  background: transparent !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-workspace-body {
-  background: var(--gn-bg-app);
+  background: transparent;
 }
 
 body[data-ui-version="v2"] .gn-v2-workspace-main {
@@ -4522,7 +4524,7 @@ body[data-ui-version="v2"] .gn-v2-tab-workbench {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--gn-bg-panel-2);
+  background: transparent;
 }
 
 body[data-ui-version="v2"] .gn-v2-main-tabs > .ant-tabs-nav {
@@ -6682,4 +6684,3 @@ body[data-ui-version="v2"] .gonavi-settings-center-pane-scroll,
 body[data-ui-version="v2"] .gonavi-settings-center-content {
   scrollbar-gutter: auto;
 }
-
