@@ -3493,12 +3493,12 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn
   background: transparent !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected:has(.gn-v2-tree-title:not(.is-mono)) {
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected {
   background: color-mix(in srgb, var(--gn-accent) 10%, var(--gn-bg-selected)) !important;
   border-radius: 6px;
 }
 
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected:has(.gn-v2-tree-title:not(.is-mono)):hover {
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected:hover {
   background: color-mix(in srgb, var(--gn-accent) 14%, var(--gn-bg-selected)) !important;
 }
 
@@ -3506,12 +3506,12 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn
   background: var(--gn-bg-active) !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected:has(.gn-v2-tree-title:not(.is-mono)):active {
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected:active {
   background: color-mix(in srgb, var(--gn-accent) 16%, var(--gn-bg-selected)) !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected:has(.gn-v2-tree-title:not(.is-mono)) .ant-tree-node-content-wrapper,
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected:has(.gn-v2-tree-title:not(.is-mono)) .ant-tree-node-content-wrapper.ant-tree-node-selected {
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected .ant-tree-node-content-wrapper,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected .ant-tree-node-content-wrapper.ant-tree-node-selected {
   background: transparent !important;
   box-shadow: none !important;
 }

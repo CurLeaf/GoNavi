@@ -1584,6 +1584,20 @@ describe('Sidebar locate toolbar', () => {
     expect(css).not.toContain('.gn-v2-tree-connection-meta');
   });
 
+  it('paints selected table nodes across the full tree row like databases and connections', () => {
+    const css = readV2ThemeCss();
+
+    expect(css).toMatch(
+      /\.gn-v2-explorer-tree-shell \.ant-tree-treenode\.ant-tree-treenode-selected \{[^}]*background: color-mix\(in srgb, var\(--gn-accent\) 10%, var\(--gn-bg-selected\)\) !important;[^}]*border-radius: 6px;/s,
+    );
+    expect(css).toMatch(
+      /\.gn-v2-explorer-tree-shell \.ant-tree-treenode\.ant-tree-treenode-selected \.ant-tree-node-content-wrapper,[\s\S]*?\.gn-v2-explorer-tree-shell \.ant-tree-treenode\.ant-tree-treenode-selected \.ant-tree-node-content-wrapper\.ant-tree-node-selected \{[^}]*background: transparent !important;[^}]*box-shadow: none !important;/s,
+    );
+    expect(css).not.toMatch(
+      /\.ant-tree-treenode\.ant-tree-treenode-selected:has\(\.gn-v2-tree-title:not\(\.is-mono\)\)/,
+    );
+  });
+
   it('shows the v2 tree vertical scrollbar only during user scrolling', () => {
     const css = readV2ThemeCss();
     const source = readSourceFile('./Sidebar.tsx');
