@@ -3111,6 +3111,8 @@ body[data-ui-version="v2"] .gn-v2-explorer-toolbar {
 
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell {
   --gn-v2-tree-horizontal-scroll-reserve: 32px;
+  --gn-v2-tree-trailing-inset: 12px;
+  --gn-v2-tree-trailing-status-slot: 16px;
   margin: 0;
   border: 0;
   border-radius: 0;
@@ -3124,7 +3126,7 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .sidebar-tree-scroll-conte
   min-height: 0;
   height: 100%;
   box-sizing: border-box;
-  padding: 6px 4px 8px;
+  padding: 6px 8px 8px;
 }
 
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree {
@@ -3246,7 +3248,7 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-indent-unit {
 }
 
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-node-content-wrapper {
-  min-width: 100%;
+  min-width: 0;
   width: max-content !important;
   min-height: 26px !important;
   padding: 0 6px 0 6px !important;
@@ -3312,7 +3314,11 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-iconEle [data-db
 }
 
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection) .ant-tree-iconEle,
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="saved-query-group"]) .ant-tree-iconEle {
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection-group) .ant-tree-iconEle,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="all-saved-queries"]) .ant-tree-iconEle,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="external-sql-root"]) .ant-tree-iconEle,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="saved-query-group"]) .ant-tree-iconEle,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-folder-icon) .ant-tree-iconEle {
   width: 20px !important;
   min-width: 20px !important;
   height: 20px !important;
@@ -3322,10 +3328,19 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection) .ant-tree-iconEle img,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection) .ant-tree-iconEle svg,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection) .ant-tree-iconEle [data-db-icon-frame="true"],
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection-group) .ant-tree-iconEle > *,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection-group) .ant-tree-iconEle img,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection-group) .ant-tree-iconEle svg,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="all-saved-queries"]) .ant-tree-iconEle > *,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="all-saved-queries"]) .ant-tree-iconEle svg,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="external-sql-root"]) .ant-tree-iconEle > *,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="external-sql-root"]) .ant-tree-iconEle svg,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="saved-query-group"]) .ant-tree-iconEle > *,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="saved-query-group"]) .ant-tree-iconEle img,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="saved-query-group"]) .ant-tree-iconEle svg,
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="saved-query-group"]) .ant-tree-iconEle [data-db-icon-frame="true"] {
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="saved-query-group"]) .ant-tree-iconEle [data-db-icon-frame="true"],
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-folder-icon) .ant-tree-iconEle > *,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-folder-icon) .ant-tree-iconEle svg {
   max-width: 20px !important;
   max-height: 20px !important;
 }
@@ -3344,18 +3359,30 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-iconEle .anticon
 }
 
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .gn-v2-tree-folder-icon {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 16px;
+  flex: 0 0 20px;
 }
 
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .gn-v2-tree-folder-icon .anticon-folder,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .gn-v2-tree-folder-icon .anticon-folder-open {
   color: #d48806;
-  font-size: 14px;
+  font-size: 17px;
+  line-height: 1;
+}
+
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection-group) .ant-tree-iconEle .anticon-folder,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection-group) .ant-tree-iconEle .anticon-folder-open,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="all-saved-queries"]) .ant-tree-iconEle .anticon-folder,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="all-saved-queries"]) .ant-tree-iconEle .anticon-folder-open,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="external-sql-root"]) .ant-tree-iconEle .anticon-folder,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="external-sql-root"]) .ant-tree-iconEle .anticon-folder-open {
+  color: #d48806;
+  font-size: 17px;
+  line-height: 1;
 }
 
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-title {
@@ -3375,13 +3402,13 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-title > span {
 
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-title > .gn-v2-tree-title {
   width: max-content;
-  min-width: 100%;
+  min-width: 0;
   overflow: visible;
 }
 
 body[data-ui-version="v2"] .gn-v2-tree-title {
   width: max-content;
-  min-width: 100%;
+  min-width: 0;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -3395,7 +3422,7 @@ body[data-ui-version="v2"] .gn-v2-tree-title {
 
 body[data-ui-version="v2"] .gn-v2-tree-title.is-mono {
   width: max-content;
-  min-width: 100%;
+  min-width: 0;
   flex: 0 0 auto;
 }
 
@@ -3454,27 +3481,8 @@ body[data-ui-version="v2"] .gn-v2-tree-title.is-connection {
 
 /* Host / folder rows fill the sidebar and ellipsize; object identifiers keep
    the existing horizontal scroll so long table names stay readable. */
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title:not(.is-mono)) {
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-}
+/* 可见层长标签按内容撑开（横滚由 estimate 按展开层计算）；短标签自然不溢出 */
 
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title:not(.is-mono)) .ant-tree-node-content-wrapper {
-  width: auto !important;
-  min-width: 0 !important;
-  flex: 1 1 auto;
-  overflow: hidden;
-}
-
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title:not(.is-mono)) .ant-tree-title,
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title:not(.is-mono)) .ant-tree-title > span,
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title:not(.is-mono)) .ant-tree-title > .gn-v2-tree-title {
-  width: 100%;
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-}
 
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title:not(.is-mono)):hover {
   background: var(--gn-bg-hover) !important;
@@ -3485,12 +3493,12 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn
   background: transparent !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected:has(.gn-v2-tree-title:not(.is-mono)) {
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected {
   background: color-mix(in srgb, var(--gn-accent) 10%, var(--gn-bg-selected)) !important;
   border-radius: 6px;
 }
 
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected:has(.gn-v2-tree-title:not(.is-mono)):hover {
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected:hover {
   background: color-mix(in srgb, var(--gn-accent) 14%, var(--gn-bg-selected)) !important;
 }
 
@@ -3498,56 +3506,30 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn
   background: var(--gn-bg-active) !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected:has(.gn-v2-tree-title:not(.is-mono)):active {
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected:active {
   background: color-mix(in srgb, var(--gn-accent) 16%, var(--gn-bg-selected)) !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected:has(.gn-v2-tree-title:not(.is-mono)) .ant-tree-node-content-wrapper,
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected:has(.gn-v2-tree-title:not(.is-mono)) .ant-tree-node-content-wrapper.ant-tree-node-selected {
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected .ant-tree-node-content-wrapper,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode.ant-tree-treenode-selected .ant-tree-node-content-wrapper.ant-tree-node-selected {
   background: transparent !important;
   box-shadow: none !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-tree-title:not(.is-mono) {
-  width: 100%;
+  width: max-content;
   min-width: 0;
 }
 
 body[data-ui-version="v2"] .gn-v2-tree-title.is-connection .gn-v2-tree-connection-copy {
-  order: 1;
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
+  min-width: max-content;
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-status) {
-  width: 100%;
-  max-width: 100%;
-}
-
+/* 状态点绝对定位，行宽仍按内容；只留右侧槽位 */
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-status) .ant-tree-node-content-wrapper {
-  position: relative;
-  width: auto !important;
-  min-width: 0 !important;
-  flex: 1 1 auto;
-  overflow: hidden;
-}
-
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-status) .ant-tree-title,
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-status) .ant-tree-title > .gn-v2-tree-title {
-  width: 100%;
-  min-width: 0;
-  padding-right: 18px;
-}
-
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .gn-v2-tree-status {
-  position: absolute;
-  top: 50%;
-  right: 6px;
-  z-index: 1;
-  margin: 0;
-  transform: translateY(-50%);
-  pointer-events: none;
+  padding-right: calc(var(--gn-v2-tree-trailing-inset, 12px) + var(--gn-v2-tree-trailing-status-slot, 16px) + 12px) !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-tree-title.is-connection .gn-v2-tree-label,
@@ -3557,10 +3539,10 @@ body[data-ui-version="v2"] .gn-v2-tree-title[data-node-type="database"] .gn-v2-t
 body[data-ui-version="v2"] .gn-v2-tree-title[data-node-type="queries-folder"] .gn-v2-tree-label,
 body[data-ui-version="v2"] .gn-v2-tree-title[data-node-type="external-sql-root"] .gn-v2-tree-label {
   display: block;
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 0 0 auto;
+  min-width: max-content;
+  overflow: visible;
+  text-overflow: clip;
   white-space: nowrap;
 }
 
@@ -3568,13 +3550,64 @@ body[data-ui-version="v2"] .gn-v2-tree-title.is-connection-group .gn-v2-tree-cou
 body[data-ui-version="v2"] .gn-v2-tree-title.is-group .gn-v2-tree-count,
 body[data-ui-version="v2"] .gn-v2-tree-title[data-node-type="database"] .gn-v2-tree-count {
   margin-left: auto;
-  padding: 0 5px;
-  min-height: 15px;
+  padding: 0 6px;
+  min-width: 16px;
+  min-height: 16px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--gn-fg-4) 12%, transparent);
+  background: color-mix(in srgb, var(--gn-fg-4) 8%, transparent);
+  color: var(--gn-fg-4);
   font-size: 10px;
   font-weight: 500 !important;
-  opacity: 1;
+  letter-spacing: 0.01em;
+  opacity: 0.92;
+}
+
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .gn-v2-tree-status {
+  position: absolute;
+  top: 50%;
+  right: var(--gn-v2-tree-trailing-inset, 12px);
+  z-index: 1;
+  margin: 0;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+/* 分组/对象组数字：与绿色状态点同一右缘；有状态点时让到圆点左侧 */
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection-group) .gn-v2-tree-count,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-group) .gn-v2-tree-count {
+  position: absolute;
+  top: 50%;
+  right: var(--gn-v2-tree-trailing-inset, 12px);
+  z-index: 1;
+  margin-left: 0;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-status) .gn-v2-tree-count {
+  position: absolute;
+  top: 50%;
+  right: calc(var(--gn-v2-tree-trailing-inset, 12px) + var(--gn-v2-tree-trailing-status-slot, 16px));
+  z-index: 1;
+  margin-left: 0;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection-group) .ant-tree-node-content-wrapper,
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-group) .ant-tree-node-content-wrapper {
+  padding-right: calc(var(--gn-v2-tree-trailing-inset, 12px) + 20px) !important;
 }
 
 /* Host grouping drag: group rows are magnetic targets, gaps remain sortable. */
@@ -3720,7 +3753,7 @@ body[data-ui-version="v2"] .gn-v2-sidebar-tree-drag-preview-label {
 
 body[data-ui-version="v2"] .gn-v2-tree-status {
   position: relative;
-  margin: 0 2px 0 0;
+  margin: 0;
   width: 14px;
   min-width: 14px;
   height: 14px;
@@ -3729,6 +3762,11 @@ body[data-ui-version="v2"] .gn-v2-tree-status {
   align-items: center;
   justify-content: center;
   overflow: visible;
+  pointer-events: none;
+}
+
+body[data-ui-version="v2"] .gn-v2-tree-status.is-default {
+  display: none;
 }
 
 body[data-ui-version="v2"] .gn-v2-tree-status::before {
@@ -3739,7 +3777,7 @@ body[data-ui-version="v2"] .gn-v2-tree-status::before {
   border: 0;
   border-radius: 50%;
   flex: 0 0 6px;
-  background: color-mix(in srgb, var(--gn-fg-4) 72%, transparent);
+  background: color-mix(in srgb, var(--gn-fg-4) 55%, transparent);
 }
 
 body[data-ui-version="v2"] .gn-v2-tree-status.is-success::before {
@@ -3903,12 +3941,13 @@ body[data-ui-version="v2"] .gn-v2-tree-connection-copy {
 
 body[data-ui-version="v2"] .gn-v2-tree-count {
   flex: 0 0 auto;
+  align-self: center;
   color: var(--gn-fg-5);
   font-family: var(--gn-font-sans);
   font-variant-numeric: tabular-nums;
   font-size: clamp(10px, calc(var(--gn-sidebar-tree-font-size, var(--gn-font-size-sm, 12px)) - 1px), 16px);
   font-weight: 400 !important;
-  opacity: 0.82;
+  opacity: 0.78;
 }
 
 body[data-ui-version="v2"] .gn-v2-table-pin-indicator {
@@ -6594,3 +6633,50 @@ body[data-ui-version="v2"] .gn-v2-context-menu-kbd {
     transform: translateY(0) scale(1);
   }
 }
+
+/* Settings center: flush right edge + refined scrollbar
+   Must beat body[data-ui-version="v2"] ::-webkit-scrollbar (imported after App.css). */
+body[data-ui-version="v2"] .gonavi-settings-center-workbench-host,
+body[data-ui-version="v2"] .gonavi-settings-center-workbench,
+body[data-ui-version="v2"] .gonavi-settings-center-modal {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--gn-fg-4) 50%, transparent) transparent;
+}
+body[data-ui-version="v2"] .gonavi-settings-center-workbench-host ::-webkit-scrollbar,
+body[data-ui-version="v2"] .gonavi-settings-center-workbench ::-webkit-scrollbar,
+body[data-ui-version="v2"] .gonavi-settings-center-modal ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+body[data-ui-version="v2"] .gonavi-settings-center-workbench-host ::-webkit-scrollbar-track,
+body[data-ui-version="v2"] .gonavi-settings-center-workbench ::-webkit-scrollbar-track,
+body[data-ui-version="v2"] .gonavi-settings-center-modal ::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 2px 0;
+}
+body[data-ui-version="v2"] .gonavi-settings-center-workbench-host ::-webkit-scrollbar-thumb,
+body[data-ui-version="v2"] .gonavi-settings-center-workbench ::-webkit-scrollbar-thumb,
+body[data-ui-version="v2"] .gonavi-settings-center-modal ::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--gn-fg-4) 38%, transparent);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+  min-height: 36px;
+}
+body[data-ui-version="v2"] .gonavi-settings-center-workbench-host ::-webkit-scrollbar-thumb:hover,
+body[data-ui-version="v2"] .gonavi-settings-center-workbench ::-webkit-scrollbar-thumb:hover,
+body[data-ui-version="v2"] .gonavi-settings-center-modal ::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--gn-accent) 50%, var(--gn-fg-4));
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+body[data-ui-version="v2"] .gonavi-settings-center-workbench-host ::-webkit-scrollbar-corner,
+body[data-ui-version="v2"] .gonavi-settings-center-workbench ::-webkit-scrollbar-corner,
+body[data-ui-version="v2"] .gonavi-settings-center-modal ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+body[data-ui-version="v2"] .gonavi-settings-center-pane-scroll,
+body[data-ui-version="v2"] .gonavi-settings-center-content {
+  scrollbar-gutter: auto;
+}
+

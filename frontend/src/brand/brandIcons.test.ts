@@ -6,32 +6,39 @@ import {
   resolveBrandFullSrc,
   resolveBrandIconSrc,
   resolveBrandTitlebarSrc,
+  BRAND_ICON_FALLBACK_SRC,
+  setLoadedBrandIconSources,
 } from './brandIcons';
 
 describe('brand icon asset resolution', () => {
-  it('keeps tile assets for app surfaces and uses a transparent lockup on the about page', () => {
+  it('uses a compact fallback before the remote asset cache is ready', () => {
     for (const icon of BRAND_ICONS) {
       const selectedAsset = resolveBrandIconSrc(icon.id);
-      expect(selectedAsset).toMatch(/^\/brand-icons\/\d{2}-.+\.webp$/);
+      expect(selectedAsset).toBe(BRAND_ICON_FALLBACK_SRC);
       expect(resolveBrandFullSrc(icon.id)).toBe(selectedAsset);
       expect(resolveBrandDockSrc(icon.id)).toBe(selectedAsset);
 
       const aboutAsset = resolveBrandAboutSrc(icon.id);
-      expect(aboutAsset).toMatch(/^\/brand-icons\/\d{2}-.+-about\.png$/);
-      expect(aboutAsset).not.toBe(selectedAsset);
+      expect(aboutAsset).toBe(BRAND_ICON_FALLBACK_SRC);
     }
   });
 
   it('uses the transparent compact mark for the default titlebar icon', () => {
-    const defaultTitlebarAsset = '/brand-marks/02-database-search-transparent.png';
-    expect(resolveBrandTitlebarSrc('02')).toBe(defaultTitlebarAsset);
+    const defaultTitlebarAsset = BRAND_ICON_FALLBACK_SRC;
+    expect(resolveBrandTitlebarSrc('03')).toBe(defaultTitlebarAsset);
     expect(resolveBrandTitlebarSrc()).toBe(defaultTitlebarAsset);
     expect(resolveBrandTitlebarSrc('unknown')).toBe(defaultTitlebarAsset);
     expect(resolveBrandTitlebarSrc('01')).toBe(resolveBrandIconSrc('01'));
   });
 
-  it('falls back to the default transparent about lockup for invalid selections', () => {
-    const defaultAboutAsset = resolveBrandAboutSrc('02');
+  it('can resolve a verified remote data URL after cache warmup', () => {
+    setLoadedBrandIconSources({ '03': 'data:image/svg+xml;base64,remote' });
+    expect(resolveBrandIconSrc('03')).toBe('data:image/svg+xml;base64,remote');
+    expect(resolveBrandTitlebarSrc('03')).toBe('data:image/svg+xml;base64,remote');
+  });
+
+  it('falls back to the default about lockup for invalid selections', () => {
+    const defaultAboutAsset = resolveBrandAboutSrc('03');
     expect(resolveBrandAboutSrc()).toBe(defaultAboutAsset);
     expect(resolveBrandAboutSrc('unknown')).toBe(defaultAboutAsset);
   });

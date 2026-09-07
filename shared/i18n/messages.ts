@@ -781,6 +781,7 @@ export const messages: Record<SupportedLanguage, Record<MessageKey, string>> = {
     "driver.modal.toolbar.removeAll": "删除所有驱动",
     "driver.modal.toolbar.openDirectory": "打开驱动目录",
     "driver.modal.toolbar.importDirectory": "导入驱动目录",
+    "driver.modal.toolbar.importDirectoryOverwrite": "导入并覆盖已安装",
     "driver.modal.batch.action.installAll": "安装所有驱动",
     "driver.modal.batch.action.reinstallUpdates": "重装需更新驱动",
     "driver.modal.batch.action.removeAll": "删除所有驱动",
@@ -822,7 +823,7 @@ export const messages: Record<SupportedLanguage, Record<MessageKey, string>> = {
     "driver.modal.card.status.builtIn": "内置驱动，可直接连接。",
     "driver.modal.card.status.runtimeAvailable": "纯 Go 驱动已启用，可直接连接。",
     "driver.modal.card.status.needsUpdate":
-      "需要重装以应用驱动侧更新。",
+      "驱动组件有更新，建议重装以获得最新修复与兼容性改进；当前版本仍可正常使用。",
     "driver.modal.card.status.installedRevision":
       "已安装 revision {revision}。",
     "driver.modal.card.status.expectedRevision":
@@ -927,7 +928,11 @@ export const messages: Record<SupportedLanguage, Record<MessageKey, string>> = {
     "driver.modal.card.downloading": "下载中 {percent}%",
     "driver.modal.card.ready": "已就绪",
     "driver.modal.hero.loaded": "已加载 {count} 个驱动",
-    "driver.modal.list.sortByName": "按名称排序",
+    "driver.modal.list.sortLabel": "排序方式",
+    "driver.modal.list.sortByName": "按名称",
+    "driver.modal.list.sortByStatus": "按状态",
+    "driver.modal.list.sortBySize": "按大小",
+    "driver.modal.list.sortByVersion": "按版本",
     "driver.modal.batch.compactTitle": "正在安装驱动 {completed}/{total}",
     "driver.modal.batch.cancelAll": "取消全部",
     "driver.modal.batch.detail": "详情",
@@ -1755,6 +1760,7 @@ export const messages: Record<SupportedLanguage, Record<MessageKey, string>> = {
     "driver.modal.toolbar.removeAll": "Remove all drivers",
     "driver.modal.toolbar.openDirectory": "Open driver directory",
     "driver.modal.toolbar.importDirectory": "Import driver directory",
+    "driver.modal.toolbar.importDirectoryOverwrite": "Import and overwrite installed",
     "driver.modal.batch.action.installAll": "Install all drivers",
     "driver.modal.batch.action.reinstallUpdates": "Reinstall outdated drivers",
     "driver.modal.batch.action.removeAll": "Remove all drivers",
@@ -1796,7 +1802,7 @@ export const messages: Record<SupportedLanguage, Record<MessageKey, string>> = {
     "driver.modal.card.status.builtIn": "Built-in driver, ready to connect.",
     "driver.modal.card.status.runtimeAvailable": "Pure Go driver is enabled and ready to connect.",
     "driver.modal.card.status.needsUpdate":
-      "Reinstall required to apply driver updates.",
+      "The driver component has an update. Reinstall to get the latest fixes and compatibility improvements; the current version still works.",
     "driver.modal.card.status.installedRevision":
       "installed revision {revision}.",
     "driver.modal.card.status.expectedRevision":
@@ -1901,7 +1907,11 @@ export const messages: Record<SupportedLanguage, Record<MessageKey, string>> = {
     "driver.modal.card.downloading": "Downloading {percent}%",
     "driver.modal.card.ready": "Ready",
     "driver.modal.hero.loaded": "{count} drivers loaded",
-    "driver.modal.list.sortByName": "Sort by name",
+    "driver.modal.list.sortLabel": "Sort by",
+    "driver.modal.list.sortByName": "Name",
+    "driver.modal.list.sortByStatus": "Status",
+    "driver.modal.list.sortBySize": "Size",
+    "driver.modal.list.sortByVersion": "Version",
     "driver.modal.batch.compactTitle": "Installing drivers {completed}/{total}",
     "driver.modal.batch.cancelAll": "Cancel all",
     "driver.modal.batch.detail": "Details",
