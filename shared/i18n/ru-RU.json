@@ -3158,7 +3158,7 @@
   "app.theme.appearance.enable_transparency_blur_hint": "При отключении текущие пороги сохраняются и будут восстановлены при повторном включении.",
   "app.theme.appearance.font_size_title": "Базовый размер шрифта (Font Size)",
   "app.theme.appearance.opacity_title": "Непрозрачность фона (Opacity)",
-  "app.theme.appearance.sidebar_rail_scale_hint": "Влияет только на левую навигационную панель V2 и помогает увеличить кнопки и значки подключений на больших экранах.",
+  "app.theme.appearance.sidebar_rail_scale_hint": "Изменяет размер инструментов боковой панели V2 в развёрнутом и свёрнутом состояниях, а также кнопок типов объектов в развёрнутом виде.",
   "app.theme.appearance.sidebar_rail_scale_title": "Размер кнопок левой навигации",
   "app.theme.appearance.single_database_expansion_hint": "Если включено, при раскрытии базы данных остальные базы в том же подключении сворачиваются. Другие подключения не меняются; правило также действует для баз Redis.",
   "app.theme.appearance.single_database_expansion_title": "Раскрывать одну базу на подключение",

@@ -1280,6 +1280,7 @@ function App() {
       effectiveUiScale,
       isV2Ui,
       isCollapsedSidebarActionsDocked,
+      effectiveSidebarRailScale,
   );
   const titleBarHeight = titleBarLayout.height;
   const sidebarCollapsedWidth = isV2Ui && !shouldDockCollapsedSidebarActionsInTitlebar

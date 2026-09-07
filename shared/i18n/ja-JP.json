@@ -3158,7 +3158,7 @@
   "app.theme.appearance.enable_transparency_blur_hint": "無効にすると現在のしきい値は保持され、再度有効化したときにそのまま復元されます。",
   "app.theme.appearance.font_size_title": "基本フォントサイズ (Font Size)",
   "app.theme.appearance.opacity_title": "背景の不透明度 (Opacity)",
-  "app.theme.appearance.sidebar_rail_scale_hint": "V2 左側ナビゲーションレールにのみ適用されます。大画面でボタンや接続アイコンを見やすく拡大できます。",
+  "app.theme.appearance.sidebar_rail_scale_hint": "V2 左サイドバーの展開・折りたたみ時のツールボタンと、展開時のオブジェクト種別ボタンを調整します。",
   "app.theme.appearance.sidebar_rail_scale_title": "左側ナビゲーションボタンのサイズ",
   "app.theme.appearance.single_database_expansion_hint": "有効にすると、同じ接続で別のデータベースを展開した際に他のデータベースを自動的に折りたたみます。他の接続には影響せず、Redis データベースにも適用されます。",
   "app.theme.appearance.single_database_expansion_title": "接続ごとに1つのデータベースを展開",

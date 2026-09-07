@@ -3158,7 +3158,7 @@
   "app.theme.appearance.enable_transparency_blur_hint": "關閉后保留目前阈值，重新开启时直接還原之前的設定。",
   "app.theme.appearance.font_size_title": "基础字体大小 (Font Size)",
   "app.theme.appearance.opacity_title": "背景不透明度 (Opacity)",
-  "app.theme.appearance.sidebar_rail_scale_hint": "僅影響 V2 左側導覽軌，適合在大螢幕上放大按鈕與連線圖示。",
+  "app.theme.appearance.sidebar_rail_scale_hint": "調整 V2 左側欄展開或收合時的工具按鈕，以及展開時的物件類型按鈕。",
   "app.theme.appearance.sidebar_rail_scale_title": "左側導覽按鈕大小",
   "app.theme.appearance.single_database_expansion_hint": "啟用後，同一連線展開新資料庫時會自動收合其他資料庫；其他連線不受影響，Redis 資料庫同樣適用。",
   "app.theme.appearance.single_database_expansion_title": "同一連線僅展開一個資料庫",

@@ -3158,7 +3158,7 @@
   "app.theme.appearance.enable_transparency_blur_hint": "When disabled, the current thresholds are retained and restored directly when re-enabled.",
   "app.theme.appearance.font_size_title": "Base Font Size (Font Size)",
   "app.theme.appearance.opacity_title": "Background Opacity (Opacity)",
-  "app.theme.appearance.sidebar_rail_scale_hint": "Only affects the V2 left navigation rail. Use it to enlarge buttons and connection icons on large displays.",
+  "app.theme.appearance.sidebar_rail_scale_hint": "Adjusts V2 sidebar tools in both expanded and collapsed states, plus object-type buttons while expanded.",
   "app.theme.appearance.sidebar_rail_scale_title": "Left Navigation Button Size",
   "app.theme.appearance.single_database_expansion_hint": "When enabled, expanding a database collapses the other databases in the same connection. Other connections stay unchanged, and Redis databases follow the same rule.",
   "app.theme.appearance.single_database_expansion_title": "Expand One Database per Connection",

@@ -114,7 +114,7 @@ describe('collapsed V2 sidebar actions', () => {
     expect(appSource).toContain('navigatorPlatform,');
     expect(appSource).toContain('isWebRuntime,');
     expect(appSource).toMatch(
-      /resolveTitleBarLayout\(\s*effectiveUiScale,\s*isV2Ui,\s*isCollapsedSidebarActionsDocked,\s*\)/s,
+      /resolveTitleBarLayout\(\s*effectiveUiScale,\s*isV2Ui,\s*isCollapsedSidebarActionsDocked,\s*effectiveSidebarRailScale,\s*\)/s,
     );
     expect(appSource).toContain("isCollapsedSidebarActionsDocked ? 'gn-v2-titlebar-collapsed-docked' : ''");
     expect(actionsSource).toContain('role="toolbar"');
@@ -182,7 +182,7 @@ describe('collapsed V2 sidebar actions', () => {
     expect(toolbarRule).toContain('-webkit-app-region: no-drag;');
     expect(toolbarRule).toContain('overflow-x: auto;');
     expect(toolbarRule).toContain('height: calc(26px * var(--gn-v2-explorer-scale));');
-    expect(toolbarRule).toContain('--gn-v2-explorer-scale: var(--gn-ui-scale, 1);');
+    expect(toolbarRule).toContain('--gn-v2-explorer-scale: calc(var(--gn-ui-scale, 1) * var(--gn-sidebar-rail-scale, 1));');
     expect(toolbarRule).toContain('right: calc(var(--gn-titlebar-window-controls-width, 0px) + 6px);');
     expect(toolRule).toContain('flex: 0 0 calc(26px * var(--gn-v2-explorer-scale));');
     expect(toolRule).toContain('height: calc(26px * var(--gn-v2-explorer-scale)) !important;');
@@ -263,6 +263,14 @@ describe('collapsed V2 sidebar actions', () => {
     expect(collapsed.height).toBeGreaterThan(expanded.height);
     expect(collapsed.upperBandHeight).toBeLessThan(collapsed.height);
     expect(collapsed.height - collapsed.emptyWorkbenchTopOffset).toBe(expanded.height);
+  });
+
+  it('grows the collapsed titlebar action band with the sidebar button scale', () => {
+    const normal = resolveTitleBarLayout(1, true, true, 1);
+    const enlarged = resolveTitleBarLayout(1, true, true, 1.8);
+
+    expect(enlarged.height).toBeGreaterThan(normal.height);
+    expect(enlarged.height - enlarged.emptyWorkbenchTopOffset).toBe(32);
   });
 
   it.each([0.8, 0.9, 0.95, 1, 1.1, 1.25])(

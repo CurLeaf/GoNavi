@@ -3158,7 +3158,7 @@
   "app.theme.appearance.enable_transparency_blur_hint": "Bei Deaktivierung bleiben die aktuellen Schwellenwerte erhalten und werden beim erneuten Aktivieren direkt wiederhergestellt.",
   "app.theme.appearance.font_size_title": "Basisschriftgröße (Font Size)",
   "app.theme.appearance.opacity_title": "Hintergrunddeckkraft (Opacity)",
-  "app.theme.appearance.sidebar_rail_scale_hint": "Wirkt sich nur auf die linke V2-Navigationsleiste aus und vergrößert dort Buttons und Verbindungsicons für große Displays.",
+  "app.theme.appearance.sidebar_rail_scale_hint": "Passt die Werkzeuge der V2-Seitenleiste im ein- und ausgeklappten Zustand sowie ausgeklappt die Objekttyp-Schaltflächen an.",
   "app.theme.appearance.sidebar_rail_scale_title": "Größe der linken Navigationsbuttons",
   "app.theme.appearance.single_database_expansion_hint": "Wenn aktiviert, klappt das Öffnen einer Datenbank die anderen Datenbanken derselben Verbindung zu. Andere Verbindungen bleiben unverändert; dies gilt auch für Redis-Datenbanken.",
   "app.theme.appearance.single_database_expansion_title": "Eine Datenbank pro Verbindung aufklappen",

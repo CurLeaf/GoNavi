@@ -2159,7 +2159,7 @@ body[data-ui-version="v2"] .gn-v2-app-sider {
 
 body[data-ui-version="v2"] .gn-v2-sidebar-redesign {
   --gn-v2-rail-scale: calc(var(--gn-ui-scale, 1) * var(--gn-sidebar-rail-scale, 1));
-  --gn-v2-explorer-scale: var(--gn-ui-scale, 1);
+  --gn-v2-explorer-scale: calc(var(--gn-ui-scale, 1) * var(--gn-sidebar-rail-scale, 1));
   width: 100%;
   background: var(--gn-bg-panel-2);
   overflow: hidden;
@@ -4390,7 +4390,7 @@ body[data-ui-version="v2"]
   padding-left: max(
     0px,
     calc(
-      (182px * var(--gn-ui-scale, 1))
+      (182px * var(--gn-ui-scale, 1) * var(--gn-sidebar-rail-scale, 1))
       - var(--gn-v2-empty-hero-padding-inline-start, 30px)
     )
   );
@@ -4414,7 +4414,7 @@ body[data-ui-version="v2"] .gn-v2-titlebar {
    empty lower titlebar band for the same six scaled actions shown by the
    expanded explorer toolbar. Keep the Windows window controls out of its way. */
 body[data-ui-version="v2"] .gn-v2-titlebar-collapsed-docked .gn-v2-collapsed-sidebar-actions {
-  --gn-v2-explorer-scale: var(--gn-ui-scale, 1);
+  --gn-v2-explorer-scale: calc(var(--gn-ui-scale, 1) * var(--gn-sidebar-rail-scale, 1));
   position: absolute;
   left: calc(6px * var(--gn-ui-scale, 1));
   right: calc(var(--gn-titlebar-window-controls-width, 0px) + 6px);
@@ -4426,8 +4426,8 @@ body[data-ui-version="v2"] .gn-v2-titlebar-collapsed-docked .gn-v2-collapsed-sid
   height: calc(26px * var(--gn-v2-explorer-scale));
   flex-wrap: nowrap;
   align-items: center;
-  gap: calc(2px * var(--gn-ui-scale, 1));
-  padding: 0 calc(2px * var(--gn-ui-scale, 1));
+  gap: calc(2px * var(--gn-v2-explorer-scale));
+  padding: 0 calc(2px * var(--gn-v2-explorer-scale));
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;

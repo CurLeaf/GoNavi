@@ -3158,7 +3158,7 @@
   "app.theme.appearance.enable_transparency_blur_hint": "关闭后保留当前阈值，重新开启时直接恢复之前的设置。",
   "app.theme.appearance.font_size_title": "基础字体大小 (Font Size)",
   "app.theme.appearance.opacity_title": "背景不透明度 (Opacity)",
-  "app.theme.appearance.sidebar_rail_scale_hint": "仅影响 V2 左侧导航轨道，适合在大屏上放大按钮和连接图标。",
+  "app.theme.appearance.sidebar_rail_scale_hint": "调整 V2 左侧栏展开或折叠时的工具按钮，以及展开时的对象类型按钮。",
   "app.theme.appearance.sidebar_rail_scale_title": "左侧导航按钮大小",
   "app.theme.appearance.single_database_expansion_hint": "开启后，同一连接展开新数据库时会自动收起其他数据库；其他连接不受影响，Redis 数据库同样适用。",
   "app.theme.appearance.single_database_expansion_title": "同一连接仅展开一个数据库",
