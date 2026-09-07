@@ -1,8 +1,9 @@
 const DOCK_ICON_SIZE = 1024;
-// Chrome and VS Code both keep their high-alpha artwork inside an 824px
-// square on a 1024px macOS icon canvas.
-const DOCK_ICON_INSET = 100;
-// Chrome's 824px tile uses a 184px outer corner radius.
+// The PNG handed to NSApp is already a complete Dock tile.  Leaving a
+// 100px transparent border here makes GoNavi render visibly smaller than
+// neighbouring macOS apps, so use the full 1024px canvas.
+const DOCK_ICON_INSET = 0;
+// Keep the same rounded-tile proportion used by the source artwork.
 const DOCK_ICON_CORNER_RADIUS_RATIO = 184 / 824;
 
 export type DockIconRuntimeEnvironment = {
