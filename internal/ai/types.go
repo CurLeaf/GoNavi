@@ -101,7 +101,7 @@ type ProviderConfig struct {
 	ID                    string   `json:"id"`
 	Type                  string   `json:"type"` // openai | anthropic | gemini | custom
 	Name                  string   `json:"name"`
-	AuthMode              string   `json:"authMode,omitempty"` // api-key | local-cli
+	AuthMode              string   `json:"authMode,omitempty"` // api-key | bearer | local-cli
 	APIKey                string   `json:"apiKey"`
 	SecretRef             string   `json:"secretRef,omitempty"`
 	HasSecret             bool     `json:"hasSecret,omitempty"`
@@ -115,6 +115,9 @@ type ProviderConfig struct {
 	APIFormat      string            `json:"apiFormat,omitempty"` // openai | openai-responses | anthropic | gemini | cursor-agent | cursor-cli | codex-cli | claude-cli | codebuddy-cli | grok-cli
 	Headers        map[string]string `json:"headers,omitempty"`
 	MaxTokens      int               `json:"maxTokens"`
+	ContextWindow  int               `json:"contextWindow,omitempty"`
+	CLIPath        string            `json:"cliPath,omitempty"`
+	CLIEnv         map[string]string `json:"cliEnv,omitempty"`
 	Temperature    float64           `json:"temperature"`
 	// ThinkingIntensity 可选：off/low/medium/high。空值表示沿用供应商默认（多数等价 medium）。
 	ThinkingIntensity string `json:"thinkingIntensity,omitempty"`

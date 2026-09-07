@@ -135,7 +135,7 @@ func (p *ClaudeCLIProvider) Name() string {
 }
 
 func (p *ClaudeCLIProvider) Validate() error {
-	_, err := resolveClaudeCLICommand(runtime.GOOS, runtime.GOARCH, claudeLookPath, fileExists)
+	_, err := resolveClaudeCLICommand(runtime.GOOS, runtime.GOARCH, lookPathWithOverride(p.config.CLIPath, claudeLookPath), fileExists)
 	if err != nil {
 		return err
 	}
@@ -250,7 +250,7 @@ func (p *ClaudeCLIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 		args = append(args, "--model", p.config.Model)
 	}
 
-	command, err := resolveClaudeCLICommand(runtime.GOOS, runtime.GOARCH, claudeLookPath, fileExists)
+	command, err := resolveClaudeCLICommand(runtime.GOOS, runtime.GOARCH, lookPathWithOverride(p.config.CLIPath, claudeLookPath), fileExists)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +327,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		args = append(args, "--model", p.config.Model)
 	}
 
-	command, err := resolveClaudeCLICommand(runtime.GOOS, runtime.GOARCH, claudeLookPath, fileExists)
+	command, err := resolveClaudeCLICommand(runtime.GOOS, runtime.GOARCH, lookPathWithOverride(p.config.CLIPath, claudeLookPath), fileExists)
 	if err != nil {
 		return err
 	}
@@ -729,7 +729,7 @@ func (p *ClaudeCLIProvider) setEnv(cmd *exec.Cmd) error {
 	if err != nil {
 		return err
 	}
-	cmd.Env = env
+	cmd.Env = MergeProviderCLIEnv(env, p.config.CLIEnv)
 	return nil
 }
 

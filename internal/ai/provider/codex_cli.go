@@ -130,7 +130,7 @@ func (p *CodexCLIProvider) Name() string {
 }
 
 func (p *CodexCLIProvider) Validate() error {
-	_, err := resolveCodexCLICommand(runtime.GOOS, runtime.GOARCH, codexLookPath, fileExists)
+	_, err := resolveCodexCLICommand(runtime.GOOS, runtime.GOARCH, lookPathWithOverride(p.config.CLIPath, codexLookPath), fileExists)
 	return err
 }
 
@@ -206,7 +206,7 @@ func (p *CodexCLIProvider) run(ctx context.Context, req ai.ChatRequest, onChunk 
 		return codexCLIResult{}, err
 	}
 
-	command, err := resolveCodexCLICommand(runtime.GOOS, runtime.GOARCH, codexLookPath, fileExists)
+	command, err := resolveCodexCLICommand(runtime.GOOS, runtime.GOARCH, lookPathWithOverride(p.config.CLIPath, codexLookPath), fileExists)
 	if err != nil {
 		return codexCLIResult{}, err
 	}
@@ -226,7 +226,7 @@ func (p *CodexCLIProvider) run(ctx context.Context, req ai.ChatRequest, onChunk 
 	cmd := codexCommandContext(ctx, command.Path, args...)
 	cmd.Dir = workDir
 	cmd.Stdin = strings.NewReader(prompt)
-	cmd.Env = buildCodexCLIEnv(cmd.Environ(), command.Path)
+	cmd.Env = MergeProviderCLIEnv(buildCodexCLIEnv(cmd.Environ(), command.Path), p.config.CLIEnv)
 
 	requestLog := logAIUpstreamRequestStart(
 		p.Name(),

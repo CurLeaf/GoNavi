@@ -1,4 +1,5 @@
 import type { AIProviderAuthMode, AIProviderConfig, AIProviderType } from '../types';
+import { rowsFromRecord } from './aiProviderKeyValue';
 
 type ProviderEditorStatus = 'idle' | 'success' | 'error';
 
@@ -56,6 +57,10 @@ export const buildAddProviderEditorSession = ({
       presetKey,
       apiFormat,
       authMode,
+      headerRows: [],
+      cliEnvRows: [],
+      cliPath: '',
+      contextWindow: undefined,
     },
     isEditing: true,
     testStatus: 'idle',
@@ -72,6 +77,9 @@ export const buildEditProviderEditorSession = ({
     models: provider.models || [],
     presetKey: provider.presetKey,
     apiFormat: provider.apiFormat || 'openai',
+    headerRows: rowsFromRecord(provider.headers),
+    cliEnvRows: rowsFromRecord(provider.cliEnv),
+    cliPath: provider.cliPath || '',
   },
   isEditing: true,
   testStatus: 'idle',

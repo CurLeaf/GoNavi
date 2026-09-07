@@ -621,6 +621,10 @@ func (p *AnthropicProvider) doRequest(ctx context.Context, body interface{}) (io
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	ApplyAnthropicAuthHeaders(httpReq.Header, p.baseURL, p.config.APIKey)
+	if strings.EqualFold(strings.TrimSpace(p.config.AuthMode), "bearer") {
+		httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
+		httpReq.Header.Del("x-api-key")
+	}
 
 	if strings.Contains(string(jsonBody), `"stream":true`) || strings.Contains(string(jsonBody), `"stream": true`) {
 		httpReq.Header.Set("Accept", "text/event-stream")

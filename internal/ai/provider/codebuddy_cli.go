@@ -38,7 +38,7 @@ func (p *CodeBuddyCLIProvider) Name() string {
 }
 
 func (p *CodeBuddyCLIProvider) Validate() error {
-	_, err := resolveCodeBuddyCLICommand(codebuddyLookPath)
+	_, err := resolveCodeBuddyCLICommand(lookPathWithOverride(p.config.CLIPath, codebuddyLookPath))
 	if err != nil {
 		return err
 	}
@@ -58,7 +58,7 @@ func (p *CodeBuddyCLIProvider) ChatWithState(ctx context.Context, state json.Raw
 	ctx, cancel := ensureClaudeCLITimeout(ctx, codebuddyCLIRequestTimeout)
 	defer cancel()
 
-	commandName, err := resolveCodeBuddyCLICommand(codebuddyLookPath)
+	commandName, err := resolveCodeBuddyCLICommand(lookPathWithOverride(p.config.CLIPath, codebuddyLookPath))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -161,7 +161,7 @@ func (p *CodeBuddyCLIProvider) chatStreamWithSession(ctx context.Context, resume
 	ctx, cancel := ensureClaudeCLITimeout(ctx, codebuddyCLIRequestTimeout)
 	defer cancel()
 
-	commandName, err := resolveCodeBuddyCLICommand(codebuddyLookPath)
+	commandName, err := resolveCodeBuddyCLICommand(lookPathWithOverride(p.config.CLIPath, codebuddyLookPath))
 	if err != nil {
 		return "", err
 	}
@@ -424,7 +424,7 @@ func (p *CodeBuddyCLIProvider) setEnv(cmd *exec.Cmd) error {
 	if err != nil {
 		return err
 	}
-	cmd.Env = EnrichCLICommandPATH(env, cmd.Path)
+	cmd.Env = MergeProviderCLIEnv(EnrichCLICommandPATH(env, cmd.Path), p.config.CLIEnv)
 	return nil
 }
 
