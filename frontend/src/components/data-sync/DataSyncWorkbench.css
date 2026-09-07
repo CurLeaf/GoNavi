@@ -774,6 +774,7 @@ textarea.gn-data-sync-control {
 
 .gn-data-sync-stage-nav button {
   position: relative;
+  z-index: 0;
   display: inline-flex;
   min-width: 120px;
   align-items: center;
@@ -787,11 +788,12 @@ textarea.gn-data-sync-control {
   font: inherit;
   font-size: var(--gn-font-size-sm, 12px);
   scroll-snap-align: center;
+  isolation: isolate;
 }
 
 .gn-data-sync-stage-nav button:not(:last-child)::after {
   position: absolute;
-  z-index: 0;
+  z-index: -1;
   top: 26px;
   left: calc(50% + 18px);
   right: calc(-50% + 18px);
@@ -826,6 +828,8 @@ textarea.gn-data-sync-control {
   position: relative;
   z-index: 1;
   overflow: hidden;
+  background: var(--gn-bg-panel, #fff);
+  padding-inline: 4px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -852,6 +856,11 @@ textarea.gn-data-sync-control {
 .gn-data-sync-stage-nav button[data-active='true'] {
   background: var(--gn-bg-hover, rgba(15, 23, 42, 0.045));
   color: var(--gn-fg-1, #0c1322);
+}
+
+.gn-data-sync-stage-nav button:hover .gn-data-sync-stage-nav__label,
+.gn-data-sync-stage-nav button[data-active='true'] .gn-data-sync-stage-nav__label {
+  background: var(--gn-bg-hover, rgba(15, 23, 42, 0.045));
 }
 
 .gn-data-sync-stage-nav button[data-active='true'] {

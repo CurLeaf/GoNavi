@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import TestRenderer, { act } from 'react-test-renderer';
@@ -24,6 +25,11 @@ import {
   DataSyncWorkbenchShell,
   resolveDataSyncSidebarRefreshes,
 } from './DataSyncWorkbenchShell';
+
+const dataSyncWorkbenchCss = readFileSync(
+  new URL('./DataSyncWorkbench.css', import.meta.url),
+  'utf8',
+);
 
 const buildTask = () => {
   const draft = createDataSyncTaskDraft({
@@ -76,6 +82,21 @@ describe('DataSyncWorkbenchShell', () => {
     modalConfirm.mockReset();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it('masks step connectors behind stage labels', () => {
+    expect(dataSyncWorkbenchCss).toMatch(
+      /\.gn-data-sync-stage-nav button\s*\{[^}]*z-index:\s*0;[^}]*isolation:\s*isolate;/s,
+    );
+    expect(dataSyncWorkbenchCss).toMatch(
+      /\.gn-data-sync-stage-nav button:not\(:last-child\)::after\s*\{[^}]*z-index:\s*-1;/s,
+    );
+    expect(dataSyncWorkbenchCss).toMatch(
+      /\.gn-data-sync-stage-nav__label\s*\{[^}]*background:\s*var\(--gn-bg-panel,[^;]+;[^}]*padding-inline:/s,
+    );
+    expect(dataSyncWorkbenchCss).toMatch(
+      /\.gn-data-sync-stage-nav button:hover \.gn-data-sync-stage-nav__label,[\s\S]*button\[data-active='true'\] \.gn-data-sync-stage-nav__label\s*\{[^}]*background:\s*var\(--gn-bg-hover,/,
+    );
   });
 
   it('requests one target database refresh when a run finishes after writing rows', () => {
