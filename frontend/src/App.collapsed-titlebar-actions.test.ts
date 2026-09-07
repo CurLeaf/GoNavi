@@ -195,7 +195,8 @@ describe('collapsed V2 sidebar actions', () => {
     expect(v2ThemeCss).not.toContain('.gn-v2-collapsed-titlebar-tool');
     expect(appCss).toContain('gn-v2-titlebar-collapsed-docked:not(.gn-v2-titlebar-native-mac)');
     expect(appCss).toContain('height: var(--gn-titlebar-collapsed-upper-height, 29px);');
-    expect(appCss).toContain('width: 38px !important;');
+    expect(appCss).toContain('font-size: 10px !important;');
+    expect(appCss).not.toContain('font-size: 0 !important;');
   });
 
   it('renders the complete toolbar in collapsed-titlebar placement and keeps actions usable', () => {

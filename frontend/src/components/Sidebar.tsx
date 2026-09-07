@@ -93,9 +93,7 @@ import { createSidebarResizeAwareFrameScheduler } from '../utils/sidebarResizeLi
 	  DownloadOutlined,
 	  GlobalOutlined,
 	  HistoryOutlined,
-	  InfoCircleOutlined,
 	  TableOutlined,
-	  ToolOutlined,
 	  SwitcherOutlined,
 	  UploadOutlined,
 	  ConsoleSqlOutlined,
@@ -4587,7 +4585,6 @@ const Sidebar: React.FC<{
     {
       key: 'data-workflow',
       label: v2DataWorkflowLabel,
-      icon: <SwitcherOutlined aria-hidden="true" />,
       menu: [
         {
           key: 'batch-tables',
@@ -4630,7 +4627,6 @@ const Sidebar: React.FC<{
     {
       key: 'sql-tools',
       label: v2SqlToolsLabel,
-      icon: <ToolOutlined aria-hidden="true" />,
       menu: [
         {
           key: 'slow-query',
@@ -4650,7 +4646,6 @@ const Sidebar: React.FC<{
     {
       key: 'drivers',
       label: t('app.tools.entry.drivers.title'),
-      icon: <SettingOutlined aria-hidden="true" />,
       onClick: () => onOpenSettingsNavigation?.({ group: 'workspace', action: 'drivers' }),
     },
   ];
@@ -4659,7 +4654,6 @@ const Sidebar: React.FC<{
     {
       key: 'about-go-navi',
       label: t('app.settings.group.about.title'),
-      icon: <InfoCircleOutlined aria-hidden="true" />,
       onClick: () => onOpenSettingsNavigation?.({ group: 'about', pane: 'about-go-navi' }),
     },
   ];

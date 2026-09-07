@@ -2601,7 +2601,7 @@ body[data-ui-version="v2"] .gn-v2-titlebar-right {
     color: var(--gn-fg-2, var(--ant-color-text));
     align-items: center;
     justify-content: center;
-    gap: 5px;
+    gap: 0;
     font: inherit;
     font-size: 11px;
     font-weight: 600;
@@ -2612,12 +2612,6 @@ body[data-ui-version="v2"] .gn-v2-titlebar-right {
     -webkit-app-region: no-drag;
     --wails-draggable: no-drag;
     transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
-}
-
-.gonavi-titlebar-primary-action .anticon {
-    flex: 0 0 auto;
-    font-size: 13px;
-    color: var(--gn-accent, var(--ant-color-primary));
 }
 
 .gonavi-titlebar-primary-action:hover,
@@ -2660,7 +2654,7 @@ body[data-ui-version="v2"] .gn-v2-titlebar-right {
     height: var(--gn-titlebar-action-height, 26px);
     flex: 0 0 auto;
     align-items: center;
-    gap: 6px;
+    gap: 0;
     padding: 0 8px;
     border: 0;
     border-radius: 5px;
@@ -2687,22 +2681,10 @@ body[data-ui-version="v2"] .gn-v2-titlebar-right {
     outline: none;
 }
 
-.gn-v2-titlebar-quick-action .anticon,
-.gn-v2-titlebar-quick-more .anticon {
-    flex: 0 0 auto;
-    font-size: 13px;
-}
-
 body[data-ui-version="v2"] .gn-v2-titlebar-quick-action,
 body[data-ui-version="v2"] .gn-v2-titlebar-quick-more {
-    gap: 6px;
+    gap: 0;
     font-size: 12px;
-}
-
-body[data-ui-version="v2"] .gn-v2-titlebar-quick-action .anticon,
-body[data-ui-version="v2"] .gn-v2-titlebar-quick-more .anticon {
-    font-size: 15px;
-    color: var(--gn-fg-4);
 }
 
 /* "更多" shows icon + label like other titlebar quick actions */
@@ -2739,16 +2721,13 @@ body[data-ui-version="v2"] .gn-v2-titlebar-quick-more .gn-v2-titlebar-quick-labe
 }
 
 @media (max-width: 920px) {
-    .gn-v2-titlebar-quick-action > span:not(.anticon) {
-        display: none;
-    }
-
     .gn-v2-titlebar-quick-action {
-        width: 28px;
-        min-width: 28px;
-        padding-inline: 0;
+        width: auto;
+        min-width: 0;
+        padding-inline: 5px;
         gap: 0;
         justify-content: center;
+        font-size: 11px;
     }
 
     .gn-v2-titlebar-quick-more {
@@ -2840,21 +2819,15 @@ body[data-ui-version="v2"][data-platform='linux'] .gn-v2-titlebar > div:last-chi
 }
 
 @media (max-width: 420px) {
-    /* Leave room for native window controls while keeping every command reachable. */
+    /* Text-only titlebar actions stay readable instead of collapsing to empty icon buttons. */
     body[data-ui-version="v2"] .gonavi-titlebar-primary-action,
     body[data-ui-version="v2"] .gn-v2-titlebar-quick-action,
     body[data-ui-version="v2"] .gn-v2-titlebar-quick-more {
-        width: 38px !important;
-        min-width: 38px !important;
-        padding-inline: 0 !important;
+        width: auto !important;
+        min-width: 0 !important;
+        padding-inline: 4px !important;
         gap: 0 !important;
-        font-size: 0 !important;
-    }
-
-    body[data-ui-version="v2"] .gonavi-titlebar-primary-action .anticon,
-    body[data-ui-version="v2"] .gn-v2-titlebar-quick-action .anticon,
-    body[data-ui-version="v2"] .gn-v2-titlebar-quick-more .anticon {
-        margin: 0;
+        font-size: 10px !important;
     }
 }
 
@@ -6426,4 +6399,3 @@ body .gonavi-theme-settings .gonavi-settings-row.is-control-only .gonavi-setting
 .gonavi-settings-center-modal .ant-modal-body {
   padding-top: 0 !important;
 }
-

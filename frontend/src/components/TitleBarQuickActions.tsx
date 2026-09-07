@@ -6,7 +6,7 @@ import { renderV2ActionMenuPopup } from './common/V2ActionMenuPopup';
 export interface TitleBarQuickAction {
   key: string;
   label: string;
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
   priority?: 'primary' | 'secondary';
@@ -71,7 +71,6 @@ const TitleBarQuickActions: React.FC<TitleBarQuickActionsProps> = ({ label, acti
             data-no-titlebar-toggle="true"
             aria-label={action.label}
           >
-            {action.icon}
             <span>{action.label}</span>
           </button>
         </Dropdown>
@@ -87,7 +86,6 @@ const TitleBarQuickActions: React.FC<TitleBarQuickActionsProps> = ({ label, acti
           disabled={action.disabled}
           onClick={action.onClick}
         >
-          {action.icon}
           <span>{action.label}</span>
         </button>
       </Tooltip>

@@ -7954,7 +7954,6 @@ function App() {
                     newQueryLabel={t(primaryActionIsMessageQueue
                       ? 'message_queue_workbench.action.open'
                       : 'query.new')}
-                    newQueryIcon={primaryActionIsMessageQueue ? <MessageOutlined /> : undefined}
                     newConnectionLabel={t('connection.new')}
                     newQueryShortcut={titleBarNewQueryShortcut}
                     newConnectionShortcut={titleBarNewConnectionShortcut}

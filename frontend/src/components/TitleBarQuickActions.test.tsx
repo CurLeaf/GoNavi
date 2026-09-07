@@ -38,7 +38,8 @@ describe('TitleBarQuickActions', () => {
     expect(appCss).toContain('display: inline;');
     expect(appCss).not.toContain('body[data-ui-version="v2"] .gn-v2-titlebar-quick-more span');
     expect(appCss).not.toMatch(/@media \(max-width: 920px\) \{[^@]*\.gn-v2-titlebar-quick-primary \{[^}]*display:\s*none;/s);
-    expect(appCss).toMatch(/@media \(max-width: 920px\) \{[^@]*\.gn-v2-titlebar-quick-action > span:not\(\.anticon\) \{[^}]*display:\s*none;/s);
+    expect(appCss).not.toMatch(/@media \(max-width: 920px\) \{[^@]*\.gn-v2-titlebar-quick-action > span:not\(\.anticon\) \{[^}]*display:\s*none;/s);
+    expect(appCss).not.toMatch(/@media \(max-width: 420px\) \{[^@]*\.gn-v2-titlebar-quick-action[^}]*font-size:\s*0/s);
   });
 
   it('renders primary actions with visible labels and does not show a More overflow', () => {
@@ -58,7 +59,7 @@ describe('TitleBarQuickActions', () => {
           {
             key: 'batch-actions',
             label: 'Batch operations',
-            icon: <span />,
+            icon: <span data-titlebar-icon="data-workflow" />,
             menu: [
               { key: 'batch-tables', label: 'Batch tables', icon: <span />, onClick: onBatchTables },
               { key: 'batch-databases', label: 'Batch databases', icon: <span />, onClick: onBatchDatabases },
@@ -68,7 +69,7 @@ describe('TitleBarQuickActions', () => {
           {
             key: 'sql-tools',
             label: 'SQL tools',
-            icon: <span />,
+            icon: <span data-titlebar-icon="sql-tools" />,
             menu: [
               { key: 'slow-query', label: 'Slow SQL workbench', icon: <span />, onClick: onSlowQuery, disabled: true },
               { key: 'sql-audit', label: 'SQL Audit Center', icon: <span />, onClick: onSqlAudit },
@@ -77,7 +78,7 @@ describe('TitleBarQuickActions', () => {
           {
             key: 'data-workflow',
             label: 'Data workflows',
-            icon: <span />,
+            icon: <span data-titlebar-icon="data-workflow-secondary" />,
             menu: [
               { key: 'schema-compare', label: 'Schema Compare', icon: <span />, onClick: onSchemaCompare },
               { key: 'data-compare', label: 'Data Compare', icon: <span />, onClick: onDataCompare },
@@ -93,6 +94,7 @@ describe('TitleBarQuickActions', () => {
     expect(toolbar.props['aria-label']).toBe('Object actions');
     expect(toolbar.props['data-no-titlebar-toggle']).toBe('true');
     expect(toolbar.findAllByProps({ className: 'gn-v2-titlebar-quick-label' })).toHaveLength(0);
+    expect(toolbar.findAll((node) => Boolean(node.props['data-titlebar-icon']))).toHaveLength(0);
     const batchMenuButton = toolbar.findByProps({ 'data-titlebar-quick-menu': 'batch-actions' });
     expect(batchMenuButton.props['data-no-titlebar-toggle']).toBe('true');
     const dropdowns = renderer.root.findAll((node) => Array.isArray(node.props.menu?.items)) as ReactTestInstance[];

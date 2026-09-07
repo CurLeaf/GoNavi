@@ -75,18 +75,17 @@ describe('TitleBarPrimaryActions', () => {
     );
     expect(narrowStart).toBeGreaterThanOrEqual(0);
     expect(narrowEnd).toBeGreaterThan(narrowStart);
-    expect(narrowCss).toContain('Leave room for native window controls while keeping every command reachable.');
-    expect(narrowPrimaryRule?.groups?.body).toContain('width: 38px !important;');
-    expect(narrowPrimaryRule?.groups?.body).toContain('min-width: 38px !important;');
-    expect(narrowPrimaryRule?.groups?.body).toContain('padding-inline: 0 !important;');
+    expect(narrowCss).toContain('Text-only titlebar actions stay readable instead of collapsing to empty icon buttons.');
+    expect(narrowPrimaryRule?.groups?.body).toContain('width: auto !important;');
+    expect(narrowPrimaryRule?.groups?.body).toContain('min-width: 0 !important;');
+    expect(narrowPrimaryRule?.groups?.body).toContain('padding-inline: 4px !important;');
     expect(narrowPrimaryRule?.groups?.body).toContain('gap: 0 !important;');
-    expect(narrowPrimaryRule?.groups?.body).toContain('font-size: 0 !important;');
+    expect(narrowPrimaryRule?.groups?.body).toContain('font-size: 10px !important;');
 
     const titlebarMatch = v2ThemeCss.match(
       /body\[data-ui-version="v2"\] \.gn-v2-titlebar\s*\{(?<body>[^}]*)\}/s,
     );
-    expect(titlebarMatch?.groups?.body).toContain('background: var(--gn-bg-panel-2) !important;');
-    expect(titlebarMatch?.groups?.body).not.toContain('--gn-bg-chrome');
+    expect(titlebarMatch?.groups?.body).toContain('background: var(--gn-bg-titlebar) !important;');
     expect(titlebarMatch?.groups?.body).toContain('border: 0 !important;');
     expect(titlebarMatch?.groups?.body).toContain('box-shadow: none !important;');
   });
@@ -211,20 +210,26 @@ describe('TitleBarPrimaryActions', () => {
     ]);
   });
 
-  it('accepts a message-oriented icon for the context-aware primary action', () => {
+  it('renders every primary titlebar action as text only', () => {
     const renderer = create(
       <TitleBarPrimaryActions
         newQueryLabel="消息工作台"
-        newQueryIcon={<span data-icon="message-workbench" />}
         newConnectionLabel="新建连接"
         onNewQuery={vi.fn()}
         onNewConnection={vi.fn()}
+        connectionGroupLabel="管理连接分组"
+        onConnectionGroupManagement={vi.fn()}
       />,
     );
 
-    const primaryButton = renderer.root.findAllByType('button')[0];
-    expect(primaryButton.findByProps({ 'data-icon': 'message-workbench' })).toBeTruthy();
-    expect(primaryButton.props['aria-label']).toBe('消息工作台');
+    const buttons = renderer.root.findAllByType('button');
+    expect(buttons).toHaveLength(3);
+    expect(buttons.flatMap((button) => button.findAllByProps({ 'data-icon': 'true' }))).toHaveLength(0);
+    expect(buttons.map((button) => button.children)).toEqual([
+      ['消息工作台'],
+      ['新建连接'],
+      ['管理连接分组'],
+    ]);
   });
 
   it('uses current platform custom bindings and hides disabled shortcuts', () => {
