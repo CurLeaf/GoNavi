@@ -1280,6 +1280,7 @@ function App() {
       effectiveUiScale,
       isV2Ui,
       isCollapsedSidebarActionsDocked,
+      effectiveSidebarRailScale,
   );
   const titleBarHeight = titleBarLayout.height;
   const sidebarCollapsedWidth = isV2Ui && !shouldDockCollapsedSidebarActionsInTitlebar
@@ -1405,9 +1406,9 @@ function App() {
   // 避免 GPU 持续计算窗口背后的模糊合成
   useEffect(() => {
     try {
-        void SetWindowTranslucency(resolvedAppearance.opacity, resolvedAppearance.blur).catch(() => undefined);
+        void SetWindowTranslucency(resolvedAppearance.opacity, resolvedAppearance.blur, darkMode).catch(() => undefined);
     } catch(e) { /* ignore */ }
-  }, [resolvedAppearance.blur, resolvedAppearance.opacity]);
+  }, [darkMode, resolvedAppearance.blur, resolvedAppearance.opacity]);
 
   useEffect(() => {
       let cancelled = false;
@@ -5094,6 +5095,8 @@ function App() {
     document.documentElement.style.setProperty('--gn-font-sans', resolvedUiFontFamily);
     document.documentElement.style.setProperty('--gn-font-mono', resolvedMonoFontFamily);
     document.documentElement.style.setProperty('--gn-ui-scale', `${effectiveUiScale}`);
+    document.documentElement.style.setProperty('--gn-window-opacity', `${effectiveOpacity}`);
+    document.documentElement.style.setProperty('--gn-window-opacity-percent', `${effectiveOpacity * 100}%`);
     document.documentElement.style.setProperty('--gn-font-size', `${effectiveFontSize}px`);
     document.documentElement.style.setProperty('--gn-font-size-sm', `${Math.max(10, Math.round(effectiveFontSize * 0.86))}px`);
     document.documentElement.style.setProperty('--gn-font-size-xs', `${Math.max(9, Math.round(effectiveFontSize * 0.76))}px`);
@@ -5107,6 +5110,7 @@ function App() {
     darkMode,
     effectiveDataTableFontSize,
     effectiveFontSize,
+    effectiveOpacity,
     resolvedMonoFontFamily,
     resolvedUiFontFamily,
     documentPlatform,
@@ -7882,6 +7886,7 @@ function App() {
         />
         <ToolbarAppearanceStyleHost />
         <Layout
+          className={isV2Ui ? 'gn-v2-app-root' : undefined}
           data-gonavi-close-shortcut-scope="workspace"
           data-empty-workbench={isV2Ui && tabs.length === 0 ? 'true' : 'false'}
           data-collapsed-sidebar-actions-docked={
@@ -7922,8 +7927,8 @@ function App() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: isV2Ui ? 'flex-start' : 'space-between',
-                // Keep the V2 titlebar on the same surface as the immediately adjacent workbench.
-                background: isV2Ui ? 'var(--gn-bg-panel-2)' : bgMain,
+                // Match the titlebar to the adjacent theme surface with its compensated opacity.
+                background: isV2Ui ? 'var(--gn-bg-titlebar)' : bgMain,
                 borderBottom: 'none',
                 userSelect: 'none',
                 WebkitAppRegion: isWebRuntime ? 'no-drag' : 'drag',
@@ -7949,7 +7954,6 @@ function App() {
                     newQueryLabel={t(primaryActionIsMessageQueue
                       ? 'message_queue_workbench.action.open'
                       : 'query.new')}
-                    newQueryIcon={primaryActionIsMessageQueue ? <MessageOutlined /> : undefined}
                     newConnectionLabel={t('connection.new')}
                     newQueryShortcut={titleBarNewQueryShortcut}
                     newConnectionShortcut={titleBarNewConnectionShortcut}
@@ -8172,7 +8176,7 @@ function App() {
                 />
              )}
              <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'row', position: 'relative' }}>
-               <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: isV2Ui ? 'var(--gn-bg-panel-2)' : bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? 'var(--gonavi-border-radius)' : 0, clipPath: isLogPanelOpen ? 'inset(0 round var(--gonavi-border-radius))' : 'none' }}>
+               <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: isV2Ui ? 'transparent' : bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? 'var(--gonavi-border-radius)' : 0, clipPath: isLogPanelOpen ? 'inset(0 round var(--gonavi-border-radius))' : 'none' }}>
                   <TabManager onFocusSidebarSearch={handleFocusSidebarSearch} />
                   <FloatingWorkbenchWindows />
                   <FloatingQueryResultWindows />

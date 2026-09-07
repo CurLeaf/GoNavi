@@ -1099,6 +1099,45 @@ describe('QueryEditor external SQL save', () => {
     renderer.unmount();
   });
 
+  it('places the Dameng row limit before a trailing WITH UR clause', async () => {
+    storeState.connections[0].config.type = 'dameng';
+    storeState.connections[0].config.database = 'GXCM';
+    storeState.queryOptions.maxRows = 500;
+    const sql = [
+      'SELECT DISTINCT v.emp_id, v.emp_name, s.stru_order',
+      'FROM pub_stru s, pub_emp_view_all v',
+      'WHERE s.organ_id = v.emp_id',
+      '  AND v.emp_id IN (',
+      '    SELECT b.organ_id',
+      '    FROM pub_organ_view a, pub_organ_role b',
+      "    WHERE locate(',' || a.organ_id || ',', ',' || b.range_ids || ',') > 0",
+      '  )',
+      'ORDER BY s.stru_order WITH ur;',
+    ].join('\n');
+    editorState.value = sql;
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['emp_id'], rows: [{ emp_id: '1' }] }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'GXCM', query: sql })} />);
+    });
+    await act(async () => {
+      await findButton(renderer, '运行').props.onClick();
+      for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'dameng' }),
+      'GXCM',
+      sql.replace(' WITH ur;', ' LIMIT 500 OFFSET 0 WITH ur'),
+      'query-1',
+    );
+    renderer.unmount();
+  });
+
   it('executes a long commented Oracle anonymous block without blocking the UI thread', async () => {
     storeState.appearance.uiVersion = 'v2';
     storeState.connections[0].config.type = 'oracle';
@@ -4127,6 +4166,94 @@ describe('QueryEditor external SQL save', () => {
     renderer.unmount();
   });
 
+  it('passes max rows only to paginated SQL result grids', async () => {
+    const pagedResultSets = [{
+        key: 'paged-result',
+        sql: 'select id from users',
+        rows: [{ id: 1 }],
+        columns: ['id'],
+        pkColumns: [],
+        readOnly: true,
+        page: { baseSql: 'select id from users', current: 1, pageSize: 100, total: 1, totalKnown: true },
+      }];
+    const localResultSets = [{
+        key: 'local-result',
+        sql: 'select 1 as value',
+        rows: [{ value: 1 }],
+        columns: ['value'],
+        pkColumns: [],
+        readOnly: true,
+      }];
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(
+        <QueryEditorResultsPanel
+          resultSets={pagedResultSets}
+          activeResultKey="paged-result"
+          isActive
+          loading={false}
+          executionError=""
+          sqlLogCount={0}
+          darkMode={false}
+          isV2Ui
+          currentDb="main"
+          currentConnectionId="conn-1"
+          maxRows={750}
+          toggleShortcutLabel=""
+          onActiveResultKeyChange={vi.fn()}
+          onHide={vi.fn()}
+          onCloseResult={vi.fn()}
+          onCloseOtherResultTabs={vi.fn()}
+          onCloseResultTabsToLeft={vi.fn()}
+          onCloseResultTabsToRight={vi.fn()}
+          onCloseAllResultTabs={vi.fn()}
+          onResultPinnedChange={vi.fn()}
+          onReloadResult={vi.fn()}
+          onResultPageChange={vi.fn()}
+          onResultSort={vi.fn()}
+          onDiagnoseExecutionError={vi.fn()}
+        />,
+      );
+    });
+
+    expect(dataGridState.latestProps?.queryMaxRows).toBe(750);
+
+    await act(async () => {
+      renderer.update(
+        <QueryEditorResultsPanel
+          resultSets={localResultSets}
+          activeResultKey="local-result"
+          isActive
+          loading={false}
+          executionError=""
+          sqlLogCount={0}
+          darkMode={false}
+          isV2Ui
+          currentDb="main"
+          currentConnectionId="conn-1"
+          maxRows={750}
+          toggleShortcutLabel=""
+          onActiveResultKeyChange={vi.fn()}
+          onHide={vi.fn()}
+          onCloseResult={vi.fn()}
+          onCloseOtherResultTabs={vi.fn()}
+          onCloseResultTabsToLeft={vi.fn()}
+          onCloseResultTabsToRight={vi.fn()}
+          onCloseAllResultTabs={vi.fn()}
+          onResultPinnedChange={vi.fn()}
+          onReloadResult={vi.fn()}
+          onResultPageChange={vi.fn()}
+          onResultSort={vi.fn()}
+          onDiagnoseExecutionError={vi.fn()}
+        />,
+      );
+    });
+
+    expect(dataGridState.latestProps?.queryMaxRows).toBeUndefined();
+    renderer.unmount();
+  });
+
   it('activates shortcuts only for the visible result grid in the active query editor', async () => {
     const resultSets = [
       {
@@ -4306,6 +4433,47 @@ describe('QueryEditor external SQL save', () => {
       { columnKey: 'name', order: 'ascend', enabled: true },
     ]);
     expect(dataGridState.latestProps?.data.map((row: any) => row.name)).toEqual(['Alpha', 'Beta']);
+    renderer.unmount();
+  });
+
+  it('loads all SQL result rows without a page LIMIT when the page size is unlimited', async () => {
+    storeState.queryOptions.maxRows = 2;
+    const query = 'select id from users;';
+    backendApp.DBQueryMulti
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{
+          columns: ['id'],
+          rows: [{ id: 1 }, { id: 2 }],
+        }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{
+          columns: ['id'],
+          rows: [{ id: 1 }, { id: 2 }, { id: 3 }],
+        }],
+      });
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'main', query })} />);
+    });
+    await act(async () => {
+      await findButton(renderer, '运行').props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await dataGridState.latestProps.onPageChange(2, 0);
+    });
+
+    const unlimitedPageSql = String(backendApp.DBQueryMulti.mock.calls[1][2]);
+    expect(unlimitedPageSql).not.toContain('LIMIT');
+    expect(unlimitedPageSql).not.toContain('OFFSET');
+    expect(dataGridState.latestProps?.pagination).toMatchObject({ current: 1, pageSize: 0, total: 3, totalKnown: true });
+    expect(dataGridState.latestProps?.data.map((row: any) => row.id)).toEqual([1, 2, 3]);
     renderer.unmount();
   });
 

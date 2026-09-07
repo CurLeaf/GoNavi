@@ -51,7 +51,7 @@ func NewCursorCLIProvider(config ai.ProviderConfig) (Provider, error) {
 func (p *CursorCLIProvider) Name() string { return "CursorCLI" }
 
 func (p *CursorCLIProvider) Validate() error {
-	_, err := resolveCursorCLICommand(runtime.GOOS, cursorLookPath)
+	_, err := resolveCursorCLICommand(runtime.GOOS, lookPathWithOverride(p.config.CLIPath, cursorLookPath))
 	return err
 }
 

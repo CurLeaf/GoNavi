@@ -172,6 +172,16 @@ describe('titlebarLayout', () => {
     });
   });
 
+  it('reserves enough height for enlarged collapsed sidebar actions', () => {
+    expect(resolveTitleBarLayout(1, true, true, 1.8)).toEqual({
+      height: 78,
+      actionHeight: 26,
+      dividerHeight: 12,
+      upperBandHeight: 29,
+      emptyWorkbenchTopOffset: 46,
+    });
+  });
+
   it.each([0.8, 0.9, 0.95, 1, 1.1, 1.25])(
     'keeps the empty workbench content origin stable at UI scale %s',
     (scale) => {
@@ -182,12 +192,16 @@ describe('titlebarLayout', () => {
     },
   );
 
-  it.each([0.8, 0.9, 0.95, 1, 1.1, 1.25])(
-    'keeps the two docked titlebar rows separated at UI scale %s',
-    (scale) => {
-      const layout = resolveTitleBarLayout(scale, true, true);
+  it.each([
+    [0.8, 1],
+    [1, 1.25],
+    [1.25, 1.8],
+  ])(
+    'keeps the two docked titlebar rows separated at UI scale %s and sidebar scale %s',
+    (scale, sidebarScale) => {
+      const layout = resolveTitleBarLayout(scale, true, true, sidebarScale);
       const upperBandBottom = layout.upperBandHeight;
-      const collapsedBandTop = layout.height - 1 - (26 * scale);
+      const collapsedBandTop = layout.height - 1 - (26 * scale * sidebarScale);
 
       expect(collapsedBandTop - upperBandBottom).toBeGreaterThanOrEqual(1);
     },

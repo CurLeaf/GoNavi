@@ -225,6 +225,9 @@ export namespace ai {
 	    apiFormat?: string;
 	    headers?: Record<string, string>;
 	    maxTokens: number;
+	    contextWindow?: number;
+	    cliPath?: string;
+	    cliEnv?: Record<string, string>;
 	    temperature: number;
 	    thinkingIntensity?: string;
 	    effort?: string;
@@ -251,6 +254,9 @@ export namespace ai {
 	        this.apiFormat = source["apiFormat"];
 	        this.headers = source["headers"];
 	        this.maxTokens = source["maxTokens"];
+	        this.contextWindow = source["contextWindow"];
+	        this.cliPath = source["cliPath"];
+	        this.cliEnv = source["cliEnv"];
 	        this.temperature = source["temperature"];
 	        this.thinkingIntensity = source["thinkingIntensity"];
 	        this.effort = source["effort"];

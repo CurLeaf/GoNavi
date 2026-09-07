@@ -246,27 +246,46 @@ const mixHex = (accent: string, towards: string, ratio: number): string => {
   return `#${channel(0)}${channel(1)}${channel(2)}`;
 };
 
+const withWindowOpacity = (color: string): string => (
+  `color-mix(in srgb, ${color} var(--gn-window-opacity-percent, 100%), transparent)`
+);
+
+const readableDarkForeground = (level: 1 | 2 | 3 | 4 | 5): string => ({
+  1: '#ffffff',
+  2: '#f5f5f5',
+  3: '#e6e6e6',
+  4: '#d9d9d9',
+  5: '#cccccc',
+}[level]);
+
+const themeForeground = (palette: BuiltinThemePalette, level: 1 | 2 | 3 | 4 | 5): string => (
+  palette.mode === 'dark'
+    ? readableDarkForeground(level)
+    : palette[`fg${level}`]
+);
+
 const createBuiltinThemeCss = (id: string, palette: BuiltinThemePalette): string => `/* GoNavi built-in theme: ${id} */
 body[data-custom-theme],
 body[data-custom-theme][data-ui-version="v2"] {
   color-scheme: ${palette.mode};
-  --gn-bg-app: ${palette.app};
-  --gn-bg-chrome: ${palette.chrome};
-  --gn-bg-panel: ${palette.panel};
-  --gn-bg-panel-2: ${palette.panel2};
+  --gn-bg-app: ${withWindowOpacity(palette.app)};
+  --gn-bg-chrome: ${withWindowOpacity(palette.chrome)};
+  --gn-bg-titlebar: ${withWindowOpacity(palette.panel2)};
+  --gn-bg-panel: ${withWindowOpacity(palette.panel)};
+  --gn-bg-panel-2: ${withWindowOpacity(palette.panel2)};
   --gn-monaco-bg: var(--gn-bg-panel-2);
-  --gn-bg-input: ${palette.input};
-  --gn-bg-subtle: ${palette.panel2};
+  --gn-bg-input: ${withWindowOpacity(palette.input)};
+  --gn-bg-subtle: ${withWindowOpacity(palette.panel2)};
   --gn-bg-hover: ${palette.hover};
   --gn-bg-active: ${palette.active};
   --gn-bg-selected: ${palette.selected};
 
-  --gn-fg-1: ${palette.fg1};
-  --gn-fg-2: ${palette.fg2};
-  --gn-fg-3: ${palette.fg3};
-  --gn-fg-4: ${palette.fg4};
-  --gn-fg-5: ${palette.fg5};
-  --gn-text-muted: ${palette.fg4};
+  --gn-fg-1: ${themeForeground(palette, 1)};
+  --gn-fg-2: ${themeForeground(palette, 2)};
+  --gn-fg-3: ${themeForeground(palette, 3)};
+  --gn-fg-4: ${themeForeground(palette, 4)};
+  --gn-fg-5: ${themeForeground(palette, 5)};
+  --gn-text-muted: ${themeForeground(palette, 4)};
 
   --gn-br-1: ${palette.border1};
   --gn-br-2: ${palette.border2};
@@ -797,5 +816,3 @@ export const resolveAvailableCustomTheme = (
   resolveBuiltinCustomThemePreset(activeThemeId)
   ?? resolveActiveCustomTheme(themes, activeThemeId)
 );
-
-

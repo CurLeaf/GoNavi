@@ -1517,7 +1517,7 @@ describe('Sidebar locate toolbar', () => {
     expect(css).toMatch(/body\[data-ui-version="v2"\] \.gn-v2-rail-item,\s*body\[data-ui-version="v2"\] \.gn-v2-rail-tool \{[^}]*width: calc\(36px \* var\(--gn-v2-rail-scale\)\);[^}]*height: calc\(38px \* var\(--gn-v2-rail-scale\)\);[^}]*font-size: calc\(var\(--gn-font-size-sm, 12px\) \* var\(--gn-sidebar-rail-scale, 1\)\);/s);
     expect(css).toMatch(/\.gn-v2-rail-tool \{[^}]*height: calc\(28px \* var\(--gn-v2-rail-scale\)\);/s);
     expect(css).toMatch(/\.gn-v2-rail-tool \{[^}]*width: calc\(28px \* var\(--gn-v2-rail-scale\)\);/s);
-    expect(css).toContain('--gn-v2-explorer-scale: var(--gn-ui-scale, 1);');
+    expect(css).toContain('--gn-v2-explorer-scale: calc(var(--gn-ui-scale, 1) * var(--gn-sidebar-rail-scale, 1));');
     expect(css).toMatch(/\.gn-v2-explorer-actions \{[^}]*min-height: calc\(46px \* var\(--gn-v2-explorer-scale\)\);/s);
     expect(css).toMatch(/\.gn-v2-explorer-context-line\.is-connection \{[^}]*font-size: var\(--gn-sidebar-tree-font-size, var\(--gn-font-size-sm, 12px\)\);/s);
     expect(css).toMatch(/\.gn-v2-explorer-context-line\.is-database,[\s\S]*?\.gn-v2-explorer-context-line\.is-object \{[^}]*font-size: var\(--gn-sidebar-tree-font-size, var\(--gn-font-size-sm, 12px\)\);/s);

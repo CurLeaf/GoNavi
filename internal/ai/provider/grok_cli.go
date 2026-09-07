@@ -79,7 +79,7 @@ func (p *GrokCLIProvider) Name() string {
 }
 
 func (p *GrokCLIProvider) Validate() error {
-	_, err := resolveGrokCLICommand(runtime.GOOS, grokLookPath)
+	_, err := resolveGrokCLICommand(runtime.GOOS, lookPathWithOverride(p.config.CLIPath, grokLookPath))
 	return err
 }
 
@@ -137,7 +137,7 @@ func (p *GrokCLIProvider) stream(ctx context.Context, req ai.ChatRequest, callba
 	ctx, watchdog := startCLIIdleWatchdog(ctx, cliStreamIdleTimeout, cliStreamMaxTimeout)
 	defer watchdog.Close()
 
-	command, err := resolveGrokCLICommand(runtime.GOOS, grokLookPath)
+	command, err := resolveGrokCLICommand(runtime.GOOS, lookPathWithOverride(p.config.CLIPath, grokLookPath))
 	if err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func (p *GrokCLIProvider) stream(ctx context.Context, req ai.ChatRequest, callba
 	}
 
 	cmd := grokCommandContext(ctx, command, args...)
-	cmd.Env = EnrichCLICommandPATH(cmd.Environ(), command)
+	cmd.Env = MergeProviderCLIEnv(EnrichCLICommandPATH(cmd.Environ(), command), p.config.CLIEnv)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("create Grok CLI stdout pipe failed: %w", err)
@@ -270,7 +270,7 @@ func (p *GrokCLIProvider) run(ctx context.Context, req ai.ChatRequest) (grokCLIR
 	ctx, cancel := ensureClaudeCLITimeout(ctx, grokCLIRequestTimeout)
 	defer cancel()
 
-	command, err := resolveGrokCLICommand(runtime.GOOS, grokLookPath)
+	command, err := resolveGrokCLICommand(runtime.GOOS, lookPathWithOverride(p.config.CLIPath, grokLookPath))
 	if err != nil {
 		return grokCLIResult{}, err
 	}
@@ -282,7 +282,7 @@ func (p *GrokCLIProvider) run(ctx context.Context, req ai.ChatRequest) (grokCLIR
 	}
 
 	cmd := grokCommandContext(ctx, command, args...)
-	cmd.Env = EnrichCLICommandPATH(cmd.Environ(), command)
+	cmd.Env = MergeProviderCLIEnv(EnrichCLICommandPATH(cmd.Environ(), command), p.config.CLIEnv)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

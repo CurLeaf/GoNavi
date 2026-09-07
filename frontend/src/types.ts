@@ -725,7 +725,7 @@ export interface StreamEntry {
 // --- AI Types ---
 
 export type AIProviderType = "openai" | "anthropic" | "gemini" | "custom";
-export type AIProviderAuthMode = "api-key" | "local-cli";
+export type AIProviderAuthMode = "api-key" | "bearer" | "local-cli";
 export type AISafetyLevel = "readonly" | "readwrite" | "full";
 export type AIContextLevel = "schema_only" | "with_samples" | "with_results";
 
@@ -753,6 +753,9 @@ export interface AIProviderConfig {
   apiFormat?: string; // openai 可选 openai-responses；custom 支持 openai/anthropic/gemini/CLI 等格式
   headers?: Record<string, string>;
   maxTokens: number;
+  contextWindow?: number;
+  cliPath?: string;
+  cliEnv?: Record<string, string>;
   temperature: number;
   /** 思考强度：off | low | medium | high；空表示供应商默认 */
   thinkingIntensity?: string;
