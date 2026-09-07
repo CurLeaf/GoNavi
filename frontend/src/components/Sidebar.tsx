@@ -4382,7 +4382,7 @@ const Sidebar: React.FC<{
   const v2RailObjectActionsLabel = t('sidebar.rail.object_actions');
   const v2RailSystemActionsLabel = t('sidebar.rail.system_actions');
   const v2NewGroupLabel = t('sidebar.action.new_group');
-  const v2BatchActionsLabel = t('sidebar.action.batch_operations');
+  const v2DataWorkflowLabel = t('app.tools.group.workflow.title');
   const v2BatchTablesLabel = t('sidebar.action.batch_tables');
   const v2BatchDatabasesLabel = t('sidebar.action.batch_databases');
   const v2DataImportLabel = t('sidebar.action.data_import');
@@ -4467,9 +4467,9 @@ const Sidebar: React.FC<{
 
   const v2TitlebarQuickActions: TitleBarQuickAction[] = [
     {
-      key: 'batch-actions',
-      label: v2BatchActionsLabel,
-      icon: <AppstoreOutlined aria-hidden="true" />,
+      key: 'data-workflow',
+      label: v2DataWorkflowLabel,
+      icon: <SwitcherOutlined aria-hidden="true" />,
       menu: [
         {
           key: 'batch-tables',
@@ -4488,6 +4488,24 @@ const Sidebar: React.FC<{
           label: v2DataImportLabel,
           icon: <ImportOutlined aria-hidden="true" />,
           onClick: handleOpenDataImportWorkbench,
+        },
+        {
+          key: 'schema-compare',
+          label: t('app.tools.entry.schema_compare.title'),
+          icon: <AppstoreOutlined aria-hidden="true" />,
+          onClick: () => onOpenSettingsNavigation?.({ group: 'workflow', action: 'schema-compare' }),
+        },
+        {
+          key: 'data-compare',
+          label: t('app.tools.entry.data_compare.title'),
+          icon: <SwitcherOutlined aria-hidden="true" />,
+          onClick: () => onOpenSettingsNavigation?.({ group: 'workflow', action: 'data-compare' }),
+        },
+        {
+          key: 'sync',
+          label: t('app.tools.entry.sync.title'),
+          icon: <UploadOutlined rotate={90} aria-hidden="true" />,
+          onClick: () => onOpenSettingsNavigation?.({ group: 'workflow', action: 'sync' }),
         },
       ],
     },
@@ -4518,7 +4536,7 @@ const Sidebar: React.FC<{
       onClick: () => onOpenSettingsNavigation?.({ group: 'workspace', action: 'drivers' }),
     },
   ];
-  // 关于 GoNavi 作为标题栏独立按钮，和批量处理 / SQL 工具并列。
+  // 关于 GoNavi 作为标题栏独立按钮，和数据工作流 / SQL 工具并列。
   const v2TitlebarAboutActions: TitleBarQuickAction[] = [
     {
       key: 'about-go-navi',

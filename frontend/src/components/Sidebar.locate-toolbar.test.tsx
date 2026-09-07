@@ -1146,7 +1146,15 @@ describe('Sidebar locate toolbar', () => {
     const actionsSource = source.slice(actionsStart, actionsEnd);
     const driverIndex = actionsSource.indexOf("key: 'drivers'");
 
-    expect(actionsSource).toContain("key: 'batch-actions'");
+    expect(actionsSource).toContain("key: 'data-workflow'");
+    expect(actionsSource).toContain('label: v2DataWorkflowLabel');
+    expect(actionsSource).toContain("key: 'schema-compare'");
+    expect(actionsSource).toContain("action: 'schema-compare'");
+    expect(actionsSource).toContain("key: 'data-compare'");
+    expect(actionsSource).toContain("action: 'data-compare'");
+    expect(actionsSource).toContain("key: 'sync'");
+    expect(actionsSource).toContain("action: 'sync'");
+    expect(actionsSource).not.toContain("key: 'batch-actions'");
     expect(actionsSource).toContain("key: 'sql-tools'");
     expect(driverIndex).toBeGreaterThan(actionsSource.indexOf("key: 'sql-tools'"));
     expect(actionsSource).not.toContain("key: 'settings-about'");
@@ -1223,12 +1231,16 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).not.toContain('data-sidebar-open-external-sql-file-action="true"');
     expect(markup).toContain('data-sidebar-locate-current-tab-action="true"');
     expect(titlebarQuickActionsSource).toContain('data-titlebar-quick-actions');
-    expect(source).toContain("key: 'batch-actions'");
-    expect(source).toContain("sidebar.action.batch_operations");
+    expect(source).toContain("key: 'data-workflow'");
+    expect(source).toContain("app.tools.group.workflow.title");
     expect(source).toContain("key: 'sql-tools'");
     expect(source).toContain("sidebar.action.sql_tools");
-    expect(source).not.toContain("key: 'data-workflow'");
-    expect(source).not.toContain("onOpenDataSyncWorkbench?.('schemaCompare')");
+    expect(source).toContain("key: 'schema-compare'");
+    expect(source).toContain("onOpenSettingsNavigation?.({ group: 'workflow', action: 'schema-compare' })");
+    expect(source).toContain("key: 'data-compare'");
+    expect(source).toContain("onOpenSettingsNavigation?.({ group: 'workflow', action: 'data-compare' })");
+    expect(source).toContain("key: 'sync'");
+    expect(source).toContain("onOpenSettingsNavigation?.({ group: 'workflow', action: 'sync' })");
     expect(source).toContain('showObjectActions: false');
     expect(source).not.toContain("key: 'locate-current-table'");
     expect(markup).not.toContain('data-gonavi-new-query-action="true"');
