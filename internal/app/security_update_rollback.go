@@ -2,17 +2,10 @@ package app
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 
-	aiservice "GoNavi-Wails/internal/ai/service"
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/secretstore"
-)
-
-const (
-	securityUpdateAIConfigFileName    = "ai_config.json"
-	securityUpdateAIProviderSecretKind = "ai-provider"
 )
 
 type securityUpdateSecretSnapshot struct {
@@ -31,17 +24,11 @@ type securityUpdateCurrentAppRollbackSnapshot struct {
 	globalProxySecretRef  string
 	globalProxySecret     securityUpdateSecretSnapshot
 	globalProxyCleanupRef string
-
-	aiConfigFileExists bool
-	aiConfigFileData   []byte
-	aiProviderSecrets  map[string]securityUpdateSecretSnapshot
-	aiProviderCleanupRefs []string
 }
 
 func captureSecurityUpdateCurrentAppRollbackSnapshot(a *App, source securityUpdateCurrentAppSource) (securityUpdateCurrentAppRollbackSnapshot, error) {
 	snapshot := securityUpdateCurrentAppRollbackSnapshot{
 		connectionSecrets: make(map[string]securityUpdateSecretSnapshot),
-		aiProviderSecrets: make(map[string]securityUpdateSecretSnapshot),
 	}
 	configDir := strings.TrimSpace(a.configDir)
 	if configDir == "" {
@@ -140,47 +127,6 @@ func captureSecurityUpdateCurrentAppRollbackSnapshot(a *App, source securityUpda
 		}
 	}
 
-	aiConfigPath := filepath.Join(configDir, securityUpdateAIConfigFileName)
-	aiConfigFileData, aiConfigFileExists, err := readOptionalFile(aiConfigPath)
-	if err != nil {
-		return snapshot, err
-	}
-	snapshot.aiConfigFileExists = aiConfigFileExists
-	snapshot.aiConfigFileData = aiConfigFileData
-
-	inspection, err := aiservice.NewProviderConfigStore(configDir, a.secretStore).Inspect()
-	if err != nil {
-		return snapshot, err
-	}
-	aiProviderCleanupSet := make(map[string]struct{})
-	for _, provider := range inspection.Snapshot.Providers {
-		providerID := strings.TrimSpace(provider.ID)
-		if providerID == "" {
-			continue
-		}
-
-		ref := strings.TrimSpace(provider.SecretRef)
-		if ref == "" && (provider.HasSecret || strings.TrimSpace(provider.APIKey) != "" || len(provider.Headers) > 0) {
-			builtRef, refErr := secretstore.BuildRef(securityUpdateAIProviderSecretKind, providerID)
-			if refErr == nil {
-				ref = builtRef
-			}
-		}
-		if ref == "" {
-			continue
-		}
-
-		secretSnapshot, captureErr := captureSecurityUpdateSecretSnapshot(a.secretStore, ref)
-		if captureErr != nil {
-			return snapshot, captureErr
-		}
-		snapshot.aiProviderSecrets[ref] = secretSnapshot
-		aiProviderCleanupSet[ref] = struct{}{}
-	}
-	snapshot.aiProviderCleanupRefs = make([]string, 0, len(aiProviderCleanupSet))
-	for ref := range aiProviderCleanupSet {
-		snapshot.aiProviderCleanupRefs = append(snapshot.aiProviderCleanupRefs, ref)
-	}
 	return snapshot, nil
 }
 
@@ -217,23 +163,6 @@ func (s securityUpdateCurrentAppRollbackSnapshot) restore(a *App) error {
 	}
 	if s.globalProxyCleanupRef != "" && s.globalProxyCleanupRef != s.globalProxySecretRef {
 		if err := deleteSecurityUpdateSecretRef(a.secretStore, s.globalProxyCleanupRef); err != nil {
-			return err
-		}
-	}
-
-	if err := restoreOptionalFile(filepath.Join(configDir, securityUpdateAIConfigFileName), s.aiConfigFileExists, s.aiConfigFileData); err != nil {
-		return err
-	}
-	for ref, secretSnapshot := range s.aiProviderSecrets {
-		if err := restoreSecurityUpdateSecretSnapshot(a.secretStore, ref, secretSnapshot); err != nil {
-			return err
-		}
-	}
-	for _, ref := range s.aiProviderCleanupRefs {
-		if _, alreadyRestored := s.aiProviderSecrets[ref]; alreadyRestored {
-			continue
-		}
-		if err := deleteSecurityUpdateSecretRef(a.secretStore, ref); err != nil {
 			return err
 		}
 	}

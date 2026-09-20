@@ -26,7 +26,7 @@ AI 入口：`AGENTS.md`、`CLAUDE.md`、`.cursor/rules/gonavi-go.mdc` 均指向�
    - `internal/app`：Wails/`App` 绑定，保持薄
    - `internal/db`：`Database` 契约与 `*_impl.go` 驱动
    - `internal/connection`：跨层 DTO（含 `QueryResult`）
-   - 其余领域包：`internal/ai`、`internal/sync`、`internal/logger`、`internal/sqlaudit` 等
+   - 其余领域包：`internal/sync`、`internal/logger`、`internal/sqlaudit` 等
 4. 文件命名：`methods_<领域>.go`、`<引擎>_impl.go`、`<主题>_<平台>.go`。平台后缀只用 `windows` / `darwin` / `linux` / `stub` / `nonwindows` 这类已有约定。
 5. 一个文件一个主题。新建生产文件建议 ≤400 行、硬上限 800 行；函数体建议 ≤80 行、硬上限 120 行。
 6. 禁止继续膨胀：`internal/app/methods_file.go`、`methods_db.go`、`app.go`。新逻辑进新文件，旧文件只接线。
@@ -207,7 +207,7 @@ return connection.QueryResult{Success: true, Data: data, Fields: fields}
 **【强制】**
 
 1. `App` 导出方法只做：校验、只读/生产风险策略、调领域包、收成 `QueryResult`（或既有 DTO）。禁止在绑定层写驱动 SQL、拼协议、做 UI 逻辑。
-2. 不随意改导出方法名、参数、`QueryResult` JSON 字段。前端、MCP、Web RPC 共用契约。
+2. 不随意改导出方法名、参数、`QueryResult` JSON 字段。前端、Web RPC 共用契约。
 3. 新驱动：实现 `db.Database` + 需要的可选接口，在工厂注册；lite/full 构建走现有 `database_optional_factories_*.go`，不要破坏 lite 构建标签。
 4. SQL 走驱动实现；审计、脱敏走 `internal/sqlaudit`，不得绕过。
 5. 资源成对：`Connect`/`Close`、forwarder、`sql.Rows` 必须 `Close`。`defer` 用于清理。

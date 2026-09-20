@@ -5,7 +5,7 @@ import type {
 } from './detachedWindow';
 import type { QueryEditorResultSessionSnapshot } from './queryEditorResultSessionCache';
 import { isNativeDetachedWindowRoute } from './nativeDetachedWindowRoute';
-import { resolveLiveQueryTab, resolveLiveQueryTabs } from './liveQueryTabs';
+import { resolveLiveQueryTab } from './liveQueryTabs';
 import { setQueryTabDraft } from './sqlFileTabDrafts';
 import { sanitizeTableAccessCount } from './tableAccessCount';
 import {
@@ -55,17 +55,11 @@ const withNativeDetachedThemeContext = (
 };
 
 export const NATIVE_DETACHED_HOST_EVENT_NAMES = [
-  'gonavi:ai:inject-prompt',
-  'gonavi:ai:config-changed',
-  'gonavi:ai:provider-changed',
   'gonavi:locate-sidebar-object',
   'gonavi:insert-sql',
   'gonavi:insert-sql-to-tab',
-  'gonavi:jvm-apply-ai-plan',
-  'gonavi:jvm-apply-diagnostic-plan',
   'gonavi:open-download-source-settings',
   'gonavi:open-global-proxy-settings',
-  'gonavi:shortcut:toggle-ai-panel',
 ] as const;
 
 export type NativeDetachedHostEventName = typeof NATIVE_DETACHED_HOST_EVENT_NAMES[number];
@@ -76,7 +70,7 @@ export interface NativeDetachedHostEvent {
   detail?: unknown;
 }
 
-export type NativeDetachedWindowKind = 'workbench' | 'query-result' | 'ai-chat';
+export type NativeDetachedWindowKind = 'workbench' | 'query-result';
 export type NativeDetachedWindowAction =
   | 'ready'
   | 'sync'
@@ -84,7 +78,6 @@ export type NativeDetachedWindowAction =
   | 'hide'
   | 'close'
   | 'cancel-close'
-  | 'open-ai-settings'
   | 'host-event';
 export type NativeDetachedStoreSnapshot = Record<string, unknown>;
 
@@ -183,40 +176,21 @@ type StoreApiLike<TState extends object> = {
 const OMIT_VALUE = Symbol('gonavi.native-detached.omit');
 const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const WORKBENCH_BOOTSTRAP_OMITTED_KEYS = new Set([
-  'aiChatHistory',
-  'aiChatSessions',
-  'aiContexts',
   'jvmDiagnosticDrafts',
   'jvmDiagnosticOutputs',
   'tabs',
   'detachedWorkbenchWindows',
   'detachedQueryResultWindows',
-  'detachedAIChatWindow',
   'sqlEditorPendingTransactions',
 ]);
 const QUERY_RESULT_BOOTSTRAP_OMITTED_KEYS = new Set([
   ...WORKBENCH_BOOTSTRAP_OMITTED_KEYS,
   'sqlLogs',
 ]);
-const AI_CHAT_BOOTSTRAP_OMITTED_KEYS = new Set([
-  'detachedWorkbenchWindows',
-  'detachedQueryResultWindows',
-  'detachedAIChatWindow',
-  'sqlEditorPendingTransactions',
-  'jvmDiagnosticOutputs',
-]);
-const AI_CHAT_SYNC_KEYS = [
-  'aiChatHistory',
-  'aiChatSessions',
-  'aiActiveSessionId',
-  'aiContexts',
-] as const;
-const NATIVE_AI_HOST_QUERY_MAX_CHARS = 512 * 1024;
 const NATIVE_DETACHED_PROCESSED_EVENT_LIMIT = 256;
 const NATIVE_DETACHED_HOST_EVENT_NAME_SET = new Set<string>(NATIVE_DETACHED_HOST_EVENT_NAMES);
 export const NATIVE_DETACHED_WORKBENCH_MUTABLE_KEYS = [
   'activeContext',
-  'aiContexts',
   'pinnedSidebarTables',
   'queryOptions',
   'sqlFormatOptions',
@@ -237,20 +211,6 @@ export const NATIVE_DETACHED_WORKBENCH_MUTABLE_KEYS = [
   'jvmDiagnosticDrafts',
   'jvmDiagnosticOutputs',
 ] as const;
-
-const resolveArrayRecordById = (
-  value: unknown,
-  id: string,
-): Record<string, unknown> | null => {
-  if (!id || !Array.isArray(value)) return null;
-  const match = value.find((item) => (
-    item
-    && typeof item === 'object'
-    && !Array.isArray(item)
-    && String((item as { id?: unknown }).id || '') === id
-  ));
-  return match && typeof match === 'object' ? match as Record<string, unknown> : null;
-};
 
 const cloneSerializableValue = (
   value: unknown,
@@ -345,15 +305,11 @@ export const buildNativeDetachedWorkbenchPayload = (
   storeState.activeTabId = liveTab.id;
   storeState.detachedWorkbenchWindows = [];
   storeState.detachedQueryResultWindows = [];
-  storeState.detachedAIChatWindow = null;
   storeState.sqlEditorPendingTransactions = buildNativeDetachedStoreSnapshot(
     Object.prototype.hasOwnProperty.call(pendingRecord, liveTab.id)
       ? { [liveTab.id]: pendingRecord[liveTab.id] }
       : {},
   );
-  storeState.aiContexts = buildNativeDetachedStoreSnapshot({
-    value: source.aiContexts,
-  }).value ?? {};
   const diagnosticDrafts = source.jvmDiagnosticDrafts;
   const diagnosticOutputs = source.jvmDiagnosticOutputs;
   const diagnosticDraftRecord = diagnosticDrafts && typeof diagnosticDrafts === 'object'
@@ -389,7 +345,6 @@ export const buildNativeDetachedQueryResultPayload = (
   storeState.activeTabId = null;
   storeState.detachedWorkbenchWindows = [];
   storeState.detachedQueryResultWindows = [];
-  storeState.detachedAIChatWindow = null;
   storeState.sqlLogs = [];
   storeState.sqlEditorPendingTransactions = {};
   return {
@@ -399,43 +354,6 @@ export const buildNativeDetachedQueryResultPayload = (
       result: buildNativeDetachedQueryResultSnapshot(resultWindow.result),
     },
   };
-};
-
-export const buildNativeDetachedAIChatPayload = (
-  state: object,
-  themeContext?: NativeDetachedThemeContext,
-): NativeDetachedWindowPayload => {
-  const storeState = buildFilteredStoreSnapshot(state, AI_CHAT_BOOTSTRAP_OMITTED_KEYS);
-  const source = state as Record<string, unknown>;
-  if (Array.isArray(source.tabs)) {
-    storeState.tabs = buildNativeDetachedStoreSnapshot({
-      tabs: resolveLiveQueryTabs(source.tabs as TabData[]),
-    }).tabs ?? [];
-  }
-  storeState.detachedWorkbenchWindows = [];
-  storeState.detachedQueryResultWindows = [];
-  storeState.detachedAIChatWindow = null;
-  storeState.sqlEditorPendingTransactions = {};
-  storeState.aiPanelVisible = true;
-  storeState.aiChatOpenMode = 'detached';
-  return { storeState: withNativeDetachedThemeContext(storeState, themeContext) };
-};
-
-export const buildNativeDetachedAIChatSyncStoreSnapshot = (
-  state: object,
-  newSqlLogs: unknown[] = [],
-): NativeDetachedStoreSnapshot => {
-  const source = state as Record<string, unknown>;
-  const snapshot: Record<string, unknown> = {};
-  for (const key of AI_CHAT_SYNC_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(source, key)) {
-      snapshot[key] = source[key];
-    }
-  }
-  if (newSqlLogs.length > 0) {
-    snapshot.sqlLogs = newSqlLogs;
-  }
-  return buildNativeDetachedStoreSnapshot(snapshot);
 };
 
 export const buildNativeDetachedWorkbenchMutableStoreSnapshot = (
@@ -475,8 +393,7 @@ const mergeNativeDetachedValueDelta = (
       || rootKey === 'recentConnectionTargets'
       || rootKey === 'recentSQLFiles'
       || rootKey === 'tableExportHistories'
-      || rootKey === 'pinnedSidebarTables'
-      || rootKey === 'aiContexts';
+      || rootKey === 'pinnedSidebarTables';
     if (supportsIdentityMerge) {
       const identity = (item: unknown): string | null => {
         if (rootKey === 'pinnedSidebarTables') {
@@ -505,11 +422,7 @@ const mergeNativeDetachedValueDelta = (
           const jobId = String(record.jobId || '').trim();
           return jobId ? `job:${jobId}` : null;
         }
-        const dbName = String(record.dbName || '').trim();
-        const tableName = String(record.tableName || '').trim();
-        return dbName || tableName
-          ? `context:${dbName}\u0000${String(record.schemaName || '')}\u0000${tableName}`
-          : null;
+        return null;
       };
       const previousIds = previousSourceValue.map(identity);
       const nextIds = nextSourceValue.map(identity);
@@ -620,56 +533,6 @@ export const advanceNativeDetachedStoreSource = (
   ...buildNativeDetachedStoreSnapshot(changedSource),
 });
 
-/** Host-owned context sent to a detached AI window after it has started. */
-export const buildNativeDetachedAIHostStoreSnapshot = (
-  state: object,
-  hostEvents: NativeDetachedHostEvent[] = [],
-  themeContext?: NativeDetachedThemeContext,
-): NativeDetachedStoreSnapshot => {
-  const source = state as Record<string, unknown>;
-  const activeTabId = typeof source.activeTabId === 'string' && source.activeTabId
-    ? source.activeTabId
-    : null;
-  const storedActiveTab = activeTabId
-    ? resolveArrayRecordById(source.tabs, activeTabId)
-    : null;
-  const activeTabRecord = storedActiveTab
-    ? resolveLiveQueryTab(storedActiveTab as unknown as TabData)
-    : null;
-  const activeTab = activeTabRecord && typeof activeTabRecord.query === 'string'
-    && activeTabRecord.query.length > NATIVE_AI_HOST_QUERY_MAX_CHARS
-    ? {
-        ...activeTabRecord,
-        query: `${activeTabRecord.query.slice(0, NATIVE_AI_HOST_QUERY_MAX_CHARS / 2)}\n`
-          + '/* ... SQL truncated for detached AI context sync ... */\n'
-          + activeTabRecord.query.slice(-NATIVE_AI_HOST_QUERY_MAX_CHARS / 2),
-      }
-    : activeTabRecord;
-  const activeContext = source.activeContext
-    && typeof source.activeContext === 'object'
-    && !Array.isArray(source.activeContext)
-    ? source.activeContext as Record<string, unknown>
-    : null;
-  const activeConnectionId = String(activeContext?.connectionId || activeTab?.connectionId || '');
-  const activeConnection = resolveArrayRecordById(source.connections, activeConnectionId);
-  return withNativeDetachedThemeContext(buildNativeDetachedStoreSnapshot({
-    // Presentation state is host-owned. Keep a detached AI window aligned with
-    // the main window when the user changes appearance after it is opened.
-    theme: source.theme,
-    themePreference: source.themePreference,
-    appearance: source.appearance,
-    fontSize: source.fontSize,
-    uiScale: source.uiScale,
-    activeContext,
-    activeTabId,
-    activeTab,
-    activeConnection,
-    aiContexts: source.aiContexts,
-    shortcutOptions: source.shortcutOptions,
-    ...(hostEvents.length > 0 ? { [NATIVE_DETACHED_HOST_EVENTS_KEY]: hostEvents } : {}),
-  }), themeContext);
-};
-
 export const buildNativeDetachedQueryResultSnapshot = (
   result: DetachedQueryResultSnapshot,
 ): DetachedQueryResultSnapshot => {
@@ -713,82 +576,9 @@ export const hydrateNativeDetachedStore = <TState extends object>(
   return nextState;
 };
 
-/** Apply only host-owned AI context while preserving child actions and conversation state. */
-type NativeDetachedAIContexts = Record<string, unknown[]>;
-
-const normalizeNativeDetachedAIContexts = (value: unknown): NativeDetachedAIContexts => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  const result: NativeDetachedAIContexts = {};
-  for (const [key, items] of Object.entries(value)) {
-    if (Array.isArray(items)) result[key] = items;
-  }
-  return result;
-};
-
-const nativeDetachedAIContextIdentity = (item: unknown): string => {
-  if (!item || typeof item !== 'object' || Array.isArray(item)) return JSON.stringify(item);
-  const record = item as Record<string, unknown>;
-  return `${String(record.dbName || '')}\u0000${String(record.tableName || '')}`;
-};
-
-/**
- * Apply only changes made by one process since its last snapshot. Unrelated
- * additions from the other process survive, while removals still propagate.
- */
-export const mergeNativeDetachedAIContextsDelta = (
-  currentValue: unknown,
-  previousSourceValue: unknown,
-  nextSourceValue: unknown,
-): NativeDetachedAIContexts => {
-  const current = normalizeNativeDetachedAIContexts(currentValue);
-  const previousSource = normalizeNativeDetachedAIContexts(previousSourceValue);
-  const nextSource = normalizeNativeDetachedAIContexts(nextSourceValue);
-  const result: NativeDetachedAIContexts = Object.fromEntries(
-    Object.entries(current).map(([key, items]) => [key, [...items]]),
-  );
-  const connectionKeys = new Set([
-    ...Object.keys(previousSource),
-    ...Object.keys(nextSource),
-  ]);
-
-  for (const connectionKey of connectionKeys) {
-    const before = previousSource[connectionKey] || [];
-    const after = nextSource[connectionKey] || [];
-    const beforeByIdentity = new Map(before.map((item) => [nativeDetachedAIContextIdentity(item), item]));
-    const afterByIdentity = new Map(after.map((item) => [nativeDetachedAIContextIdentity(item), item]));
-    const changedIdentities = new Set<string>();
-    for (const [identity, item] of beforeByIdentity) {
-      if (!afterByIdentity.has(identity)
-        || JSON.stringify(afterByIdentity.get(identity)) !== JSON.stringify(item)) {
-        changedIdentities.add(identity);
-      }
-    }
-    for (const [identity, item] of afterByIdentity) {
-      if (!beforeByIdentity.has(identity)
-        || JSON.stringify(beforeByIdentity.get(identity)) !== JSON.stringify(item)) {
-        changedIdentities.add(identity);
-      }
-    }
-    if (changedIdentities.size === 0) continue;
-
-    const currentItems = result[connectionKey] || [];
-    const retained = currentItems.filter(
-      (item) => !changedIdentities.has(nativeDetachedAIContextIdentity(item)),
-    );
-    const changedNextItems = after.filter(
-      (item) => changedIdentities.has(nativeDetachedAIContextIdentity(item)),
-    );
-    const merged = [...retained, ...changedNextItems];
-    if (merged.length > 0) result[connectionKey] = merged;
-    else delete result[connectionKey];
-  }
-  return result;
-};
-
 export const applyNativeDetachedHostStateSync = <TState extends object>(
   currentState: TState,
   snapshot: NativeDetachedStoreSnapshot,
-  previousHostAIContexts?: unknown,
 ): TState => {
   const safe = buildNativeDetachedStoreSnapshot(snapshot);
   const hostStatePatch: NativeDetachedStoreSnapshot = {};
@@ -823,19 +613,11 @@ export const applyNativeDetachedHostStateSync = <TState extends object>(
 
   mergeById('tabs', safe.activeTab);
   mergeById('connections', safe.activeConnection);
-  if (Object.prototype.hasOwnProperty.call(safe, 'aiContexts')) {
-    next.aiContexts = mergeNativeDetachedAIContextsDelta(
-      next.aiContexts,
-      previousHostAIContexts ?? next.aiContexts,
-      safe.aiContexts,
-    );
-  }
   return next as TState;
 };
 
 export type NativeDetachedHostStateApplyOptions = {
   processedEventIds?: Set<string>;
-  previousHostAIContextsRef?: { current: unknown };
   dispatchHostEvent?: (event: NativeDetachedHostEvent) => void;
 };
 
@@ -893,12 +675,7 @@ export const applyNativeDetachedHostStateCommand = <TState extends object>(
   store.setState(applyNativeDetachedHostStateSync(
     store.getState(),
     safeSnapshot,
-    options.previousHostAIContextsRef?.current,
   ), true);
-  if (Object.prototype.hasOwnProperty.call(safeSnapshot, 'aiContexts')
-    && options.previousHostAIContextsRef) {
-    options.previousHostAIContextsRef.current = safeSnapshot.aiContexts;
-  }
   const processedIds = options.processedEventIds;
   for (const event of readNativeDetachedHostEvents(safeSnapshot)) {
     if (processedIds?.has(event.id)) continue;
@@ -951,7 +728,6 @@ export const fetchNativeDetachedWindowBootstrap = async (
   if (
     bootstrap.kind !== 'workbench'
     && bootstrap.kind !== 'query-result'
-    && bootstrap.kind !== 'ai-chat'
   ) {
     throw new Error('Native detached window bootstrap has an invalid kind');
   }
@@ -1051,11 +827,6 @@ export const cancelNativeDetachedWindowClose = (
   fetchImpl?: FetchLike,
 ): Promise<void> => postNativeDetachedWindowAction('cancel-close', payload, fetchImpl).then(() => undefined);
 
-export const openNativeDetachedAISettings = (
-  payload: NativeDetachedWindowActionPayload,
-  fetchImpl?: FetchLike,
-): Promise<void> => postNativeDetachedWindowAction('open-ai-settings', payload, fetchImpl).then(() => undefined);
-
 export const sendNativeDetachedHostEvent = (
   payload: NativeDetachedWindowActionPayload,
   fetchImpl?: FetchLike,
@@ -1100,34 +871,6 @@ export const hideCurrentNativeDetachedWindow = async (
   const result = await nativeHide(Math.trunc(visibilityRevision));
   if (result?.success === false) {
     throw new Error(String(result.message || 'Failed to hide native detached window'));
-  }
-};
-
-export const hideCurrentNativeDetachedWindowForAISettings = async (
-  visibilityRevision: number,
-  providerId?: string,
-): Promise<void> => {
-  const control = typeof window !== 'undefined'
-    ? (window as any).go?.nativewindow?.Control
-    : undefined;
-  const normalizedProviderId = String(providerId || '').trim();
-  const hideForProviderSettings = normalizedProviderId
-    ? control?.HideForAISettingsProvider
-    : undefined;
-  const hideForAISettings = control?.HideForAISettings;
-  if (typeof hideForProviderSettings === 'function') {
-    const result = await hideForProviderSettings(Math.trunc(visibilityRevision), normalizedProviderId);
-    if (result?.success === false) {
-      throw new Error(String(result.message || 'Failed to open AI provider settings from native window'));
-    }
-    return;
-  }
-  if (typeof hideForAISettings !== 'function') {
-    throw new Error('Native detached AI settings control is unavailable');
-  }
-  const result = await hideForAISettings(Math.trunc(visibilityRevision));
-  if (result?.success === false) {
-    throw new Error(String(result.message || 'Failed to open AI settings from native window'));
   }
 };
 

@@ -11,7 +11,6 @@ WORKFLOWS = (
     ROOT / ".github" / "workflows" / "dev-build.yml",
 )
 DOCKERFILES = (
-    ROOT / "Dockerfile.mcp-server",
     ROOT / "Dockerfile.web-server",
     ROOT / "Dockerfile.build-env",
 )

@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"GoNavi-Wails/internal/ai"
-	aiservice "GoNavi-Wails/internal/ai/service"
 	"GoNavi-Wails/internal/app"
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/secretstore"
@@ -18,17 +16,13 @@ import (
 
 const (
 	modeSeedSecureStorage = "seed-secure-storage"
-	modeSeedAIUpdate      = "seed-ai-update"
 )
 
 const (
 	testConnectionID       = "manualtest-postgres"
-	testSecureProviderID   = "manualtest-secure-provider"
-	testPendingProviderID  = "manualtest-pending-provider"
 	testBackupDirName      = "manual-test-backups"
 	connectionsFileName    = "connections.json"
 	globalProxyFileName    = "global_proxy.json"
-	aiConfigFileName       = "ai_config.json"
 	securityUpdateFileName = "config-security-update.json"
 )
 
@@ -43,16 +37,8 @@ type backupManifestFile struct {
 	Existed      bool   `json:"existed"`
 }
 
-type storedAIConfig struct {
-	SchemaVersion  int                 `json:"schemaVersion,omitempty"`
-	Providers      []ai.ProviderConfig `json:"providers"`
-	ActiveProvider string              `json:"activeProvider"`
-	SafetyLevel    string              `json:"safetyLevel"`
-	ContextLevel   string              `json:"contextLevel"`
-}
-
 func main() {
-	mode := flag.String("mode", modeSeedSecureStorage, "seed mode: seed-secure-storage | seed-ai-update")
+	mode := flag.String("mode", modeSeedSecureStorage, "seed mode: seed-secure-storage")
 	flag.Parse()
 
 	configDir, err := resolveConfigDir()
@@ -75,12 +61,7 @@ func main() {
 		if err := seedSecureStorage(configDir, store); err != nil {
 			fatalf("seed secure storage failed: %v", err)
 		}
-		fmt.Printf("mode=%s\nbackup=%s\nconnectionId=%s\nproviderId=%s\n", modeSeedSecureStorage, backupDir, testConnectionID, testSecureProviderID)
-	case modeSeedAIUpdate:
-		if err := seedAIUpdate(configDir, store); err != nil {
-			fatalf("seed ai update failed: %v", err)
-		}
-		fmt.Printf("mode=%s\nbackup=%s\npendingProviderId=%s\n", modeSeedAIUpdate, backupDir, testPendingProviderID)
+		fmt.Printf("mode=%s\nbackup=%s\nconnectionId=%s\n", modeSeedSecureStorage, backupDir, testConnectionID)
 	default:
 		fatalf("unsupported mode: %s", *mode)
 	}
@@ -104,7 +85,6 @@ func backupConfigFiles(configDir string) (string, error) {
 	files := []string{
 		connectionsFileName,
 		globalProxyFileName,
-		aiConfigFileName,
 		filepath.Join("migrations", securityUpdateFileName),
 	}
 
@@ -161,7 +141,7 @@ func backupConfigFiles(configDir string) (string, error) {
 	return backupDir, nil
 }
 
-func seedSecureStorage(configDir string, store secretstore.SecretStore) error {
+func seedSecureStorage(_ string, store secretstore.SecretStore) error {
 	if err := cleanupKnownTestSecrets(store); err != nil {
 		return err
 	}
@@ -196,112 +176,7 @@ func seedSecureStorage(configDir string, store secretstore.SecretStore) error {
 		return err
 	}
 
-	storeConfig := aiservice.NewProviderConfigStore(configDir, store)
-	snapshot, err := storeConfig.LoadRuntime()
-	if err != nil {
-		return err
-	}
-	snapshot.Providers = filterProviders(snapshot.Providers, testSecureProviderID, testPendingProviderID)
-	snapshot.Providers = append(snapshot.Providers, ai.ProviderConfig{
-		ID:        testSecureProviderID,
-		Type:      "custom",
-		Name:      "手工测试 Secure Provider",
-		APIKey:    "manualtest-ai-secret",
-		BaseURL:   "https://api.openai.com/v1",
-		Model:     "gpt-4o-mini",
-		APIFormat: "openai",
-		Headers: map[string]string{
-			"Authorization": "Bearer manualtest-header-secret",
-			"X-Trace-Id":    "manualtest-visible",
-		},
-		MaxTokens:   2048,
-		Temperature: 0.2,
-	})
-	if snapshot.SafetyLevel == "" {
-		snapshot.SafetyLevel = ai.PermissionReadOnly
-	}
-	if snapshot.ContextLevel == "" {
-		snapshot.ContextLevel = ai.ContextSchemaOnly
-	}
-	return storeConfig.Save(snapshot)
-}
-
-func seedAIUpdate(configDir string, store secretstore.SecretStore) error {
-	if err := cleanupKnownTestSecrets(store); err != nil {
-		return err
-	}
-
-	configPath := filepath.Join(configDir, aiConfigFileName)
-	cfg, err := readStoredAIConfig(configPath)
-	if err != nil {
-		return err
-	}
-
-	cfg.Providers = filterProviders(cfg.Providers, testSecureProviderID, testPendingProviderID)
-	cfg.Providers = append(cfg.Providers, ai.ProviderConfig{
-		ID:        testPendingProviderID,
-		Type:      "custom",
-		Name:      "手工测试 待迁移 AI",
-		APIKey:    "manualtest-ai-update-secret",
-		BaseURL:   "https://api.openai.com/v1",
-		Model:     "gpt-4o-mini",
-		APIFormat: "openai",
-		MaxTokens: 1024,
-	})
-	if cfg.SchemaVersion == 0 {
-		cfg.SchemaVersion = 2
-	}
-	if cfg.Providers == nil {
-		cfg.Providers = []ai.ProviderConfig{}
-	}
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(configPath, data, 0o644)
-}
-
-func readStoredAIConfig(configPath string) (storedAIConfig, error) {
-	cfg := storedAIConfig{
-		Providers:      []ai.ProviderConfig{},
-		SafetyLevel:    string(ai.PermissionReadOnly),
-		ContextLevel:   string(ai.ContextSchemaOnly),
-		SchemaVersion:  2,
-		ActiveProvider: "",
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return cfg, nil
-		}
-		return storedAIConfig{}, err
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return storedAIConfig{}, err
-	}
-	if cfg.Providers == nil {
-		cfg.Providers = []ai.ProviderConfig{}
-	}
-	return cfg, nil
-}
-
-func filterProviders(providers []ai.ProviderConfig, excludedIDs ...string) []ai.ProviderConfig {
-	excluded := make(map[string]struct{}, len(excludedIDs))
-	for _, id := range excludedIDs {
-		excluded[strings.TrimSpace(id)] = struct{}{}
-	}
-	filtered := make([]ai.ProviderConfig, 0, len(providers))
-	for _, provider := range providers {
-		if _, skip := excluded[strings.TrimSpace(provider.ID)]; skip {
-			continue
-		}
-		filtered = append(filtered, provider)
-	}
-	return filtered
+	return nil
 }
 
 func cleanupKnownTestSecrets(store secretstore.SecretStore) error {
@@ -312,8 +187,6 @@ func cleanupKnownTestSecrets(store secretstore.SecretStore) error {
 	refs := []secretRef{
 		{kind: "connection", id: testConnectionID},
 		{kind: "global-proxy", id: "default"},
-		{kind: "ai-provider", id: testSecureProviderID},
-		{kind: "ai-provider", id: testPendingProviderID},
 	}
 
 	for _, item := range refs {

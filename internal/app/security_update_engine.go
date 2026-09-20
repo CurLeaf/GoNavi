@@ -7,18 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"GoNavi-Wails/internal/ai"
-	aiservice "GoNavi-Wails/internal/ai/service"
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/secretstore"
 )
 
 type securityUpdateNormalizedPreview struct {
-	SourceType                  SecurityUpdateSourceType `json:"sourceType"`
-	ConnectionIDs               []string                 `json:"connectionIds"`
-	HasGlobalProxy              bool                     `json:"hasGlobalProxy"`
-	AIProviderIDs               []string                 `json:"aiProviderIds"`
-	AIProvidersNeedingAttention []string                 `json:"aiProvidersNeedingAttention,omitempty"`
+	SourceType     SecurityUpdateSourceType `json:"sourceType"`
+	ConnectionIDs  []string                 `json:"connectionIds"`
+	HasGlobalProxy bool                     `json:"hasGlobalProxy"`
 }
 
 func (a *App) GetSecurityUpdateStatus() (SecurityUpdateStatus, error) {
@@ -29,13 +25,6 @@ func (a *App) GetSecurityUpdateStatus() (SecurityUpdateStatus, error) {
 	status, err := repo.LoadMarker()
 	if err != nil {
 		if os.IsNotExist(err) {
-			inspection, inspectErr := aiservice.NewProviderConfigStore(a.configDir, a.secretStore).Inspect()
-			if inspectErr != nil {
-				return SecurityUpdateStatus{}, inspectErr
-			}
-			if len(inspection.ProvidersNeedingMigration) > 0 {
-				return a.buildSecurityUpdatePendingStatusFromInspection(inspection, SecurityUpdateOverallStatusPending), nil
-			}
 			return SecurityUpdateStatus{
 				SchemaVersion: securityUpdateSchemaVersion,
 				OverallStatus: SecurityUpdateOverallStatusNotDetected,
@@ -118,19 +107,11 @@ func (a *App) DismissSecurityUpdateReminder() (SecurityUpdateStatus, error) {
 		if !os.IsNotExist(err) {
 			return SecurityUpdateStatus{}, err
 		}
-		inspection, inspectErr := aiservice.NewProviderConfigStore(a.configDir, a.secretStore).Inspect()
-		if inspectErr != nil {
-			return SecurityUpdateStatus{}, inspectErr
-		}
-		if len(inspection.ProvidersNeedingMigration) > 0 {
-			status = a.buildSecurityUpdatePendingStatusFromInspection(inspection, SecurityUpdateOverallStatusPostponed)
-		} else {
-			status = SecurityUpdateStatus{
-				SchemaVersion: securityUpdateSchemaVersion,
-				SourceType:    SecurityUpdateSourceTypeCurrentAppSavedConfig,
-				Summary:       SecurityUpdateSummary{},
-				Issues:        []SecurityUpdateIssue{},
-			}
+		status = SecurityUpdateStatus{
+			SchemaVersion: securityUpdateSchemaVersion,
+			SourceType:    SecurityUpdateSourceTypeCurrentAppSavedConfig,
+			Summary:       SecurityUpdateSummary{},
+			Issues:        []SecurityUpdateIssue{},
 		}
 	}
 	status.SchemaVersion = securityUpdateSchemaVersion
@@ -225,7 +206,6 @@ func (a *App) runSecurityUpdateCurrentAppRound(round SecurityUpdateStatus, sourc
 		SourceType:     SecurityUpdateSourceTypeCurrentAppSavedConfig,
 		ConnectionIDs:  make([]string, 0, len(source.Connections)),
 		HasGlobalProxy: source.GlobalProxy != nil,
-		AIProviderIDs:  []string{},
 	}
 
 	connectionRepo := a.savedConnectionRepository()
@@ -244,39 +224,6 @@ func (a *App) runSecurityUpdateCurrentAppRound(round SecurityUpdateStatus, sourc
 		if _, err := a.saveGlobalProxy(connection.SaveGlobalProxyInput(*source.GlobalProxy)); err != nil {
 			failed := a.newSecurityUpdateSystemFailureStatus(finalStatus, SecurityUpdateIssueReasonCodeEnvironmentBlocked, err)
 			return failed, preview, err
-		}
-		finalStatus.Summary.Updated++
-	}
-
-	providerSnapshot, err := aiservice.NewProviderConfigStore(a.configDir, a.secretStore).Load()
-	if err != nil {
-		failed := a.newSecurityUpdateSystemFailureStatus(finalStatus, securityUpdateFailureReasonForError(err), err)
-		return failed, preview, err
-	}
-
-	for _, provider := range providerSnapshot.Providers {
-		if !providerParticipatesInSecurityUpdate(provider) {
-			continue
-		}
-
-		preview.AIProviderIDs = append(preview.AIProviderIDs, provider.ID)
-		finalStatus.Summary.Total++
-		if provider.HasSecret && strings.TrimSpace(provider.APIKey) == "" {
-			finalStatus.OverallStatus = SecurityUpdateOverallStatusNeedsAttention
-			finalStatus.Summary.Pending++
-			finalStatus.Issues = append(finalStatus.Issues, SecurityUpdateIssue{
-				ID:         "ai-provider-" + provider.ID,
-				Scope:      SecurityUpdateIssueScopeAIProvider,
-				RefID:      provider.ID,
-				Title:      provider.Name,
-				Severity:   SecurityUpdateIssueSeverityMedium,
-				Status:     SecurityUpdateItemStatusNeedsAttention,
-				ReasonCode: SecurityUpdateIssueReasonCodeSecretMissing,
-				Action:     SecurityUpdateIssueActionOpenAISettings,
-				Message:    a.appText("security_update.backend.issue.ai_provider.secret_missing", nil),
-			})
-			preview.AIProvidersNeedingAttention = append(preview.AIProvidersNeedingAttention, provider.ID)
-			continue
 		}
 		finalStatus.Summary.Updated++
 	}
@@ -392,129 +339,18 @@ func (a *App) validateSecurityUpdateCurrentAppRound(round SecurityUpdateStatus, 
 							Message:    message,
 						},
 					)
-					goto validateProviders
+					goto finishSecurityUpdateValidation
 				}
 			}
 			finalStatus.Summary.Updated++
 		}
 	}
 
-validateProviders:
-	providerSnapshot, err := aiservice.NewProviderConfigStore(a.configDir, a.secretStore).Load()
-	if err != nil {
-		failed := a.newSecurityUpdateSystemFailureStatus(finalStatus, securityUpdateFailureReasonForError(err), err)
-		return failed, err
-	}
-
-	providersByID := make(map[string]ai.ProviderConfig, len(providerSnapshot.Providers))
-	for _, provider := range providerSnapshot.Providers {
-		providersByID[provider.ID] = provider
-	}
-
-	for _, providerID := range preview.AIProviderIDs {
-		finalStatus.Summary.Total++
-		provider, ok := providersByID[providerID]
-		if !ok {
-			markSecurityUpdateNeedsAttention(
-				&finalStatus,
-				SecurityUpdateIssue{
-					ID:         "ai-provider-" + providerID,
-					Scope:      SecurityUpdateIssueScopeAIProvider,
-					RefID:      providerID,
-					Title:      providerID,
-					Severity:   SecurityUpdateIssueSeverityMedium,
-					Status:     SecurityUpdateItemStatusNeedsAttention,
-					ReasonCode: SecurityUpdateIssueReasonCodeValidationFailed,
-					Action:     SecurityUpdateIssueActionOpenAISettings,
-					Message:    a.appText("security_update.backend.issue.ai_provider.missing_or_resave", nil),
-				},
-			)
-			continue
-		}
-		if provider.HasSecret && strings.TrimSpace(provider.APIKey) == "" {
-			markSecurityUpdateNeedsAttention(
-				&finalStatus,
-				SecurityUpdateIssue{
-					ID:         "ai-provider-" + provider.ID,
-					Scope:      SecurityUpdateIssueScopeAIProvider,
-					RefID:      provider.ID,
-					Title:      provider.Name,
-					Severity:   SecurityUpdateIssueSeverityMedium,
-					Status:     SecurityUpdateItemStatusNeedsAttention,
-					ReasonCode: SecurityUpdateIssueReasonCodeSecretMissing,
-					Action:     SecurityUpdateIssueActionOpenAISettings,
-					Message:    a.appText("security_update.backend.issue.ai_provider.secret_missing", nil),
-				},
-			)
-			continue
-		}
-		finalStatus.Summary.Updated++
-	}
-
+finishSecurityUpdateValidation:
 	if finalStatus.OverallStatus == SecurityUpdateOverallStatusCompleted {
 		finalStatus.CompletedAt = finalStatus.UpdatedAt
 	}
 	return finalStatus, nil
-}
-
-func providerParticipatesInSecurityUpdate(provider ai.ProviderConfig) bool {
-	return provider.HasSecret || strings.TrimSpace(provider.APIKey) != ""
-}
-
-func (a *App) buildSecurityUpdatePendingStatusFromInspection(
-	inspection aiservice.ProviderConfigStoreInspection,
-	overallStatus SecurityUpdateOverallStatus,
-) SecurityUpdateStatus {
-	return buildSecurityUpdatePendingStatusFromInspection(
-		inspection,
-		overallStatus,
-		a.appText("security_update.backend.issue.ai_provider.migration_required", nil),
-	)
-}
-
-func buildSecurityUpdatePendingStatusFromInspection(
-	inspection aiservice.ProviderConfigStoreInspection,
-	overallStatus SecurityUpdateOverallStatus,
-	message string,
-) SecurityUpdateStatus {
-	providersByID := make(map[string]ai.ProviderConfig, len(inspection.Snapshot.Providers))
-	for _, provider := range inspection.Snapshot.Providers {
-		providersByID[provider.ID] = provider
-	}
-
-	issues := make([]SecurityUpdateIssue, 0, len(inspection.ProvidersNeedingMigration))
-	for _, providerID := range inspection.ProvidersNeedingMigration {
-		provider := providersByID[providerID]
-		title := strings.TrimSpace(provider.Name)
-		if title == "" {
-			title = providerID
-		}
-		issues = append(issues, SecurityUpdateIssue{
-			ID:         "ai-provider-" + providerID,
-			Scope:      SecurityUpdateIssueScopeAIProvider,
-			RefID:      providerID,
-			Title:      title,
-			Severity:   SecurityUpdateIssueSeverityMedium,
-			Status:     SecurityUpdateItemStatusPending,
-			ReasonCode: SecurityUpdateIssueReasonCodeMigrationRequired,
-			Action:     SecurityUpdateIssueActionOpenAISettings,
-			Message:    message,
-		})
-	}
-
-	return SecurityUpdateStatus{
-		SchemaVersion:   securityUpdateSchemaVersion,
-		OverallStatus:   overallStatus,
-		SourceType:      SecurityUpdateSourceTypeCurrentAppSavedConfig,
-		ReminderVisible: overallStatus == SecurityUpdateOverallStatusPending,
-		CanStart:        overallStatus == SecurityUpdateOverallStatusPending || overallStatus == SecurityUpdateOverallStatusPostponed,
-		CanPostpone:     overallStatus == SecurityUpdateOverallStatusPending || overallStatus == SecurityUpdateOverallStatusPostponed,
-		Summary: SecurityUpdateSummary{
-			Total:   len(issues),
-			Pending: len(issues),
-		},
-		Issues: issues,
-	}
 }
 
 func newSecurityUpdateRoundBaseStatus(round SecurityUpdateStatus, sourceType SecurityUpdateSourceType) SecurityUpdateStatus {

@@ -33,7 +33,6 @@ const DataSyncWorkbench: React.FC<{ tab: TabData; embedded?: boolean }> = ({
   const i18n = useOptionalI18n();
   const workbenchFamily = resolveWorkbenchFamily(tab);
   const addTab = useStore((state) => state.addTab);
-  const setAIPanelVisible = useStore((state) => state.setAIPanelVisible);
   const handleClose = useCallback(() => {
     requestCloseWorkbenchTabs([tab.id]);
   }, [tab.id]);
@@ -56,18 +55,6 @@ const DataSyncWorkbench: React.FC<{ tab: TabData; embedded?: boolean }> = ({
       });
     },
     [addTab],
-  );
-  const handleAskAi = useCallback(
-    (prompt: string) => {
-      const wasClosed = !useStore.getState().aiPanelVisible;
-      if (wasClosed) setAIPanelVisible(true);
-      globalThis.setTimeout(() => {
-        window.dispatchEvent(
-          new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }),
-        );
-      }, wasClosed ? 350 : 0);
-    },
-    [setAIPanelVisible],
   );
   const handleOpenSyncWorkbench = useCallback(
     (handoff?: { taskId: string; stage?: 'endpoints' | 'mappings' | 'delivery' | 'trigger' | 'preflight' }) => {
@@ -131,7 +118,6 @@ const DataSyncWorkbench: React.FC<{ tab: TabData; embedded?: boolean }> = ({
         workbenchTabId={tab.id}
         workbenchFamily={workbenchFamily}
         onOpenQueryTab={handleOpenQueryTab}
-        onAskAi={handleAskAi}
         onOpenSyncWorkbench={handleOpenSyncWorkbench}
         focusTaskId={tab.dataSyncFocusTaskId}
         focusStage={tab.dataSyncFocusStage}

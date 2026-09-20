@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 
-	aiservice "GoNavi-Wails/internal/ai/service"
 	"GoNavi-Wails/internal/app"
 	"GoNavi-Wails/internal/nativewindow"
 
@@ -25,8 +24,7 @@ func main() {
 func runWailsBindingsGeneration() error {
 	store := newBindingsSecretStore()
 	application := app.NewAppWithSecretStore(store)
-	aiService := aiservice.NewServiceWithSecretStore(store)
-	nativeWindowManager, err := nativewindow.NewManager(assets, application, aiService)
+	nativeWindowManager, err := nativewindow.NewManager(assets, application)
 	if err != nil {
 		return err
 	}
@@ -35,6 +33,6 @@ func runWailsBindingsGeneration() error {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		Bind: collectWailsBindings(application, aiService, nativeWindowManager),
+		Bind: collectWailsBindings(application, nativeWindowManager),
 	})
 }

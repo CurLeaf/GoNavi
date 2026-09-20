@@ -35,7 +35,6 @@ body:
         - Import, export, or backup
         - SSH, proxy, or tunnel
         - Driver or Driver Agent
-        - AI, MCP, or Agent
         - Installation, update, or startup
         - User interface, interaction, or local settings
         - Performance or resource usage

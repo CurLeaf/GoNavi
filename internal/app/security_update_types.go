@@ -23,7 +23,6 @@ type SecurityUpdateIssueScope string
 const (
 	SecurityUpdateIssueScopeConnection  SecurityUpdateIssueScope = "connection"
 	SecurityUpdateIssueScopeGlobalProxy SecurityUpdateIssueScope = "global_proxy"
-	SecurityUpdateIssueScopeAIProvider  SecurityUpdateIssueScope = "ai_provider"
 	SecurityUpdateIssueScopeSystem      SecurityUpdateIssueScope = "system"
 )
 
@@ -61,7 +60,6 @@ type SecurityUpdateIssueAction string
 const (
 	SecurityUpdateIssueActionOpenConnection    SecurityUpdateIssueAction = "open_connection"
 	SecurityUpdateIssueActionOpenProxySettings SecurityUpdateIssueAction = "open_proxy_settings"
-	SecurityUpdateIssueActionOpenAISettings    SecurityUpdateIssueAction = "open_ai_settings"
 	SecurityUpdateIssueActionRetryUpdate       SecurityUpdateIssueAction = "retry_update"
 	SecurityUpdateIssueActionViewDetails       SecurityUpdateIssueAction = "view_details"
 )

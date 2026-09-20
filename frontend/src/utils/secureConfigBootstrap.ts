@@ -57,10 +57,6 @@ type StartSecurityUpdateResult = {
   error: Error | null;
 };
 
-type PrepareExternalMCPResult = StartSecurityUpdateResult & {
-  attempted: boolean;
-};
-
 type MergeSecurityUpdateStatusOptions = {
   previousStatus?: Partial<SecurityUpdateStatus> | null;
   t?: SecureConfigBootstrapTranslator;
@@ -402,25 +398,6 @@ export async function bootstrapSecureConfig(args: SecureConfigBootstrapArgs): Pr
   };
 }
 
-export async function prepareSecureConfigForExternalMCP(args: SecureConfigBootstrapArgs): Promise<PrepareExternalMCPResult> {
-  const storage = resolveStorage(args.storage);
-  const rawPayload = storage?.getItem(LEGACY_PERSIST_KEY) ?? null;
-  if (!hasLegacyMigratableSensitiveItems(rawPayload)) {
-    return {
-      attempted: false,
-      status: null,
-      error: null,
-    };
-  }
-
-  const result = await startSecurityUpdateFromBootstrap(args);
-  return {
-    attempted: true,
-    status: result.status,
-    error: result.error,
-  };
-}
-
 export async function startSecurityUpdateFromBootstrap(args: SecureConfigBootstrapArgs): Promise<StartSecurityUpdateResult> {
   const storage = resolveStorage(args.storage);
   const rawPayload = storage?.getItem(LEGACY_PERSIST_KEY) ?? null;
@@ -464,7 +441,6 @@ export async function startSecurityUpdateFromBootstrap(args: SecureConfigBootstr
 export type {
   BackendGlobalProxyResult,
   MergeSecurityUpdateStatusOptions,
-  PrepareExternalMCPResult,
   SecurityUpdateBackend,
   SecureConfigBootstrapArgs,
   SecureConfigBootstrapResult,

@@ -105,7 +105,6 @@ interface QueryEditorResultsPanelProps {
     maxRows?: number;
     dataPreviewRequest?: { resultKey: string; requestId: string } | null;
     toggleShortcutLabel: string;
-    diagnoseShortcutLabel?: string;
     onActiveResultKeyChange: (key: string) => void;
     onHide: () => void;
     onCloseResult: (key: string) => void;
@@ -129,7 +128,6 @@ interface QueryEditorResultsPanelProps {
     onResultSort: (key: string, field: string, order: string) => void;
     onRequestResultTotalCount?: (key: string) => void;
     onCancelResultTotalCount?: (key: string) => void;
-    onDiagnoseExecutionError: () => void;
     onLocateExecutionError?: () => void;
     onCompareResult?: (resultKey: string) => void;
     executionLifecycle?: QueryEditorExecutionLifecycleState | null;
@@ -173,7 +171,6 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     maxRows,
     dataPreviewRequest,
     toggleShortcutLabel,
-    diagnoseShortcutLabel,
     onActiveResultKeyChange,
     onHide,
     onCloseResult,
@@ -188,7 +185,6 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     onResultSort,
     onRequestResultTotalCount,
     onCancelResultTotalCount,
-    onDiagnoseExecutionError,
     onLocateExecutionError,
     onCompareResult,
     executionLifecycle = null,
@@ -671,8 +667,6 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                 <LogPanel
                     variant="embedded"
                     executionError={executionError}
-                    onDiagnoseExecutionError={executionError ? onDiagnoseExecutionError : undefined}
-                    diagnoseShortcutLabel={executionError ? diagnoseShortcutLabel : undefined}
                     onLocateExecutionError={executionError ? onLocateExecutionError : undefined}
                 />
             ),
@@ -764,8 +758,6 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                             <QueryEditorExecutionErrorCard
                                 darkMode={darkMode}
                                 error={executionError}
-                                onDiagnose={onDiagnoseExecutionError}
-                                diagnoseShortcutLabel={diagnoseShortcutLabel}
                                 onLocate={onLocateExecutionError}
                             />
                         </div>

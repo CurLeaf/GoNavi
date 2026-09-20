@@ -57,30 +57,10 @@ func (b GlobalProxyBundle) HasAny() bool {
 	return strings.TrimSpace(b.Password) != ""
 }
 
-type MCPHTTPServerBundle struct {
-	Token string `json:"token,omitempty"`
-}
-
-func (b MCPHTTPServerBundle) HasAny() bool {
-	return strings.TrimSpace(b.Token) != ""
-}
-
-type ProviderBundle struct {
-	APIKey           string            `json:"apiKey,omitempty"`
-	SensitiveHeaders map[string]string `json:"sensitiveHeaders,omitempty"`
-	CLIEnv           map[string]string `json:"cliEnv,omitempty"`
-}
-
-func (b ProviderBundle) HasAny() bool {
-	return strings.TrimSpace(b.APIKey) != "" || len(b.SensitiveHeaders) > 0 || len(b.CLIEnv) > 0
-}
-
 type File struct {
 	SchemaVersion int                         `json:"schemaVersion,omitempty"`
 	Connections   map[string]ConnectionBundle `json:"connections,omitempty"`
 	GlobalProxy   *GlobalProxyBundle          `json:"globalProxy,omitempty"`
-	MCPHTTPServer *MCPHTTPServerBundle        `json:"mcpHTTPServer,omitempty"`
-	AIProviders   map[string]ProviderBundle   `json:"aiProviders,omitempty"`
 }
 
 type Store struct {
@@ -164,13 +144,7 @@ func (s *Store) saveUnlocked(file File) error {
 	if file.GlobalProxy != nil && !file.GlobalProxy.HasAny() {
 		file.GlobalProxy = nil
 	}
-	if file.MCPHTTPServer != nil && !file.MCPHTTPServer.HasAny() {
-		file.MCPHTTPServer = nil
-	}
-	if len(file.AIProviders) == 0 {
-		file.AIProviders = nil
-	}
-	// 本文件以明文保存全部数据库/SSH/代理口令与 AI Provider 的 API Key，必须限制为仅属主可读。
+	// 本文件以明文保存全部数据库/SSH/代理口令，必须限制为仅属主可读。
 	// 目录同时收紧到 0o700，避免同机其他用户遍历目录。
 	payload, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
@@ -340,83 +314,4 @@ func (s *Store) DeleteGlobalProxy() error {
 	return s.update(func(file *File) {
 		file.GlobalProxy = nil
 	})
-}
-
-func (s *Store) GetMCPHTTPServer() (MCPHTTPServerBundle, bool, error) {
-	file, err := s.Load()
-	if err != nil {
-		return MCPHTTPServerBundle{}, false, err
-	}
-	if file.MCPHTTPServer == nil {
-		return MCPHTTPServerBundle{}, false, nil
-	}
-	return *file.MCPHTTPServer, true, nil
-}
-
-func (s *Store) PutMCPHTTPServer(bundle MCPHTTPServerBundle) error {
-	return s.update(func(file *File) {
-		if !bundle.HasAny() {
-			file.MCPHTTPServer = nil
-			return
-		}
-		copyBundle := bundle
-		file.MCPHTTPServer = &copyBundle
-	})
-}
-
-func (s *Store) DeleteMCPHTTPServer() error {
-	return s.update(func(file *File) {
-		file.MCPHTTPServer = nil
-	})
-}
-
-func (s *Store) GetAIProvider(id string) (ProviderBundle, bool, error) {
-	file, err := s.Load()
-	if err != nil {
-		return ProviderBundle{}, false, err
-	}
-	bundle, ok := file.AIProviders[strings.TrimSpace(id)]
-	return bundle, ok, nil
-}
-
-func (s *Store) PutAIProvider(id string, bundle ProviderBundle) error {
-	return s.update(func(file *File) {
-		if !bundle.HasAny() {
-			deleteAIProviderFromFile(file, id)
-			return
-		}
-		if file.AIProviders == nil {
-			file.AIProviders = make(map[string]ProviderBundle)
-		}
-		if len(bundle.SensitiveHeaders) > 0 {
-			cloned := make(map[string]string, len(bundle.SensitiveHeaders))
-			for key, value := range bundle.SensitiveHeaders {
-				cloned[key] = value
-			}
-			bundle.SensitiveHeaders = cloned
-		}
-		if len(bundle.CLIEnv) > 0 {
-			cloned := make(map[string]string, len(bundle.CLIEnv))
-			for key, value := range bundle.CLIEnv {
-				cloned[key] = value
-			}
-			bundle.CLIEnv = cloned
-		}
-		file.AIProviders[strings.TrimSpace(id)] = bundle
-	})
-}
-
-func (s *Store) DeleteAIProvider(id string) error {
-	return s.update(func(file *File) {
-		deleteAIProviderFromFile(file, id)
-	})
-}
-
-func deleteAIProviderFromFile(file *File, id string) {
-	if file == nil {
-		return
-	}
-	if len(file.AIProviders) != 0 {
-		delete(file.AIProviders, strings.TrimSpace(id))
-	}
 }

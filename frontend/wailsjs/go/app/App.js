@@ -18,10 +18,6 @@ export function ApplySavedQueryDirectory(arg1) {
   return window['go']['app']['App']['ApplySavedQueryDirectory'](arg1);
 }
 
-export function AuthorizeMCPConnectionSQL(arg1, arg2) {
-  return window['go']['app']['App']['AuthorizeMCPConnectionSQL'](arg1, arg2);
-}
-
 export function BootstrapConnectionSidebarLayout(arg1) {
   return window['go']['app']['App']['BootstrapConnectionSidebarLayout'](arg1);
 }
@@ -236,10 +232,6 @@ export function DBGetViewsContext(arg1, arg2, arg3) {
 
 export function DBQuery(arg1, arg2, arg3) {
   return window['go']['app']['App']['DBQuery'](arg1, arg2, arg3);
-}
-
-export function DBQueryAI(arg1, arg2, arg3) {
-  return window['go']['app']['App']['DBQueryAI'](arg1, arg2, arg3);
 }
 
 export function DBQueryApplicationWithCancel(arg1, arg2, arg3, arg4) {

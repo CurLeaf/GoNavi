@@ -251,21 +251,21 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-btn {
   font-size: 12.5px !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-btn-default:not(.gn-v2-query-toolbar-ai-action):not(:disabled):not(.ant-btn-disabled) {
+body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-btn-default:not(:disabled):not(.ant-btn-disabled) {
   color: var(--gn-toolbar-action-fg) !important;
   background: var(--gn-toolbar-action-bg) !important;
   border-color: var(--gn-toolbar-action-border) !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-btn-default:not(.gn-v2-query-toolbar-ai-action):not(:disabled):not(.ant-btn-disabled):hover,
-body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-btn-default:not(.gn-v2-query-toolbar-ai-action):not(:disabled):not(.ant-btn-disabled):focus-visible {
+body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-btn-default:not(:disabled):not(.ant-btn-disabled):hover,
+body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-btn-default:not(:disabled):not(.ant-btn-disabled):focus-visible {
   color: var(--gn-toolbar-action-hover-fg) !important;
   background: var(--gn-toolbar-action-hover-bg) !important;
   border-color: var(--gn-toolbar-action-hover-border) !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-btn-default:not(.gn-v2-query-toolbar-ai-action):not(:disabled):not(.ant-btn-disabled):active,
-body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-btn-default:not(.gn-v2-query-toolbar-ai-action):not(:disabled):not(.ant-btn-disabled)[aria-expanded="true"] {
+body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-btn-default:not(:disabled):not(.ant-btn-disabled):active,
+body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-btn-default:not(:disabled):not(.ant-btn-disabled)[aria-expanded="true"] {
   color: var(--gn-toolbar-action-active-fg) !important;
   background: var(--gn-toolbar-action-active-bg) !important;
   border-color: var(--gn-toolbar-action-active-border) !important;
@@ -501,27 +501,6 @@ body[data-custom-theme][data-ui-version="v2"] .gn-v2-query-toolbar .gn-v2-query-
 body[data-ui-version="v2"] .gn-v2-query-toolbar .gn-v2-query-toolbar-save-action.ant-btn:not(:disabled):not(.ant-btn-disabled):active .anticon,
 body[data-custom-theme][data-ui-version="v2"] .gn-v2-query-toolbar .gn-v2-query-toolbar-save-action.ant-btn:not(:disabled):not(.ant-btn-disabled):active .anticon {
   color: inherit !important;
-}
-
-body[data-ui-version="v2"] .gn-v2-query-toolbar-ai-action.ant-btn {
-  color: var(--gn-client-query-toolbar-button-fg, var(--gn-query-toolbar-button-fg, var(--gn-purple, #818cf8))) !important;
-  background: var(--gn-client-query-toolbar-button-bg, var(--gn-query-toolbar-button-bg, var(--gn-toolbar-action-bg))) !important;
-  border-color: var(--gn-client-query-toolbar-button-border, var(--gn-query-toolbar-button-border, var(--gn-toolbar-action-border))) !important;
-  font-weight: 650 !important;
-}
-
-body[data-ui-version="v2"] .gn-v2-query-toolbar-ai-action.ant-btn:hover,
-body[data-ui-version="v2"] .gn-v2-query-toolbar-ai-action.ant-btn:focus-visible {
-  color: var(--gn-client-query-toolbar-button-hover-fg, var(--gn-query-toolbar-button-hover-fg, var(--gn-purple, #818cf8))) !important;
-  background: var(--gn-client-query-toolbar-button-hover-bg, var(--gn-query-toolbar-button-hover-bg, var(--gn-toolbar-action-hover-bg))) !important;
-  border-color: var(--gn-client-query-toolbar-button-hover-border, var(--gn-query-toolbar-button-hover-border, var(--gn-toolbar-action-hover-border))) !important;
-}
-
-body[data-ui-version="v2"] .gn-v2-query-toolbar-ai-action.ant-btn:active,
-body[data-ui-version="v2"] .gn-v2-query-toolbar-ai-action.ant-btn[aria-expanded="true"] {
-  color: var(--gn-client-query-toolbar-button-active-fg, var(--gn-query-toolbar-button-active-fg, var(--gn-purple, #818cf8))) !important;
-  background: var(--gn-client-query-toolbar-button-active-bg, var(--gn-query-toolbar-button-active-bg, var(--gn-toolbar-action-active-bg))) !important;
-  border-color: var(--gn-client-query-toolbar-button-active-border, var(--gn-query-toolbar-button-active-border, var(--gn-toolbar-action-active-border))) !important;
 }
 
 @media (max-width: 900px) {

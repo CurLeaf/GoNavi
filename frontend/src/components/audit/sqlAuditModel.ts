@@ -124,7 +124,6 @@ export const SQL_AUDIT_SOURCES = [
   'query_editor',
   'sql_file',
   'sync',
-  'mcp',
   'system',
   'tab_close',
   'app_shutdown',
@@ -133,7 +132,6 @@ export const SQL_AUDIT_SOURCES = [
   'table_designer',
   'object_editor',
   'message_publish',
-  'ai_action',
   'application_api',
   'audit_control',
 ] as const;

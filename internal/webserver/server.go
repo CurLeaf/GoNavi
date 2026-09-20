@@ -18,7 +18,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	aiservice "GoNavi-Wails/internal/ai/service"
 	appcore "GoNavi-Wails/internal/app"
 	httpserverlimits "GoNavi-Wails/internal/httpserver"
 	"GoNavi-Wails/internal/logger"
@@ -342,13 +341,11 @@ type methodInvoker struct {
 	allowDesktopMethods bool
 }
 
-func newMethodInvoker(app *appcore.App, ai *aiservice.Service) (*methodInvoker, error) {
+func newMethodInvoker(app *appcore.App) (*methodInvoker, error) {
 	invoker := &methodInvoker{
 		targets: map[string]reflect.Value{
-			"app.app":           reflect.ValueOf(app),
-			"app":               reflect.ValueOf(app),
-			"aiservice.service": reflect.ValueOf(ai),
-			"aiservice":         reflect.ValueOf(ai),
+			"app.app": reflect.ValueOf(app),
+			"app":     reflect.ValueOf(app),
 		},
 	}
 	appHandlers, err := validateContextHandlers(
@@ -435,8 +432,6 @@ func canonicalInvokeTarget(key string) string {
 	switch key {
 	case "app", "app.app":
 		return "app"
-	case "aiservice", "aiservice.service":
-		return "aiservice"
 	default:
 		return key
 	}
@@ -643,7 +638,6 @@ type Server struct {
 	options       Options
 	assets        fs.FS
 	app           *appcore.App
-	ai            *aiservice.Service
 	auth          *webAuthManager
 	events        *eventHub
 	invoker       *methodInvoker
@@ -662,7 +656,7 @@ type SharedRuntimeOptions struct {
 	RuntimeBridgeScript string
 }
 
-// SharedRuntime exposes the existing frontend assets and reflective App/AI RPC
+// SharedRuntime exposes the existing frontend assets and reflective App RPC
 // bridge without creating a second backend. It is safe to host this on a
 // loopback-only listener owned by the desktop process.
 type SharedRuntime struct {
@@ -673,14 +667,13 @@ type SharedRuntime struct {
 }
 
 // NewSharedRuntime creates an HTTP runtime backed by the already-running
-// desktop App and AI service. The caller remains responsible for their
-// lifecycle.
-func NewSharedRuntime(assetFS fs.FS, app *appcore.App, ai *aiservice.Service, options SharedRuntimeOptions) (*SharedRuntime, error) {
+// desktop App. The caller remains responsible for its lifecycle.
+func NewSharedRuntime(assetFS fs.FS, app *appcore.App, options SharedRuntimeOptions) (*SharedRuntime, error) {
 	if assetFS == nil {
 		return nil, fmt.Errorf("web assets are unavailable")
 	}
-	if app == nil || ai == nil {
-		return nil, fmt.Errorf("shared App and AI service are required")
+	if app == nil {
+		return nil, fmt.Errorf("shared App is required")
 	}
 	frontendFS, err := resolveFrontendAssets(assetFS)
 	if err != nil {
@@ -693,7 +686,7 @@ func NewSharedRuntime(assetFS fs.FS, app *appcore.App, ai *aiservice.Service, op
 	}
 
 	events := newEventHub()
-	invoker, err := newMethodInvoker(app, ai)
+	invoker, err := newMethodInvoker(app)
 	if err != nil {
 		return nil, err
 	}
@@ -702,7 +695,6 @@ func NewSharedRuntime(assetFS fs.FS, app *appcore.App, ai *aiservice.Service, op
 		server: &Server{
 			assets:        frontendFS,
 			app:           app,
-			ai:            ai,
 			events:        events,
 			invoker:       invoker,
 			auditHeavySem: make(chan struct{}, 1),
@@ -842,9 +834,7 @@ func New(ctx context.Context, assetFS fs.FS, options Options) (*Server, error) {
 
 	app := appcore.NewWebApp()
 	appcore.InitializeLifecycle(app, lifecycleCtx)
-	ai := aiservice.NewService()
-	aiservice.InitializeLifecycle(ai, lifecycleCtx)
-	invoker, err := newMethodInvoker(app, ai)
+	invoker, err := newMethodInvoker(app)
 	if err != nil {
 		return nil, err
 	}
@@ -857,7 +847,6 @@ func New(ctx context.Context, assetFS fs.FS, options Options) (*Server, error) {
 		options:       options,
 		assets:        frontendFS,
 		app:           app,
-		ai:            ai,
 		auth:          auth,
 		events:        events,
 		invoker:       invoker,
@@ -978,9 +967,6 @@ func (s *Server) shutdownHTTP(serveCtx context.Context, serveCancel context.Canc
 func (s *Server) shutdownTeardown() {
 	if s.app != nil {
 		s.app.Shutdown()
-	}
-	if s.ai != nil {
-		s.ai.Shutdown()
 	}
 }
 

@@ -40,15 +40,6 @@ const (
 	defaultCloudBackupRestoreConfirmationTokenTTL = 10 * time.Minute
 )
 
-// NewCloudBackupChangeHandler returns a callback for services that persist
-// files included in the cloud backup payload.
-func NewCloudBackupChangeHandler(a *App) func() {
-	if a == nil {
-		return nil
-	}
-	return a.markCloudBackupDirty
-}
-
 type cloudBackupSecrets struct {
 	WebDAVUsername     string `json:"webdavUsername,omitempty"`
 	WebDAVPassword     string `json:"webdavPassword,omitempty"`
@@ -124,7 +115,6 @@ type cloudBackupRestoreConfirmationToken struct {
 var cloudBackupCategoryOrder = []string{
 	CloudBackupCategoryConnections,
 	CloudBackupCategorySavedQueries,
-	CloudBackupCategoryAISettings,
 	CloudBackupCategoryProxySettings,
 	CloudBackupCategoryDailySecrets,
 	CloudBackupCategoryUpdateSettings,
@@ -645,7 +635,7 @@ func (a *App) collectCloudBackupFiles(selected map[string]struct{}) ([]cloudBack
 	if root == "" {
 		root = resolveAppConfigDir()
 	}
-	paths := []string{"ai_config.json", "global_proxy.json", "daily_secrets.json", "saved_queries.json", "update_channel.json"}
+	paths := []string{"global_proxy.json", "daily_secrets.json", "saved_queries.json", "update_channel.json"}
 	files := make([]cloudBackupFile, 0, len(paths))
 	var total int64
 	for _, name := range paths {
@@ -1339,8 +1329,6 @@ func cloudBackupRestoreCategoryForFile(path string) (string, error) {
 	switch {
 	case clean == "saved_queries.json", filepath.Dir(clean) == "saved_queries", strings.HasPrefix(clean, "saved_queries"+string(os.PathSeparator)):
 		return CloudBackupCategorySavedQueries, nil
-	case clean == "ai_config.json":
-		return CloudBackupCategoryAISettings, nil
 	case clean == "global_proxy.json":
 		return CloudBackupCategoryProxySettings, nil
 	case clean == "daily_secrets.json":
@@ -1425,7 +1413,7 @@ func (a *App) pruneExpiredCloudBackupRestoreConfirmationTokensLocked(now time.Ti
 func cloudBackupRestoreRequiresRestart(files []cloudBackupFile) bool {
 	for _, file := range files {
 		clean := filepath.Clean(filepath.FromSlash(file.Path))
-		if clean == "ai_config.json" || clean == "global_proxy.json" || clean == "daily_secrets.json" || clean == "update_channel.json" {
+		if clean == "global_proxy.json" || clean == "daily_secrets.json" || clean == "update_channel.json" {
 			return true
 		}
 	}
@@ -1478,7 +1466,7 @@ func (a *App) restoreCloudBackupFilesUnlocked(files []cloudBackupFile) (func() e
 		baseDir := root
 		mode := os.FileMode(0o644)
 		switch {
-		case clean == "ai_config.json" || clean == "global_proxy.json" || clean == "saved_queries.json" || clean == "update_channel.json":
+		case clean == "global_proxy.json" || clean == "saved_queries.json" || clean == "update_channel.json":
 			target = filepath.Join(root, clean)
 		case clean == "daily_secrets.json":
 			target = filepath.Join(root, clean)

@@ -1,7 +1,7 @@
 import Modal from './common/ResizableDraggableModal';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button, Dropdown, message, Tabs, Tooltip } from 'antd';
-import { ArrowLeftOutlined, ArrowRightOutlined, CloseCircleOutlined, CloseOutlined, ConsoleSqlOutlined, DatabaseOutlined, EditOutlined, ExportOutlined, FileTextOutlined, FolderOpenOutlined, HistoryOutlined, PlusOutlined, PushpinOutlined, RightOutlined, RobotOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, ArrowRightOutlined, CloseCircleOutlined, CloseOutlined, ConsoleSqlOutlined, DatabaseOutlined, EditOutlined, ExportOutlined, FileTextOutlined, FolderOpenOutlined, HistoryOutlined, PlusOutlined, PushpinOutlined, RightOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import type { MenuProps, TabsProps } from 'antd';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core';
@@ -881,7 +881,6 @@ const TabManager: React.FC<TabManagerProps> = React.memo<TabManagerProps>(({ onF
   const addTab = useStore(state => state.addTab);
   const closeTab = useStore(state => state.closeTab);
   const moveTab = useStore(state => state.moveTab);
-  const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const detachedTabIdSet = useMemo(
     () => new Set(detachedWorkbenchWindows.map((windowState) => windowState.tabId)),
     [detachedWorkbenchWindows],
@@ -1643,10 +1642,6 @@ const TabManager: React.FC<TabManagerProps> = React.memo<TabManagerProps>(({ onF
     target?.click();
   };
 
-  const handleOpenAI = () => {
-    setAIPanelVisible(true);
-  };
-
   const handleFocusObjectSearch = () => {
     if (onFocusSidebarSearch) {
       onFocusSidebarSearch();
@@ -1791,9 +1786,6 @@ const TabManager: React.FC<TabManagerProps> = React.memo<TabManagerProps>(({ onF
               {t('tab_manager.empty.quick.search.title')}
             </Button>
           </Tooltip>
-          <Button icon={<RobotOutlined />} onClick={handleOpenAI}>
-            {t('tab_manager.empty.action.open_ai')}
-          </Button>
         </div>
       </section>
       <section className="gn-v2-empty-recent" aria-label={t('tab_manager.empty.recent.aria')}>

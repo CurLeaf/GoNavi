@@ -1,6 +1,6 @@
 # Best TablePlus Alternatives in 2026 (and When to Switch)
 
-> Looking for a TablePlus alternative? Most people searching that phrase are not hunting a prettier SQL editor. They hit a free-tier wall (tabs / connections), a per-device license, or the “one client per database” tax. This guide compares options by **multi-database reach**, **weight** (installer vs RAM — keep them separate), and **where AI actually helps**.
+> Looking for a TablePlus alternative? Most people searching that phrase are not hunting a prettier SQL editor. They hit a free-tier wall (tabs / connections), a per-device license, or the “one client per database” tax. This guide compares options by **multi-database reach** and **weight** (installer vs RAM — keep them separate).
 
 ## Why people leave TablePlus
 
@@ -11,9 +11,8 @@ Community threads in the last month keep repeating the same exits:
 - **Free tier friction** — limited tabs or connections on the free plan; paid unlocks often sit around **~$99 per device**. A desk with a work laptop plus a personal machine (or a second OS) multiplies cost quickly.
 - **One cockpit or many** — people still bounce between a SQL GUI, a Redis tool, a document browser, and an SSH jumphost. LibreDB-style complaints on Reddit put it bluntly: *dbeaver + compass + redis gui + ssh… none of that fits on a locked work laptop*.
 - **Weight anxiety** — “lightweight” is overused. Some want out of Electron or JVM stacks; others just want fewer installs on a locked corporate laptop where every `.msi` needs a ticket.
-- **AI curiosity without autopilot** — teams want SQL draft / explain help, but they do not want a model with production credentials and no human gate.
 
-If that is you, skip beauty contests. Score tools on three axes: **what engines live in one window**, **installer size vs steady RSS**, and **whether AI drafts SQL without becoming an unsupervised autopilot**.
+If that is you, skip beauty contests. Score tools on two axes: **what engines live in one window** and **installer size vs steady RSS**.
 
 ## What “good enough” means in 2026
 
@@ -21,10 +20,9 @@ A modern database client should at least:
 
 1. Keep **multiple engines** (SQL, cache, queue, search, vector) reachable without swapping apps.
 2. Publish **honest weight numbers** — installer megabytes are not RAM; UI stack is a third axis.
-3. Treat AI as a **copilot**: draft and explain, while humans still own schema checks, result review, EXPLAIN, and production gates.
-4. Survive **locked laptops** — fewer companion apps, optional agents instead of “install five more GUIs.”
+3. Survive **locked laptops** — fewer companion apps, optional driver agents instead of “install five more GUIs.”
 
-GoNavi is built around that split: Wails (Go + system WebView) desktop, multi-source workbench, optional AI / MCP — secrets stay on the host. It is not a pixel-for-pixel TablePlus clone; evaluate it on the axes above.
+GoNavi is built around that split: Wails (Go + system WebView) desktop, multi-source workbench, secrets stay on the host. It is not a pixel-for-pixel TablePlus clone; evaluate it on the axes above.
 
 ## Comparison snapshot (decision table)
 
@@ -36,7 +34,7 @@ Use this as a **decision table**, not a feature bingo card.
 | **DBeaver** | Java / Eclipse lineage | Extremely wide JDBC world | Community often calls it heavy (cold start; multi‑GB RSS is a common complaint) | You need obscure drivers and can afford JVM weight |
 | **Beekeeper Studio** | Electron | SQL-focused modern UI | Electron baseline; marketing often cites hundreds-of-MB class | You want a polished OSS SQL client and accept Chromium tax |
 | **DataGrip** | JetBrains IDE | Deep SQL IDE | IDE-class footprint and pricing | You already live in JetBrains |
-| **GoNavi** | Go + system WebView (not Electron) | SQL · cache · vector · MQ · search · time-series · domestic DBs in one workbench | **Installer ~20–26 MB** (v0.9.8). Linux idle RSS sample: main ≈**429 MB**, with WebKit helpers ≈**765 MB** (method below) | You want one cockpit + optional AI without Electron |
+| **GoNavi** | Go + system WebView (not Electron) | SQL · cache · vector · MQ · search · time-series · domestic DBs in one workbench | **Installer ~20–26 MB** (v0.9.8). Linux idle RSS sample: main ≈**429 MB**, with WebKit helpers ≈**765 MB** (method below) | You want one cockpit without Electron |
 
 ### Weight honesty (do not mix columns)
 
@@ -51,7 +49,6 @@ Use this as a **decision table**, not a feature bingo card.
 Screens that show the multi-engine story:
 
 - [Multi-DB workbench](https://raw.githubusercontent.com/Syngnat/GoNavi/dev/assets/screenshots/01-home-workbench.png) — MySQL / PostgreSQL / Redis / Kafka in one sidebar
-- [AI panel](https://raw.githubusercontent.com/Syngnat/GoNavi/dev/assets/screenshots/04-ai-assistant.png) — generate / explain / optimize entry points (provider may need config; treat the shot as UI evidence, not a configured-provider claim)
 
 ## Built-in and agent engines (why “one cockpit” matters)
 
@@ -75,8 +72,6 @@ Choose GoNavi if you:
 
 - Need **MySQL + Postgres + Redis + Kafka** (and more) without a tray full of icons
 - Prefer **non-Electron** packaging and small **installers**
-- Want AI that **drafts** SQL while you still drive connections, schema, grids, and EXPLAIN
-- Care about agents: MCP can expose tools without shipping passwords off-host
 - Work across **domestic and international** engines in one sidebar
 
 **Skip GoNavi (for now) if you…**
@@ -88,49 +83,22 @@ Choose GoNavi if you:
 
 Honest “not for you” copy converts better than feature inflation — and it matches how people actually decide after a TablePlus free-tier wall.
 
-## After AI can write SQL, do you still need a GUI?
-
-Short answer: **yes, if you ship anything that can break production.**
-
-AI is good at drafting. It is bad at being an unsupervised driver. Recent community framing:
-
-- Hacker News still asks whether management tools matter when models write SQL.
-- Validation culture: *only believe what you can validate*; “efficient but dumb if not monitored.”
-- Product norms for safe text-to-SQL: show the SQL, don’t auto-run destructive statements, prefer read-only agents, use EXPLAIN before trust.
-
-So the split is clean:
-
-| Job | AI | GUI / client |
-|---|---|---|
-| Draft SELECT / ETL sketch | Strong | Optional |
-| Attach live schema context | Helpful | Client supplies it |
-| Multi-connection cockpit | Weak | **Required** |
-| Edit rows / batch txn | Weak | **Required** |
-| EXPLAIN / plan review | Assist | **Human gate** |
-| Decide “safe to run in prod” | No | **Human gate** |
-
-GoNavi’s product line matches that split: AI is a **copilot in the workbench**, not a replacement for the workbench. If your “alternative” search is really “I want ChatGPT to own production,” pause — that is a process problem, not a client skin problem.
-
 ## Migration checklist (TablePlus → GoNavi)
 
 1. Export or note connection hosts, SSH tunnels, SSL settings, and favorite queries from TablePlus.
 2. Install GoNavi from [Releases](https://github.com/Syngnat/GoNavi/releases) (~20–26 MB class assets depending on OS).
 3. Recreate connections; for Redis / Kafka / vector / search, add them in the **same** workbench instead of a second app.
 4. Open a query tab, run a known-good `SELECT`, confirm encoding / timezone / SSL / SSH behavior.
-5. If you use AI: configure a provider, ask it to draft SQL, **read the statement**, then run deliberately — never “generate and hope.”
-6. Pin critical tables / save snippets so day-two friction drops.
-7. Keep TablePlus around for one week as a fallback; delete the license anxiety only after your daily path is solid.
+5. Pin critical tables / save snippets so day-two friction drops.
+6. Keep TablePlus around for one week as a fallback; delete the license anxiety only after your daily path is solid.
 
 ## FAQ
 
 **Is GoNavi a free TablePlus clone?**  
-No. Different stack (Wails), broader data-source set, optional MCP / AI. Evaluate on multi-DB and weight honesty, not pixel matching.
-
-**Why not just ChatGPT + `psql`?**  
-CLI plus chat works for one-off queries. It fails the “locked laptop / five engines / visual grid / EXPLAIN habit” test that drove people to search *TablePlus alternative* in the first place.
+No. Different stack (Wails) and a broader data-source set. Evaluate on multi-DB and weight honesty, not pixel matching.
 
 **Is GoNavi lighter than TablePlus?**  
-Compare the right column. GoNavi’s **installers** are small (~20–26 MB). Steady **RSS** on Linux is in the hundreds of MB with WebKit helpers — publish methodology, do not invent “~80 MB native” claims. TablePlus’s strength is UX polish on relational work; GoNavi’s strength is multi-source + non-Electron packaging + AI-as-copilot.
+Compare the right column. GoNavi’s **installers** are small (~20–26 MB). Steady **RSS** on Linux is in the hundreds of MB with WebKit helpers — publish methodology, do not invent “~80 MB native” claims. TablePlus’s strength is UX polish on relational work; GoNavi’s strength is multi-source reach plus non-Electron packaging.
 
 **Where do the installer and RSS numbers come from?**  
 Installer sizes are v0.9.8 GitHub Release assets. RSS is a labeled Linux sample described above — do not mix the two, and do not present either as a cross-OS leaderboard win without re-measuring.
@@ -140,10 +108,10 @@ No. Invented traffic numbers help nobody. Rank the decision on your own connecti
 
 ## Bottom line
 
-Searchers for **TablePlus alternative** usually want **fewer walls and fewer apps**, not another skin. Score by multi-database cockpit, honest weight math, and AI-as-copilot. If that matches, start with GoNavi’s workbench screenshots and a [download](https://github.com/Syngnat/GoNavi/releases) — then decide with your own connections, not a marketing slide.
+Searchers for **TablePlus alternative** usually want **fewer walls and fewer apps**, not another skin. Score by multi-database cockpit and honest weight math. If that matches, start with GoNavi’s workbench screenshots and a [download](https://github.com/Syngnat/GoNavi/releases) — then decide with your own connections, not a marketing slide.
 
 ---
 
-*Related next:* [Lightweight Native Database Client in 2026](./lightweight-native-database-client-2026.md) · [After AI Can Write SQL, Do You Still Need a Database GUI?](./ai-sql-still-need-gui-2026.md)
+*Related next:* [Lightweight Native Database Client in 2026](./lightweight-native-database-client-2026.md)
 
 *Source notes:* product facts from GoNavi README / v0.9.8 releases; community framing from recent Reddit / HN / product-safety discussions synthesized for decision-making — not presented as Search Console metrics.

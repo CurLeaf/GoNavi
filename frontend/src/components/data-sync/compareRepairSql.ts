@@ -137,30 +137,3 @@ export const buildCompareRepairSQL = (
     ? blocks.join('\n\n')
     : `${blocks.join('\n\n')}\n\n-- 当前比对结果没有可生成的结构修复语句。`;
 };
-
-export const buildCompareAiPrompt = (
-  result: DataSyncCompareResult,
-  options: { dialect: string; sourceName: string; targetName: string },
-): string => {
-  const tables = result.tables.map((summary) => ({
-    table: summary.table,
-    sourceObject: summary.sourceObject,
-    targetObject: summary.targetObject,
-    inserts: summary.inserts,
-    updates: summary.updates,
-    deletes: summary.deletes,
-    same: summary.same,
-    schemaDiffCount: summary.schemaDiffCount,
-    columnDiffs: summary.columnDiffs,
-    message: summary.message,
-  }));
-  return [
-    '请根据下面的数据库比对差异，生成可在目标库执行的修复 SQL，并简要说明每条语句的风险。',
-    '只输出 SQL 和简短说明，不要改源库。删除类语句请单独标出风险。',
-    `源：${options.sourceName}`,
-    `目标：${options.targetName}`,
-    `目标库类型：${options.dialect || 'unknown'}`,
-    '差异 JSON：',
-    JSON.stringify(tables, null, 2),
-  ].join('\n');
-};

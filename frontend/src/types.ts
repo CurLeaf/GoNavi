@@ -122,19 +122,10 @@ export interface JVMDiagnosticAuditRecord {
   status: string;
 }
 
-export interface JVMDiagnosticPlan {
-  intent: string;
-  transport: JVMDiagnosticTransport;
-  command: string;
-  riskLevel: "low" | "medium" | "high";
-  reason: string;
-  expectedSignals?: string[];
-}
-
 export interface JVMDiagnosticCommandDraft {
   sessionId?: string;
   command: string;
-  source?: "manual" | "ai-plan";
+  source?: "manual";
   reason?: string;
 }
 
@@ -260,7 +251,7 @@ export interface JVMChangeRequest {
   resourceId: string;
   action: string;
   reason: string;
-  source?: "manual" | "ai-plan";
+  source?: "manual";
   expectedVersion?: string;
   confirmationToken?: string;
   payload?: Record<string, any>;
@@ -619,19 +610,6 @@ export interface TabData {
   }; // Last SQL content before beautify, for cross-session restore
 }
 
-export interface JVMAIPlanContext {
-  tabId: string;
-  connectionId: string;
-  providerMode: "jmx" | "endpoint" | "agent";
-  resourcePath: string;
-}
-
-export interface JVMDiagnosticPlanContext {
-  tabId: string;
-  connectionId: string;
-  transport: JVMDiagnosticTransport;
-}
-
 export interface DatabaseNode {
   title: string;
   key: string;
@@ -732,233 +710,6 @@ export interface StreamEntry {
   fields: Record<string, string>;
 }
 
-// --- AI Types ---
-
-export type AIProviderType = "openai" | "anthropic" | "gemini" | "custom";
-export type AIProviderAuthMode = "api-key" | "bearer" | "local-cli";
-export type AISafetyLevel = "readonly" | "readwrite" | "full";
-export type AIContextLevel = "schema_only" | "with_samples" | "with_results";
-
-export interface AIResultMaskingSettings {
-  enabled: boolean;
-  fullMaskFields: string[];
-  partialMaskFields: string[];
-}
-
-export interface AIContextItem {
-  dbName: string;
-  tableName: string;
-  ddl: string;
-}
-
-export interface AIProviderConfig {
-  id: string;
-  type: AIProviderType;
-  name: string;
-  apiKey: string;
-  authMode?: AIProviderAuthMode;
-  secretRef?: string;
-  hasSecret?: boolean;
-  baseUrl: string;
-  model: string;
-  inlineCompletionModel?: string;
-  models?: string[];
-  /** Per-configuration suggestions only; absent fields preserve legacy behavior. */
-  disabledModels?: string[];
-  customModels?: string[];
-  apiFormat?: string; // openai 可选 openai-responses；custom 支持 openai/anthropic/gemini/CLI 等格式
-  headers?: Record<string, string>;
-  maxTokens: number;
-  contextWindow?: number;
-  cliPath?: string;
-  cliEnv?: Record<string, string>;
-  temperature: number;
-  /** API 供应商的思考强度；合法值域由供应商 profile 决定。 */
-  thinkingIntensity?: string;
-  /**
-   * 本机 CLI 供应商的推理档位。合法值域由目标 CLI 决定，三个 CLI 两两不同，
-   * 候选值来自后端 AIGetCLICapabilities，前端不维护副本。空表示沿用 CLI 默认。
-   */
-  effort?: string;
-}
-
-export interface AIUserPromptSettings {
-  global: string;
-  database: string;
-  jvm: string;
-  jvmDiagnostic: string;
-}
-
-export type AIMCPTransport = "stdio";
-
-export interface AIMCPServerConfig {
-  id: string;
-  name: string;
-  transport: AIMCPTransport;
-  command: string;
-  args?: string[];
-  env?: Record<string, string>;
-  enabled: boolean;
-  timeoutSeconds: number;
-}
-
-export interface AIMCPToolDescriptor {
-  alias: string;
-  serverId: string;
-  serverName: string;
-  originalName: string;
-  title?: string;
-  description?: string;
-  inputSchema?: Record<string, any>;
-}
-
-export interface AIMCPToolCallResult {
-  alias: string;
-  serverId: string;
-  serverName: string;
-  originalName: string;
-  title?: string;
-  content: string;
-  structuredContent?: any;
-  isError: boolean;
-}
-
-export interface AIMCPClientInstallStatus {
-  client: string;
-  displayName: string;
-  installMode?: 'auto' | 'remote';
-  installed: boolean;
-  matchesCurrent: boolean;
-  clientDetected?: boolean;
-  clientCommand?: string;
-  clientPath?: string;
-  message: string;
-  configPath?: string;
-  command?: string;
-  args?: string[];
-}
-
-export interface AIMCPHTTPServerStatus {
-  /** 用户持久化的启用意图；与真实进程运行状态分离。 */
-  enabled?: boolean;
-  running: boolean;
-  addr: string;
-  path: string;
-  url: string;
-  schemaOnly: boolean;
-  token?: string;
-  authorizationHeader?: string;
-  startedAt?: number;
-  message: string;
-}
-
-export type AISkillScope = "global" | "database" | "jvm" | "jvmDiagnostic";
-
-export interface AISkillConfig {
-  id: string;
-  name: string;
-  description?: string;
-  systemPrompt: string;
-  enabled: boolean;
-  scopes: AISkillScope[];
-  requiredTools?: string[];
-}
-
-export interface AIToolCall {
-  id: string;
-  type: string;
-  function: {
-    name: string;
-    arguments: string;
-  };
-}
-
-export type AIChatAttachmentKind = "image" | "markdown" | "text" | "pdf" | "word" | "excel" | "document";
-
-export interface AIChatAttachment {
-  id: string;
-  name: string;
-  mimeType: string;
-  size: number;
-  kind: AIChatAttachmentKind;
-  dataUrl?: string;
-  text?: string;
-  textTruncated?: boolean;
-  extractWarning?: string;
-}
-
-export type ChatPhase =
-  | "idle"
-  | "queued"
-  | "connecting"
-  | "thinking"
-  | "generating"
-  | "tool_calling";
-
-/**
- * A user-visible, redacted projection of one Agent Harness run step. Keep
- * provider reasoning, tool arguments, tool output, and raw errors out of
- * this type: those belong to their existing dedicated UI paths.
- */
-export type AIChatRunActivityKind = "model" | "tool" | "approval" | "workspace" | "retry" | "run";
-export type AIChatRunActivityStatus = "active" | "waiting" | "completed" | "failed" | "canceled";
-
-export interface AIChatRunActivity {
-  /** Stable only within a run; it is not rendered to the user. */
-  id: string;
-  kind: AIChatRunActivityKind;
-  status: AIChatRunActivityStatus;
-  timestamp: number;
-  /** A catalog tool name, safe to expose without its arguments or results. */
-  toolName?: string;
-  /** Harness retry attempt, when the activity represents a retry. */
-  attempt?: number;
-  /** Stable failure code only; raw provider messages stay in `rawError`. */
-  errorCode?: string;
-}
-
-export interface AIChatTokenUsage {
-  promptTokens?: number;
-  completionTokens?: number;
-  totalTokens?: number;
-  /** Undefined means the provider did not expose cache-hit usage. */
-  cachedTokens?: number;
-}
-
-export interface AIChatMessage {
-  id: string;
-  /** Harness run that owns this transient or durable message, when known. */
-  runId?: string;
-  role: "user" | "assistant" | "system" | "tool";
-  phase?: ChatPhase;
-  content: string;
-  thinking?: string;
-  reasoning_content?: string;
-  timestamp: number;
-  loading?: boolean;
-  images?: string[]; // base64 encoded images with data URI prefix
-  attachments?: AIChatAttachment[];
-  tool_calls?: AIToolCall[];
-  /** Provider-reported usage aggregated across all model turns in this reply. */
-  tokenUsage?: AIChatTokenUsage;
-  /** Redacted, ordered execution steps retained with this assistant message. */
-  runActivities?: AIChatRunActivity[];
-  tool_call_id?: string;
-  tool_name?: string; // used for UI display
-  rawError?: string; // 存储未清洗的原始错误信息，用于用户复制排查
-  excludeFromAIContext?: boolean; // 纯 UI 状态或错误消息，不回灌给模型
-  success?: boolean; // 标记探针执行是否成功
-  jvmPlanContext?: JVMAIPlanContext;
-  jvmDiagnosticPlanContext?: JVMDiagnosticPlanContext;
-}
-
-export interface AISafetyResult {
-  allowed: boolean;
-  operationType: "query" | "dml" | "ddl" | "other";
-  requiresConfirm: boolean;
-  warningMessage?: string;
-}
-
 export type SecurityUpdateOverallStatus =
   | "not_detected"
   | "pending"
@@ -990,7 +741,6 @@ export type SecurityUpdateIssueReasonCode =
 export type SecurityUpdateIssueAction =
   | "open_connection"
   | "open_proxy_settings"
-  | "open_ai_settings"
   | "retry_update"
   | "view_details";
 

@@ -129,8 +129,6 @@ type UseSidebarObjectActionsArgs = {
   openDesign: (node: any, initialTab: string, readOnly?: boolean) => void;
   onDoubleClick: (event: any, node: any) => void;
   runExportWithProgress: RunExportWithProgress;
-  setAIPanelVisible: (visible: boolean) => void;
-  addAIContext: (connectionId: string, context: { dbName: string; tableName: string; ddl: string }) => void;
   migrateVisibilityForRenamedDatabase: (
     connection: SavedConnection,
     oldDbName: string,
@@ -283,8 +281,6 @@ export const useSidebarObjectActions = ({
   openDesign,
   onDoubleClick,
   runExportWithProgress,
-  setAIPanelVisible,
-  addAIContext,
   migrateVisibilityForRenamedDatabase,
   removeVisibilityForDeletedDatabase,
   migrateVisibilityForRenamedSchema,
@@ -464,45 +460,6 @@ export const useSidebarObjectActions = ({
         },
       }));
     }, 0);
-  };
-
-  const injectTablePromptToAI = async (node: any, promptKind: 'explain' | 'query') => {
-    const conn = node.dataRef;
-    const tableName = String(conn?.tableName || node?.title || '').trim();
-    if (!conn?.id || !conn?.dbName || !tableName) {
-      message.warning(t('sidebar.message.ai_table_context_missing'));
-      return;
-    }
-    const tableRef = `${conn.dbName}.${tableName}`;
-
-    let ddl = '';
-    try {
-      const res = await DBShowCreateTable(buildRpcConnectionConfig(conn.config) as any, conn.dbName, tableName);
-      if (res.success) {
-        ddl = String(res.data || '').trim();
-        addAIContext(conn.id, { dbName: conn.dbName, tableName, ddl });
-      }
-    } catch {
-      // AI 入口仍可基于表名工作，DDL 获取失败不阻断打开面板。
-    }
-
-    const prompt = promptKind === 'explain'
-      ? [
-        t('sidebar.ai_prompt.explain.intro', { table: tableRef }),
-        t('sidebar.ai_prompt.explain.detail'),
-        ddl ? `\n\`\`\`sql\n${ddl}\n\`\`\`` : '',
-      ].filter(Boolean).join('\n')
-      : [
-        t('sidebar.ai_prompt.query.intro', { table: tableRef }),
-        t('sidebar.ai_prompt.query.detail'),
-        ddl ? `\n\`\`\`sql\n${ddl}\n\`\`\`` : '',
-      ].filter(Boolean).join('\n');
-
-    const wasClosed = !useStore.getState().aiPanelVisible;
-    if (wasClosed) setAIPanelVisible(true);
-    setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
-    }, wasClosed ? 350 : 0);
   };
 
   const handleCreateDatabase = async () => {
@@ -1717,7 +1674,6 @@ export const useSidebarObjectActions = ({
     handleCopyTableAsInsert,
     openTableDdlInDesigner,
     openTableInERView,
-    injectTablePromptToAI,
     handleCreateDatabase,
     openCreateSchemaModal,
     handleCreateSchema,

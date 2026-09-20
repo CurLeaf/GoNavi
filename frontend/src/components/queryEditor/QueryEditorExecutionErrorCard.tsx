@@ -1,6 +1,6 @@
 import React from 'react';
-import { Button, Tooltip } from 'antd';
-import { AimOutlined, CloseOutlined, RobotOutlined } from '@ant-design/icons';
+import { Button } from 'antd';
+import { AimOutlined, CloseOutlined } from '@ant-design/icons';
 
 import { t as defaultTranslate } from '../../i18n';
 import { useOptionalI18n } from '../../i18n/provider';
@@ -13,8 +13,6 @@ type QueryEditorExecutionErrorCardProps = {
     error: string;
     darkMode: boolean;
     compact?: boolean;
-    onDiagnose?: () => void;
-    diagnoseShortcutLabel?: string;
     onLocate?: () => void;
 };
 
@@ -22,8 +20,6 @@ const QueryEditorExecutionErrorCardComponent: React.FC<QueryEditorExecutionError
     error,
     darkMode,
     compact = false,
-    onDiagnose,
-    diagnoseShortcutLabel,
     onLocate,
 }) => {
     const i18n = useOptionalI18n();
@@ -67,22 +63,6 @@ const QueryEditorExecutionErrorCardComponent: React.FC<QueryEditorExecutionError
                     <Button icon={<AimOutlined />} onClick={onLocate}>
                         {t('query_editor.result.locate_error')}
                     </Button>
-                ) : null}
-                {onDiagnose ? (
-                    <Tooltip
-                        title={diagnoseShortcutLabel
-                            ? t('query_editor.result.ai_diagnose_with_shortcut', { shortcut: diagnoseShortcutLabel })
-                            : undefined}
-                    >
-                        <Button
-                            type="primary"
-                            icon={<RobotOutlined />}
-                            className="gn-query-execution-error-diagnose"
-                            onClick={onDiagnose}
-                        >
-                            {t('query_editor.result.ai_diagnose')}
-                        </Button>
-                    </Tooltip>
                 ) : null}
             </div>
         </div>

@@ -161,7 +161,6 @@ const DETACHED_CLOSE_SHORTCUT_SCOPE_SELECTOR = [
   '[data-gonavi-close-shortcut-scope="blocked"]',
   '.gn-detached-result-window',
   '.gn-detached-window',
-  '.gn-detached-ai-chat-window',
   '.gn-result-diff-floating-window',
 ].join(', ');
 

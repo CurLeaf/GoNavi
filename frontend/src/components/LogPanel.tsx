@@ -11,8 +11,6 @@ interface LogPanelProps {
     onResizeStart?: (e: React.MouseEvent) => void;
     variant?: 'panel' | 'embedded';
     executionError?: string;
-    onDiagnoseExecutionError?: () => void;
-    diagnoseShortcutLabel?: string;
     onLocateExecutionError?: () => void;
 }
 
@@ -22,8 +20,6 @@ const LogPanel: React.FC<LogPanelProps> = ({
     onResizeStart,
     variant = 'panel',
     executionError,
-    onDiagnoseExecutionError,
-    diagnoseShortcutLabel,
     onLocateExecutionError,
 }) => {
     const { t } = useI18n();
@@ -199,8 +195,6 @@ const LogPanel: React.FC<LogPanelProps> = ({
                                 compact
                                 darkMode={darkMode}
                                 error={executionError}
-                                onDiagnose={onDiagnoseExecutionError}
-                                diagnoseShortcutLabel={diagnoseShortcutLabel}
                                 onLocate={onLocateExecutionError}
                             />
                         </div>

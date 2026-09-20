@@ -5,7 +5,6 @@ import type { I18nParams } from '../i18n';
 export const CLOUD_BACKUP_CATEGORY_IDS = [
   'connections',
   'saved_queries',
-  'ai_settings',
   'proxy_settings',
   'daily_secrets',
   'update_settings',
@@ -38,7 +37,6 @@ const fallback = (t: Translate, key: string, value: string, params?: I18nParams)
 const CATEGORY_LABELS: Record<string, { key: string; fallback: string }> = {
   connections: { key: 'app.cloud_backup.category.connections', fallback: 'Saved connections' },
   saved_queries: { key: 'app.cloud_backup.category.saved_queries', fallback: 'Saved queries' },
-  ai_settings: { key: 'app.cloud_backup.category.ai_settings', fallback: 'AI settings' },
   proxy_settings: { key: 'app.cloud_backup.category.proxy_settings', fallback: 'Proxy settings' },
   daily_secrets: { key: 'app.cloud_backup.category.daily_secrets', fallback: 'Saved credentials' },
   update_settings: { key: 'app.cloud_backup.category.update_settings', fallback: 'Update settings' },

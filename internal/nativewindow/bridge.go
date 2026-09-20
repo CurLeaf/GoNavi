@@ -48,16 +48,15 @@ type Bridge struct {
 	client     *http.Client
 	rpcTimeout time.Duration
 
-	mu                    sync.Mutex
-	ctx                   context.Context
-	lifecycleCtx          context.Context // one-shot child lifetime shared by SSE and ordinary RPC
-	cancel                context.CancelFunc
-	ready                 bool
-	onReady               func() OperationResult
-	terminal              string
-	closeOnce             sync.Once
-	emitToWails           func(context.Context, string, ...any)
-	allowParentForeground func() error
+	mu           sync.Mutex
+	ctx          context.Context
+	lifecycleCtx context.Context // one-shot child lifetime shared by SSE and ordinary RPC
+	cancel       context.CancelFunc
+	ready        bool
+	onReady      func() OperationResult
+	terminal     string
+	closeOnce    sync.Once
+	emitToWails  func(context.Context, string, ...any)
 }
 
 func newBridge(options ChildOptions) *Bridge {
@@ -70,13 +69,12 @@ func newBridge(options ChildOptions) *Bridge {
 		ForceAttemptHTTP2: false,
 	}
 	return &Bridge{
-		parentURL:             strings.TrimRight(options.ParentURL, "/"),
-		token:                 options.Token,
-		windowID:              options.ID,
-		kind:                  options.Kind,
-		client:                &http.Client{Transport: transport},
-		rpcTimeout:            defaultDetachedRPCRequestTimeout,
-		allowParentForeground: grantParentForegroundAccess,
+		parentURL:  strings.TrimRight(options.ParentURL, "/"),
+		token:      options.Token,
+		windowID:   options.ID,
+		kind:       options.Kind,
+		client:     &http.Client{Transport: transport},
+		rpcTimeout: defaultDetachedRPCRequestTimeout,
 		emitToWails: func(ctx context.Context, name string, args ...any) {
 			wailsRuntime.EventsEmit(ctx, name, args...)
 		},
@@ -103,7 +101,7 @@ func InitializeBridge(bridge *Bridge, ctx context.Context) {
 	go bridge.consumeEvents(lifecycleCtx)
 }
 
-// Invoke calls the shared parent App or AI service.
+// Invoke calls the shared parent App.
 func (b *Bridge) Invoke(namespace string, receiver string, method string, args []any) (any, error) {
 	request := invokeRequest{
 		Namespace: namespace,
@@ -196,21 +194,15 @@ func (b *Bridge) control(request controlRequest) OperationResult {
 // Action acknowledges child readiness or forwards sync, hide, attach, or close
 // state to the main window.
 func (b *Bridge) Action(action string, payload any) OperationResult {
-	return b.action(action, payload, true)
+	return b.action(action, payload)
 }
 
-func (b *Bridge) action(action string, payload any, grantForeground bool) OperationResult {
+func (b *Bridge) action(action string, payload any) OperationResult {
 	normalizedAction := strings.ToLower(strings.TrimSpace(action))
 	if normalizedAction == "ready" {
 		if result := b.presentFrontendReady(); !result.Success {
 			return result
 		}
-	}
-	if grantForeground && normalizedAction == "open-ai-settings" && b.allowParentForeground != nil {
-		// The detached child owns the current user interaction on Windows. Grant
-		// the parent permission immediately before it attempts to take focus. This
-		// is best-effort so an OS rejection never blocks the settings action itself.
-		_ = b.allowParentForeground()
 	}
 
 	var result OperationResult
@@ -828,68 +820,6 @@ func (c *Control) Hide(visibilityRevision uint64) OperationResult {
 	c.closeGate.cancel()
 	hide(ctx)
 	return OperationResult{Success: true, VisibilityRevision: visibilityRevision}
-}
-
-// HideForAISettings parks the child before asking the parent to render its
-// settings modal. The request runs in Go after WindowHide, so WebView suspension
-// cannot leave the modal behind the detached window.
-func (c *Control) HideForAISettings(visibilityRevision uint64) OperationResult {
-	return c.hideForAISettings(visibilityRevision, "")
-}
-
-// HideForAISettingsProvider preserves the provider selected by the detached
-// chat so the parent can open that provider's editor, not only the AI settings
-// landing page.
-func (c *Control) HideForAISettingsProvider(visibilityRevision uint64, providerID string) OperationResult {
-	return c.hideForAISettings(visibilityRevision, strings.TrimSpace(providerID))
-}
-
-func (c *Control) hideForAISettings(visibilityRevision uint64, providerID string) OperationResult {
-	if c == nil || c.bridge == nil {
-		return operationFailure("native window control is unavailable")
-	}
-	bridge := c.bridge
-	if bridge.allowParentForeground != nil {
-		// Windows requires the currently foreground child to grant activation to
-		// its parent before the child is hidden.
-		_ = bridge.allowParentForeground()
-	}
-	hideResult := c.Hide(visibilityRevision)
-	if !hideResult.Success {
-		return hideResult
-	}
-	if hideResult.VisibilityRevision != visibilityRevision {
-		failure := operationFailure("open AI settings was superseded by a newer window focus")
-		failure.VisibilityRevision = hideResult.VisibilityRevision
-		return failure
-	}
-	payload := map[string]any{
-		"id":                 bridge.windowID,
-		"kind":               bridge.kind,
-		"visibilityRevision": visibilityRevision,
-	}
-	if providerID != "" {
-		payload["providerId"] = providerID
-	}
-	actionResult := bridge.action("open-ai-settings", payload, false)
-	if actionResult.Success && (actionResult.Applied == nil || *actionResult.Applied) {
-		return OperationResult{
-			Success:            true,
-			ID:                 bridge.windowID,
-			VisibilityRevision: visibilityRevision,
-		}
-	}
-
-	// Do not strand the user in a hidden child when the parent request fails.
-	restoreResult := bridge.FocusWindow(bridge.windowID)
-	if restoreResult.Success {
-		_ = c.FocusRevision(restoreResult.VisibilityRevision)
-	} else {
-		_ = c.FocusRevision(visibilityRevision)
-	}
-	failure := operationFailure(fmt.Sprintf("open AI settings failed: %s", actionResult.Message))
-	failure.VisibilityRevision = visibilityRevision
-	return failure
 }
 
 // CancelClose keeps the child alive after a failed final frontend flush. It

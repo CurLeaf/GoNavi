@@ -1640,28 +1640,6 @@ body[data-ui-version="v2"] .gn-er-node-footer-toggle:hover {
   text-decoration: underline;
 }
 
-/* ─── AI Chat Panel hooks (project's class names) ──────── */
-body[data-ui-version="v2"] .ai-chat-panel {
-  background: var(--gn-bg-panel) !important;
-  border-left: 0.5px solid var(--gn-br-1) !important;
-}
-
-body[data-ui-version="v2"] .ai-chat-panel input,
-body[data-ui-version="v2"] .ai-chat-panel textarea {
-  background: var(--gn-bg-input) !important;
-  border: 0.5px solid var(--gn-br-2) !important;
-  border-radius: 9px !important;
-  font-family: var(--gn-font-sans) !important;
-}
-
-/* AI accent button (send / 生成 SQL) */
-body[data-ui-version="v2"] .ant-btn.ai-send,
-body[data-ui-version="v2"] [class*="AISend"] {
-  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
-  border-color: #0369a1 !important;
-  color: #fff !important;
-}
-
 /* ─── Code / SQL editor surfaces (unified via MonacoEditor .gn-monaco-surface) ─
  * Consumers must not set per-page Monaco bg; only --gn-monaco-bg (defaults to panel).
  * Covers SQL workbench, Redis field modals, Nacos, DataGrid cell/JSON editors, etc.
@@ -1771,7 +1749,7 @@ body[data-ui-version="v2"] .gonavi-v2-version-ribbon {
    EXTENDED COVERAGE — forms, deep modals, Redis viewer, etc.
    ══════════════════════════════════════════════════════════ */
 
-/* ─── Form (新建连接、AI 设置 等) ──────────────────────── */
+/* ─── Form (新建连接 等) ──────────────────────────────── */
 body[data-ui-version="v2"] .ant-form-item-label > label {
   color: var(--gn-fg-3) !important;
   font-size: 12.5px !important;
@@ -4513,41 +4491,6 @@ body[data-ui-version="v2"] .gn-v2-workspace-main {
   background: var(--gn-bg-panel-2) !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-ai-panel-dock {
-  background: var(--gn-bg-panel);
-}
-
-body[data-ui-version="v2"] .gn-v2-ai-panel-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  justify-content: flex-end;
-  pointer-events: none;
-  z-index: 14;
-}
-
-body[data-ui-version="v2"] .gn-v2-ai-panel-backdrop {
-  position: absolute;
-  inset: 0;
-  border: 0;
-  padding: 0;
-  background: rgba(248, 250, 252, 0.38);
-  backdrop-filter: blur(2px);
-  pointer-events: auto;
-}
-
-body[data-ui-version="v2"] .gn-v2-ai-panel-dock.is-overlay {
-  position: relative;
-  height: 100%;
-  pointer-events: auto;
-  z-index: 1;
-}
-
-body[data-ui-version="v2"] .gn-v2-ai-panel-dock.is-overlay .gn-v2-ai-panel {
-  height: 100%;
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
-}
-
 body[data-ui-version="v2"] .gn-v2-tab-workbench {
   min-height: 0;
   min-width: 0;
@@ -5003,21 +4946,21 @@ body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-toolbar-scroll .ant-btn {
   border-radius: 7px !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-toolbar-scroll .ant-btn-default:not(.gn-v2-ai-insight-button):not(:disabled):not(.ant-btn-disabled) {
+body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-toolbar-scroll .ant-btn-default:not(:disabled):not(.ant-btn-disabled) {
   color: var(--gn-toolbar-action-fg) !important;
   background: var(--gn-toolbar-action-bg) !important;
   border-color: var(--gn-toolbar-action-border) !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-toolbar-scroll .ant-btn-default:not(.gn-v2-ai-insight-button):not(:disabled):not(.ant-btn-disabled):hover,
-body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-toolbar-scroll .ant-btn-default:not(.gn-v2-ai-insight-button):not(:disabled):not(.ant-btn-disabled):focus-visible {
+body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-toolbar-scroll .ant-btn-default:not(:disabled):not(.ant-btn-disabled):hover,
+body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-toolbar-scroll .ant-btn-default:not(:disabled):not(.ant-btn-disabled):focus-visible {
   color: var(--gn-toolbar-action-hover-fg) !important;
   background: var(--gn-toolbar-action-hover-bg) !important;
   border-color: var(--gn-toolbar-action-hover-border) !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-toolbar-scroll .ant-btn-default:not(.gn-v2-ai-insight-button):not(:disabled):not(.ant-btn-disabled):active,
-body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-toolbar-scroll .ant-btn-default:not(.gn-v2-ai-insight-button):not(:disabled):not(.ant-btn-disabled)[aria-expanded="true"] {
+body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-toolbar-scroll .ant-btn-default:not(:disabled):not(.ant-btn-disabled):active,
+body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-toolbar-scroll .ant-btn-default:not(:disabled):not(.ant-btn-disabled)[aria-expanded="true"] {
   color: var(--gn-toolbar-action-active-fg) !important;
   background: var(--gn-toolbar-action-active-bg) !important;
   border-color: var(--gn-toolbar-action-active-border) !important;
@@ -5210,32 +5153,6 @@ body[data-ui-version="v2"] .gn-v2-data-grid .gn-v2-commit-button:focus-visible .
 body[data-ui-version="v2"] .gn-v2-data-grid .gn-v2-commit-button:active .gn-v2-toolbar-kbd {
   background: var(--gn-accent-badge-bg, rgba(255, 255, 255, 0.42));
   color: var(--gn-on-accent, #17130a);
-}
-
-body[data-ui-version="v2"] .gn-v2-data-grid .gn-v2-ai-insight-button {
-  border-color: var(--gn-client-result-toolbar-button-border, var(--gn-result-toolbar-button-border, transparent)) !important;
-  background: var(--gn-client-result-toolbar-button-bg, var(--gn-result-toolbar-button-bg, var(--gn-info-soft))) !important;
-  color: var(--gn-client-result-toolbar-button-fg, var(--gn-result-toolbar-button-fg, var(--gn-info))) !important;
-  font-weight: 750 !important;
-}
-
-body[data-ui-version="v2"] .gn-v2-data-grid .gn-v2-ai-insight-button:hover,
-body[data-ui-version="v2"] .gn-v2-data-grid .gn-v2-ai-insight-button:focus-visible {
-  border-color: var(--gn-client-result-toolbar-button-hover-border, var(--gn-result-toolbar-button-hover-border, transparent)) !important;
-  background: var(--gn-client-result-toolbar-button-hover-bg, var(--gn-result-toolbar-button-hover-bg, color-mix(in srgb, var(--gn-info-soft) 96%, var(--gn-info) 4%))) !important;
-  color: var(--gn-client-result-toolbar-button-hover-fg, var(--gn-result-toolbar-button-hover-fg, var(--gn-info))) !important;
-}
-
-body[data-ui-version="v2"] .gn-v2-data-grid .gn-v2-ai-insight-button:active {
-  border-color: var(--gn-client-result-toolbar-button-active-border, var(--gn-result-toolbar-button-active-border, transparent)) !important;
-  background: var(--gn-client-result-toolbar-button-active-bg, var(--gn-result-toolbar-button-active-bg, color-mix(in srgb, var(--gn-info-soft) 90%, var(--gn-info) 10%))) !important;
-  color: var(--gn-client-result-toolbar-button-active-fg, var(--gn-result-toolbar-button-active-fg, var(--gn-info))) !important;
-}
-
-body[data-ui-version="v2"] .gn-v2-data-grid .gn-v2-ai-insight-button .gn-v2-toolbar-kbd {
-  border: none;
-  background: var(--gn-bg-input);
-  color: var(--gn-info);
 }
 
 body[data-ui-version="v2"] .gn-v2-data-grid .gn-v2-query-result-toolbar-hide {
@@ -6950,18 +6867,6 @@ body[data-ui-version="v2"] .gn-v2-context-menu-item.is-featured:hover {
   background: var(--gn-info-soft);
 }
 
-body[data-ui-version="v2"] .gn-v2-context-menu-item.is-ai {
-  color: var(--gn-info);
-}
-
-body[data-ui-version="v2"] .gn-v2-context-menu-item.is-ai:not(.is-featured) {
-  background: transparent;
-}
-
-body[data-ui-version="v2"] .gn-v2-context-menu-item.is-ai:not(.is-featured):hover {
-  background: var(--gn-info-soft);
-}
-
 body[data-ui-version="v2"] .gn-v2-context-menu-item.is-danger {
   color: var(--gn-danger);
 }
@@ -6984,8 +6889,7 @@ body[data-ui-version="v2"] .gn-v2-context-menu-item-icon {
   font-size: 13px;
 }
 
-body[data-ui-version="v2"] .gn-v2-context-menu-item.is-featured .gn-v2-context-menu-item-icon,
-body[data-ui-version="v2"] .gn-v2-context-menu-item.is-ai .gn-v2-context-menu-item-icon {
+body[data-ui-version="v2"] .gn-v2-context-menu-item.is-featured .gn-v2-context-menu-item-icon {
   color: var(--gn-info);
 }
 

@@ -1,4 +1,0 @@
-drivers:
-  mode: pvc
-  pvc:
-    claimName: gonavi-drivers

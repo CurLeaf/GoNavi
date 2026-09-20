@@ -14,8 +14,6 @@ import {
   ConnectionSidebarLayoutInput,
   ConnectionDisplaySortMode,
   ConnectionSortMode,
-  AIChatMessage,
-  AIContextItem,
   GlobalProxyConfig,
   ExternalSQLDirectory,
   JVMDiagnosticCommandDraft,
@@ -47,17 +45,6 @@ import {
   sanitizeBrandIconId,
 } from "./brand/brandIcons";
 
-export interface AIChatSessionSummary {
-  id: string;
-  title: string;
-  updatedAt: number;
-  /** Ledger revision used by metadata mutations as a CAS guard. */
-  revision?: number;
-  generation?: number;
-  /** Archived Ledger sessions must never reappear in the chat history UI. */
-  archived?: boolean;
-}
-
 type ActiveContext = {
   connectionId: string;
   dbName: string;
@@ -88,9 +75,6 @@ import { sanitizeFontFamilyInput } from "./utils/fontFamilies";
 import {
   createDefaultDetachedBounds,
   nextDetachedZIndex,
-  toAIChatDetachedBoundsMemory,
-  type AIChatDetachedBoundsMemory,
-  type DetachedAIChatWindow,
   type DetachedQueryResultWindow,
   type DetachedWorkbenchWindow,
   type DetachedWindowBounds,
@@ -182,8 +166,6 @@ export type TableDoubleClickAction = "open-data" | "open-design";
 export type QueryTableCtrlClickAction = "open-design" | "locate";
 export type ThemeMode = "light" | "dark";
 export type ThemePreference = ThemeMode | "system";
-/** AI 聊天默认打开形态：侧栏 / 独立浮动窗 */
-export type AIChatOpenMode = "dock" | "detached";
 
 export interface AppearanceSettings
   extends DataGridDisplaySettings, SqlEditorTypographySettings {
@@ -1979,10 +1961,6 @@ interface AppState {
   detachedWorkbenchWindows: DetachedWorkbenchWindow[];
   /** SQL 结果区已拆出的浮动窗口（会话态，不持久化） */
   detachedQueryResultWindows: DetachedQueryResultWindow[];
-  /** AI 聊天独立浮动窗口（单例，会话态不持久化） */
-  detachedAIChatWindow: DetachedAIChatWindow | null;
-  /** AI 独立窗上次尺寸/位置（持久化，再次打开时复用） */
-  aiChatDetachedBoundsMemory: AIChatDetachedBoundsMemory | null;
   activeTabId: string | null;
   activeContext: ActiveContext | null;
   savedQueries: SavedQuery[];
@@ -2029,25 +2007,6 @@ interface AppState {
   windowBounds: { width: number; height: number; x: number; y: number } | null;
   windowState: "normal" | "fullscreen" | "maximized";
   sidebarWidth: number;
-
-  // AI 运行时投影。会话和消息的持久化由 Agent Run Harness Ledger 管理。
-  aiPanelVisible: boolean;
-  /** 打开 AI 时的默认形态：侧栏 dock 或独立窗口 detached（持久化） */
-  aiChatOpenMode: AIChatOpenMode;
-  aiChatHistory: Record<string, AIChatMessage[]>; // sessionId -> messages
-  replaceAIChatHistory: (sessionId: string, messages: AIChatMessage[]) => void;
-  aiChatSessions: AIChatSessionSummary[]; // 历史会话列表
-  aiActiveSessionId: string | null;
-  updateAISessionTitle: (sessionId: string, title: string) => void;
-
-  aiContexts: Record<string, AIContextItem[]>;
-  addAIContext: (connectionKey: string, context: AIContextItem) => void;
-  removeAIContext: (
-    connectionKey: string,
-    dbName: string,
-    tableName: string,
-  ) => void;
-  clearAIContexts: (connectionKey: string) => void;
 
   jvmDiagnosticDrafts: Record<string, JVMDiagnosticCommandDraft>;
   jvmDiagnosticOutputs: Record<string, JVMDiagnosticEventChunk[]>;
@@ -2285,53 +2244,7 @@ interface AppState {
   }) => void;
   setWindowState: (state: "normal" | "fullscreen" | "maximized") => void;
   setSidebarWidth: (width: number) => void;
-
-  // AI actions
-  toggleAIPanel: () => void;
-  setAIPanelVisible: (visible: boolean) => void;
-  setAIChatOpenMode: (mode: AIChatOpenMode) => void;
-  detachAIChatPanel: (
-    preferred?: Partial<Pick<DetachedWindowBounds, "x" | "y" | "width" | "height">>,
-  ) => void;
-  attachAIChatPanel: () => void;
-  updateDetachedAIChatBounds: (
-    bounds: Partial<Pick<
-      DetachedAIChatWindow,
-      "x" | "y" | "width" | "height" | "coordinateSpace"
-    >>,
-  ) => void;
-  focusDetachedAIChatPanel: () => void;
-  isAIChatDetached: () => boolean;
-  addAIChatMessage: (sessionId: string, message: AIChatMessage) => void;
-  updateAIChatMessage: (
-    sessionId: string,
-    messageId: string,
-    updates: Partial<AIChatMessage>,
-  ) => void;
-  deleteAIChatMessage: (sessionId: string, messageId: string) => void;
-  truncateAIChatMessages: (sessionId: string, upToMessageId: string) => void;
-  clearAIChatHistory: (sessionId: string) => void;
-  deleteAISession: (sessionId: string) => void;
-  createNewAISession: () => void;
-  setAIActiveSessionId: (sessionId: string | null) => void;
 }
-
-const AI_STREAMING_MESSAGE_UPDATE_KEYS = new Set<keyof AIChatMessage>([
-  "content",
-  "thinking",
-  "reasoning_content",
-  "phase",
-]);
-
-const isAIStreamingOnlyMessageUpdate = (
-  updates: Partial<AIChatMessage>,
-): boolean => {
-  const updateKeys = Object.keys(updates) as Array<keyof AIChatMessage>;
-  return (
-    updateKeys.length > 0 &&
-    updateKeys.every((key) => AI_STREAMING_MESSAGE_UPDATE_KEYS.has(key))
-  );
-};
 
 const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
   if (!Array.isArray(value)) return DEFAULT_SQL_SNIPPETS;
@@ -3456,48 +3369,6 @@ const sanitizeWindowState = (
   return "normal";
 };
 
-const sanitizeAIChatOpenMode = (value: unknown): AIChatOpenMode => {
-  return value === "detached" ? "detached" : "dock";
-};
-
-const sanitizeAIChatDetachedBoundsMemory = (
-  value: unknown,
-): AIChatDetachedBoundsMemory | null => {
-  if (!value || typeof value !== "object") return null;
-  const raw = value as Record<string, unknown>;
-  const width = Number(raw.width);
-  const height = Number(raw.height);
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    return null;
-  }
-  const x = Number(raw.x);
-  const y = Number(raw.y);
-  return {
-    width,
-    height,
-    x: Number.isFinite(x) ? x : 0,
-    y: Number.isFinite(y) ? y : 0,
-    ...(raw.coordinateSpace === "screen" || raw.coordinateSpace === "viewport"
-      ? { coordinateSpace: raw.coordinateSpace }
-      : {}),
-  };
-};
-
-/** 打开/弹出 AI 独立窗时，在记忆尺寸上叠加本次 preferred */
-const resolveAIChatDetachPreferred = (
-  memory: AIChatDetachedBoundsMemory | null,
-  preferred?: Partial<Pick<DetachedWindowBounds, "x" | "y" | "width" | "height">>,
-): Partial<Pick<DetachedWindowBounds, "x" | "y" | "width" | "height">> | undefined => {
-  if (!memory && !preferred) return preferred;
-  const memoryBounds = memory?.coordinateSpace === "screen"
-    ? { width: memory.width, height: memory.height }
-    : memory;
-  return {
-    ...(memoryBounds ?? {}),
-    ...(preferred ?? {}),
-  };
-};
-
 const sanitizeWindowBounds = (
   value: unknown,
 ): { width: number; height: number; x: number; y: number } | null => {
@@ -3648,8 +3519,6 @@ const PERSISTED_STATE_DEPENDENCY_KEYS = [
   "startupFullscreen",
   "autoCheckForUpdates",
   "autoCheckForUpdatesIntervalMinutes",
-  "aiChatOpenMode",
-  "aiChatDetachedBoundsMemory",
   "globalProxy",
   "sqlFormatOptions",
   "queryOptions",
@@ -3710,10 +3579,6 @@ const buildPersistedStateProjection = (
     autoCheckForUpdates: state.autoCheckForUpdates,
     autoCheckForUpdatesIntervalMinutes:
       state.autoCheckForUpdatesIntervalMinutes,
-    aiChatOpenMode: sanitizeAIChatOpenMode(state.aiChatOpenMode),
-    aiChatDetachedBoundsMemory: sanitizeAIChatDetachedBoundsMemory(
-      state.aiChatDetachedBoundsMemory,
-    ),
     globalProxy:
       toTrimmedString(state.globalProxy.password) !== ""
         ? { ...state.globalProxy }
@@ -3749,7 +3614,6 @@ const buildPersistedStateProjection = (
     partialState.connections = state.connections;
   }
 
-  // AI 会话数据已迁移到后端文件持久化（~/.gonavi/sessions/），不再写入 localStorage
   return partialState as AppState;
 };
 
@@ -3830,8 +3694,6 @@ export const useStore = create<AppState>()(
       tabs: [],
       detachedWorkbenchWindows: [],
       detachedQueryResultWindows: [],
-      detachedAIChatWindow: null,
-      aiChatDetachedBoundsMemory: null,
       activeTabId: null,
       activeContext: null,
       savedQueries: [],
@@ -3891,13 +3753,6 @@ export const useStore = create<AppState>()(
       windowState: "normal" as const,
       sidebarWidth: 330,
 
-      // AI 运行状态
-      aiPanelVisible: false,
-      aiChatOpenMode: "dock" as AIChatOpenMode,
-      aiChatHistory: {},
-      aiChatSessions: [],
-      aiActiveSessionId: null,
-      aiContexts: {},
       jvmDiagnosticDrafts: {},
       jvmDiagnosticOutputs: {},
 
@@ -5873,360 +5728,6 @@ export const useStore = create<AppState>()(
       setSidebarWidth: (width) =>
         set({ sidebarWidth: sanitizeSidebarWidth(width) }),
 
-      // AI actions
-      toggleAIPanel: () =>
-        set((state) => {
-          const nextVisible = !state.aiPanelVisible;
-          // 关闭独立 AI 面板时保留窗口意图和尺寸。桌面端会把原生子窗
-          // 隐藏保活，下一次打开可直接聚焦；浏览器浮窗也会被
-          // aiPanelVisible 门禁隐藏，不会继续占用界面。
-          if (!nextVisible) {
-            const memory = state.detachedAIChatWindow
-              ? toAIChatDetachedBoundsMemory(state.detachedAIChatWindow)
-              : state.aiChatDetachedBoundsMemory;
-            return {
-              aiPanelVisible: false,
-              detachedAIChatWindow: state.detachedAIChatWindow,
-              aiChatDetachedBoundsMemory: memory,
-            };
-          }
-          // 按默认打开形态展开
-          if (state.aiChatOpenMode === "detached") {
-            const peers = [
-              ...state.detachedWorkbenchWindows,
-              ...state.detachedQueryResultWindows,
-              ...(state.detachedAIChatWindow ? [state.detachedAIChatWindow] : []),
-            ];
-            if (state.detachedAIChatWindow) {
-              return {
-                aiPanelVisible: true,
-                detachedAIChatWindow: {
-                  ...state.detachedAIChatWindow,
-                  zIndex: nextDetachedZIndex(peers),
-                },
-              };
-            }
-            const nextBounds = createDefaultDetachedBounds(
-              peers,
-              resolveAIChatDetachPreferred(state.aiChatDetachedBoundsMemory),
-              "ai-chat",
-            );
-            return {
-              aiPanelVisible: true,
-              detachedAIChatWindow: nextBounds,
-              aiChatDetachedBoundsMemory: state.aiChatDetachedBoundsMemory?.coordinateSpace === "screen"
-                ? state.aiChatDetachedBoundsMemory
-                : toAIChatDetachedBoundsMemory(nextBounds),
-            };
-          }
-          // 侧栏打开：若仍挂着独立窗则先记下尺寸再收拢
-          if (state.detachedAIChatWindow) {
-            return {
-              aiPanelVisible: true,
-              detachedAIChatWindow: null,
-              aiChatDetachedBoundsMemory: toAIChatDetachedBoundsMemory(
-                state.detachedAIChatWindow,
-              ),
-            };
-          }
-          return { aiPanelVisible: true, detachedAIChatWindow: null };
-        }),
-      setAIPanelVisible: (visible) =>
-        set((state) => {
-          if (!visible) {
-            const memory = state.detachedAIChatWindow
-              ? toAIChatDetachedBoundsMemory(state.detachedAIChatWindow)
-              : state.aiChatDetachedBoundsMemory;
-            return {
-              aiPanelVisible: false,
-              detachedAIChatWindow: state.detachedAIChatWindow,
-              aiChatDetachedBoundsMemory: memory,
-            };
-          }
-          if (state.aiChatOpenMode === "detached") {
-            const peers = [
-              ...state.detachedWorkbenchWindows,
-              ...state.detachedQueryResultWindows,
-              ...(state.detachedAIChatWindow ? [state.detachedAIChatWindow] : []),
-            ];
-            if (state.detachedAIChatWindow) {
-              return {
-                aiPanelVisible: true,
-                detachedAIChatWindow: {
-                  ...state.detachedAIChatWindow,
-                  zIndex: nextDetachedZIndex(peers),
-                },
-              };
-            }
-            const nextBounds = createDefaultDetachedBounds(
-              peers,
-              resolveAIChatDetachPreferred(state.aiChatDetachedBoundsMemory),
-              "ai-chat",
-            );
-            return {
-              aiPanelVisible: true,
-              detachedAIChatWindow: nextBounds,
-              aiChatDetachedBoundsMemory: state.aiChatDetachedBoundsMemory?.coordinateSpace === "screen"
-                ? state.aiChatDetachedBoundsMemory
-                : toAIChatDetachedBoundsMemory(nextBounds),
-            };
-          }
-          // 默认侧栏：打开时若之前是独立窗则收拢回侧栏，并记下尺寸
-          if (state.detachedAIChatWindow) {
-            return {
-              aiPanelVisible: true,
-              detachedAIChatWindow: null,
-              aiChatDetachedBoundsMemory: toAIChatDetachedBoundsMemory(
-                state.detachedAIChatWindow,
-              ),
-            };
-          }
-          return { aiPanelVisible: true, detachedAIChatWindow: null };
-        }),
-      setAIChatOpenMode: (mode) =>
-        set({ aiChatOpenMode: sanitizeAIChatOpenMode(mode) }),
-      detachAIChatPanel: (preferred) =>
-        set((state) => {
-          const peers = [
-            ...state.detachedWorkbenchWindows,
-            ...state.detachedQueryResultWindows,
-            ...(state.detachedAIChatWindow ? [state.detachedAIChatWindow] : []),
-          ];
-          if (state.detachedAIChatWindow) {
-            return {
-              aiPanelVisible: true,
-              detachedAIChatWindow: {
-                ...state.detachedAIChatWindow,
-                zIndex: nextDetachedZIndex(peers),
-              },
-            };
-          }
-          const nextBounds = createDefaultDetachedBounds(
-            peers,
-            resolveAIChatDetachPreferred(state.aiChatDetachedBoundsMemory, preferred),
-            "ai-chat",
-          );
-          return {
-            aiPanelVisible: true,
-            detachedAIChatWindow: nextBounds,
-            aiChatDetachedBoundsMemory: state.aiChatDetachedBoundsMemory?.coordinateSpace === "screen"
-              ? state.aiChatDetachedBoundsMemory
-              : toAIChatDetachedBoundsMemory(nextBounds),
-          };
-        }),
-      attachAIChatPanel: () =>
-        set((state) => {
-          if (!state.detachedAIChatWindow) {
-            return state;
-          }
-          return {
-            aiPanelVisible: true,
-            detachedAIChatWindow: null,
-            aiChatDetachedBoundsMemory: toAIChatDetachedBoundsMemory(
-              state.detachedAIChatWindow,
-            ),
-          };
-        }),
-      updateDetachedAIChatBounds: (bounds) =>
-        set((state) => {
-          if (!state.detachedAIChatWindow) {
-            return state;
-          }
-          const nextWindow = {
-            ...state.detachedAIChatWindow,
-            ...bounds,
-          };
-          return {
-            detachedAIChatWindow: nextWindow,
-            aiChatDetachedBoundsMemory: toAIChatDetachedBoundsMemory(nextWindow),
-          };
-        }),
-      focusDetachedAIChatPanel: () =>
-        set((state) => {
-          if (!state.detachedAIChatWindow) {
-            return state;
-          }
-          const peers = [
-            ...state.detachedWorkbenchWindows,
-            ...state.detachedQueryResultWindows,
-            state.detachedAIChatWindow,
-          ];
-          return {
-            detachedAIChatWindow: {
-              ...state.detachedAIChatWindow,
-              zIndex: nextDetachedZIndex(peers),
-            },
-          };
-        }),
-      isAIChatDetached: () => Boolean(get().detachedAIChatWindow),
-      addAIChatMessage: (sessionId, message) => {
-        set((state) => {
-          const history = { ...state.aiChatHistory };
-          const messages = history[sessionId] || [];
-          history[sessionId] = [...messages, message];
-
-          let newSessions = [...state.aiChatSessions];
-          const existingSession = newSessions.find((s) => s.id === sessionId);
-
-          if (!existingSession) {
-            let title =
-              message.role === "user"
-                ? message.content
-                : translate("ai_chat.panel.session.default_title");
-            if (title.length > 20) {
-              title = title.substring(0, 20) + "...";
-            }
-            newSessions.unshift({
-              id: sessionId,
-              title,
-              updatedAt: Date.now(),
-            });
-          } else {
-            newSessions = newSessions.filter((s) => s.id !== sessionId);
-            newSessions.unshift({ ...existingSession, updatedAt: Date.now() });
-          }
-
-          return { aiChatHistory: history, aiChatSessions: newSessions };
-        });
-      },
-      updateAIChatMessage: (sessionId, messageId, updates) => {
-        set((state) => {
-          const messages = state.aiChatHistory[sessionId];
-          if (!messages) return state;
-          // Message IDs are unique within a session and are also used as React keys.
-          // Streaming updates target the newest assistant message, so keep that hot path O(1).
-          const lastIndex = messages.length - 1;
-          const idx = lastIndex >= 0 && messages[lastIndex].id === messageId
-            ? lastIndex
-            : messages.findIndex((m) => m.id === messageId);
-          if (idx < 0) return state;
-          const newMessages = [...messages];
-          newMessages[idx] = { ...newMessages[idx], ...updates };
-          const history = { ...state.aiChatHistory, [sessionId]: newMessages };
-          if (!isAIStreamingOnlyMessageUpdate(updates)) {
-            let newSessions = [...state.aiChatSessions];
-            const existingSession = newSessions.find((s) => s.id === sessionId);
-            if (existingSession) {
-              newSessions = newSessions.filter((s) => s.id !== sessionId);
-              newSessions.unshift({
-                ...existingSession,
-                updatedAt: Date.now(),
-              });
-            }
-            return { aiChatHistory: history, aiChatSessions: newSessions };
-          }
-          return { aiChatHistory: history };
-        });
-      },
-      deleteAIChatMessage: (sessionId, messageId) => {
-        set((state) => {
-          const history = { ...state.aiChatHistory };
-          if (history[sessionId]) {
-            history[sessionId] = history[sessionId].filter(
-              (m) => m.id !== messageId,
-            );
-          }
-          return { aiChatHistory: history };
-        });
-      },
-      truncateAIChatMessages: (sessionId, upToMessageId) => {
-        set((state) => {
-          const history = { ...state.aiChatHistory };
-          const messages = history[sessionId];
-          if (messages) {
-            const idx = messages.findIndex((m) => m.id === upToMessageId);
-            if (idx >= 0) {
-              history[sessionId] = messages.slice(0, idx + 1);
-            }
-          }
-          return { aiChatHistory: history };
-        });
-      },
-      clearAIChatHistory: (sessionId) => {
-        set((state) => {
-          const history = { ...state.aiChatHistory };
-          delete history[sessionId];
-          return { aiChatHistory: history };
-        });
-      },
-      replaceAIChatHistory: (sessionId, messages) => {
-        set((state) => {
-          const history = { ...state.aiChatHistory };
-          history[sessionId] = messages;
-          return { aiChatHistory: history };
-        });
-      },
-      deleteAISession: (sessionId) => {
-        set((state) => {
-          const history = { ...state.aiChatHistory };
-          delete history[sessionId];
-          const newSessions = state.aiChatSessions.filter(
-            (s) => s.id !== sessionId,
-          );
-          const newActive =
-            state.aiActiveSessionId === sessionId
-              ? null
-              : state.aiActiveSessionId;
-          return {
-            aiChatHistory: history,
-            aiChatSessions: newSessions,
-            aiActiveSessionId: newActive,
-          };
-        });
-      },
-      createNewAISession: () =>
-        set(() => {
-          const newId = `session-${Date.now()}`;
-          return { aiActiveSessionId: newId };
-        }),
-      setAIActiveSessionId: (sessionId) =>
-        set({ aiActiveSessionId: sessionId }),
-      updateAISessionTitle: (sessionId, title) => {
-        set((state) => {
-          const newSessions = [...state.aiChatSessions];
-          const session = newSessions.find((s) => s.id === sessionId);
-          if (session) {
-            session.title = title;
-          }
-          return { aiChatSessions: newSessions };
-        });
-      },
-      addAIContext: (connectionKey, context) =>
-        set((state) => {
-          const contexts = state.aiContexts[connectionKey] || [];
-          if (
-            contexts.find(
-              (c) =>
-                c.dbName === context.dbName &&
-                c.tableName === context.tableName,
-            )
-          ) {
-            return state;
-          }
-          return {
-            aiContexts: {
-              ...state.aiContexts,
-              [connectionKey]: [...contexts, context],
-            },
-          };
-        }),
-      removeAIContext: (connectionKey, dbName, tableName) =>
-        set((state) => {
-          const contexts = state.aiContexts[connectionKey] || [];
-          return {
-            aiContexts: {
-              ...state.aiContexts,
-              [connectionKey]: contexts.filter(
-                (c) => !(c.dbName === dbName && c.tableName === tableName),
-              ),
-            },
-          };
-        }),
-      clearAIContexts: (connectionKey) =>
-        set((state) => {
-          const { [connectionKey]: _, ...rest } = state.aiContexts;
-          return { aiContexts: rest };
-        }),
       setJVMDiagnosticDraft: (tabId, draft) =>
         set((state) => ({
           jvmDiagnosticDrafts: {
@@ -6391,19 +5892,6 @@ export const useStore = create<AppState>()(
         nextState.windowBounds = sanitizeWindowBounds(state.windowBounds);
         nextState.windowState = sanitizeWindowState(state.windowState);
         nextState.sidebarWidth = sanitizeSidebarWidth(state.sidebarWidth);
-        nextState.aiChatOpenMode = sanitizeAIChatOpenMode(state.aiChatOpenMode);
-        nextState.aiChatDetachedBoundsMemory = sanitizeAIChatDetachedBoundsMemory(
-          state.aiChatDetachedBoundsMemory,
-        );
-
-        // 保留原有的 AI 持久化记录，或者为空（版本兼容）
-        nextState.aiChatHistory =
-          state.aiChatHistory && typeof state.aiChatHistory === "object"
-            ? state.aiChatHistory
-            : {};
-        nextState.aiChatSessions = Array.isArray(state.aiChatSessions)
-          ? state.aiChatSessions
-          : [];
         return nextState as AppState;
       },
       merge: (persistedState, currentState) => {
@@ -6446,7 +5934,6 @@ export const useStore = create<AppState>()(
           // Floating windows are session-only and must not be restored from disk.
           detachedWorkbenchWindows: [],
           detachedQueryResultWindows: [],
-          detachedAIChatWindow: null,
           activeTabId: sanitizeActiveTabId(state.activeTabId, safeTabs),
           savedQueries: currentState.savedQueries,
           savedQueryGroups: currentState.savedQueryGroups,
@@ -6505,10 +5992,6 @@ export const useStore = create<AppState>()(
           windowBounds: sanitizeWindowBounds(state.windowBounds),
           windowState: sanitizeWindowState(state.windowState),
           sidebarWidth: sanitizeSidebarWidth(state.sidebarWidth),
-          aiChatOpenMode: sanitizeAIChatOpenMode(state.aiChatOpenMode),
-          aiChatDetachedBoundsMemory: sanitizeAIChatDetachedBoundsMemory(
-            state.aiChatDetachedBoundsMemory,
-          ),
 
           sqlFormatOptions: sanitizeSqlFormatOptions(state.sqlFormatOptions),
           queryOptions: sanitizeQueryOptions(state.queryOptions),
@@ -6522,10 +6005,6 @@ export const useStore = create<AppState>()(
           sqlLogs: sanitizeRuntimeSqlLogs(state.sqlLogs),
           sqlSnippets: sanitizeSqlSnippets(state.sqlSnippets),
           tableAccessCount: sanitizeTableAccessCount(state.tableAccessCount),
-
-          // AI 会话数据不再从 localStorage 恢复，改为从后端文件加载
-          aiChatHistory: {},
-          aiChatSessions: [],
         };
       },
       partialize: partializePersistedState,

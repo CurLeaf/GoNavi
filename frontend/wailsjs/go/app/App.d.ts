@@ -19,8 +19,6 @@ export function ApplyLogDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function ApplySavedQueryDirectory(arg1:string):Promise<connection.QueryResult>;
 
-export function AuthorizeMCPConnectionSQL(arg1:connection.ConnectionConfig,arg2:string):Promise<void>;
-
 export function BootstrapConnectionSidebarLayout(arg1:connection.ConnectionSidebarLayoutInput):Promise<connection.ConnectionSidebarLayout>;
 
 export function BuildDatabaseDiagnosticPackage():Promise<connection.QueryResult>;
@@ -128,8 +126,6 @@ export function DBGetViews(arg1:connection.ConnectionConfig,arg2:string):Promise
 export function DBGetViewsContext(arg1:context.Context,arg2:connection.ConnectionConfig,arg3:string):Promise<connection.QueryResult>;
 
 export function DBQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
-
-export function DBQueryAI(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DBQueryApplicationWithCancel(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 

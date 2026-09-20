@@ -15,7 +15,6 @@ import {
 import {
   FileSearchOutlined,
   ReloadOutlined,
-  RobotOutlined,
 } from "@ant-design/icons";
 
 import { useStore } from "../store";
@@ -24,7 +23,6 @@ import type {
   JVMApplyResult,
   JVMChangePreview,
   JVMChangeRequest,
-  JVMAIPlanContext,
   JVMValueSnapshot,
   SavedConnection,
   TabData,
@@ -32,13 +30,6 @@ import type {
 import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
 import { t as translate } from "../i18n";
 import { useOptionalI18n } from "../i18n/provider";
-import {
-  buildJVMChangeDraftFromAIPlan,
-  buildJVMAIPlanPrompt,
-  matchesJVMAIPlanTargetTab,
-  type JVMAIChangeDraft,
-  type JVMAIChangePlan,
-} from "../utils/jvmAiPlan";
 import {
   buildJVMActionPayloadTemplate,
   buildJVMPreviewApplyRequest,
@@ -170,14 +161,6 @@ const snapshotBlockStyle = (background: string): React.CSSProperties => ({
   overflow: "auto",
 });
 
-const formatDraftPayload = (draft: JVMAIChangeDraft): string => {
-  try {
-    return JSON.stringify(draft.payload ?? {}, null, 2);
-  } catch {
-    return "{}";
-  }
-};
-
 const resolveDefaultAction = (
   actions: JVMActionDefinition[] | undefined,
   providerMode: "jmx" | "endpoint" | "agent",
@@ -241,9 +224,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
   const [action, setAction] = useState("");
   const [reason, setReason] = useState("");
   const [payloadText, setPayloadText] = useState(DEFAULT_PAYLOAD_TEXT);
-  const [draftSource, setDraftSource] = useState<"manual" | "ai-plan">(
-    "manual",
-  );
+  const [draftSource, setDraftSource] = useState<"manual">("manual");
   const [draftResourceId, setDraftResourceId] = useState("");
   const [draftError, setDraftError] = useState("");
   const [applyMessage, setApplyMessage] = useState("");
@@ -419,91 +400,6 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
     }
   }, [action, payloadText, providerMode, supportedActions]);
 
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent).detail as
-        | {
-            plan?: JVMAIChangePlan;
-            targetTabId?: string;
-            connectionId?: string;
-            providerMode?: JVMAIPlanContext["providerMode"];
-            resourcePath?: string;
-          }
-        | undefined;
-      const plan = detail?.plan;
-      if (!plan || (detail?.targetTabId && detail.targetTabId !== tab.id)) {
-        return;
-      }
-
-      const planContext =
-        detail?.targetTabId &&
-        detail?.connectionId &&
-        detail?.providerMode &&
-        detail?.resourcePath
-          ? {
-              tabId: detail.targetTabId,
-              connectionId: detail.connectionId,
-              providerMode: detail.providerMode,
-              resourcePath: detail.resourcePath,
-            }
-          : undefined;
-
-      if (!planContext) {
-        setDraftError(tr("jvm_resource.error.ai_plan_missing_context"));
-        setApplyMessage("");
-        clearPreviewState();
-        return;
-      }
-
-      if (!matchesJVMAIPlanTargetTab(tab, planContext)) {
-        setDraftError(tr("jvm_resource.error.ai_plan_context_mismatch"));
-        setApplyMessage("");
-        clearPreviewState();
-        return;
-      }
-
-      let draftFromPlan: JVMAIChangeDraft;
-      try {
-        draftFromPlan = buildJVMChangeDraftFromAIPlan(plan, tr);
-      } catch {
-        setDraftError(tr("jvm_resource.error.ai_plan_to_draft_failed"));
-        setApplyMessage("");
-        clearPreviewState();
-        return;
-      }
-
-      setDraftResourceId(draftFromPlan.resourceId);
-      setAction(draftFromPlan.action);
-      setReason(draftFromPlan.reason);
-      setPayloadText(formatDraftPayload(draftFromPlan));
-      setDraftSource(draftFromPlan.source || "ai-plan");
-      setDraftError("");
-      setApplyMessage(
-        tr("jvm_resource.message.ai_plan_draft_filled", {
-          resourceId: draftFromPlan.resourceId,
-        }),
-      );
-      clearPreviewState();
-    };
-
-    window.addEventListener(
-      "gonavi:jvm-apply-ai-plan",
-      handler as EventListener,
-    );
-    return () =>
-      window.removeEventListener(
-        "gonavi:jvm-apply-ai-plan",
-        handler as EventListener,
-      );
-  }, [
-    i18nLanguage,
-    resourcePath,
-    tab.connectionId,
-    tab.id,
-    tab.providerMode,
-    tab.type,
-  ]);
-
   const handleSelectAction = (
     nextAction: string,
     definition?: JVMActionDefinition | null,
@@ -570,37 +466,6 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       connectionId: connection.id,
       providerMode,
     });
-  };
-
-  const handleAskAIForPlan = () => {
-    if (!connection) {
-      setDraftError(tr("jvm_resource.error.connection_missing"));
-      return;
-    }
-
-    const prompt = buildJVMAIPlanPrompt({
-      connectionName: connection.name,
-      host: connection.config.host,
-      providerMode,
-      resourcePath,
-      readOnly,
-      environment: connection.config.jvm?.environment,
-      snapshot,
-    }, tr);
-
-    const store = useStore.getState();
-    const wasClosed = !store.aiPanelVisible;
-    if (wasClosed) {
-      store.setAIPanelVisible(true);
-    }
-    setTimeout(
-      () => {
-        window.dispatchEvent(
-          new CustomEvent("gonavi:ai:inject-prompt", { detail: { prompt } }),
-        );
-      },
-      wasClosed ? 350 : 0,
-    );
   };
 
   const handlePreview = async () => {
@@ -824,13 +689,6 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
               >
                 {tr("jvm_resource.action.audit")}
               </Button>
-              <Button
-                size="small"
-                icon={<RobotOutlined />}
-                onClick={handleAskAIForPlan}
-              >
-                {tr("jvm_resource.action.generate_ai_plan")}
-              </Button>
             </>
           }
         />
@@ -989,9 +847,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                     {snapshot?.version || "-"}
                   </Descriptions.Item>
                   <Descriptions.Item label={tr("jvm_resource.field.draft_source")}>
-                    {draftSource === "ai-plan"
-                      ? tr("jvm_resource.draft_source.ai_plan")
-                      : tr("jvm_resource.draft_source.manual")}
+                    {tr("jvm_resource.draft_source.manual")}
                   </Descriptions.Item>
                 </Descriptions>
                 {supportedActions.length > 0 ? (
@@ -1097,9 +953,6 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                     onClick={() => void handlePreview()}
                   >
                     {tr("jvm_resource.action.preview_change")}
-                  </Button>
-                  <Button icon={<RobotOutlined />} onClick={handleAskAIForPlan}>
-                    {tr("jvm_resource.action.ask_ai_plan")}
                   </Button>
                 </Space>
               </Space>

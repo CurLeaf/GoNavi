@@ -1,7 +1,6 @@
 package main
 
 import (
-	aiservice "GoNavi-Wails/internal/ai/service"
 	"GoNavi-Wails/internal/app"
 	"GoNavi-Wails/internal/nativewindow"
 	"GoNavi-Wails/internal/secretstore"
@@ -13,10 +12,9 @@ func newBindingsSecretStore() secretstore.SecretStore {
 
 func collectWailsBindings(
 	application *app.App,
-	aiService *aiservice.Service,
 	nativeWindowManager *nativewindow.Manager,
 ) []interface{} {
-	bindings := []interface{}{application, aiService}
+	bindings := []interface{}{application}
 	if nativeWindowManager != nil {
 		bindings = append(bindings, nativeWindowManager)
 	}

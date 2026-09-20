@@ -179,10 +179,6 @@ const SOURCE_LABELS: Record<string, LocalizedLabel> = {
     key: "jvm_diagnostic.presentation.source.manual",
     fallback: "Manual input",
   },
-  "ai-plan": {
-    key: "jvm_diagnostic.presentation.source.ai_plan",
-    fallback: "AI plan",
-  },
 };
 
 const JVM_DIAGNOSTIC_REDACTION_MASK = "********";

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"strings"
 	"time"
 
@@ -88,122 +87,6 @@ func (a *App) DBQueryAudited(
 		auditWrites: true,
 		source:      normalizeSQLAuditUserActionSource(source),
 	})
-}
-
-// DBQueryAI is the dedicated entry point used by GoNavi's built-in AI tool
-// runtime. The audit source describes this called entry point; it is not an
-// unforgeable actor identity or security provenance claim.
-func (a *App) DBQueryAI(
-	config connection.ConnectionConfig,
-	dbName string,
-	query string,
-) connection.QueryResult {
-	return a.dbQueryWithCancel(config, dbName, query, "", dbQueryAuditOptions{
-		auditAll:    true,
-		auditWrites: true,
-		source:      "ai_action",
-	})
-}
-
-// MCPQueryExecutor is a narrow adapter for the MCP server. Keeping it separate
-// from App's Wails-bound method set makes the mcp source a backend-owned fact
-// rather than a source string accepted from a browser or desktop caller.
-type MCPQueryExecutor struct {
-	app *App
-}
-
-func NewMCPQueryExecutor(app *App) *MCPQueryExecutor {
-	return &MCPQueryExecutor{app: app}
-}
-
-func (executor *MCPQueryExecutor) DBQueryMulti(
-	config connection.ConnectionConfig,
-	dbName string,
-	query string,
-) connection.QueryResult {
-	return executor.DBQueryMultiContext(context.Background(), config, dbName, query, 0)
-}
-
-// DBQueryMultiContext binds an MCP request lifecycle to the underlying
-// database query. This keeps an HTTP client disconnect or stdio shutdown from
-// leaving a query running after its MCP caller has gone away.
-// maxRowsPerResult 是每个结果集的物化行数上限（0 表示不限制）：达到上限后
-// db 层停止读取行并释放连接，避免在完整物化后才截断。
-func (executor *MCPQueryExecutor) DBQueryMultiContext(
-	ctx context.Context,
-	config connection.ConnectionConfig,
-	dbName string,
-	query string,
-	maxRowsPerResult int,
-) connection.QueryResult {
-	result, _ := executor.dbQueryMultiAuthorizedContext(ctx, config, dbName, query, true, maxRowsPerResult)
-	return result
-}
-
-// DBQueryMultiAuthorizedContext is the MCP execution boundary. It resolves
-// the current saved metadata and secrets together, then re-evaluates the
-// shared AI safety level and connection protections immediately before the
-// SQL call. The resolved-snapshot marker prevents a later execution layer
-// from mixing in a newer secret bundle.
-func (executor *MCPQueryExecutor) DBQueryMultiAuthorizedContext(
-	ctx context.Context,
-	config connection.ConnectionConfig,
-	dbName string,
-	query string,
-	allowMutating bool,
-	maxRowsPerResult int,
-) connection.QueryResult {
-	result, _ := executor.dbQueryMultiAuthorizedContext(ctx, config, dbName, query, allowMutating, maxRowsPerResult)
-	return result
-}
-
-// DBQueryMultiAuthorizedContextWithDialect reports the effective SQL dialect
-// from the exact saved connection snapshot used for this execution. This keeps
-// MCP projection parsing aligned with OceanBase protocol and custom-driver
-// routing without exposing resolved connection secrets outside the app layer.
-func (executor *MCPQueryExecutor) DBQueryMultiAuthorizedContextWithDialect(
-	ctx context.Context,
-	config connection.ConnectionConfig,
-	dbName string,
-	query string,
-	allowMutating bool,
-	maxRowsPerResult int,
-) (connection.QueryResult, string) {
-	return executor.dbQueryMultiAuthorizedContext(ctx, config, dbName, query, allowMutating, maxRowsPerResult)
-}
-
-func (executor *MCPQueryExecutor) dbQueryMultiAuthorizedContext(
-	ctx context.Context,
-	config connection.ConnectionConfig,
-	dbName string,
-	query string,
-	allowMutating bool,
-	maxRowsPerResult int,
-) (connection.QueryResult, string) {
-	if executor == nil || executor.app == nil {
-		return connection.QueryResult{Success: false, Message: "MCP query executor is unavailable"}, ""
-	}
-	resolvedConfig, err := executor.app.resolveConnectionSecrets(config)
-	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}, ""
-	}
-	effectiveDialect := resolveDDLDBType(resolvedConfig)
-	runtime := &HeadlessRuntime{app: executor.app}
-	if err := runtime.authorizeHeadlessSQL(resolvedConfig, query, allowMutating, false); err != nil {
-		return connection.QueryResult{
-			Success: false,
-			Message: err.Error(),
-			Data:    map[string]any{"errorKind": headlessResultErrorKindPolicy},
-		}, effectiveDialect
-	}
-	return executor.app.dbQueryMulti(resolvedConfig, dbName, query, "", dbQueryMultiAuditOptions{
-		auditAll:                 true,
-		auditWrites:              true,
-		source:                   "mcp",
-		executionContext:         ctx,
-		RowBudget:                maxRowsPerResult,
-		StopRemainingOnRowBudget: true,
-	}), effectiveDialect
 }
 
 func normalizeSQLAuditUserActionSource(source string) string {

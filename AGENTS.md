@@ -21,8 +21,8 @@ GoNavi 是 **Wails v2 + Go + React 18** 的跨平台数据源工作台，不是 
 | 层 | 位置 | 职责 |
 |---|---|---|
 | 桌面壳 | `main.go` | Wails 启动、窗口、菜单 |
-| Wails 绑定 | `internal/app` | 给前端/MCP/Web RPC 的 `App` 方法，保持薄 |
-| 领域实现 | `internal/db`、`internal/ai`、`internal/sync`、`internal/connection` 等 | 驱动、AI、同步、类型 |
+| Wails 绑定 | `internal/app` | 给前端 / Web RPC 的 `App` 方法，保持薄 |
+| 领域实现 | `internal/db`、`internal/sync`、`internal/connection` 等 | 驱动、同步、类型 |
 | UI | `frontend/src` | React + Ant Design 5 + Zustand + Monaco |
 | 文案 | `shared/i18n/*.json` | 前后端共用目录 |
 | 生成物 | `frontend/wailsjs/` | **禁止手改** |
@@ -37,7 +37,7 @@ Go module：`GoNavi-Wails`。默认集成分支：`dev`。
 
 当前债务（禁止继续加行）：`frontend/src/components/QueryEditor.tsx`、`App.tsx`、`store.ts`、`DataGrid.tsx`、`Sidebar.tsx`、`queryEditor/QueryEditorHelpers.ts`、`internal/app/methods_file.go`、`methods_db.go`、`app.go`。
 
-正确范例：`DataGridShell` / `DataGridCore` / `DataGridModals` 拆文件；`components/queryEditor/`、`components/sidebar/`、`components/ai/` 拆目录；Go 侧 `methods_db_objects.go`、`methods_db_transaction.go`、`application_icon_windows.go`。
+正确范例：`DataGridShell` / `DataGridCore` / `DataGridModals` 拆文件；`components/queryEditor/`、`components/sidebar/` 拆目录；Go 侧 `methods_db_objects.go`、`methods_db_transaction.go`、`application_icon_windows.go`。
 
 ### 1.1 限额
 
@@ -64,7 +64,7 @@ Go module：`GoNavi-Wails`。默认集成分支：`dev`。
 ✅ methods_file_import.go / methods_file_export.go，App 方法签名不变
 
 ❌ store.ts 再加一块持久化状态
-✅ store/aiChatSlice.ts（或等价拆分），根 store 只组合
+✅ store/connectionSlice.ts（或等价拆分），根 store 只组合
 ```
 
 ---
@@ -118,7 +118,7 @@ Java 跟《阿里巴巴 Java 开发手册》。**Go 不套那本手册**，专�
 ```tsx
 // ❌ BAD
 export function QueryEditor() {
-  // 上万行：执行、拖拽、分页、AI、快捷键全写在这
+  // 上万行：执行、拖拽、分页、快捷键全写在这
 }
 
 // ✅ GOOD
@@ -157,7 +157,7 @@ export function QueryEditor() {
 
 1. 不提交密钥、`.env`、私钥、生产连接密码。配置里的密码字段按现有 `secretstore` / 脱敏逻辑处理。
 2. SQL 审计、只读连接、生产库确认（`productionRiskConfirm`、`connectionReadOnly`）不得绕过。
-3. 不随意改 Wails 方法签名和 `QueryResult` JSON 字段；前端、MCP、Web RPC 共用这些契约。
+3. 不随意改 Wails 方法签名和 `QueryResult` JSON 字段；前端、Web RPC 共用这些契约。
 4. 提交信息遵循 `CONTRIBUTING.md`：`emoji type(scope): 中文描述`。未要求时不要 commit、不要 push。
 
 **【推荐】** PR 保持单一主题；UI 变更附截图或录屏说明。

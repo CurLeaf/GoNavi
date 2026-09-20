@@ -55,7 +55,6 @@ import {
   type DataSyncWorkbenchTextKey,
 } from './text';
 import {
-  buildCompareAiPrompt,
   buildCompareRepairSQL,
   tableHasCompareDiff,
 } from './compareRepairSql';
@@ -242,7 +241,6 @@ export type DataSyncWorkbenchShellProps = {
     schemaName?: string;
     query: string;
   }) => void;
-  onAskAi?: (prompt: string) => void;
   onOpenSyncWorkbench?: (handoff?: {
     taskId: string;
     stage?: DataSyncTaskStage;
@@ -316,7 +314,6 @@ export const DataSyncWorkbenchShell: React.FC<DataSyncWorkbenchShellProps> = ({
   workbenchTabId,
   workbenchFamily,
   onOpenQueryTab,
-  onAskAi,
   onOpenSyncWorkbench,
   focusTaskId,
   focusStage,
@@ -2014,18 +2011,6 @@ export const DataSyncWorkbenchShell: React.FC<DataSyncWorkbenchShellProps> = ({
       }),
     });
   };
-  const handleAskAiAboutDiffs = () => {
-    if (!selectedTask || !compareResult || !onAskAi) return;
-    onAskAi(
-      buildCompareAiPrompt(compareResult, {
-        dialect: selectedTask.target.type,
-        sourceName:
-          selectedTask.source.connectionName || selectedTask.source.connectionId,
-        targetName:
-          selectedTask.target.connectionName || selectedTask.target.connectionId,
-      }),
-    );
-  };
   const handleSyncDiffs = async () => {
     if (!selectedTask || selectedTask.kind !== 'compare') return;
     const tables = (compareResult?.tables || [])
@@ -2557,11 +2542,6 @@ export const DataSyncWorkbenchShell: React.FC<DataSyncWorkbenchShellProps> = ({
           onGenerateRepairSql={
             workbenchFamily === 'compare' && onOpenQueryTab
               ? handleGenerateRepairSql
-              : undefined
-          }
-          onAskAiAboutDiffs={
-            workbenchFamily === 'compare' && onAskAi
-              ? handleAskAiAboutDiffs
               : undefined
           }
           onSyncDiffs={

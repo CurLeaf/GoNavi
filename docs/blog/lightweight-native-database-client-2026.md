@@ -90,7 +90,7 @@ Installer size and multi-engine reach matter before anyone opens Activity Monito
 | “Lightweight” slogan risk | High if only download is quoted | Lower if three numbers stay separate |
 | Memory claim hygiene | Must measure RSS separately | Same rule — we publish a Linux sample |
 
-Neither stack makes AI safe by itself. Stack only answers **how the UI is packaged**. Production safety still needs human gates (see the AI article in this series).
+Stack only answers **how the UI is packaged**; production safety still needs human gates such as read-only connections and explicit write confirmation.
 
 ## How to measure RSS yourself (copy this method)
 
@@ -134,7 +134,6 @@ GoNavi’s workbench pitch is: keep SQL · cache · vector · MQ · search · ti
 Screens:
 
 - [Multi-DB workbench](https://raw.githubusercontent.com/Syngnat/GoNavi/dev/assets/screenshots/01-home-workbench.png)
-- [AI panel](https://raw.githubusercontent.com/Syngnat/GoNavi/dev/assets/screenshots/04-ai-assistant.png) (UI evidence; configure your own provider)
 
 ## What to put in your next comparison blog post
 
@@ -171,6 +170,6 @@ Download from [Releases](https://github.com/Syngnat/GoNavi/releases), measure on
 
 ---
 
-*Related:* [Best TablePlus Alternatives in 2026](./tableplus-alternative-2026.md) · [After AI Can Write SQL, Do You Still Need a Database GUI?](./ai-sql-still-need-gui-2026.md)
+*Related:* [Best TablePlus Alternatives in 2026](./tableplus-alternative-2026.md)
 
 *Source notes:* aligned with GoNavi README “Why GoNavi?” three-number framing (PR #1230); product facts from v0.9.8 releases — not Search Console metrics.

@@ -1,6 +1,6 @@
 import type { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from '../types';
 
-export type SecurityUpdateRepairSource = 'connection' | 'proxy' | 'ai';
+export type SecurityUpdateRepairSource = 'connection' | 'proxy';
 export type SecurityUpdateSettingsFocusTarget = 'recent_result' | 'status';
 export type SecurityUpdateRepairTranslator = (key: string) => string;
 export type SecurityUpdateFocusState = {
@@ -22,11 +22,6 @@ export type SecurityUpdateRepairEntry =
   | {
       type: 'proxy';
       repairSource: 'proxy';
-    }
-  | {
-      type: 'ai';
-      providerId?: string;
-      repairSource: 'ai';
     }
   | {
       type: 'retry';
@@ -96,14 +91,6 @@ export const resolveSecurityUpdateRepairEntry = (
     };
   }
 
-  if (issue.action === 'open_ai_settings') {
-    return {
-      type: 'ai',
-      providerId: issue.refId || undefined,
-      repairSource: 'ai',
-    };
-  }
-
   if (issue.action === 'retry_update') {
     return {
       type: 'retry',
@@ -118,7 +105,7 @@ export const resolveSecurityUpdateRepairEntry = (
 
 export const shouldReopenSecurityUpdateDetails = (
   repairSource: SecurityUpdateRepairSource | null | undefined,
-): boolean => repairSource === 'connection' || repairSource === 'proxy' || repairSource === 'ai';
+): boolean => repairSource === 'connection' || repairSource === 'proxy';
 
 export const shouldRefreshSecurityUpdateDetailsFocus = ({
   requestedOpen,

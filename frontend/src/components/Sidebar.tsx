@@ -886,7 +886,6 @@ const Sidebar: React.FC<{
   /** Whether web-only settings entries (e.g. browser auth) should appear. */
   isWebRuntime?: boolean;
   onOpenDataSyncWorkbench?: (entryMode: DataSyncEntryModeAlias) => void;
-  onToggleAI?: () => void;
   onToggleLogPanel?: () => void;
   v2ExplorerContext?: V2ExplorerContext;
   collapsedSidebarActionsTarget?: HTMLElement | null;
@@ -907,7 +906,6 @@ const Sidebar: React.FC<{
   onOpenSettings,
   onOpenSettingsNavigation,
   isWebRuntime = false,
-  onToggleAI,
   onToggleLogPanel,
   v2ExplorerContext,
   collapsedSidebarActionsTarget,
@@ -975,8 +973,6 @@ const Sidebar: React.FC<{
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const languagePreference = useStore(state => state.languagePreference);
   const setAppearance = useStore(state => state.setAppearance);
-  const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
-  const addAIContext = useStore(state => state.addAIContext);
   void languagePreference;
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
@@ -3362,7 +3358,6 @@ const Sidebar: React.FC<{
       handleCopyTableAsInsert,
       openTableDdlInDesigner,
       openTableInERView,
-      injectTablePromptToAI,
       handleCreateDatabase,
       openCreateSchemaModal,
       handleCreateSchema,
@@ -3459,8 +3454,6 @@ const Sidebar: React.FC<{
       openDesign,
       onDoubleClick,
       runExportWithProgress,
-      setAIPanelVisible,
-      addAIContext,
       migrateVisibilityForRenamedDatabase,
       removeVisibilityForDeletedDatabase,
       migrateVisibilityForRenamedSchema,
@@ -3536,7 +3529,6 @@ const Sidebar: React.FC<{
       openCreateStarRocksRollup,
       handleExport,
       openExportDialog,
-      injectTablePromptToAI,
       handleTableDataDangerAction,
       handleDeleteTable,
       openCreateSchemaModal,
@@ -3573,11 +3565,9 @@ const Sidebar: React.FC<{
       searchScopePopoverContent,
       displayTreeData,
       v2CommandSearchObjectMode,
-      v2CommandSearchAiMode,
       filteredCommandSearchTreeItems,
       filteredCommandSearchActionItems,
       filteredCommandSearchRecentItems,
-      commandSearchAiItem,
       commandSearchFlatItems,
       flattenConnectionNodes,
       activeConnection,
@@ -3608,9 +3598,7 @@ const Sidebar: React.FC<{
       overlayTheme,
       darkMode,
       onCreateConnection,
-      onToggleAI,
       onToggleLogPanel,
-      setAIPanelVisible,
       extractObjectName,
   });
   // The tree never scrolls horizontally: long labels ellipsize and the user
@@ -4575,12 +4563,10 @@ const Sidebar: React.FC<{
     activeIndex: v2CommandActiveIndex,
     label: v2CommandSearchLabel,
     placeholder: v2CommandSearchPlaceholder,
-    aiMode: v2CommandSearchAiMode,
     objectMode: v2CommandSearchObjectMode,
     flatItems: commandSearchFlatItems,
     sections: {
       goTo: filteredCommandSearchTreeItems,
-      ai: commandSearchAiItem,
       actions: filteredCommandSearchActionItems,
       recent: filteredCommandSearchRecentItems,
     },

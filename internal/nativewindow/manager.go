@@ -17,8 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"GoNavi-Wails/internal/ai/runharness"
-	aiservice "GoNavi-Wails/internal/ai/service"
 	appcore "GoNavi-Wails/internal/app"
 	"GoNavi-Wails/internal/uievents"
 	"GoNavi-Wails/internal/webserver"
@@ -83,27 +81,26 @@ type Manager struct {
 	closing    bool
 	windows    map[string]*windowEntry
 
-	starter               processStarter
-	executable            string
-	resolveBounds         func(WindowBounds) WindowBounds
-	openTimeout           time.Duration
-	closeFallbackDelay    time.Duration
-	shutdownGracePeriod   time.Duration
-	emitToWails           func(context.Context, string, ...any)
-	emitToChildren        func(string, ...any)
-	emitToChild           func(string, string, ...any)
-	emitToChildBestEffort func(string, string, ...any)
+	starter             processStarter
+	executable          string
+	resolveBounds       func(WindowBounds) WindowBounds
+	openTimeout         time.Duration
+	closeFallbackDelay  time.Duration
+	shutdownGracePeriod time.Duration
+	emitToWails         func(context.Context, string, ...any)
+	emitToChildren      func(string, ...any)
+	emitToChild         func(string, string, ...any)
 }
 
 // NewManager prepares a detached-window manager around the already-created
 // desktop backend instances. InitializeLifecycle starts its random loopback
 // listener after Wails provides the runtime context.
-func NewManager(assetFS fs.FS, app *appcore.App, ai *aiservice.Service) (*Manager, error) {
+func NewManager(assetFS fs.FS, app *appcore.App) (*Manager, error) {
 	token, err := newBridgeToken()
 	if err != nil {
 		return nil, fmt.Errorf("create detached-window token failed: %w", err)
 	}
-	shared, err := webserver.NewSharedRuntime(assetFS, app, ai, webserver.SharedRuntimeOptions{
+	shared, err := webserver.NewSharedRuntime(assetFS, app, webserver.SharedRuntimeOptions{
 		RuntimeBridgePath:   RuntimePath,
 		RuntimeBridgeScript: detachedRuntimeBridgeScript(),
 	})
@@ -127,9 +124,8 @@ func NewManager(assetFS fs.FS, app *appcore.App, ai *aiservice.Service) (*Manage
 		emitToWails: func(ctx context.Context, name string, args ...any) {
 			wailsRuntime.EventsEmit(ctx, name, args...)
 		},
-		emitToChildren:        shared.Emit,
-		emitToChild:           shared.EmitTo,
-		emitToChildBestEffort: shared.EmitToBestEffort,
+		emitToChildren: shared.Emit,
+		emitToChild:    shared.EmitTo,
 	}
 	installDetachedDockMenu()
 	return manager, nil
@@ -144,7 +140,7 @@ func newBridgeToken() (string, error) {
 }
 
 // InitializeLifecycle starts the loopback bridge and attaches the main Wails
-// runtime. Call it before initialising App and AI lifecycle contexts.
+// runtime. Call it before initialising the App lifecycle context.
 func InitializeLifecycle(manager *Manager, ctx context.Context) error {
 	if manager == nil {
 		return fmt.Errorf("native window manager is unavailable")
@@ -152,8 +148,8 @@ func InitializeLifecycle(manager *Manager, ctx context.Context) error {
 	return manager.initialize(ctx)
 }
 
-// WithLifecycleContext makes App/AI events fan out to both the main Wails
-// window and every detached child. It does not rerun either backend lifecycle.
+// WithLifecycleContext makes App events fan out to both the main Wails
+// window and every detached child. It does not rerun the backend lifecycle.
 func WithLifecycleContext(manager *Manager, ctx context.Context) context.Context {
 	if manager == nil {
 		return ctx
@@ -216,23 +212,10 @@ func (m *Manager) emit(name string, args ...any) {
 	ctx := m.runtimeCtx
 	emitToWails := m.emitToWails
 	emitToChildren := m.emitToChildren
-	emitToChildBestEffort := m.emitToChildBestEffort
 	shared := m.shared
 	m.mu.RUnlock()
 	if ctx != nil && emitToWails != nil {
 		emitToWails(ctx, name, args...)
-	}
-	if name == runharness.EventName {
-		// Run events are durably sequenced before publication. A detached chat
-		// window can replay any dropped best-effort notification through
-		// AIReadAgentRun, so the bridge must not preserve the old stream-specific
-		// reliability and chunk-coalescing behavior.
-		if emitToChildBestEffort != nil {
-			emitToChildBestEffort("ai-chat", name, args...)
-		} else if shared != nil {
-			shared.EmitToBestEffort("ai-chat", name, args...)
-		}
-		return
 	}
 	if emitToChildren != nil {
 		emitToChildren(name, args...)
@@ -869,7 +852,7 @@ func validateOpenRequest(request OpenRequest) error {
 	if strings.ContainsRune(request.Kind, '\x00') || strings.ContainsRune(request.Title, '\x00') {
 		return fmt.Errorf("native window kind or title is invalid")
 	}
-	if request.Kind != "workbench" && request.Kind != "query-result" && request.Kind != "ai-chat" {
+	if request.Kind != "workbench" && request.Kind != "query-result" {
 		return fmt.Errorf("native window kind is unsupported")
 	}
 	return nil
@@ -1167,7 +1150,7 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	request.Action = strings.ToLower(strings.TrimSpace(request.Action))
 	switch request.Action {
-	case "ready", "sync", "attach", "close", "hide", "cancel-close", "host-event", "open-ai-settings":
+	case "ready", "sync", "attach", "close", "hide", "cancel-close", "host-event":
 	default:
 		http.Error(w, "unsupported detached action", http.StatusBadRequest)
 		return
@@ -1175,31 +1158,12 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 
 	id := strings.TrimSpace(r.Header.Get(HeaderWindowID))
 	revision := positiveActionRevision(request.Payload)
-	requestedAISettingsVisibilityRevision := uint64(0)
 	m.mu.Lock()
 	entry, exists := m.windows[id]
 	if !exists {
 		m.mu.Unlock()
 		http.Error(w, "unknown detached window", http.StatusNotFound)
 		return
-	}
-	if request.Action == "open-ai-settings" {
-		requestedAISettingsVisibilityRevision = positiveVisibilityRevision(request.Payload)
-		if requestedAISettingsVisibilityRevision == 0 ||
-			requestedAISettingsVisibilityRevision != entry.visibilityRevision ||
-			!entry.info.Hidden {
-			visibilityRevision := entry.visibilityRevision
-			m.mu.Unlock()
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			_ = json.NewEncoder(w).Encode(OperationResult{
-				Success:            true,
-				Applied:            operationApplied(false),
-				ID:                 id,
-				Message:            "open AI settings ignored after a newer visibility action",
-				VisibilityRevision: visibilityRevision,
-			})
-			return
-		}
 	}
 	if request.Action == "cancel-close" && (m.closing || entry.exitReason == ExitReasonParentShutdown) {
 		visibilityRevision := entry.visibilityRevision
@@ -1231,7 +1195,7 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 		entry.actionRevision = revision
 	}
 	eventAction := request.Action
-	visibilityRevision := requestedAISettingsVisibilityRevision
+	var visibilityRevision uint64
 	if request.Action == "ready" {
 		entry.info.Ready = true
 		entry.readyOnce.Do(func() {
@@ -1301,9 +1265,6 @@ func (m *Manager) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	applied := revisionedActionApplied(request.Action, revision)
-	if request.Action == "open-ai-settings" {
-		applied = operationApplied(true)
-	}
 	_ = json.NewEncoder(w).Encode(OperationResult{
 		Success:            true,
 		Applied:            applied,

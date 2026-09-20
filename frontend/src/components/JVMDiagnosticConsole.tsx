@@ -359,38 +359,6 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
   }, [connection, t]);
 
   useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent).detail;
-      if (!detail || detail.targetTabId !== tab.id || !detail.plan) {
-        return;
-      }
-
-      const planTransport = String(detail.plan.transport || diagnosticTransport);
-      if (planTransport !== diagnosticTransport) {
-        setError(
-          t("jvm_diagnostic.ai_plan.error.transport_mismatch", {
-            planTransport,
-            currentTransport: diagnosticTransport,
-          }),
-        );
-        return;
-      }
-
-      setError("");
-      setDraft(tab.id, {
-        command: String(detail.plan.command || ""),
-        reason: String(detail.plan.reason || ""),
-        source: "ai-plan",
-      });
-      message.success(t("jvm_diagnostic.ai_plan.message.filled"));
-    };
-
-    window.addEventListener("gonavi:jvm-apply-diagnostic-plan", handler);
-    return () =>
-      window.removeEventListener("gonavi:jvm-apply-diagnostic-plan", handler);
-  }, [diagnosticTransport, setDraft, t, tab.id]);
-
-  useEffect(() => {
     void loadAuditRecords();
   }, [loadAuditRecords]);
 

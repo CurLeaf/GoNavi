@@ -5,12 +5,12 @@
 <h1 align="center">GoNavi</h1>
 
 <p align="center">
-  <b>一套客户端，航行全部数据源 — 原生性能 · Agent 就绪 · 告别 Electron 膨胀。</b>
+  <b>一套客户端，航行全部数据源 — 原生性能 · 告别 Electron 膨胀。</b>
 </p>
 
 <p align="center">
   基于 <a href="https://wails.io">Wails</a>（Go）+ <a href="https://react.dev">React</a> 的跨平台数据库工作台。
-  桌面优先，MCP 原生，安装包约 <b>20–26MB</b> 量级。
+  桌面优先，安装包约 <b>20–26MB</b> 量级。
 </p>
 
 <p align="center">
@@ -28,10 +28,6 @@
 </p>
 
 <p align="center">
-  <a href="https://mcpvault.io/servers/gonavi/health?utm_source=external_badge&utm_medium=referral&utm_campaign=mcp_health_report"><img src="https://mcpvault.io/badge/gonavi.svg" alt="MCPVault: claimed" /></a>
-</p>
-
-<p align="center">
   <b>语言</b>：<a href="README.md">English</a> · 简体中文
   &nbsp;·&nbsp;
   <a href="https://gonavi.org"><b>🌐 官网</b></a>
@@ -41,8 +37,6 @@
   <a href="#-快速开始"><b>⚡ 快速开始</b></a>
   ·
   <a href="#-核心能力"><b>✨ 特性</b></a>
-  ·
-  <a href="#-mcp--agents"><b>🤖 MCP</b></a>
 </p>
 
 <p align="center">
@@ -70,13 +64,12 @@
 | 安装包 | 动辄数百 MB | **约 20–26 MB 量级** |
 | 启动 | 偏重 | **更快** |
 | 内存口径 | 常和安装包混谈 | **RSS 单独测**（见注） |
-| AI / Agent | 外挂或缺失 | **MCP + 多模型一等公民**（AI 起草 SQL；GUI 仍管 schema / 改行 / EXPLAIN） |
 | 数据源 | 以 RDBMS 为主 | **SQL · 缓存 · 向量 · 消息 · 搜索 · 时序 · 国产库** |
 
 > **安装包 MB ≠ 运行内存。** 上表 RSS 来自一次云电脑 Linux 实测：v0.9.8 WebKit41 包、空工作台、无数据库连接、远程显示、约 30–40 s 稳态。不要拿它和安装包比，也不要和未经核实的「原生 ~80 MB」宣传混比。Windows / macOS 本机结果可能不同——这是带方法学的样本，不是排行榜分数。
 
 > **MySQL、Postgres、Redis、Kafka、Milvus、OceanBase、ClickHouse… 一个工作台打通。**  
-> 查询、编辑、审计、同步；把结构化上下文交给编码 Agent，密码仍留在本机。
+> 查询、编辑、审计、同步 —— 密钥始终留在本机。
 
 ---
 
@@ -86,14 +79,14 @@
 ┌──────────────────────────────────────────────────────────────────────┐
 │  GoNavi 工作台                                                       │
 │  ┌─────────────┐  ┌──────────────────┐  ┌─────────────────────────┐  │
-│  │ 连接管理    │  │ Monaco SQL + AI  │  │ 虚拟滚动 DataGrid       │  │
+│  │ 连接管理    │  │ Monaco SQL       │  │ 虚拟滚动 DataGrid       │  │
 │  │ SSH / 代理  │  │ 表结构上下文     │  │ 批量编辑 · 导出         │  │
-│  │ 驱动代理    │  │ 快捷指令         │  │ 事务提交 / 回滚         │  │
+│  │ 驱动代理    │  │ 代码补全         │  │ 事务提交 / 回滚         │  │
 │  └─────────────┘  └────────┬─────────┘  └─────────────────────────┘  │
 │                            │                                         │
 │              ┌─────────────▼─────────────┐                           │
 │              │  Go 核心 · 审计 · 同步    │                           │
-│              │  MCP HTTP · Web Server    │                           │
+│              │  Web Server               │                           │
 │              └───────────────────────────┘                           │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -104,8 +97,6 @@
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Syngnat/GoNavi/dev/assets/screenshots/01-home-workbench.png" alt="GoNavi 全窗口 — 连接、查询与工作台" width="560" />
-  &nbsp;
-  <img src="https://raw.githubusercontent.com/Syngnat/GoNavi/dev/assets/screenshots/04-ai-assistant.png" alt="GoNavi 全窗口 — 带表结构上下文的 AI 助手" width="560" />
 </p>
 
 <p align="center">
@@ -144,7 +135,7 @@
 | 赞助商 | 提供什么 | 为什么适合 GoNavi |
 |---|---|---|
 | **[APISmart](https://www.apismart.ai/)** | APISmart 通过一个 API 提供对主流 AI 模型的统一访问。开发者只需一个 API Key，即可通过兼容 OpenAI 的接口接入大语言模型、图像和视频模型，无需分别管理多个服务商。智能路由与自动故障切换有助于提升可靠性，集中式账单使使用管理更加轻松。借助 APISmart，开发者能以更精简的平台更快构建并扩展 AI 应用。 | 开发者和 Agent 工作流无需分别接入各家服务商，也能使用多种 AI 能力。 |
-| **[華龍算力](https://api.hualong.online/)** | 華龍算力是一家面向重度 AI 开发者、专注官方直连的高品质模型 API 中转服务商。主要营业 Codex 系列模型，100% 官方源直供，不掺假不注水，欢迎检验。计费透明，Token 级账单可逐笔核验。同时支持企业级高并发，并为企业客户提供专业的管理平台；企业客户可签订正式合同并开具发票，更多详情请进入官网获取联系方式。GPT 系列最低至 0.08 倍率，更有 0.15 倍率的 Pro 稳定分组；邀请好友双向赠送，邀请奖励无上限。 | 稳定的模型通道是 GoNavi 的 AI 助手、MCP 与日常开发工作流的基础设施。 |
+| **[華龍算力](https://api.hualong.online/)** | 華龍算力是一家面向重度 AI 开发者、专注官方直连的高品质模型 API 中转服务商。主要营业 Codex 系列模型，100% 官方源直供，不掺假不注水，欢迎检验。计费透明，Token 级账单可逐笔核验。同时支持企业级高并发，并为企业客户提供专业的管理平台；企业客户可签订正式合同并开具发票，更多详情请进入官网获取联系方式。GPT 系列最低至 0.08 倍率，更有 0.15 倍率的 Pro 稳定分组；邀请好友双向赠送，邀请奖励无上限。 | 稳定的模型通道支持日常开发工作流。 |
 
 - APISmart：[https://www.apismart.ai/](https://www.apismart.ai/) — 统一 AI 模型 API，兼容 OpenAI 接口。
 - 華龍算力：[https://api.hualong.online/](https://api.hualong.online/) — 控制台、文档与国内高速端点。
@@ -159,16 +150,6 @@
 <tr>
 <td width="50%" valign="top">
 
-### 🤖 懂表结构的 AI
-- OpenAI · Gemini · Claude · 自定义 OpenAI 兼容 API  
-- 将当前库表结构注入对话上下文  
-- 快捷指令：生成 SQL、解释、优化、表设计评审  
-- **MCP**：一键装到 Claude Code / Codex，或 Streamable HTTP 给远端 Agent  
-- 连接与密码留在运行 GoNavi 的主机上  
-
-</td>
-<td width="50%" valign="top">
-
 ### ⚡ 大数据仍流畅
 - 虚拟滚动 DataGrid，扛住大结果集  
 - 单元格编辑 · 批量增删改 · 事务提交/回滚  
@@ -177,8 +158,6 @@
 - Monaco + 库/表/字段上下文补全  
 
 </td>
-</tr>
-<tr>
 <td width="50%" valign="top">
 
 ### 🔌 连接与驱动
@@ -189,13 +168,15 @@
 - Custom Driver + DSN 扩展  
 
 </td>
-<td width="50%" valign="top">
+</tr>
+<tr>
+<td colspan="2" valign="top">
 
 ### 🛡️ 可观测 & 可交付
 - SQL 执行日志（含耗时）  
 - 审计中心（默认脱敏、保留策略、导出）  
 - 桌面端 + 实验性 **Web Server**  
-- Docker / K8s / Helm / Podman  
+- Docker 镜像打包  
 - 更新检查 · 多架构发布  
 
 </td>
@@ -345,7 +326,7 @@ winget install --id Syngnat.GoNavi.CLI -e
 CLI 与桌面版共用活动数据根，优先级为：`GONAVI_DATA_ROOT`、
 `~/.gonavi/storage_root.json`、`~/.gonavi`。临时凭据只能放在属主可读的
 `0600` `--connection-file` 中，不能通过命令行参数传入。查询默认输出 JSONL，
-诊断信息输出到 stderr。变更类 SQL 还必须同时通过已保存的 AI 安全级别、连接保护和
+诊断信息输出到 stderr。变更类 SQL 还必须同时通过已保存的 SQL 安全级别、连接保护和
 `--allow-write` 确认。
 
 Linux 容器可复制 `docker.cli.env.example`，设置宿主数据目录及 UID/GID，
@@ -399,28 +380,9 @@ docker compose --env-file docker.web-server.env -f docker-compose.web-server.yml
 
 ---
 
-## 🤖 MCP & Agents
+## 🐧 Linux 构建环境
 
-把结构工具交给 Agent，而不是把密钥交出去：
-
-```bash
-cp docker.mcp-server.env.example docker.mcp-server.env
-docker compose --env-file docker.mcp-server.env -f docker-compose.mcp-server.yml up -d
-```
-
-| 形态 | 入口 |
-|---|---|
-| MCP 容器 | `docker-compose.mcp-server.yml` → `ghcr.io/syngnat/gonavi-mcp-server` |
-| Web UI 容器 | `docker-compose.web-server.yml` → `ghcr.io/syngnat/gonavi-web-server` |
-| Podman / Quadlet | [deploy/podman/gonavi-mcp-server](deploy/podman/gonavi-mcp-server) |
-| Kubernetes | [deploy/k8s/gonavi-mcp-server](deploy/k8s/gonavi-mcp-server) |
-| Helm | [deploy/helm/gonavi-mcp-server](deploy/helm/gonavi-mcp-server) |
-| 仅构建镜像 | `Dockerfile.build-env` → `ghcr.io/syngnat/gonavi-build-env` |
-
-安全默认：远端 `schema-only` 不暴露 `execute_sql`；开放后与内置 AI 助手共用安全控制，调用 `execute_sql` 即视为确认。  
-详见：[cmd/gonavi-mcp-server/README.md](cmd/gonavi-mcp-server/README.md)。
-
-### 仅 Linux 构建环境
+在可复现的 Linux 容器镜像（`ghcr.io/syngnat/gonavi-build-env`）中构建与调试 GoNavi：
 
 ```bash
 docker build -f Dockerfile.build-env -t gonavi-build-env:local .
@@ -601,5 +563,5 @@ fc-cache -fv
 [Apache-2.0](LICENSE)
 
 <p align="center">
-  <sub>为泡在 SQL、表结构与 Agent 循环里的人而造。</sub>
+  <sub>为泡在 SQL 与表结构里的人而造。</sub>
 </p>

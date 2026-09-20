@@ -1,7 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { ConfigProvider, Input, Tooltip } from 'antd';
-import { CloseOutlined, CopyOutlined, SearchOutlined, TableOutlined, RobotOutlined } from '@ant-design/icons';
+import { CloseOutlined, CopyOutlined, SearchOutlined, TableOutlined } from '@ant-design/icons';
 import { noAutoCapInputProps } from '../../utils/inputAutoCap';
 import { t } from '../../i18n';
 import { APP_COMMAND_PALETTE_Z_INDEX } from '../../utils/overlayZIndex';
@@ -36,12 +36,10 @@ export interface SidebarSearchPanelProps<TItem extends V2CommandSearchItemLike =
   activeIndex: number;
   label: string;
   placeholder: string;
-  aiMode: boolean;
   objectMode: boolean;
   flatItems: TItem[];
   sections: {
     goTo: TItem[];
-    ai: TItem[];
     actions: TItem[];
     recent: TItem[];
   };
@@ -82,7 +80,6 @@ const SidebarSearchPanel = <TItem extends V2CommandSearchItemLike>({
   activeIndex,
   label,
   placeholder,
-  aiMode,
   objectMode,
   flatItems,
   sections,
@@ -126,11 +123,9 @@ const SidebarSearchPanel = <TItem extends V2CommandSearchItemLike>({
 
   if (!isOpen || typeof document === 'undefined') return null;
 
-  const emptyCopy = aiMode
-    ? t('sidebar.command_search.empty.ai')
-    : objectMode
-      ? t('sidebar.command_search.empty.object')
-      : t('sidebar.command_search.empty.default');
+  const emptyCopy = objectMode
+    ? t('sidebar.command_search.empty.object')
+    : t('sidebar.command_search.empty.default');
 
   const openContextMenu = (event: React.MouseEvent<HTMLDivElement>, item: TItem) => {
     event.preventDefault();
@@ -263,7 +258,6 @@ const SidebarSearchPanel = <TItem extends V2CommandSearchItemLike>({
         </div>
         <div className="gn-v2-command-list">
           {renderSection(t('sidebar.command_search.section.goto'), sections.goTo)}
-          {renderSection(t('sidebar.command_search.section.ai'), sections.ai)}
           {renderSection(t('sidebar.command_search.section.actions'), sections.actions)}
           {renderSection(t('sidebar.command_search.section.recent'), sections.recent, true)}
           {flatItems.length === 0 ? (
@@ -274,7 +268,6 @@ const SidebarSearchPanel = <TItem extends V2CommandSearchItemLike>({
           <span><kbd>↑</kbd><kbd>↓</kbd>{t('sidebar.command_search.footer.navigate')}</span>
           <span><kbd>↵</kbd>{t('sidebar.command_search.footer.select')}</span>
           <span><TableOutlined /> <kbd>@</kbd>{t('sidebar.command_search.footer.object_only')}</span>
-          <span><RobotOutlined /> <kbd>?</kbd>{t('sidebar.command_search.footer.ask_ai')}</span>
         </div>
       </div>
     </div>

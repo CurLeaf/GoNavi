@@ -65,7 +65,7 @@ def render_manifest(version: str, hashes: dict[str, str], repo: str) -> str:
         "License: Apache-2.0",
         "LicenseUrl: https://github.com/Syngnat/GoNavi/blob/main/LICENSE",
         "ShortDescription: Headless GoNavi database CLI",
-        "Description: Run GoNavi queries, exports, batches, audit exports, and MCP without the desktop GUI.",
+        "Description: Run GoNavi queries, exports, batches, and audit exports without the desktop GUI.",
         "ReleaseNotesUrl: https://github.com/Syngnat/GoNavi/releases/tag/v" + version,
         "Installers:",
     ]

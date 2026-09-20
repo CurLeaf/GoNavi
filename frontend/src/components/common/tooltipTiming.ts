@@ -24,7 +24,7 @@ export const hintTooltipTiming = {
 // events, moving onto a neighbour that the bubble covers cannot update the
 // hint. Leave delay is 0 and the overlay ignores the pointer, so leaving the
 // trigger hides the bubble immediately.
-export const HINT_TOOLTIP_OVERLAY_CLASS = 'gonavi-ai-provider-hint-overlay';
+export const HINT_TOOLTIP_OVERLAY_CLASS = 'gonavi-hint-tooltip-overlay';
 export const passThroughHintTooltip = {
   mouseEnterDelay: HINT_TOOLTIP_ENTER_DELAY,
   mouseLeaveDelay: 0,
@@ -35,11 +35,11 @@ export const passThroughHintTooltip = {
 // pointer to enter the bubble, and the bubble must accept clicks. Other provider
 // hints stay on passThroughHintTooltip so they never intercept a neighbour.
 export const HINT_TOOLTIP_INTERACTIVE_LEAVE_DELAY = 0.4;
-export const HINT_TOOLTIP_INTERACTIVE_OVERLAY_CLASS = 'gonavi-ai-provider-hint-overlay-interactive';
+export const HINT_TOOLTIP_INTERACTIVE_OVERLAY_CLASS = 'gonavi-hint-tooltip-overlay-interactive';
 export const interactiveHintTooltip = {
   mouseEnterDelay: HINT_TOOLTIP_ENTER_DELAY,
   mouseLeaveDelay: HINT_TOOLTIP_INTERACTIVE_LEAVE_DELAY,
   overlayClassName: HINT_TOOLTIP_INTERACTIVE_OVERLAY_CLASS,
   getPopupContainer: (node: HTMLElement) =>
-    (node.closest('.gonavi-ai-provider-management') as HTMLElement | null) || document.body,
+    (node.closest('.gonavi-hint-tooltip-container') as HTMLElement | null) || document.body,
 } as const;

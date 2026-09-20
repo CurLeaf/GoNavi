@@ -14,7 +14,6 @@ import {
   ImportOutlined,
   PlusOutlined,
   ReloadOutlined,
-  RobotOutlined,
   SaveOutlined,
   SelectOutlined,
   SnippetsOutlined,
@@ -79,7 +78,6 @@ export interface DataGridToolbarFrameProps {
   isQueryResultExport: boolean;
   canCopyQueryResult: boolean;
   prefersManualTotalCount: boolean;
-  aiShortcutLabel: string;
   paginationTotalCountLoading?: boolean;
   totalCountUnavailableLabel?: string;
   totalCountUnavailableReason?: string;
@@ -117,7 +115,6 @@ export interface DataGridToolbarFrameProps {
   onCommit: () => void;
   onPreviewChanges: () => void;
   onImport: () => void;
-  onRequestAiInsight: () => void;
   onToggleTotalCount: () => void;
   onQuickWhereDraftChange: (value: string) => void;
   onQuickWhereSuggestionsOpenChange: (open: boolean) => void;
@@ -179,7 +176,6 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
   isQueryResultExport,
   canCopyQueryResult,
   prefersManualTotalCount,
-  aiShortcutLabel,
   paginationTotalCountLoading,
   totalCountUnavailableLabel,
   totalCountUnavailableReason,
@@ -217,7 +213,6 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
   onCommit,
   onPreviewChanges,
   onImport,
-  onRequestAiInsight,
   onToggleTotalCount,
   onQuickWhereDraftChange,
   onQuickWhereSuggestionsOpenChange,
@@ -260,9 +255,6 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
     ? translate('data_grid.filter.mongodb_query_placeholder')
     : translate('data_grid.filter.quick_where_placeholder');
   const toolbarTitle = tableName || translate('data_grid.table_fallback.query_result');
-  const aiInsightTooltip = aiShortcutLabel !== '-'
-    ? `${translate('data_grid.toolbar.ai_insight_tooltip')} · ${aiShortcutLabel}`
-    : translate('data_grid.toolbar.ai_insight_tooltip');
   const commitModeLabel = translate(`data_grid.toolbar.commit_mode.${dataEditCommitMode}`);
   const cellSelectionModeLabel = translate('data_grid.toolbar.cell_selection_mode');
   const cellSelectionActionLabel = translate(cellEditMode
@@ -596,18 +588,6 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
             </Tooltip>
           </>
         )}
-
-        <>
-          {renderToolbarDivider()}
-          <Tooltip title={aiInsightTooltip}>
-            <Button
-              className="gn-v2-data-grid-toolbar-action gn-v2-ai-insight-button"
-              aria-label={translate('data_grid.toolbar.ai_insight_short')}
-              icon={<RobotOutlined />}
-              onClick={onRequestAiInsight}
-            />
-          </Tooltip>
-        </>
 
         {toolbarExtraActions && (
           <>

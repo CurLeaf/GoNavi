@@ -51,10 +51,6 @@ const actionMetaMap: Record<SecurityUpdateIssueAction, SecurityUpdateIssueAction
     label: 'security_update.action.open_proxy_settings',
     emphasis: 'primary',
   },
-  open_ai_settings: {
-    label: 'security_update.action.open_ai_settings',
-    emphasis: 'primary',
-  },
   retry_update: {
     label: 'security_update.action.retry_update',
     emphasis: 'primary',

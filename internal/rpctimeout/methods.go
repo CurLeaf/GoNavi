@@ -15,7 +15,6 @@ func IsLongRunningAppMethod(method string) bool {
 		"DBQueryMultiTransactionalWithOptions",
 		"DBQueryMultiInTransactionWithOptions",
 		"DBQueryAudited",
-		"DBQueryAI",
 		"DBQueryIsolated",
 		"MySQLQuery",
 		"ExecuteElasticsearchConsole",

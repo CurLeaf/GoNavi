@@ -144,7 +144,7 @@ func RunChild(parentCtx context.Context, assetFS fs.FS, args []string) error {
 	bridge := newBridge(childOptions)
 	control := newControl(bridge)
 	bridge.setReadyHandler(control.markFrontendReady)
-	minWidth, minHeight := detachedWindowMinimumSize(childOptions.Kind)
+	minWidth, minHeight := detachedWindowMinimumSize()
 	visuals := resolveDetachedWindowVisualOptions(runtime.GOOS)
 	err = runDetachedChildApplication(&options.App{
 		Title:            childOptions.Title,
@@ -209,10 +209,9 @@ func runDetachedChildApplication(app *options.App, runner func(*options.App) err
 	return runner(app)
 }
 
-func detachedWindowMinimumSize(kind string) (width int, height int) {
-	if strings.TrimSpace(kind) == "ai-chat" {
-		return 360, 420
-	}
+// detachedWindowMinimumSize keeps every detached window large enough for its
+// toolbar and results grid. Workbench and query-result share one floor.
+func detachedWindowMinimumSize() (width int, height int) {
 	return 480, 320
 }
 

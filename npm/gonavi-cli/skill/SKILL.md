@@ -1,13 +1,13 @@
 ---
 name: gonavi-cli
-description: Operate databases through the GoNavi headless CLI — the `gonavi` executable shipped in verified GitHub Release archives. Covers listing/adding/importing saved connections, running SQL queries against saved connections or ad-hoc connection files, exporting result sets to csv/json/md/html/xlsx, batch-executing SQL files with transaction control, exporting the SQL audit log, and launching the MCP server (stdio/http/remote-config). Use whenever the user mentions GoNavi, the gonavi CLI, running SQL from the terminal, exporting database query results, executing SQL files, managing saved database connections without the GUI, or the GoNavi MCP server — even if they don't name the tool explicitly.
+description: Operate databases through the GoNavi headless CLI — the `gonavi` executable shipped in verified GitHub Release archives. Covers listing/adding/importing saved connections, running SQL queries against saved connections or ad-hoc connection files, exporting result sets to csv/json/md/html/xlsx, batch-executing SQL files with transaction control, and exporting the SQL audit log. Use whenever the user mentions GoNavi, the gonavi CLI, running SQL from the terminal, exporting database query results, executing SQL files, or managing saved database connections without the GUI — even if they don't name the tool explicitly.
 ---
 
 # GoNavi CLI
 
 The GoNavi CLI is a standalone, headless binary for the GoNavi database client
 (Wails app). It queries and manages saved connections without the GUI and is
-built for scripting and AI agents: stdout carries machine-readable data
+built for scripting and automation: stdout carries machine-readable data
 (JSON/JSONL/CSV/Markdown), stderr carries JSON error reports, and every
 invocation exits with a stable exit code.
 
@@ -62,7 +62,7 @@ Common `code` values: `usage`, `runtime_unavailable`, `connections_unavailable`,
 `connection_not_found`, `connection_ambiguous`, `connection_file_invalid`,
 `invalid_connection_input`, `missing_secret_environment`, `sql_file_unavailable`,
 `policy_denied`, `execution_failed`, `invalid_result`, `unsupported_result_shape`,
-`cancelled`, `outcome_unknown`, `output_failed`, `mcp_failed`.
+`cancelled`, `outcome_unknown`, `output_failed`.
 
 Error messages are redacted before they are printed, so they are safe to log.
 
@@ -75,7 +75,6 @@ gonavi [--data-root PATH] query (--conn ID_OR_NAME|--connection-file FILE) [--sq
 gonavi [--data-root PATH] export (--conn ID_OR_NAME|--connection-file FILE) --output FILE [--sql SQL|--sql-file FILE|SQL]
 gonavi [--data-root PATH] batch (--conn ID_OR_NAME|--connection-file FILE) --file FILE --allow-write
 gonavi [--data-root PATH] audit export --output FILE
-gonavi [--data-root PATH] mcp <stdio|http|remote-config>
 ```
 
 Every command supports `--help`. `connection help` and `audit help` also work.
@@ -207,12 +206,6 @@ Exports the SQL audit log. Flags: `--output FILE` (required), `--format json|csv
 (default `json`), `--force`, and filters `--connection-id`, `--database`,
 `--db-type`, `--status`, `--source`, `--search`, `--from`, `--to`
 (RFC3339 or Unix milliseconds).
-
-### mcp
-
-`gonavi mcp stdio` runs the MCP server over stdio; `gonavi mcp http` runs the
-Streamable HTTP server (see `gonavi mcp --help` for its options);
-`gonavi mcp remote-config` writes a remote MCP client config to stdout.
 
 ## Connection selection
 

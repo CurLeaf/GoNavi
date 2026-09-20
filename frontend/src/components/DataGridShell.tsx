@@ -149,7 +149,6 @@ const DataGridShell: React.FC<DataGridShellProps> = (props) => {
     activePageFindPosition,
     activeShortcutPlatform,
     addFilter,
-    aiShortcutLabel,
     allSelectedAreDeleted,
     applyAllFiltersDisabled,
     applyAllFiltersEnabled,
@@ -656,20 +655,6 @@ const renderDataTableView = () => (
           : translateDataGrid('data_grid.message.cell_edit_mode_exited')).then();
   }, [cellEditMode, closeCellEditMode, resetCellSelection, translateDataGrid]);
 
-  const handleRequestAiInsight = useCallback(() => {
-      const sampleData = mergedDisplayData.slice(0, 10);
-      const prompt = translateDataGrid('data_grid.ai_insight.prompt', {
-          count: sampleData.length,
-          json: JSON.stringify(sampleData, null, 2),
-      });
-      const store = useStore.getState();
-      const wasClosed = !store.aiPanelVisible;
-      if (wasClosed) store.setAIPanelVisible(true);
-      setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
-      }, wasClosed ? 350 : 0);
-  }, [mergedDisplayData, translateDataGrid]);
-
   return (
     <div
         ref={rootRef}
@@ -716,7 +701,6 @@ const renderDataTableView = () => (
             isQueryResultExport={isQueryResultExport}
             canCopyQueryResult={canCopyQueryResult}
             prefersManualTotalCount={prefersManualTotalCount && !!onRequestTotalCount}
-            aiShortcutLabel={aiShortcutLabel}
             paginationTotalCountLoading={pagination?.totalCountLoading}
             totalCountUnavailableLabel={pagination?.totalCountUnavailableLabel}
             totalCountUnavailableReason={pagination?.totalCountUnavailableReason}
@@ -754,7 +738,6 @@ const renderDataTableView = () => (
             onPreviewChanges={handlePreviewChanges}
             onImport={handleImport}
             onOpenExportModal={handleOpenExportDialog}
-            onRequestAiInsight={handleRequestAiInsight}
             onToggleTotalCount={handleToggleTotalCount}
             onQuickWhereDraftChange={setQuickWhereDraft}
             onQuickWhereSuggestionsOpenChange={setQuickWhereSuggestionsOpen}

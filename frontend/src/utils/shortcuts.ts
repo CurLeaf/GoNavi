@@ -9,24 +9,19 @@ export type ShortcutAction =
   | 'saveQuery'
   | 'saveQueryAs'
   | 'formatSql'
-  | 'triggerSqlAiCompletion'
-  | 'acceptSqlAiCompletion'
   | 'toggleQueryResultsPanel'
-  | 'sendAIChatMessage'
   | 'focusSidebarSearch'
   | 'newQueryTab'
   | 'closeActiveTab'
   | 'switchToNextTab'
   | 'switchToPreviousTab'
   | 'newConnection'
-  | 'toggleAIPanel'
   | 'toggleLogPanel'
   | 'toggleTheme'
   | 'openShortcutManager'
   | 'toggleMacFullscreen'
   | 'resetWindowZoom'
   | 'diagnoseQuery'
-  | 'diagnoseExecutionError'
   | 'showSlowQueries';
 
 export type ShortcutPlatform = 'mac' | 'windows';
@@ -45,7 +40,7 @@ export interface ShortcutActionMeta {
   description: string;
   allowInEditable?: boolean;
   allowWithoutModifier?: boolean;
-  scope?: 'global' | 'aiComposer' | 'queryEditor';
+  scope?: 'global' | 'queryEditor';
   requiredKey?: string;
   disallowShift?: boolean;
   platformOnly?: 'mac';
@@ -114,21 +109,16 @@ export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'saveQuery',
   'saveQueryAs',
   'formatSql',
-  'triggerSqlAiCompletion',
-  'acceptSqlAiCompletion',
   'toggleQueryResultsPanel',
-  'sendAIChatMessage',
   'focusSidebarSearch',
   'newQueryTab',
   'closeActiveTab',
   'switchToNextTab',
   'switchToPreviousTab',
   'newConnection',
-  'toggleAIPanel',
   'toggleLogPanel',
   'toggleTheme',
   'diagnoseQuery',
-  'diagnoseExecutionError',
   'showSlowQueries',
   'openShortcutManager',
   'toggleMacFullscreen',
@@ -190,33 +180,11 @@ const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMet
     scope: 'queryEditor',
     allowInEditable: true,
   },
-  triggerSqlAiCompletion: {
-    labelKey: 'app.shortcuts.action.triggerSqlAiCompletion.label',
-    descriptionKey: 'app.shortcuts.action.triggerSqlAiCompletion.description',
-    scope: 'queryEditor',
-    allowInEditable: true,
-  },
-  acceptSqlAiCompletion: {
-    labelKey: 'app.shortcuts.action.acceptSqlAiCompletion.label',
-    descriptionKey: 'app.shortcuts.action.acceptSqlAiCompletion.description',
-    scope: 'queryEditor',
-    allowInEditable: true,
-    allowWithoutModifier: true,
-  },
   toggleQueryResultsPanel: {
     labelKey: 'app.shortcuts.action.toggleQueryResultsPanel.label',
     descriptionKey: 'app.shortcuts.action.toggleQueryResultsPanel.description',
     scope: 'queryEditor',
     allowInEditable: true,
-  },
-  sendAIChatMessage: {
-    labelKey: 'app.shortcuts.action.sendAIChatMessage.label',
-    descriptionKey: 'app.shortcuts.action.sendAIChatMessage.description',
-    allowInEditable: true,
-    allowWithoutModifier: true,
-    scope: 'aiComposer',
-    requiredKey: 'Enter',
-    disallowShift: true,
   },
   focusSidebarSearch: {
     labelKey: 'app.shortcuts.action.focusSidebarSearch.label',
@@ -248,11 +216,6 @@ const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMet
     labelKey: 'app.shortcuts.action.newConnection.label',
     descriptionKey: 'app.shortcuts.action.newConnection.description',
   },
-  toggleAIPanel: {
-    labelKey: 'app.shortcuts.action.toggleAIPanel.label',
-    descriptionKey: 'app.shortcuts.action.toggleAIPanel.description',
-    allowInEditable: true,
-  },
   toggleLogPanel: {
     labelKey: 'app.shortcuts.action.toggleLogPanel.label',
     descriptionKey: 'app.shortcuts.action.toggleLogPanel.description',
@@ -264,12 +227,6 @@ const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMet
   diagnoseQuery: {
     labelKey: 'app.shortcuts.action.diagnoseQuery.label',
     descriptionKey: 'app.shortcuts.action.diagnoseQuery.description',
-    scope: 'queryEditor',
-    allowInEditable: true,
-  },
-  diagnoseExecutionError: {
-    labelKey: 'app.shortcuts.action.diagnoseExecutionError.label',
-    descriptionKey: 'app.shortcuts.action.diagnoseExecutionError.description',
     scope: 'queryEditor',
     allowInEditable: true,
   },
@@ -328,21 +285,9 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
     mac: { combo: 'Alt+Shift+F', enabled: true },
     windows: { combo: 'Alt+Shift+F', enabled: true },
   },
-  triggerSqlAiCompletion: {
-    mac: { combo: 'Alt+\\', enabled: true },
-    windows: { combo: 'Alt+\\', enabled: true },
-  },
-  acceptSqlAiCompletion: {
-    mac: { combo: 'Tab', enabled: true },
-    windows: { combo: 'Tab', enabled: true },
-  },
   toggleQueryResultsPanel: {
     mac: { combo: 'Meta+Shift+M', enabled: true },
     windows: { combo: 'Ctrl+Shift+M', enabled: true },
-  },
-  sendAIChatMessage: {
-    mac: { combo: 'Enter', enabled: true },
-    windows: { combo: 'Enter', enabled: true },
   },
   focusSidebarSearch: {
     mac: { combo: 'Meta+K', enabled: true },
@@ -368,10 +313,6 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
     mac: { combo: 'Meta+Shift+N', enabled: true },
     windows: { combo: 'Ctrl+Shift+N', enabled: true },
   },
-  toggleAIPanel: {
-    mac: { combo: 'Meta+J', enabled: true },
-    windows: { combo: 'Ctrl+J', enabled: true },
-  },
   toggleLogPanel: {
     mac: { combo: 'Meta+Shift+H', enabled: true },
     windows: { combo: 'Ctrl+H', enabled: true },
@@ -384,11 +325,6 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   diagnoseQuery: {
     mac: { combo: 'Meta+Shift+P', enabled: true },
     windows: { combo: 'Ctrl+Shift+P', enabled: true },
-  },
-  // AI 诊断：与 SQL 诊断同族，用 Ctrl+Shift+A（A = AI），注入当前 SQL 与执行错误到 AI 面板
-  diagnoseExecutionError: {
-    mac: { combo: 'Meta+Shift+A', enabled: true },
-    windows: { combo: 'Ctrl+Shift+A', enabled: true },
   },
   // 慢查询历史：避开 toggleLogPanel 的 Ctrl+H / Meta+Shift+H，用 Ctrl+Shift+L（L = Log）
   showSlowQueries: {

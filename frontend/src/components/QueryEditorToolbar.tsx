@@ -1,9 +1,7 @@
 import React from "react";
 import { Button, Dropdown, Select, Tooltip, type MenuProps } from "antd";
 import {
-  BulbOutlined,
   CheckOutlined,
-  DatabaseOutlined,
   DiffOutlined,
   DownOutlined,
   EyeInvisibleOutlined,
@@ -12,11 +10,9 @@ import {
   FileTextOutlined,
   FormatPainterOutlined,
   PlayCircleOutlined,
-  RobotOutlined,
   SearchOutlined,
   SaveOutlined,
   SettingOutlined,
-  ThunderboltOutlined,
 } from "@ant-design/icons";
 
 import { t as defaultTranslate } from '../i18n';
@@ -62,7 +58,6 @@ export type QueryEditorToolbarProps = {
   runQueryShortcutBinding: ShortcutPlatformBinding;
   saveQueryShortcutBinding: ShortcutPlatformBinding;
   formatSqlShortcutBinding: ShortcutPlatformBinding;
-  triggerSqlAiCompletionShortcutBinding: ShortcutPlatformBinding;
   toggleQueryResultsPanelShortcutBinding: ShortcutPlatformBinding;
   activeShortcutPlatform: ShortcutPlatform;
   isResultPanelVisible: boolean;
@@ -87,9 +82,7 @@ export type QueryEditorToolbarProps = {
   onFindInEditor: () => void;
   onToggleWordWrap: () => void;
   onFormat: () => void;
-  onTriggerSqlAiCompletion: () => void;
   onToggleResultPanelVisibility: () => void;
-  onAIAction: (action: "generate" | "explain" | "optimize" | "schema") => void;
   /** object-edit 视图：验证数据变化入口 */
   showViewDataVerify?: boolean;
   onViewDataVerify?: () => void;
@@ -197,7 +190,7 @@ type FullNameSelectOption = {
   fullName: string;
 };
 
-type QueryToolbarMenuKey = "ai" | "more" | "format" | "templates";
+type QueryToolbarMenuKey = "more" | "format" | "templates";
 
 const normalizeV2ActionMenuItems = (
   items: MenuProps["items"],
@@ -270,7 +263,6 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
   runQueryShortcutBinding,
   saveQueryShortcutBinding,
   formatSqlShortcutBinding,
-  triggerSqlAiCompletionShortcutBinding,
   toggleQueryResultsPanelShortcutBinding,
   activeShortcutPlatform,
   isResultPanelVisible,
@@ -295,9 +287,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
   onFindInEditor,
   onToggleWordWrap,
   onFormat,
-  onTriggerSqlAiCompletion,
   onToggleResultPanelVisibility,
-  onAIAction,
   showViewDataVerify = false,
   onViewDataVerify,
 }) => {
@@ -380,61 +370,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
       ),
     },
   );
-  const triggerSqlAiCompletionLabel =
-    triggerSqlAiCompletionShortcutBinding.enabled &&
-    triggerSqlAiCompletionShortcutBinding.combo
-      ? `${t("app.shortcuts.action.triggerSqlAiCompletion.label")} · ${getShortcutDisplayLabel(
-          triggerSqlAiCompletionShortcutBinding.combo,
-          activeShortcutPlatform,
-        )}`
-      : t("app.shortcuts.action.triggerSqlAiCompletion.label");
-  const aiMoreTitle = isElasticsearchMode
-    ? t("query_editor.elasticsearch.action.ai")
-    : `AI · ${t("query_editor.action.more")}`;
   const formatSettingsTitle = `${t("query_editor.action.format_sql")} · ${t("settings.title")}`;
-  const aiMenuItems: MenuProps["items"] = isElasticsearchMode
-    ? [
-        {
-          key: "ai-generate",
-          label: t("query_editor.elasticsearch.action.ai_generate"),
-          icon: <FileTextOutlined />,
-          onClick: () => onAIAction("generate"),
-        },
-      ]
-    : [
-        {
-          key: "ai-inline-completion",
-          label: triggerSqlAiCompletionLabel,
-          icon: <RobotOutlined />,
-          onClick: onTriggerSqlAiCompletion,
-        },
-        { type: "divider" as const },
-        {
-          key: "ai-generate",
-          label: t("query_editor.action.ai_text_to_sql_menu"),
-          icon: <FileTextOutlined />,
-          onClick: () => onAIAction("generate"),
-        },
-        {
-          key: "ai-explain",
-          label: t("query_editor.action.ai_explain_sql_menu"),
-          icon: <BulbOutlined />,
-          onClick: () => onAIAction("explain"),
-        },
-        {
-          key: "ai-optimize",
-          label: t("query_editor.action.ai_optimize_sql_menu"),
-          icon: <ThunderboltOutlined />,
-          onClick: () => onAIAction("optimize"),
-        },
-        { type: "divider" as const },
-        {
-          key: "ai-schema",
-          label: t("query_editor.action.ai_schema_analysis"),
-          icon: <DatabaseOutlined />,
-          onClick: () => onAIAction("schema"),
-        },
-      ];
   const moreMenuItems: MenuProps["items"] = [
         ...baseMoreMenuItems,
         {
@@ -454,7 +390,6 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
         },
       ];
   const templateActionMenuItems = normalizeV2ActionMenuItems(templateMenuItems, <FileTextOutlined />);
-  const aiActionMenuItems = normalizeV2ActionMenuItems(aiMenuItems, <RobotOutlined />);
   const moreActionMenuItems = normalizeV2ActionMenuItems(moreMenuItems, <EllipsisOutlined />);
   const selectedFormatKeys = new Set(formatSettingsSelectedKeys);
   const markSelectedFormatItems = (items: MenuProps['items']): MenuProps['items'] => (items ?? []).map((item) => {
@@ -667,104 +602,34 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
             onClick={onQuickSave}
           />
         </Tooltip>
-        {isElasticsearchMode ? (
+        {!isElasticsearchMode && (
           <Tooltip
-            title={aiMoreTitle}
-            open={openToolbarMenu === "ai" ? false : undefined}
+            title={t("query_editor.action.more")}
+            open={openToolbarMenu === "more" ? false : undefined}
           >
             <span className="gn-v2-query-toolbar-menu-trigger">
               <Dropdown
-                menu={{ items: aiActionMenuItems }}
+                menu={{ items: moreActionMenuItems }}
                 placement="bottomRight"
                 trigger={["click"]}
-                  rootClassName="gn-v2-titlebar-quick-dropdown gn-v2-action-menu-popup-host"
+                rootClassName="gn-v2-titlebar-quick-dropdown gn-v2-action-menu-popup-host"
                 popupRender={(menu) => renderV2ActionMenuPopup(menu, true, {
-                  title: aiMoreTitle,
+                  title: t('query_editor.action.more'),
                   showHeader: false,
                 })}
-                open={openToolbarMenu === "ai"}
-                onOpenChange={(open) => updateToolbarMenuOpen("ai", open)}
+                open={openToolbarMenu === "more"}
+                onOpenChange={(open) => updateToolbarMenuOpen("more", open)}
               >
                 <Button
-                  className="gn-v2-query-toolbar-icon-action gn-v2-query-toolbar-ai-action"
-                  icon={<RobotOutlined />}
-                  aria-label={aiMoreTitle}
+                  aria-label={t("query_editor.action.more")}
+                  className="gn-v2-query-toolbar-icon-action"
+                  icon={<EllipsisOutlined />}
                   aria-haspopup="menu"
-                  aria-expanded={openToolbarMenu === "ai"}
-                  onMouseDown={onCaptureEditorCursorPosition}
+                  aria-expanded={openToolbarMenu === "more"}
                 />
               </Dropdown>
             </span>
           </Tooltip>
-        ) : (
-          <>
-            <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-              <Tooltip title={triggerSqlAiCompletionLabel}>
-                <Button
-                  aria-label={triggerSqlAiCompletionLabel}
-                  className="gn-v2-query-toolbar-icon-action gn-v2-query-toolbar-ai-action"
-                  icon={<RobotOutlined />}
-                  onMouseDown={onCaptureEditorCursorPosition}
-                  onClick={onTriggerSqlAiCompletion}
-                />
-              </Tooltip>
-              <Tooltip
-                title={aiMoreTitle}
-                open={openToolbarMenu === "ai" ? false : undefined}
-              >
-                <span className="gn-v2-query-toolbar-menu-trigger">
-                  <Dropdown
-                    menu={{ items: aiActionMenuItems }}
-                    placement="bottomRight"
-                    trigger={["click"]}
-                    rootClassName="gn-v2-titlebar-quick-dropdown gn-v2-action-menu-popup-host"
-                    popupRender={(menu) => renderV2ActionMenuPopup(menu, true, {
-                      title: aiMoreTitle,
-                      showHeader: false,
-                    })}
-                    open={openToolbarMenu === "ai"}
-                    onOpenChange={(open) => updateToolbarMenuOpen("ai", open)}
-                  >
-                    <Button
-                      className="gn-v2-query-toolbar-icon-action"
-                      icon={<DownOutlined />}
-                      aria-label={aiMoreTitle}
-                      aria-haspopup="menu"
-                      aria-expanded={openToolbarMenu === "ai"}
-                      onMouseDown={onCaptureEditorCursorPosition}
-                    />
-                  </Dropdown>
-                </span>
-              </Tooltip>
-            </div>
-            <Tooltip
-              title={t("query_editor.action.more")}
-              open={openToolbarMenu === "more" ? false : undefined}
-            >
-              <span className="gn-v2-query-toolbar-menu-trigger">
-                <Dropdown
-                  menu={{ items: moreActionMenuItems }}
-                  placement="bottomRight"
-                  trigger={["click"]}
-                  rootClassName="gn-v2-titlebar-quick-dropdown gn-v2-action-menu-popup-host"
-                  popupRender={(menu) => renderV2ActionMenuPopup(menu, true, {
-                    title: t('query_editor.action.more'),
-                    showHeader: false,
-                  })}
-                  open={openToolbarMenu === "more"}
-                  onOpenChange={(open) => updateToolbarMenuOpen("more", open)}
-                >
-                  <Button
-                    aria-label={t("query_editor.action.more")}
-                    className="gn-v2-query-toolbar-icon-action"
-                    icon={<EllipsisOutlined />}
-                    aria-haspopup="menu"
-                    aria-expanded={openToolbarMenu === "more"}
-                  />
-                </Dropdown>
-              </span>
-            </Tooltip>
-          </>
         )}
       </div>
 

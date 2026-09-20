@@ -5,13 +5,13 @@
 <h1 align="center">GoNavi</h1>
 
 <p align="center">
-  <b>Navigate every data source — native speed, agent-ready, zero Electron bloat.</b>
+  <b>Navigate every data source — native speed, zero Electron bloat.</b>
 </p>
 
 <p align="center">
   A high-performance cross-platform database client built with
   <a href="https://wails.io">Wails</a> (Go) + <a href="https://react.dev">React</a>.
-  Desktop-first. MCP-ready. ~20–26MB class installers.
+  Desktop-first. ~20–26MB class installers.
 </p>
 
 <p align="center">
@@ -29,10 +29,6 @@
 </p>
 
 <p align="center">
-  <a href="https://mcpvault.io/servers/gonavi/health?utm_source=external_badge&utm_medium=referral&utm_campaign=mcp_health_report"><img src="https://mcpvault.io/badge/gonavi.svg" alt="MCPVault: claimed" /></a>
-</p>
-
-<p align="center">
   <b>Language</b>: English · <a href="README.zh-CN.md">简体中文</a>
   &nbsp;·&nbsp;
   <a href="https://gonavi.org"><b>🌐 Website</b></a>
@@ -42,8 +38,6 @@
   <a href="#-quick-start"><b>⚡ Quick Start</b></a>
   ·
   <a href="#-key-features"><b>✨ Features</b></a>
-  ·
-  <a href="#-mcp--agents"><b>🤖 MCP</b></a>
 </p>
 
 <p align="center">
@@ -71,13 +65,12 @@ Most database GUIs are Electron shells with megabytes of tax. GoNavi takes a dif
 | Installer | Hundreds of MB common | **~20–26 MB class** |
 | Startup | Heavy | **Fast** |
 | Memory claim | Often mixed with installer size | **Measure RSS separately** (see note) |
-| AI / Agents | Bolt-on or absent | **First-class MCP + multi-provider AI** (draft SQL; GUI still owns schema / edits / EXPLAIN) |
 | Data sources | Mostly RDBMS | **SQL · Cache · Vector · MQ · Search · Time-series · Domestic DBs** |
 
 > **Installer MB ≠ RAM.** The RSS figures above are one Linux cloud run of the v0.9.8 WebKit41 build (empty workbench, no DB connections, remote display, ~30–40 s steady). Do not compare them to installer size, or to unverified “native ~80 MB” marketing. Windows / macOS laptop numbers may differ — treat them as a labeled sample, not a leaderboard score.
 
 > **One cockpit for MySQL, Postgres, Redis, Kafka, Milvus, OceanBase, ClickHouse…**  
-> Query, edit, audit, sync — and hand structured context to coding agents without leaking passwords off-host.
+> Query, edit, audit, sync — secrets stay on the host.
 
 ---
 
@@ -87,14 +80,14 @@ Most database GUIs are Electron shells with megabytes of tax. GoNavi takes a dif
 ┌──────────────────────────────────────────────────────────────────────┐
 │  GoNavi Workbench                                                    │
 │  ┌─────────────┐  ┌──────────────────┐  ┌─────────────────────────┐  │
-│  │ Connections │  │ Monaco SQL + AI  │  │ Virtualized DataGrid    │  │
+│  │ Connections │  │ Monaco SQL       │  │ Virtualized DataGrid    │  │
 │  │ SSH / Proxy │  │ Schema context   │  │ Batch edit · Export     │  │
-│  │ Drivers     │  │ Slash commands   │  │ Txn submit / rollback   │  │
+│  │ Drivers     │  │ Completion       │  │ Txn submit / rollback   │  │
 │  └─────────────┘  └────────┬─────────┘  └─────────────────────────┘  │
 │                            │                                         │
 │              ┌─────────────▼─────────────┐                           │
 │              │  Go core · Audit · Sync   │                           │
-│              │  MCP HTTP · Web Server    │                           │
+│              │  Web Server               │                           │
 │              └───────────────────────────┘                           │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -105,8 +98,6 @@ Each image is a **full GoNavi application window**, scaled proportionally for RE
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Syngnat/GoNavi/dev/assets/screenshots/01-home-workbench.png" alt="GoNavi full window — connections, queries, and workbench" width="560" />
-  &nbsp;
-  <img src="https://raw.githubusercontent.com/Syngnat/GoNavi/dev/assets/screenshots/04-ai-assistant.png" alt="GoNavi full window — AI assistant with schema context" width="560" />
 </p>
 
 <p align="center">
@@ -145,7 +136,7 @@ Special thanks to **[APISmart](https://www.apismart.ai/)** and **[HuaLongAI](htt
 | Sponsor | What they offer | Why it fits GoNavi |
 |---|---|---|
 | **[APISmart](https://www.apismart.ai/)** | APISmart provides unified access to leading AI models through a single API. Developers can connect to LLM, image, and video models using one API key and an OpenAI-compatible interface. This eliminates the need to manage multiple providers separately. Intelligent routing and automatic failover help improve reliability, while centralized billing makes usage easier to manage. With APISmart, developers can build and scale AI applications faster through one streamlined platform. | Lets developers and agent workflows use multiple AI capabilities without separately integrating each provider. |
-| **[HuaLongAI](https://api.hualong.online/)** | HuaLongAI is a premium model API relay provider for power AI developers, focused on official direct connectivity. It primarily offers Codex-series models supplied directly from official sources, with no substitutions or dilution, and invites verification. Billing is transparent, with token-level itemized records available for review. It supports enterprise-grade high concurrency and provides enterprise customers with a professional management platform, formal contracts, and invoices; visit the website for contact details. GPT-series models start at a 0.08 rate, with a stable Pro group at 0.15, two-way referral gifts, and uncapped referral rewards. | Stable model access is core infrastructure for GoNavi's schema-aware assistants, MCP, and day-to-day development. |
+| **[HuaLongAI](https://api.hualong.online/)** | HuaLongAI is a premium model API relay provider for power AI developers, focused on official direct connectivity. It primarily offers Codex-series models supplied directly from official sources, with no substitutions or dilution, and invites verification. Billing is transparent, with token-level itemized records available for review. It supports enterprise-grade high concurrency and provides enterprise customers with a professional management platform, formal contracts, and invoices; visit the website for contact details. GPT-series models start at a 0.08 rate, with a stable Pro group at 0.15, two-way referral gifts, and uncapped referral rewards. | Stable model access supports day-to-day development. |
 
 - APISmart: [https://www.apismart.ai/](https://www.apismart.ai/) — unified AI model API with an OpenAI-compatible interface.
 - HuaLongAI: [https://api.hualong.online/](https://api.hualong.online/) — console, docs, and the domestic high-speed endpoint.
@@ -160,16 +151,6 @@ Special thanks to **[APISmart](https://www.apismart.ai/)** and **[HuaLongAI](htt
 <tr>
 <td width="50%" valign="top">
 
-### 🤖 AI that knows your schema
-- OpenAI · Gemini · Claude · custom OpenAI-compatible APIs  
-- Attach live table schemas as context  
-- Slash commands: generate SQL, explain, optimize, review  
-- **MCP**: after detecting a locally installed CLI, one-click connect Claude Code / Codex / OpenCode / ZCode / DeepSeek Harness / Kimi Code / Grok Build, or use Streamable HTTP for remote agents
-- Secrets stay on the GoNavi host — agents get tools, not raw passwords  
-
-</td>
-<td width="50%" valign="top">
-
 ### ⚡ Built for large data
 - Virtualized DataGrid for heavy result sets  
 - In-place cell edit · batch CRUD · transaction submit/rollback  
@@ -178,8 +159,6 @@ Special thanks to **[APISmart](https://www.apismart.ai/)** and **[HuaLongAI](htt
 - Monaco editor with context-aware completion  
 
 </td>
-</tr>
-<tr>
 <td width="50%" valign="top">
 
 ### 🔌 Connectivity without drama
@@ -190,13 +169,15 @@ Special thanks to **[APISmart](https://www.apismart.ai/)** and **[HuaLongAI](htt
 - Custom Driver + DSN extensibility  
 
 </td>
-<td width="50%" valign="top">
+</tr>
+<tr>
+<td colspan="2" valign="top">
 
 ### 🛡️ Observable & shippable
 - SQL execution logs with timing  
 - Audit center (redacted by default, retention, export)  
 - Desktop + experimental **Web Server** mode  
-- Docker / K8s / Helm / Podman packaging  
+- Docker image packaging  
 - Auto update checks · multi-arch releases  
 
 </td>
@@ -343,7 +324,7 @@ The CLI shares the active data root with the desktop application:
 `GONAVI_DATA_ROOT` first, then `~/.gonavi/storage_root.json`, then `~/.gonavi`.
 Use a `0600` owner-only `--connection-file` for transient credentials; secrets
 are never accepted as command-line flags. Query output defaults to JSONL, while
-diagnostics go to stderr. Mutating SQL also requires the stored AI safety level,
+diagnostics go to stderr. Mutating SQL also requires the stored SQL safety level,
 connection protections, and `--allow-write`.
 
 For Linux containers, copy `docker.cli.env.example`, set the host data root and
@@ -397,28 +378,10 @@ docker compose --env-file docker.web-server.env -f docker-compose.web-server.yml
 
 ---
 
-## 🤖 MCP & Agents
+## 🐧 Linux build environment
 
-Ship schema tools to agents without shipping your vault:
-
-```bash
-cp docker.mcp-server.env.example docker.mcp-server.env
-docker compose --env-file docker.mcp-server.env -f docker-compose.mcp-server.yml up -d
-```
-
-| Surface | Entry |
-|---|---|
-| MCP container | `docker-compose.mcp-server.yml` → `ghcr.io/syngnat/gonavi-mcp-server` |
-| Web UI container | `docker-compose.web-server.yml` → `ghcr.io/syngnat/gonavi-web-server` |
-| Podman / Quadlet | [deploy/podman/gonavi-mcp-server](deploy/podman/gonavi-mcp-server) |
-| Kubernetes | [deploy/k8s/gonavi-mcp-server](deploy/k8s/gonavi-mcp-server) |
-| Helm | [deploy/helm/gonavi-mcp-server](deploy/helm/gonavi-mcp-server) |
-| Build-only image | `Dockerfile.build-env` → `ghcr.io/syngnat/gonavi-build-env` |
-
-Safety defaults: remote `schema-only` omits `execute_sql`; when enabled it follows the same AI safety controls as the built-in assistant, and calling `execute_sql` is the confirmation.  
-Details: [cmd/gonavi-mcp-server/README.md](cmd/gonavi-mcp-server/README.md).
-
-### Linux build environment only
+Build and debug GoNavi in a reproducible Linux container image
+(`ghcr.io/syngnat/gonavi-build-env`):
 
 ```bash
 docker build -f Dockerfile.build-env -t gonavi-build-env:local .
@@ -598,5 +561,5 @@ Issues and PRs welcome. Branch from **`dev`**, PR against **`dev`**.
 [Apache-2.0](LICENSE)
 
 <p align="center">
-  <sub>Built for people who live in SQL, schemas, and agent loops.</sub>
+  <sub>Built for people who live in SQL and schemas.</sub>
 </p>

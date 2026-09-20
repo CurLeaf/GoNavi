@@ -11,7 +11,6 @@ const (
 
 	CloudBackupCategoryConnections    = "connections"
 	CloudBackupCategorySavedQueries   = "saved_queries"
-	CloudBackupCategoryAISettings     = "ai_settings"
 	CloudBackupCategoryProxySettings  = "proxy_settings"
 	CloudBackupCategoryDailySecrets   = "daily_secrets"
 	CloudBackupCategoryUpdateSettings = "update_settings"

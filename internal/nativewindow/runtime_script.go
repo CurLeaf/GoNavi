@@ -63,10 +63,6 @@ func detachedRuntimeBridgeScript() string {
     app: {
       ...(existingGo.app || {}),
       App: buildServiceProxy('app', 'App')
-    },
-    aiservice: {
-      ...(existingGo.aiservice || {}),
-      Service: buildServiceProxy('aiservice', 'Service')
     }
   };
 

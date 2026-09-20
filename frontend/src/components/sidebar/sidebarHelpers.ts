@@ -424,8 +424,8 @@ export const resolveSidebarDatabaseNameForCopy = (
 
 // === 命令搜索相关类型与解析（V2 Command Search）===
 
-/** 命令搜索模式：default（默认）/ object（@前缀，对象搜索）/ ai（?或？前缀，AI 提问） */
-export type V2CommandSearchMode = 'default' | 'object' | 'ai';
+/** 命令搜索模式：default（默认）/ object（@前缀，对象搜索） */
+export type V2CommandSearchMode = 'default' | 'object';
 
 /** 命令搜索查询解析结果 */
 export interface V2CommandSearchQuery {
@@ -433,7 +433,6 @@ export interface V2CommandSearchQuery {
   rawValue: string;
   keyword: string;
   normalizedKeyword: string;
-  aiPrompt: string;
 }
 
 const FULLWIDTH_UNDERSCORE = '\uFF3F';
@@ -459,7 +458,6 @@ export const matchesSidebarSearchText = (haystack: unknown, needle: unknown): bo
 /**
  * parseV2CommandSearchQuery 解析命令搜索框的输入。
  * - "@" 或 "＠" 前缀：对象搜索模式
- * - "?" 或 "？" 前缀：AI 提问模式
  * - 无前缀：默认模式
  */
 export const parseV2CommandSearchQuery = (value: unknown): V2CommandSearchQuery => {
@@ -474,18 +472,6 @@ export const parseV2CommandSearchQuery = (value: unknown): V2CommandSearchQuery 
       rawValue,
       keyword,
       normalizedKeyword: normalizeSidebarSearchText(keyword),
-      aiPrompt: '',
-    };
-  }
-
-  if (firstChar === '?' || firstChar === '？') {
-    const aiPrompt = trimmedValue.slice(1).trim();
-    return {
-      mode: 'ai',
-      rawValue,
-      keyword: aiPrompt,
-      normalizedKeyword: normalizeSidebarSearchText(aiPrompt),
-      aiPrompt,
     };
   }
 
@@ -494,7 +480,6 @@ export const parseV2CommandSearchQuery = (value: unknown): V2CommandSearchQuery 
     rawValue,
     keyword: trimmedValue,
     normalizedKeyword: normalizeSidebarSearchText(trimmedValue),
-    aiPrompt: '',
   };
 };
 

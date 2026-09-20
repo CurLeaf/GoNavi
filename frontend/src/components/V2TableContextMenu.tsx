@@ -61,8 +61,6 @@ export type V2TableContextMenuActionKey =
   | 'refresh-stats'
   | 'export-data'
   | 'batch-tables'
-  | 'ai-explain'
-  | 'ai-generate-query'
   | 'truncate-table'
   | 'clear-table'
   | 'drop-table';
@@ -84,7 +82,7 @@ type V2TableContextMenuItemConfig = {
   featured?: boolean;
   selected?: boolean;
   disabled?: boolean;
-  tone?: 'default' | 'ai' | 'danger';
+  tone?: 'default' | 'danger';
 };
 
 export const formatV2TableContextMenuRows = (count?: number): string => {
@@ -122,7 +120,6 @@ const V2TableContextMenuItem: React.FC<{
       'gn-v2-context-menu-item',
       item.featured ? 'is-featured' : '',
       item.selected ? 'is-selected' : '',
-      item.tone === 'ai' ? 'is-ai' : '',
       item.tone === 'danger' ? 'is-danger' : '',
       item.tone === 'default' ? 'is-default' : '',
       item.disabled ? 'is-disabled' : '',
@@ -271,12 +268,6 @@ export const V2TableContextMenuView: React.FC<{
             icon: <AppstoreOutlined />,
             title: t('sidebar.action.batch_tables'),
           }] : []),
-        ])}
-
-        <div className="gn-v2-context-menu-divider" />
-        {renderItems([
-          { action: 'ai-explain', icon: <ThunderboltOutlined />, title: t('sidebar.v2_table_menu.ai_explain_table'), tone: 'ai', featured: true },
-          { action: 'ai-generate-query', icon: <ConsoleSqlOutlined />, title: t('sidebar.v2_table_menu.ai_generate_query'), tone: 'ai' },
         ])}
 
         <div className="gn-v2-context-menu-divider" />

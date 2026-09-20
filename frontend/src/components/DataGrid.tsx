@@ -111,11 +111,9 @@ import {
     unescapeCellText,
 } from '../utils/dataGridCellTextTransform';
 import {
-    DEFAULT_SHORTCUT_OPTIONS,
     getShortcutPlatform,
     isEditableElement,
     isShortcutMatch,
-    resolveShortcutDisplay,
 } from '../utils/shortcuts';
 import {
     TEMPORAL_FORMATS,
@@ -421,7 +419,6 @@ const DataGrid: React.FC<DataGridProps> = ({
   const setTableHiddenColumns = useStore(state => state.setTableHiddenColumns);
   const setEnableHiddenColumnMemory = useStore(state => state.setEnableHiddenColumnMemory);
   const clearTableHiddenColumns = useStore(state => state.clearTableHiddenColumns);
-  const shortcutOptions = useStore(state => state.shortcutOptions);
   const language = useDataGridI18nLanguage();
   const translateDataGrid = useCallback(
       (key: string, rawParams?: Record<string, unknown>) => {
@@ -5973,7 +5970,6 @@ const DataGrid: React.FC<DataGridProps> = ({
       onPageChange(nextPage, pagination.pageSize);
   }, [onPageChange, pagination, paginationTotalPages]);
 
-  const aiShortcutLabel = resolveShortcutDisplay(shortcutOptions ?? DEFAULT_SHORTCUT_OPTIONS, 'toggleAIPanel', activeShortcutPlatform);
     return (
     <DataGridShell
       {...{
@@ -5993,7 +5989,6 @@ const DataGrid: React.FC<DataGridProps> = ({
         activePageFindPosition,
         activeShortcutPlatform,
         addFilter,
-        aiShortcutLabel,
         allSelectedAreDeleted,
         applyAllFiltersDisabled,
         applyAllFiltersEnabled,

@@ -11,13 +11,12 @@ import {
   FilterOutlined,
   KeyOutlined,
   PlusOutlined,
-  RobotOutlined,
   TableOutlined,
   TagOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
 
-import { type SqlLog, useStore } from '../../store';
+import { type SqlLog } from '../../store';
 import type { SavedConnection } from '../../types';
 import { getCurrentLanguage, t } from '../../i18n';
 import { resolveShortcutDisplay } from '../../utils/shortcuts';
@@ -94,9 +93,7 @@ type SidebarSearchModelArgs = {
   };
   darkMode: boolean;
   onCreateConnection?: () => void;
-  onToggleAI?: () => void;
   onToggleLogPanel?: () => void;
-  setAIPanelVisible: (visible: boolean) => void;
   extractObjectName: (fullName: string) => string;
 };
 
@@ -124,9 +121,7 @@ export const useSidebarSearchModel = ({
   overlayTheme,
   darkMode,
   onCreateConnection,
-  onToggleAI,
   onToggleLogPanel,
-  setAIPanelVisible,
   extractObjectName,
 }: SidebarSearchModelArgs) => {
   const onSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -498,15 +493,6 @@ export const useSidebarSearchModel = ({
       onRun: () => onCreateConnection?.(),
     },
     {
-      key: 'action-open-ai',
-      kind: 'action',
-      title: t('sidebar.command_search.action.open_ai.title'),
-      meta: t('sidebar.command_search.action.open_ai.meta'),
-      shortcut: resolveShortcutDisplay(shortcutOptions, 'toggleAIPanel', activeShortcutPlatform),
-      icon: <RobotOutlined />,
-      onRun: () => onToggleAI?.(),
-    },
-    {
       key: 'action-open-sql-log',
       kind: 'action',
       title: t('sidebar.command_search.action.open_sql_log.title'),
@@ -515,7 +501,7 @@ export const useSidebarSearchModel = ({
       icon: <BarsOutlined />,
       onRun: () => onToggleLogPanel?.(),
     },
-  ], [activeShortcutPlatform, onCreateConnection, onToggleAI, onToggleLogPanel, shortcutOptions]);
+  ], [activeShortcutPlatform, onCreateConnection, onToggleLogPanel, shortcutOptions]);
 
   const v2CommandSearchQuery = useMemo(
     () => parseV2CommandSearchQuery(deferredV2CommandSearchValue),
@@ -523,58 +509,35 @@ export const useSidebarSearchModel = ({
   );
   const normalizedV2CommandSearchValue = v2CommandSearchQuery.normalizedKeyword;
   const v2CommandSearchObjectMode = v2CommandSearchQuery.mode === 'object';
-  const v2CommandSearchAiMode = v2CommandSearchQuery.mode === 'ai';
   const filteredCommandSearchTreeItems = useMemo(() => {
     return filterV2CommandSearchTreeItems(commandSearchTreeIndex, v2CommandSearchQuery);
   }, [commandSearchTreeIndex, v2CommandSearchQuery]);
 
   const filteredCommandSearchActionItems = useMemo(() => {
-    if (v2CommandSearchObjectMode || v2CommandSearchAiMode) return [];
+    if (v2CommandSearchObjectMode) return [];
     if (!normalizedV2CommandSearchValue) return commandSearchActionItems;
     return commandSearchActionItems.filter((item) => {
       const haystack = `${item.title} ${item.meta}`;
       return matchesSidebarSearchText(haystack, normalizedV2CommandSearchValue);
     });
-  }, [commandSearchActionItems, normalizedV2CommandSearchValue, v2CommandSearchAiMode, v2CommandSearchObjectMode]);
+  }, [commandSearchActionItems, normalizedV2CommandSearchValue, v2CommandSearchObjectMode]);
 
   const filteredCommandSearchRecentItems = useMemo(() => {
-    if (v2CommandSearchObjectMode || v2CommandSearchAiMode) return [];
+    if (v2CommandSearchObjectMode) return [];
     if (!normalizedV2CommandSearchValue) return commandSearchRecentItems;
     return commandSearchRecentItems.filter((item) => {
       const haystack = `${item.title} ${item.meta}`;
       return matchesSidebarSearchText(haystack, normalizedV2CommandSearchValue);
     });
-  }, [commandSearchRecentItems, normalizedV2CommandSearchValue, v2CommandSearchAiMode, v2CommandSearchObjectMode]);
-
-  const commandSearchAiItem = useMemo<V2CommandSearchItem[]>(() => {
-    if (!v2CommandSearchAiMode || !v2CommandSearchQuery.aiPrompt) return [];
-    return [{
-      key: 'action-ask-ai',
-      kind: 'action',
-      title: t('sidebar.command_search.action.ask_ai.title'),
-      meta: v2CommandSearchQuery.aiPrompt,
-      shortcut: '↵',
-      icon: <RobotOutlined />,
-      onRun: () => {
-        const wasClosed = !useStore.getState().aiPanelVisible;
-        if (wasClosed) setAIPanelVisible(true);
-        window.setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', {
-            detail: { prompt: v2CommandSearchQuery.aiPrompt },
-          }));
-        }, wasClosed ? 350 : 0);
-      },
-    }];
-  }, [setAIPanelVisible, v2CommandSearchAiMode, v2CommandSearchQuery.aiPrompt]);
+  }, [commandSearchRecentItems, normalizedV2CommandSearchValue, v2CommandSearchObjectMode]);
 
   const commandSearchFlatItems = useMemo(
     () => [
-      ...commandSearchAiItem,
       ...filteredCommandSearchTreeItems,
       ...filteredCommandSearchActionItems,
       ...filteredCommandSearchRecentItems,
     ],
-    [commandSearchAiItem, filteredCommandSearchActionItems, filteredCommandSearchRecentItems, filteredCommandSearchTreeItems],
+    [filteredCommandSearchActionItems, filteredCommandSearchRecentItems, filteredCommandSearchTreeItems],
   );
 
   useEffect(() => {
@@ -696,11 +659,9 @@ export const useSidebarSearchModel = ({
     v2CommandSearchQuery,
     normalizedV2CommandSearchValue,
     v2CommandSearchObjectMode,
-    v2CommandSearchAiMode,
     filteredCommandSearchTreeItems,
     filteredCommandSearchActionItems,
     filteredCommandSearchRecentItems,
-    commandSearchAiItem,
     commandSearchFlatItems,
     flattenConnectionNodes,
     activeConnectionId,

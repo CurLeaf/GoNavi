@@ -23,7 +23,6 @@ jobs:
       fail-fast: false
       matrix:
         image_name:
-          - gonavi-mcp-server
           - gonavi-cli
           - gonavi-web-server
           - gonavi-build-env
@@ -31,9 +30,6 @@ jobs:
           - linux/amd64
           - linux/arm64
         include:
-          - image_name: gonavi-mcp-server
-            dockerfile: Dockerfile.mcp-server
-            description: GoNavi MCP Server container image
           - image_name: gonavi-cli
             dockerfile: Dockerfile.cli
             description: GoNavi command-line interface container image
@@ -107,38 +103,6 @@ jobs:
           build-args: |
             VERSION=${{ steps.prep.outputs.version }}
           cache-from: type=gha,scope=${{ matrix.image_name }}-${{ steps.prep.outputs.platform_pair }}
-
-      - name: Smoke test MCP Server image
-        if: matrix.image_name == 'gonavi-mcp-server'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cid="$(docker run -d -p 8765:8765 -e GONAVI_MCP_HTTP_TOKEN=smoke-token codex-smoke/${{ matrix.image_name }}:local http)"
-          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
-          for _ in 1 2 3 4 5 6 7 8 9 10; do
-            if curl --fail --silent http://127.0.0.1:8765/healthz >/dev/null; then
-              break
-            fi
-            sleep 1
-          done
-          if ! curl --fail --silent http://127.0.0.1:8765/healthz >/dev/null; then
-            docker logs "$cid"
-            echo "MCP Server image smoke test failed" >&2
-            exit 1
-          fi
-          docker kill --signal=TERM "$cid" >/dev/null
-          for _ in 1 2 3 4 5 6 7 8 9 10; do
-            if [[ "$(docker inspect -f '{{.State.Status}}' "$cid")" == "exited" ]]; then
-              break
-            fi
-            sleep 1
-          done
-          if [[ "$(docker inspect -f '{{.State.Status}}' "$cid")" != "exited" ]]; then
-            docker logs "$cid"
-            echo "MCP Server image did not exit after SIGTERM" >&2
-            exit 1
-          fi
-          [[ "$(docker inspect -f '{{.State.ExitCode}}' "$cid")" == "0" ]]
 
       - name: Smoke test CLI image
         if: matrix.image_name == 'gonavi-cli'
@@ -255,8 +219,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image_name: gonavi-mcp-server
-            description: GoNavi MCP Server container image
           - image_name: gonavi-cli
             description: GoNavi command-line interface container image
           - image_name: gonavi-web-server

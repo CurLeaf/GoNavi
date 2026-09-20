@@ -1,8 +1,7 @@
 import Modal from './components/common/ResizableDraggableModal';
 import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
-import { withAISettingsLeaveGuard, type AISettingsLeaveGuard } from './utils/aiSettingsLeaveGuard';
 import { Layout, Button, ConfigProvider, theme, message, notification, Spin, Slider, Switch, Input, InputNumber, Select, Segmented, Tooltip, Alert } from 'antd';
-import { UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined, PoweroffOutlined, UserOutlined, MessageOutlined, FileTextOutlined, SyncOutlined, SendOutlined, AuditOutlined, ThunderboltOutlined, ApiOutlined, WechatOutlined, CopyOutlined } from '@ant-design/icons';
+import { UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined, PoweroffOutlined, UserOutlined, MessageOutlined, FileTextOutlined, SyncOutlined, SendOutlined, AuditOutlined, ThunderboltOutlined, ApiOutlined, WechatOutlined, CopyOutlined } from '@ant-design/icons';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -15,7 +14,6 @@ import TitleBarSystemActions from './components/TitleBarSystemActions';
 import ConnectionGroupManagementModal from './components/sidebar/ConnectionGroupManagementModal';
 import TabManager from './components/TabManager';
 import FloatingWorkbenchWindows from './components/FloatingWorkbenchWindows';
-import FloatingAIChatWindow from './components/FloatingAIChatWindow';
 import FloatingQueryResultWindows from './components/FloatingQueryResultWindows';
 import NativeDetachedWindowController from './components/NativeDetachedWindowController';
 import { TitleBarCloseIcon, TitleBarMaximizeIcon, TitleBarMinimizeIcon, TitleBarRestoreIcon } from './components/TitleBarWindowControlIcons';
@@ -38,7 +36,6 @@ import {
 import { normalizeDataSyncEntryMode, type DataSyncEntryModeAlias } from './components/dataSyncEntryMode';
 import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';
 import LogPanel from './components/LogPanel';
-import AIPanelErrorBoundary from './components/ai/AIPanelErrorBoundary';
 import SecurityUpdateBanner from './components/SecurityUpdateBanner';
 import SecurityUpdateIntroModal from './components/SecurityUpdateIntroModal';
 import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModal';
@@ -75,7 +72,6 @@ import {
   DirectoryPathDisplay,
   DirectorySectionHeading,
 } from './components/settings/DataDirectorySettings';
-import { AI_SETTINGS_NAV_ITEMS, type AISettingsSectionKey } from './components/ai/AISettingsSidebar';
 import CustomThemeStyleHost, {
   type CustomThemeAntTokenSnapshot,
 } from './components/theme/CustomThemeStyleHost';
@@ -183,7 +179,6 @@ import {
   bootstrapSecureConfig,
   finalizeSecurityUpdateStatus,
   mergeSecurityUpdateStatusWithLegacySource,
-  prepareSecureConfigForExternalMCP,
   startSecurityUpdateFromBootstrap,
 } from './utils/secureConfigBootstrap';
 import { bootstrapSavedQueries } from './utils/savedQueryPersistence';
@@ -271,22 +266,10 @@ import {
 } from './utils/windowStateUi';
 import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
 import { resolveWailsWindowSetPosition, resolveWailsWindowVisibleViewport } from './utils/wailsWindowViewport';
-import {
-  DEFAULT_AI_PANEL_WIDTH,
-  resolveFullscreenAIPanelOverlayWidth,
-  resolveOverlayAIPanelWidth,
-  shouldOverlayAIPanel,
-  shouldUseFullscreenAIPanelOverlay,
-} from './utils/aiPanelLayout';
 import { safeWindowRuntimeCall } from './utils/wailsRuntime';
 import { repairWindowsWindowScale } from './utils/windowsWindowScaleRepair';
 import { waitForWindowCondition } from './utils/windowTransition';
-import {
-  hasNativeDetachedWindowManager,
-  openNativeAIChatWindow,
-  openNativeWorkbenchTabWindow,
-  toggleOrFocusNativeAIChatFromMainWindow,
-} from './utils/nativeDetachedWindowHost';
+import { openNativeWorkbenchTabWindow } from './utils/nativeDetachedWindowHost';
 import {
   buildApplicationQuitUnsavedSQLLabel,
   collectApplicationQuitUnsavedSQLTargets,
@@ -307,9 +290,7 @@ import { resolveSidebarResizeHitGeometry } from './utils/sidebarLayout';
 import { canInheritNewQueryTableContext, resolveNewQueryContext } from './utils/newQueryContext';
 import { useAppUtilityStyles } from './hooks/useAppUtilityStyles';
 import { useWorkbenchTabs } from './hooks/useWorkbenchTabs';
-import { useAIWorkspaceSnapshot } from './components/ai/useAIWorkspaceSnapshot';
 import { isWailsDevNativeContextMenu, shouldAllowNativeContextMenu } from './utils/nativeContextMenu';
-import AgentDataSettingsPanel from './components/ai/AgentDataSettingsPanel';
 import {
   ApplyDataRootDirectory,
   ApplyLogDirectory,
@@ -343,13 +324,6 @@ import {
 import './App.css';
 import './v2-theme.css';
 import './styles/v2-theme-workbench.css';
-import './styles/v2-theme-ai.css';
-
-const createLazyAIChatPanel = () => React.lazy(() => import('./components/AIChatPanel'));
-const createLazyAISettingsContent = () => React.lazy(async () => {
-  const module = await import('./components/AISettingsModal');
-  return { default: module.AISettingsContent };
-});
 
 const { Sider, Content } = Layout;
 const MIN_UI_SCALE = 0.8;
@@ -647,7 +621,6 @@ type ToolCenterPaneKey =
   | 'connection-health'
   | 'data-root'
   | 'data-root-application'
-  | 'data-root-agent'
   | 'data-root-saved-queries'
   | 'security-update'
   | 'drivers'
@@ -665,7 +638,6 @@ type SettingsCenterPaneKey =
   | 'download-source'
   | 'web-auth'
   | 'cloud-backup'
-  | 'ai'
   | ToolCenterPaneKey
   | 'about-go-navi';
 type SettingsCenterPaneState = {
@@ -860,10 +832,6 @@ const SidebarMetadataSortableRow: React.FC<SidebarMetadataSortableRowProps> = ({
 
 function App() {
   const { language, t } = useI18n();
-  // The workspace source belongs to the application lifetime, not to the
-  // optional AI panel. This keeps a running harness supplied with a live
-  // snapshot while the panel is hidden, detached, or being remounted.
-  useAIWorkspaceSnapshot({ enabled: true });
   const [notificationApi, notificationContextHolder] = notification.useNotification();
   const [brandAssetRevision, setBrandAssetRevision] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1267,25 +1235,14 @@ function App() {
   const [activeSettingsCenterGroupKey, setActiveSettingsCenterGroupKey] = useState<SettingsCenterGroupKey>('preferences');
   const [activeSettingsCenterPane, setActiveSettingsCenterPane] = useState<SettingsCenterPaneState | null>(null);
   const activeSettingsCenterPaneRef = useRef<SettingsCenterPaneState | null>(null);
-  const aiSettingsLeaveGuardRef = useRef<AISettingsLeaveGuard | null>(null);
-  const registerAISettingsLeaveGuard = useCallback((guard: AISettingsLeaveGuard | null) => {
-      aiSettingsLeaveGuardRef.current = guard;
-  }, []);
   activeSettingsCenterPaneRef.current = activeSettingsCenterPane;
   const [focusedTabDisplayElementKey, setFocusedTabDisplayElementKey] = useState<TabDisplayElementKey | null>(null);
-  const [focusedAIProviderId, setFocusedAIProviderId] = useState<string | undefined>(undefined);
-  const [aiSettingsSection, setAiSettingsSection] = useState<AISettingsSectionKey>('providers');
-  const [aiSettingsProviderView, setAiSettingsProviderView] = useState<'workspace' | 'connected'>('workspace');
   const [connectionPackageDialog, setConnectionPackageDialog] = useState<ConnectionPackageDialogState>(() => createClosedConnectionPackageDialogState());
   const [pendingConnectionImportPayload, setPendingConnectionImportPayload] = useState<string | null>(null);
   const [connectionImportTargetTagId, setConnectionImportTargetTagId] = useState('');
   const [connectionImportNotice, setConnectionImportNotice] = useState<ConnectionImportNotice | null>(null);
   const browserConnectionImportInputRef = useRef<HTMLInputElement>(null);
   const browserConnectionImportSourceGroupRef = useRef<ToolCenterGroupKey | undefined>(undefined);
-  const [aiPanelRenderNonce, setAiPanelRenderNonce] = useState(0);
-  const [aiSettingsRenderNonce, setAiSettingsRenderNonce] = useState(0);
-  const LazyAIChatPanel = useMemo(createLazyAIChatPanel, [aiPanelRenderNonce]);
-  const LazyAISettingsContent = useMemo(createLazyAISettingsContent, [aiSettingsRenderNonce]);
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -1348,15 +1305,7 @@ function App() {
       ? 38 * effectiveUiScale * effectiveSidebarRailScale
       : 0;
   const renderedSidebarWidth = isSidebarCollapsed ? sidebarCollapsedWidth : sidebarWidth;
-  const aiPanelVisible = useStore(state => state.aiPanelVisible);
-  const detachedAIChatWindow = useStore(state => state.detachedAIChatWindow);
-  const detachAIChatPanel = useStore(state => state.detachAIChatPanel);
-  const aiChatDetached = Boolean(detachedAIChatWindow);
-  const detachedAIChatZIndex = Number(detachedAIChatWindow?.zIndex);
-  const settingsCenterModalZIndex = Math.max(
-    APP_FOREGROUND_MODAL_Z_INDEX,
-    Number.isFinite(detachedAIChatZIndex) ? detachedAIChatZIndex + 1 : APP_FOREGROUND_MODAL_Z_INDEX,
-  );
+  const settingsCenterModalZIndex = APP_FOREGROUND_MODAL_Z_INDEX;
   const settingsChildModalZIndex = Math.max(
     APP_NESTED_MODAL_Z_INDEX,
     settingsCenterModalZIndex + 100,
@@ -1365,56 +1314,6 @@ function App() {
     APP_APPLICATION_QUIT_MODAL_Z_INDEX,
     settingsChildModalZIndex + 100,
   );
-  const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
-  const aiPanelTerminalGuardRef = useRef<(() => Promise<boolean>) | null>(null);
-  const aiPanelTerminalActionPendingRef = useRef(false);
-  const registerAIPanelTerminalGuard = useCallback((guard: (() => Promise<boolean>) | null) => {
-    aiPanelTerminalGuardRef.current = guard;
-  }, []);
-  const runAIPanelTerminalAction = useCallback((action: () => void) => {
-    if (aiPanelTerminalActionPendingRef.current) return;
-    aiPanelTerminalActionPendingRef.current = true;
-    void (async () => {
-      try {
-        const canTerminate = await aiPanelTerminalGuardRef.current?.();
-        if (canTerminate === false) return;
-        action();
-      } catch (error) {
-        console.warn('Failed to stop AI activity before changing the panel state', error);
-      } finally {
-        aiPanelTerminalActionPendingRef.current = false;
-      }
-    })();
-  }, []);
-  const handleCloseAIPanel = useCallback(() => {
-    runAIPanelTerminalAction(() => setAIPanelVisible(false));
-  }, [runAIPanelTerminalAction, setAIPanelVisible]);
-  const handleDetachAIPanel = useCallback(() => {
-    runAIPanelTerminalAction(() => detachAIChatPanel());
-  }, [detachAIChatPanel, runAIPanelTerminalAction]);
-  const handleToggleOrFocusAIPanel = useCallback(() => {
-    if (aiPanelVisible && (!aiChatDetached || !hasNativeDetachedWindowManager())) {
-      handleCloseAIPanel();
-      return;
-    }
-    void toggleOrFocusNativeAIChatFromMainWindow().catch((error) => {
-      void message.error(error instanceof Error ? error.message : String(error));
-    });
-  }, [aiChatDetached, aiPanelVisible, handleCloseAIPanel]);
-  useEffect(() => {
-    if (!aiPanelVisible || !detachedAIChatWindow || !hasNativeDetachedWindowManager()) {
-      return undefined;
-    }
-    let active = true;
-    void openNativeAIChatWindow().catch((error) => {
-      if (!active) return;
-      useStore.getState().attachAIChatPanel();
-      void message.error(error instanceof Error ? error.message : String(error));
-    });
-    return () => {
-      active = false;
-    };
-  }, [aiPanelVisible, aiChatDetached]);
   const windowDiagSequenceRef = React.useRef(0);
   const windowDiagLastSignatureRef = React.useRef('');
   const windowDiagLastAtRef = React.useRef(0);
@@ -1576,16 +1475,14 @@ function App() {
           setIsSecurityUpdateBannerDismissed(false);
       }
       if (options?.openSettings) {
-          withAISettingsLeaveGuard(aiSettingsLeaveGuardRef.current, () => {
-              if (options.refreshFocus !== false) {
-                  setSecurityUpdateSettingsFocusTarget(resolveSecurityUpdateSettingsFocusTarget(nextStatus));
-                  setSecurityUpdateSettingsFocusRequest((current) => current + 1);
-              }
-              setToolCenterBackGroupKey('config');
-              setActiveSettingsCenterGroupKey('config');
-              setActiveSettingsCenterPane({ key: 'security-update', group: 'config' });
-              openSettingsCenterWorkbenchTab();
-          });
+          if (options.refreshFocus !== false) {
+              setSecurityUpdateSettingsFocusTarget(resolveSecurityUpdateSettingsFocusTarget(nextStatus));
+              setSecurityUpdateSettingsFocusRequest((current) => current + 1);
+          }
+          setToolCenterBackGroupKey('config');
+          setActiveSettingsCenterGroupKey('config');
+          setActiveSettingsCenterPane({ key: 'security-update', group: 'config' });
+          openSettingsCenterWorkbenchTab();
       }
       return nextStatus;
   }, [normalizeSecurityUpdateStatus]);
@@ -2659,7 +2556,6 @@ function App() {
   }, []);
 
   const {
-      bgContent,
       floatingLogButtonBgColor, floatingLogButtonBorderColor, floatingLogButtonShadow, floatingLogButtonTextColor,
       isSidebarNarrow, isSidebarUltraCompact,
       overlayTheme, renderUtilityModalTitle,
@@ -2761,7 +2657,7 @@ function App() {
   );
   const applicationQuitConfirmRef = useRef<{ destroy: () => void } | null>(null);
   const applicationQuitHandlingRef = useRef(false);
-  const openSecurityUpdateSettings = useCallback((focusTarget?: SecurityUpdateSettingsFocusTarget | null) => withAISettingsLeaveGuard(aiSettingsLeaveGuardRef.current, () => {
+  const openSecurityUpdateSettings = useCallback((focusTarget?: SecurityUpdateSettingsFocusTarget | null) => {
       setIsSecurityUpdateIntroOpen(false);
       if (focusTarget !== undefined) {
           setSecurityUpdateSettingsFocusTarget(focusTarget);
@@ -2771,7 +2667,7 @@ function App() {
       setActiveSettingsCenterGroupKey('config');
       setActiveSettingsCenterPane({ key: 'security-update', group: 'config' });
       openSettingsCenterWorkbenchTab();
-  }), []);
+  }, []);
   const handleOpenSecurityUpdateSettings = useCallback((focusTarget: SecurityUpdateSettingsFocusTarget | null = null) => {
       openSecurityUpdateSettings(focusTarget);
   }, [openSecurityUpdateSettings]);
@@ -2882,50 +2778,6 @@ function App() {
   const handleStartSecurityUpdate = useCallback(() => {
       void runSecurityUpdateRound('start');
   }, [runSecurityUpdateRound]);
-  const handlePrepareExternalMCPUse = useCallback(async () => {
-      const backendApp = (window as any).go?.app?.App;
-      const result = await prepareSecureConfigForExternalMCP({
-          backend: backendApp,
-          replaceConnections,
-          replaceGlobalProxy,
-          t,
-      });
-      if (result.error) {
-          throw result.error;
-      }
-      if (!result.status) {
-          return;
-      }
-
-      const nextStatus = normalizeSecurityUpdateStatus(result.status);
-      const shouldOpenSettings = nextStatus.overallStatus === 'needs_attention' || nextStatus.overallStatus === 'rolled_back';
-      applySecurityUpdateStatus(nextStatus, {
-          openSettings: shouldOpenSettings,
-          refreshFocus: shouldOpenSettings,
-      });
-
-      if (nextStatus.overallStatus === 'completed') {
-          setSecurityUpdateHasLegacySensitiveItems(false);
-          setSecurityUpdateRawPayload(null);
-          return;
-      }
-
-      const hasConnectionIssue = nextStatus.issues.some((issue) =>
-          issue.scope === 'connection' && issue.status !== 'updated',
-      );
-      if (nextStatus.overallStatus === 'rolled_back' || hasConnectionIssue) {
-          throw new Error(t('app.security_update.message.needs_attention'));
-      }
-      if (nextStatus.overallStatus === 'needs_attention') {
-          void message.warning(t('app.security_update.message.needs_attention'));
-      }
-  }, [
-      applySecurityUpdateStatus,
-      normalizeSecurityUpdateStatus,
-      replaceConnections,
-      replaceGlobalProxy,
-      t,
-  ]);
   const handleRetrySecurityUpdate = useCallback(() => {
       void runSecurityUpdateRound('retry');
   }, [runSecurityUpdateRound]);
@@ -2963,7 +2815,7 @@ function App() {
       securityUpdateStatus.summary,
       t,
   ]);
-  const handleSecurityUpdateIssueAction = useCallback((issue: SecurityUpdateIssue) => withAISettingsLeaveGuard(aiSettingsLeaveGuardRef.current, () => {
+  const handleSecurityUpdateIssueAction = useCallback((issue: SecurityUpdateIssue) => {
       const repairEntry = resolveSecurityUpdateRepairEntry(issue, connections, securityUpdateStatus, t);
       if (repairEntry.type === 'warning') {
           void message.warning(repairEntry.message);
@@ -2982,23 +2834,13 @@ function App() {
           setIsProxyModalOpen(true);
           return;
       }
-      if (repairEntry.type === 'ai') {
-          setSecurityUpdateRepairSource(repairEntry.repairSource);
-          setFocusedAIProviderId(repairEntry.providerId);
-          setAiSettingsSection('providers');
-          setAiSettingsProviderView('workspace');
-          setActiveSettingsCenterGroupKey('services');
-          setActiveSettingsCenterPane({ key: 'ai', group: 'services' });
-          openSettingsCenterWorkbenchTab();
-          return;
-      }
       if (repairEntry.type === 'retry') {
           void runSecurityUpdateRound('retry');
           return;
       }
       setSecurityUpdateRepairSource(null);
       openSecurityUpdateSettings(repairEntry.focusTarget);
-  }), [connections, openSecurityUpdateSettings, runSecurityUpdateRound, securityUpdateStatus, t]);
+  }, [connections, openSecurityUpdateSettings, runSecurityUpdateRound, securityUpdateStatus, t]);
   const useNativeMacWindowControls = isMacRuntime;
   const activeShortcutPlatform = getShortcutPlatform(isMacRuntime);
   const titleBarNewQueryShortcut = resolveTitleBarPrimaryActionShortcut(
@@ -3372,11 +3214,6 @@ function App() {
       const runConfirmedAction = async (): Promise<boolean> => {
           let accepted = false;
           try {
-              const leaveGuard = aiSettingsLeaveGuardRef.current;
-              if (leaveGuard && !(await leaveGuard())) {
-                  cancelRequest();
-                  return false;
-              }
               await prepareApplicationQuitPersistence({
                   captureWindowState: () => captureMainWindowStateRef.current(),
                   flushDrafts: flushQueryTabDraftSnapshots,
@@ -4230,21 +4067,6 @@ function App() {
   const [savedQueryDirectoryApplying, setSavedQueryDirectoryApplying] = useState(false);
   const directorySettingsApplying = dataRootApplying || logDirectoryApplying || savedQueryDirectoryApplying;
 
-  const aiPanelOverlayActive = aiPanelVisible && shouldOverlayAIPanel({
-      viewportWidth,
-      sidebarWidth: renderedSidebarWidth,
-      panelWidth: DEFAULT_AI_PANEL_WIDTH,
-  });
-  const aiPanelFullscreenOverlay = aiPanelOverlayActive && shouldUseFullscreenAIPanelOverlay(viewportWidth);
-  const aiPanelRenderWidth = aiPanelFullscreenOverlay
-      ? resolveFullscreenAIPanelOverlayWidth(viewportWidth)
-      : aiPanelOverlayActive
-          ? resolveOverlayAIPanelWidth({
-          viewportWidth,
-          sidebarWidth: renderedSidebarWidth,
-          panelWidth: DEFAULT_AI_PANEL_WIDTH,
-          })
-          : DEFAULT_AI_PANEL_WIDTH;
   const appliedGlobalProxyDraft = useMemo(() => (
       createGlobalProxyComparableDraft(globalProxy)
   ), [
@@ -4472,40 +4294,27 @@ function App() {
       if (activeSettingsCenterPaneRef.current?.key === 'connection-health') {
           setConnectionHealthTargetIds([]);
       }
-      if (activeSettingsCenterPaneRef.current?.key === 'ai') {
-          setFocusedAIProviderId(undefined);
-          setSecurityUpdateRepairSource(null);
-      }
   }, [closeConnectionPackageDialog]);
-  const handleOpenToolsModal = useCallback((group: ToolCenterGroupKey = 'config') => withAISettingsLeaveGuard(aiSettingsLeaveGuardRef.current, () => {
+  const handleOpenToolsModal = useCallback((group: ToolCenterGroupKey = 'config') => {
       clearSettingsCenterTransientPaneState();
       setToolCenterBackGroupKey(null);
       setActiveSettingsCenterGroupKey(group);
       setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(group));
       openSettingsCenterWorkbenchTab();
-  }), [clearSettingsCenterTransientPaneState, openSettingsCenterWorkbenchTab]);
-  const handleOpenSettingsModal = useCallback((group: SettingsCenterGroupKey = 'preferences') => withAISettingsLeaveGuard(aiSettingsLeaveGuardRef.current, () => {
+  }, [clearSettingsCenterTransientPaneState, openSettingsCenterWorkbenchTab]);
+  const handleOpenSettingsModal = useCallback((group: SettingsCenterGroupKey = 'preferences') => {
       clearSettingsCenterTransientPaneState();
       setActiveSettingsCenterGroupKey(group);
       setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(group));
       openSettingsCenterWorkbenchTab();
-  }), [clearSettingsCenterTransientPaneState, openSettingsCenterWorkbenchTab]);
-  const handleOpenSettingsCenterPane = useCallback((group: SettingsCenterGroupKey, key: SettingsCenterPaneKey) => withAISettingsLeaveGuard(aiSettingsLeaveGuardRef.current, () => {
+  }, [clearSettingsCenterTransientPaneState, openSettingsCenterWorkbenchTab]);
+  const handleOpenSettingsCenterPane = useCallback((group: SettingsCenterGroupKey, key: SettingsCenterPaneKey) => {
       clearSettingsCenterTransientPaneState();
       setActiveSettingsCenterGroupKey(group);
       setActiveSettingsCenterPane({ key, group });
       openSettingsCenterWorkbenchTab();
-  }), [clearSettingsCenterTransientPaneState, openSettingsCenterWorkbenchTab]);
-  const finalizeSecurityRepairReturnFromAISettings = useCallback(() => {
-      const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
-      setFocusedAIProviderId(undefined);
-      setSecurityUpdateRepairSource(null);
-      if (reopenSecurityUpdateDetails) {
-          openSecurityUpdateSettings();
-      }
-  }, [openSecurityUpdateSettings, securityUpdateRepairSource]);
-  const handleCancelSettingsCenterPane = useCallback(() => withAISettingsLeaveGuard(aiSettingsLeaveGuardRef.current, () => {
-      const leavingAI = activeSettingsCenterPane?.key === 'ai';
+  }, [clearSettingsCenterTransientPaneState, openSettingsCenterWorkbenchTab]);
+  const handleCancelSettingsCenterPane = useCallback(() => {
       if (isConnectionPackageSettingsPaneKey(activeSettingsCenterPane?.key)) {
           closeConnectionPackageDialog();
       }
@@ -4516,11 +4325,8 @@ function App() {
       setToolCenterBackGroupKey(null);
       setActiveSettingsCenterPane(null);
       closeSettingsCenterWorkbenchTab();
-      if (leavingAI) {
-          finalizeSecurityRepairReturnFromAISettings();
-      }
-  }), [activeSettingsCenterPane?.key, closeConnectionPackageDialog, closeSettingsCenterWorkbenchTab, finalizeSecurityRepairReturnFromAISettings]);
-  const handleOpenDataSyncWorkbench = useCallback((entryMode: DataSyncEntryModeAlias) => withAISettingsLeaveGuard(aiSettingsLeaveGuardRef.current, () => {
+  }, [activeSettingsCenterPane?.key, closeConnectionPackageDialog, closeSettingsCenterWorkbenchTab]);
+  const handleOpenDataSyncWorkbench = useCallback((entryMode: DataSyncEntryModeAlias) => {
       const normalized = normalizeDataSyncEntryMode(entryMode);
       const nextTab = buildDataSyncWorkbenchTab({ entryMode: normalized });
       const existingId = resolveExistingDataSyncWorkbenchTabId(
@@ -4528,7 +4334,7 @@ function App() {
           useStore.getState().tabs,
       );
       addTab(existingId ? { ...nextTab, id: existingId } : nextTab);
-  }), [addTab]);
+  }, [addTab]);
   const isSettingsAboutPaneOpen = isSettingsModalOpen && activeSettingsCenterPane?.key === 'about-go-navi';
   const wasSettingsCenterTabOpenRef = useRef(false);
   useEffect(() => {
@@ -4537,21 +4343,17 @@ function App() {
       if (!wasOpen || isSettingsModalOpen) {
           return;
       }
-      // Tab closed via workbench chrome (X) — mirror cancel cleanup without re-entering leave guard.
+      // Tab closed via workbench chrome (X) — mirror cancel cleanup.
       if (isConnectionPackageSettingsPaneKey(activeSettingsCenterPaneRef.current?.key)) {
           closeConnectionPackageDialog();
       }
       if (activeSettingsCenterPaneRef.current?.key === 'connection-health') {
           setConnectionHealthTargetIds([]);
       }
-      const leavingAI = activeSettingsCenterPaneRef.current?.key === 'ai';
       setCapturingShortcutAction(null);
       setToolCenterBackGroupKey(null);
       setActiveSettingsCenterPane(null);
-      if (leavingAI) {
-          finalizeSecurityRepairReturnFromAISettings();
-      }
-  }, [closeConnectionPackageDialog, finalizeSecurityRepairReturnFromAISettings, isSettingsModalOpen]);
+  }, [closeConnectionPackageDialog, isSettingsModalOpen]);
   const isSettingsAboutPaneOpenRef = useRef(false);
   useEffect(() => {
       isSettingsAboutPaneOpenRef.current = isSettingsAboutPaneOpen;
@@ -4584,19 +4386,19 @@ function App() {
       }
       prepareAboutSurface();
   }, [isSettingsAboutPaneOpen, prepareAboutSurface]);
-  const handleOpenToolCenterPane = useCallback((group: ToolCenterGroupKey, key: ToolCenterPaneKey) => withAISettingsLeaveGuard(aiSettingsLeaveGuardRef.current, () => {
+  const handleOpenToolCenterPane = useCallback((group: ToolCenterGroupKey, key: ToolCenterPaneKey) => {
       clearSettingsCenterTransientPaneState();
       setToolCenterBackGroupKey(group);
       setActiveSettingsCenterGroupKey(group);
       setActiveSettingsCenterPane({ key, group });
       openSettingsCenterWorkbenchTab();
-  }), [clearSettingsCenterTransientPaneState]);
+  }, [clearSettingsCenterTransientPaneState]);
   /** Title-bar / explorer settings entries → settings center navigation. */
   const handleTitleBarSettingsNavigation = useCallback((spec: {
     group: 'preferences' | 'services' | 'config' | 'workflow' | 'workspace' | 'about';
     pane?: string;
     action?: 'import-connections' | 'export-connections' | 'schema-compare' | 'data-compare' | 'compare' | 'sync' | 'drivers' | 'sql-audit';
-  }) => withAISettingsLeaveGuard(aiSettingsLeaveGuardRef.current, () => {
+  }) => {
       if (spec.action === 'import-connections') {
           handleOpenToolCenterPane('config', 'import');
           return;
@@ -4643,16 +4445,8 @@ function App() {
           handleOpenSettingsCenterPane('preferences', 'theme');
           return;
       }
-      if (spec.group === 'services' && spec.pane === 'ai') {
-          setSecurityUpdateRepairSource(null);
-          setFocusedAIProviderId(undefined);
-          setAiSettingsSection('providers');
-          setAiSettingsProviderView('workspace');
-          handleOpenSettingsCenterPane('services', 'ai');
-          return;
-      }
       handleOpenSettingsCenterPane(spec.group, spec.pane as SettingsCenterPaneKey);
-  }), [
+  }, [
       addTab,
       handleCancelSettingsCenterPane,
       handleExportConnections,
@@ -4662,14 +4456,14 @@ function App() {
       handleOpenToolCenterPane,
       handleOpenToolsModal,
   ]);
-  const handleReturnToToolCenter = useCallback((closeChild?: () => void) => withAISettingsLeaveGuard(aiSettingsLeaveGuardRef.current, () => {
+  const handleReturnToToolCenter = useCallback((closeChild?: () => void) => {
       const returnGroup = toolCenterBackGroupKey ?? 'config';
       closeChild?.();
       setToolCenterBackGroupKey(null);
       setActiveSettingsCenterGroupKey(returnGroup);
       setActiveSettingsCenterPane(resolveSettingsCenterGroupInitialPane(returnGroup));
       openSettingsCenterWorkbenchTab();
-  }), [toolCenterBackGroupKey]);
+  }, [toolCenterBackGroupKey]);
   const handleFocusSidebarSearch = useCallback(() => {
       setIsSidebarCollapsed(false);
       window.setTimeout(() => {
@@ -5041,7 +4835,7 @@ function App() {
   };
 
   const renderDataDirectorySettings = (
-      section: 'all' | 'application' | 'agent' | 'saved-queries' = 'all',
+      section: 'all' | 'application' | 'saved-queries' = 'all',
       readOnly = false,
   ) => {
       if (dataRootLoading) {
@@ -5080,7 +4874,6 @@ function App() {
                               <div className="gn-storage-field-label">{t('app.data_root.application.stores')}</div>
                               <div className="gn-storage-tags">
                                   <span className="gn-storage-tag">{t('app.data_root.application.content.connections')}</span>
-                                  <span className="gn-storage-tag">{t('app.data_root.application.content.ai_config')}</span>
                                   <span className="gn-storage-tag">{t('app.data_root.application.content.drivers')}</span>
                               </div>
                           </div>
@@ -5161,10 +4954,6 @@ function App() {
                   {renderLogDirectorySettings(readOnly)}
               </DataDirectoryPage>
               )}
-
-              {(section === 'all' || section === 'agent') && <AgentDataSettingsPanel
-                  readOnly={readOnly}
-              />}
 
               {(section === 'all' || section === 'saved-queries') && renderSavedQueryDirectorySettings(readOnly)}
           </div>
@@ -5377,38 +5166,6 @@ function App() {
       }
   }, [openSecurityUpdateSettings, securityUpdateRepairSource]);
 
-  /** 从聊天面板等入口打开 AI 配置：走设置中心，不再弹独立 AISettingsModal */
-  const handleOpenAISettings = useCallback((providerId?: string) => withAISettingsLeaveGuard(aiSettingsLeaveGuardRef.current, () => {
-      setSecurityUpdateRepairSource(null);
-      setFocusedAIProviderId(providerId);
-      setAiSettingsSection('providers');
-      setAiSettingsProviderView('workspace');
-      setActiveSettingsCenterGroupKey('services');
-      setActiveSettingsCenterPane({ key: 'ai', group: 'services' });
-      openSettingsCenterWorkbenchTab();
-  }), []);
-
-  const handleAIPanelRenderError = useCallback((error: Error, errorInfo: React.ErrorInfo) => {
-      try {
-          (window as any).__gonaviLastAIPanelRenderError = {
-              message: error?.message || '',
-              stack: error?.stack || '',
-              componentStack: errorInfo?.componentStack || '',
-          };
-      } catch {
-          // ignore debug capture failures
-      }
-      console.error('AIChatPanel render error:', error, errorInfo);
-  }, []);
-
-  const handleRetryAIPanelRender = useCallback(() => {
-      setAiPanelRenderNonce((current) => current + 1);
-  }, []);
-
-  const handleRetryAISettingsRender = useCallback(() => {
-      setAiSettingsRenderNonce((current) => current + 1);
-  }, []);
-
   const handleWebLogout = useCallback(async () => {
       try {
           await fetch('/__gonavi/auth/logout', {
@@ -5607,12 +5364,12 @@ function App() {
   }, [handleOpenToolCenterPane]);
 
   useEffect(() => {
-      const handleOpenTabDisplaySettingsEvent = () => withAISettingsLeaveGuard(aiSettingsLeaveGuardRef.current, () => {
+      const handleOpenTabDisplaySettingsEvent = () => {
           closeSettingsCenterWorkbenchTab();
           setThemeModalSection('workspace');
           setIsThemeModalOpen(true);
           setTabDisplaySettingsFocusRequest((current) => current + 1);
-      });
+      };
       window.addEventListener('gonavi:open-tab-display-settings', handleOpenTabDisplaySettingsEvent as EventListener);
       return () => {
           window.removeEventListener('gonavi:open-tab-display-settings', handleOpenTabDisplaySettingsEvent as EventListener);
@@ -5739,12 +5496,6 @@ function App() {
               return;
           }
 
-          if (event.repeat && matchedAction === 'toggleAIPanel') {
-              event.preventDefault();
-              event.stopImmediatePropagation();
-              return;
-          }
-
           event.preventDefault();
           event.stopPropagation();
 
@@ -5766,9 +5517,6 @@ function App() {
                   break;
               case 'newConnection':
                   handleCreateConnection();
-                  break;
-              case 'toggleAIPanel':
-                  handleToggleOrFocusAIPanel();
                   break;
               case 'toggleLogPanel':
                   handleToggleLogPanel();
@@ -5794,7 +5542,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleGlobalShortcut, true);
       };
-  }, [activeShortcutPlatform, capturingShortcutAction, handleCreateConnection, handleFocusSidebarSearch, handleManualResetWindowZoom, handleNewQuery, handleOpenToolCenterPane, handleTitleBarWindowToggle, handleToggleLogPanel, handleToggleOrFocusAIPanel, isMacRuntime, selectPresetTheme, shortcutOptions, switchActiveTabByOffset, themeMode, useNativeMacWindowControls]);
+  }, [activeShortcutPlatform, capturingShortcutAction, handleCreateConnection, handleFocusSidebarSearch, handleManualResetWindowZoom, handleNewQuery, handleOpenToolCenterPane, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, selectPresetTheme, shortcutOptions, switchActiveTabByOffset, themeMode, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!capturingShortcutAction) {
@@ -5817,10 +5565,7 @@ function App() {
 
           const normalizedCombo = normalizeShortcutCombo(combo);
           if (!canRecordShortcutForAction(capturingShortcutAction, normalizedCombo)) {
-              const meta = SHORTCUT_ACTION_META[capturingShortcutAction];
-              void message.warning(meta.scope === 'aiComposer'
-                  ? t('app.shortcuts.message.ai_send_limit')
-                  : t('app.shortcuts.message.modifier_required'));
+              void message.warning(t('app.shortcuts.message.modifier_required'));
               return;
           }
           const conflictAction = SHORTCUT_ACTION_ORDER.find((action) => {
@@ -8093,44 +7838,6 @@ function App() {
                   description: t('app.settings.entry.cloud_backup.description'),
                   onClick: () => handleOpenSettingsCenterPane('services', 'cloud-backup'),
               },
-              {
-                  key: 'ai',
-                  icon: <RobotOutlined />,
-                  title: t('app.settings.entry.ai.title'),
-                  description: t('app.settings.entry.ai.description'),
-                  onClick: () => {
-                      setSecurityUpdateRepairSource(null);
-                      setFocusedAIProviderId(undefined);
-                      setAiSettingsSection('providers');
-                      setAiSettingsProviderView('workspace');
-                      handleOpenSettingsCenterPane('services', 'ai');
-                  },
-                  children: AI_SETTINGS_NAV_ITEMS.map((item) => ({
-                      key: `ai-${item.key}`,
-                      icon: item.icon,
-                      title: t(item.titleKey),
-                      description: t(item.descriptionKey),
-                      onClick: () => {
-                          setSecurityUpdateRepairSource(null);
-                          setFocusedAIProviderId(item.key === 'providers' ? focusedAIProviderId : undefined);
-                          setAiSettingsSection(item.key);
-                          setAiSettingsProviderView('workspace');
-                          handleOpenSettingsCenterPane('services', 'ai');
-                      },
-                      children: item.key === 'providers' ? [{
-                          key: 'ai-providers-connected',
-                          icon: item.icon,
-                          title: t('ai_settings.provider.configured'),
-                          description: t('ai_settings.provider.configured_hint'),
-                          onClick: () => {
-                              setSecurityUpdateRepairSource(null);
-                              setAiSettingsSection('providers');
-                              setAiSettingsProviderView('connected');
-                              handleOpenSettingsCenterPane('services', 'ai');
-                          },
-                      }] : undefined,
-                  })),
-              },
           ],
       },
       {
@@ -8141,8 +7848,7 @@ function App() {
           items: [],
       },
   ];
-  const isSettingsCenterContainedScrollPane =
-      activeSettingsCenterPane?.key === 'theme' || activeSettingsCenterPane?.key === 'ai';
+  const isSettingsCenterContainedScrollPane = activeSettingsCenterPane?.key === 'theme';
   const isV2ThemeSettingsPane = activeSettingsCenterPane?.key === 'theme';
   const activeSettingsCenterDetailPanelStyle: React.CSSProperties = {
       ...toolCenterDetailPanelStyle,
@@ -8224,56 +7930,6 @@ function App() {
       if (activeSettingsCenterPane.key === 'cloud-backup') {
           return (
               <CloudBackupSettings t={t} />
-          );
-      }
-      if (activeSettingsCenterPane.key === 'ai') {
-          return (
-              <div style={{ height: '100%', minHeight: 0 }}>
-                  <AIPanelErrorBoundary
-                    key={`ai-settings-${aiSettingsRenderNonce}`}
-                    onError={handleAIPanelRenderError}
-                    fallback={(error) => (
-                      <Alert
-                        type="error"
-                        showIcon
-                        message={t('app.ai_panel.error.title')}
-                        description={error?.message || t('app.ai_panel.error.description')}
-                        action={(
-                          <Button size="small" onClick={handleRetryAISettingsRender}>
-                            {t('app.ai_panel.action.reload')}
-                          </Button>
-                        )}
-                      />
-                    )}
-                  >
-                    <React.Suspense
-                      fallback={(
-                        <div style={{ height: '100%', display: 'grid', placeItems: 'center' }} aria-busy="true">
-                          <Spin />
-                        </div>
-                      )}
-                    >
-                      <LazyAISettingsContent
-                        active={isSettingsModalOpen && activeSettingsCenterPane.key === 'ai'}
-                        darkMode={darkMode}
-                        overlayTheme={overlayTheme}
-                        focusProviderId={focusedAIProviderId}
-                        hideSidebar
-                        section={aiSettingsSection}
-                        onSectionChange={(section) => {
-                            setAiSettingsSection(section);
-                            setAiSettingsProviderView('workspace');
-                        }}
-                        providersView={aiSettingsSection === 'providers' ? aiSettingsProviderView : 'workspace'}
-                        onProvidersViewChange={setAiSettingsProviderView}
-                        onCloseHost={handleCancelSettingsCenterPane}
-                        onBeforeExternalMCPUse={handlePrepareExternalMCPUse}
-                        onLeaveGuardChange={registerAISettingsLeaveGuard}
-                        confirmationZIndex={applicationQuitModalZIndex + 100}
-                      />
-                    </React.Suspense>
-                  </AIPanelErrorBoundary>
-              </div>
           );
       }
       if (activeSettingsCenterPane.key === 'about-go-navi') {
@@ -8397,10 +8053,7 @@ function App() {
               {/* Collapsed sidebar titlebar actions end */}
               <div className="gn-v2-titlebar-right">
                   <TitleBarSystemActions
-                    aiAssistantLabel={t('app.sidebar.ai_assistant')}
                     settingsLabel={t('app.sidebar.settings')}
-                    aiActive={aiPanelVisible}
-                    onToggleAI={handleToggleOrFocusAIPanel}
                     onOpenSettings={handleOpenSettingsModal}
                   />
                   {isWebRuntime ? (
@@ -8505,7 +8158,6 @@ function App() {
                             onOpenSettingsNavigation={handleTitleBarSettingsNavigation}
                             isWebRuntime={isWebRuntime}
                             onOpenDataSyncWorkbench={handleOpenDataSyncWorkbench}
-                            onToggleAI={handleToggleOrFocusAIPanel}
                             onToggleLogPanel={handleToggleLogPanel}
                             v2ExplorerContext={v2ExplorerContext}
                             collapsedSidebarActionsTarget={collapsedSidebarActionsTarget}
@@ -8606,165 +8258,9 @@ function App() {
                   <TabManager onFocusSidebarSearch={handleFocusSidebarSearch} />
                   <FloatingWorkbenchWindows />
                   <FloatingQueryResultWindows />
-                  <NativeDetachedWindowController
-                    onOpenAISettings={handleOpenAISettings}
-                    onToggleAI={handleToggleOrFocusAIPanel}
-                  />
+                  <NativeDetachedWindowController />
                </div>
 
-               {aiPanelVisible && !aiChatDetached && (
-                  <div
-                    className={aiPanelOverlayActive ? 'gn-v2-ai-panel-overlay' : undefined}
-                    style={aiPanelOverlayActive
-                      ? aiPanelFullscreenOverlay
-                        ? {
-                            position: 'fixed',
-                            top: titleBarHeight,
-                            right: 0,
-                            bottom: 0,
-                            left: 0,
-                            display: 'flex',
-                            justifyContent: 'flex-end',
-                            pointerEvents: 'none',
-                            zIndex: 14,
-                          }
-                        : { position: 'absolute', inset: 0, display: 'flex', justifyContent: 'flex-end', pointerEvents: 'none', zIndex: 14 }
-                      : { position: 'relative', display: 'flex', flexShrink: 0, overflow: 'visible' }}
-                  >
-                      {aiPanelOverlayActive && (
-                          <button
-                            type="button"
-                            className="gn-v2-ai-panel-backdrop"
-                            aria-label={t('app.ai_panel.aria.close')}
-                            onClick={handleCloseAIPanel}
-                            style={{
-                              position: 'absolute',
-                              inset: 0,
-                              border: 0,
-                              padding: 0,
-                              background: darkMode ? 'rgba(3, 7, 18, 0.26)' : 'rgba(248, 250, 252, 0.38)',
-                              backdropFilter: 'blur(2px)',
-                              pointerEvents: 'auto',
-                            }}
-                          />
-                      )}
-                      <div
-                        className={`gn-v2-ai-panel-dock${aiPanelOverlayActive ? ' is-overlay' : ''}`}
-                        style={aiPanelOverlayActive
-                          ? {
-                              position: 'relative',
-                              display: 'flex',
-                              height: '100%',
-                              pointerEvents: 'auto',
-                              zIndex: 1,
-                              boxShadow: '0 18px 48px rgba(15, 23, 42, 0.18)',
-                            }
-                          : undefined}
-                      >
-
-                      <AIPanelErrorBoundary
-                        key={aiPanelRenderNonce}
-                        onError={handleAIPanelRenderError}
-                        fallback={(error) => (
-                          <div
-                            style={{
-                              width: aiPanelRenderWidth,
-                              minWidth: 0,
-                              height: '100%',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              padding: 20,
-                              background: bgContent,
-                              color: darkMode ? 'rgba(255,255,255,0.88)' : '#162033',
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: '100%',
-                                maxWidth: 360,
-                                display: 'grid',
-                                gap: 12,
-                                padding: 18,
-                                borderRadius: 16,
-                                border: darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(15,23,42,0.08)',
-                                background: darkMode ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.94)',
-                                boxShadow: darkMode ? '0 16px 36px rgba(0,0,0,0.32)' : '0 16px 36px rgba(15,23,42,0.12)',
-                              }}
-                            >
-                              <div style={{ fontSize: 15, fontWeight: 600 }}>{t('app.ai_panel.error.title')}</div>
-                              <div style={{ fontSize: 12, lineHeight: 1.6, color: darkMode ? 'rgba(255,255,255,0.68)' : '#526075' }}>
-                                {t('app.ai_panel.error.description')}
-                              </div>
-                              {error?.message && (
-                                <div
-                                  style={{
-                                    fontSize: 12,
-                                    lineHeight: 1.5,
-                                    wordBreak: 'break-word',
-                                    padding: '10px 12px',
-                                    borderRadius: 10,
-                                    background: darkMode ? 'rgba(2,6,23,0.7)' : 'rgba(248,250,252,0.92)',
-                                    border: darkMode ? '1px solid rgba(148,163,184,0.18)' : '1px solid rgba(148,163,184,0.22)',
-                                  }}
-                                >
-                                  {error.message}
-                                </div>
-                              )}
-                              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                                <Button aria-label={t('app.ai_panel.aria.close')} onClick={handleCloseAIPanel}>{t('app.ai_panel.action.close')}</Button>
-                                <Button type="primary" onClick={handleRetryAIPanelRender}>{t('app.ai_panel.action.reload')}</Button>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      >
-                        <React.Suspense
-                          fallback={(
-                            <div
-                              style={{
-                                width: aiPanelRenderWidth,
-                                height: '100%',
-                                display: 'grid',
-                                placeItems: 'center',
-                                background: bgContent,
-                              }}
-                              aria-busy="true"
-                            >
-                              <Spin />
-                            </div>
-                          )}
-                        >
-                          <LazyAIChatPanel
-                            width={aiPanelRenderWidth}
-                            darkMode={darkMode}
-                            bgColor={bgContent}
-                            presentation="dock"
-                            onClose={handleCloseAIPanel}
-                            onDetach={handleDetachAIPanel}
-                            onRegisterTerminalGuard={registerAIPanelTerminalGuard}
-                            onOpenSettings={(providerId) => {
-                              handleOpenAISettings(providerId);
-                            }}
-                            overlayTheme={overlayTheme}
-                          />
-                        </React.Suspense>
-                      </AIPanelErrorBoundary>
-                      </div>
-                  </div>
-               )}
-               {aiPanelVisible && aiChatDetached && !hasNativeDetachedWindowManager() && (
-                  <FloatingAIChatWindow
-                    darkMode={darkMode}
-                    bgColor={bgContent}
-                    overlayTheme={overlayTheme}
-                    renderNonce={aiPanelRenderNonce}
-                    onOpenSettings={(providerId) => handleOpenAISettings(providerId)}
-                    onRenderError={handleAIPanelRenderError}
-                    onRetryRender={handleRetryAIPanelRender}
-                    onRegisterTerminalGuard={registerAIPanelTerminalGuard}
-                  />
-               )}
              </div>
 
           </Content>
@@ -8835,13 +8331,6 @@ function App() {
                         title: t('app.data_root.current_directory'),
                         description: t('app.data_root.description'),
                         onClick: () => handleOpenToolCenterPane('config', 'data-root-application'),
-                      },
-                      {
-                        key: 'data-root-agent',
-                        icon: <RobotOutlined />,
-                        title: t('app.data_root.agent_data.title'),
-                        description: t('app.data_root.agent_data.description'),
-                        onClick: () => handleOpenToolCenterPane('config', 'data-root-agent'),
                       },
                       {
                         key: 'data-root-saved-queries',
@@ -8957,11 +8446,7 @@ function App() {
             ) ?? combinedSettingsCenterGroups[0];
             const activeSettingsCenterTreeItemKey = activeSettingsCenterPane?.key === 'theme'
               ? `theme-${themeModalSection}`
-              : activeSettingsCenterPane?.key === 'ai'
-                ? (aiSettingsSection === 'providers' && aiSettingsProviderView === 'connected'
-                    ? 'ai-providers-connected'
-                    : `ai-${aiSettingsSection}`)
-                : (activeSettingsCenterPane?.key ?? null);
+              : (activeSettingsCenterPane?.key ?? null);
             const activeSettingsCenterPaneItem = activeSettingsCenterPane
               ? (
                   findSettingsCenterTreeItem(
@@ -9120,11 +8605,9 @@ function App() {
               }
 
               if (activeSettingsCenterPane.key.startsWith('data-root')) {
-                const dataDirectorySection = activeSettingsCenterPane.key === 'data-root-agent'
-                  ? 'agent'
-                  : activeSettingsCenterPane.key === 'data-root-saved-queries'
-                    ? 'saved-queries'
-                    : 'application';
+                const dataDirectorySection = activeSettingsCenterPane.key === 'data-root-saved-queries'
+                  ? 'saved-queries'
+                  : 'application';
                 if (isWebRuntime) {
                   return renderDataDirectorySettings(dataDirectorySection, true);
                 }
@@ -9313,7 +8796,7 @@ function App() {
             return (
               <SettingsCenterWorkbenchRegistrar>
                 <div
-                  className={`gonavi-settings-center-modal gonavi-settings-center-workbench${activeSettingsCenterPane?.key === 'ai' ? ' gonavi-provider-settings-host' : ''}`}
+                  className="gonavi-settings-center-modal gonavi-settings-center-workbench"
                   style={{
                     height: '100%',
                     minHeight: 0,
