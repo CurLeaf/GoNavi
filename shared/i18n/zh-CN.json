@@ -7679,6 +7679,7 @@
   "query_editor.result.execution_success": "执行成功",
   "query_editor.result.tab_title": "结果 {{index}}（{{count}}）",
   "query_editor.result.tab_title_success": "结果 {{index}} ✓",
+  "query_editor.results.truncated": "结果已截断到 {{maxRows}} 行",
   "query_editor.results_panel.action.hide": "隐藏",
   "query_editor.results_panel.aria.hide": "隐藏结果区",
   "query_editor.results_panel.detached.close": "关闭窗口",

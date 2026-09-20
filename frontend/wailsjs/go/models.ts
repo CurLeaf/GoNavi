@@ -2571,6 +2571,18 @@ export namespace connection {
 	        this.transactionPending = source["transactionPending"];
 	    }
 	}
+	export class QueryRowBudgetOptions {
+	    maxRowsPerResult: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new QueryRowBudgetOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.maxRowsPerResult = source["maxRowsPerResult"];
+	    }
+	}
 	
 	export class SaveConnectionSidebarLayoutInput {
 	    expectedRevision: number;

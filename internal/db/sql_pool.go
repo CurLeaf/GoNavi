@@ -54,7 +54,7 @@ func configureSQLConnectionPool(db *sql.DB, dbType string) {
 		return
 	}
 	db.SetMaxOpenConns(defaultSQLMaxOpenConns)
-	db.SetMaxIdleConns(0)
+	db.SetMaxIdleConns(defaultSQLMaxIdleConns)
 	db.SetConnMaxIdleTime(resolveSQLConnectionPoolMaxIdleTime(dbType))
 	db.SetConnMaxLifetime(defaultSQLConnMaxLifetime)
 }

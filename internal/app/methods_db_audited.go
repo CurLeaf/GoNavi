@@ -197,11 +197,12 @@ func (executor *MCPQueryExecutor) dbQueryMultiAuthorizedContext(
 		}, effectiveDialect
 	}
 	return executor.app.dbQueryMulti(resolvedConfig, dbName, query, "", dbQueryMultiAuditOptions{
-		auditAll:         true,
-		auditWrites:      true,
-		source:           "mcp",
-		executionContext: ctx,
-		RowBudget:        maxRowsPerResult,
+		auditAll:                 true,
+		auditWrites:              true,
+		source:                   "mcp",
+		executionContext:         ctx,
+		RowBudget:                maxRowsPerResult,
+		StopRemainingOnRowBudget: true,
 	}), effectiveDialect
 }
 

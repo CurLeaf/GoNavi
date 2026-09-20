@@ -7679,6 +7679,7 @@
   "query_editor.result.execution_success": "Ausführung erfolgreich",
   "query_editor.result.tab_title": "Ergebnis {{index}} ({{count}})",
   "query_editor.result.tab_title_success": "Ergebnis {{index}} ✓",
+  "query_editor.results.truncated": "Ergebnis auf {{maxRows}} Zeilen gekürzt",
   "query_editor.results_panel.action.hide": "Ausblenden",
   "query_editor.results_panel.aria.hide": "Ergebnisbereich ausblenden",
   "query_editor.results_panel.detached.close": "Fenster schließen",

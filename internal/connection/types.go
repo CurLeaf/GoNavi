@@ -390,6 +390,12 @@ type ResultSetData struct {
 
 const QueryCancellationStateUnsupported = "unsupported"
 
+// QueryRowBudgetOptions 限制单次查询每个结果集物化的行数。
+// MaxRowsPerResult 为 0 或不传表示不限制，语义与 db.NewRowBudget 一致。
+type QueryRowBudgetOptions struct {
+	MaxRowsPerResult int `json:"maxRowsPerResult"`
+}
+
 // QueryResult 是 Wails 绑定方法的统一响应格式，前端通过此结构体接收后端结果。
 type QueryResult struct {
 	Success            bool        `json:"success"`

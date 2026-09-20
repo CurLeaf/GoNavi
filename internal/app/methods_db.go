@@ -1149,8 +1149,12 @@ type dbQueryMultiAuditOptions struct {
 	synchronousConnectionWait bool
 	classifyConnectionErrors  bool
 	// RowBudget 为每个结果集的物化行数上限，0 表示不限制。
-	// 仅无界面调用方（如 MCP）需要设置；达到上限后停止读取并标记截断。
+	// 达到上限后停止读取并标记截断；不阻止 DML 本身执行。
 	RowBudget int
+	// StopRemainingOnRowBudget 为 true 时，逐条执行路径在某一结果集触达行预算后
+	// 不再执行后续语句。MCP 需要该行为；SQL 编辑器必须为 false，避免截断 SELECT
+	// 后静默跳过后续写入。
+	StopRemainingOnRowBudget bool
 }
 
 func buildQueryConnectionFailure(err error, queryID string, classify bool) connection.QueryResult {
@@ -1553,22 +1557,6 @@ func (a *App) dbQueryWithCancel(
 		return buildWriteExecutionFailure(ctx, err, queryID)
 	}
 	return connection.QueryResult{Success: true, Data: map[string]int64{"affectedRows": affected}, QueryID: queryID}
-}
-
-// DBQueryMulti 执行可能包含多条 SQL 语句的查询，返回多个结果集。
-// 如果底层驱动支持 MultiResultQuerier，一次性执行所有语句；
-// 否则按分号拆分后逐条执行，模拟多结果集。
-func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, query string, queryID string) connection.QueryResult {
-	explicitQuery := strings.TrimSpace(queryID) != ""
-	auditSource := "query_editor"
-	if !explicitQuery {
-		auditSource = "application_api"
-	}
-	return a.dbQueryMulti(config, dbName, query, queryID, dbQueryMultiAuditOptions{
-		auditAll:    explicitQuery || a.webRuntime,
-		auditWrites: true,
-		source:      auditSource,
-	})
 }
 
 func (a *App) dbQueryMulti(
@@ -2033,10 +2021,13 @@ func (a *App) dbQueryMulti(
 	summaryBoundaryMode := sqlaudit.BoundaryModeImplicit
 	summaryCommitMode := sqlaudit.CommitModeAuto
 	for idx, stmt := range statements {
-		if rowBudget.Truncated() {
-			// 前一语句已达行预算并停止读取，剩余语句不再执行。
+		if auditOptions.StopRemainingOnRowBudget && rowBudget.Truncated() {
+			// MCP 等无界面调用方：前一语句已达行预算，剩余语句不再执行。
+			// 编辑器 Options 路径不置该标志，避免截断 SELECT 后静默跳过后续 DML。
 			break
 		}
+		previouslyTruncated := rowBudget.Truncated()
+		resultStart := len(resultSets)
 		stmt = strings.TrimSpace(stmt)
 		if stmt == "" {
 			continue
@@ -2186,6 +2177,7 @@ func (a *App) dbQueryMulti(
 					appendStatementAudit(stmt, idx+1, statementStartedAt, rowsAffected, rowsReturned, statementBoundaryMode, statementCommitMode, nil)
 					executedCount++
 					textTransactionOpen = advancesSQLAuditTextTransaction(stmt, textTransactionOpen)
+					markNewResultSetsTruncatedIfBudgetGrew(resultSets, resultStart, rowBudget, previouslyTruncated)
 					continue
 				}
 				if data == nil {
@@ -2203,6 +2195,7 @@ func (a *App) dbQueryMulti(
 				appendStatementAudit(stmt, idx+1, statementStartedAt, 0, int64(len(data)), statementBoundaryMode, statementCommitMode, nil)
 				executedCount++
 				textTransactionOpen = advancesSQLAuditTextTransaction(stmt, textTransactionOpen)
+				markNewResultSetsTruncatedIfBudgetGrew(resultSets, resultStart, rowBudget, previouslyTruncated)
 				continue
 			}
 			if isReadStmt {
@@ -2292,13 +2285,17 @@ func (a *App) dbQueryMulti(
 	return summarizeMultiStatementResultWithCommitMode(connection.QueryResult{Success: true, Data: resultSets, QueryID: queryID, Message: fallbackMsg}, executedCount, 0, summaryBoundaryMode, summaryCommitMode, false)
 }
 
-// applyRowBudgetTruncation 在达到行预算后，把截断标记落到最后物化的结果集上：
-// 预算耗尽即停止读取，最后一个结果集就是被截断的那个。多结果集扫描路径
-// （scanMultiRows / SQL Server）已在结果集内自带标记，此处是单结果集路径的
-// 统一入口，重复标记幂等。
+// applyRowBudgetTruncation 在达到行预算后补打截断标记。逐条路径会在真正触达
+// 预算的那个结果集上先打标；此处只在原生多结果集等尚未打标的路径上，把标记
+// 落到最后一个结果集，且已有 Truncated 时保持幂等。
 func applyRowBudgetTruncation(results []connection.ResultSetData, budget *db.RowBudget) {
 	if budget == nil || !budget.Truncated() || len(results) == 0 {
 		return
+	}
+	for i := range results {
+		if results[i].Truncated {
+			return
+		}
 	}
 	results[len(results)-1].Truncated = true
 }

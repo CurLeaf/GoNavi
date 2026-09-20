@@ -283,6 +283,11 @@ export interface JVMAuditRecord {
   result: string;
 }
 
+/** Per-result row budget for Options query methods. 0 means unlimited. */
+export interface QueryRowBudgetOptions {
+  maxRowsPerResult: number;
+}
+
 export interface ConnectionConfig {
   id?: string;
   type: string;
