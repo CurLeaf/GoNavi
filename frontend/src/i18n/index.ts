@@ -139,7 +139,7 @@ const driverModalCatalogAliases: Record<string, CatalogAlias> = {
   "driver.modal.error.unknown": { aliasKey: "common.unknown" },
   "driver.modal.error.versionList": { aliasKey: "driver_manager.message.load_version_failed" },
   "driver.modal.error.versionListLoad": { aliasKey: "driver_manager.message.load_version_failed_detail" },
-  "driver.modal.footer.background": { aliasKey: "app.about.action.hide_to_background" },
+  "driver.modal.footer.background": { aliasKey: "driver_manager.action.hide_to_background" },
   "driver.modal.footer.close": { aliasKey: "driver_manager.action.close" },
   "driver.modal.footer.networkCheck": { aliasKey: "driver_manager.action.network_check" },
   "driver.modal.footer.refresh": { aliasKey: "driver_manager.action.refresh" },

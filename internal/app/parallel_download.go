@@ -290,7 +290,7 @@ func markGatedDispatcherTerminalError(rawURL string, downloadErr error) (error, 
 	if errors.As(downloadErr, &terminal) {
 		return downloadErr, true
 	}
-	var localized localizedUpdateError
+	var localized localizedDownloadError
 	if errors.As(downloadErr, &localized) && isCurrentAssetTerminalHTTPStatus(localized.httpStatus) {
 		return downloadCurrentAssetTerminalError{cause: downloadErr}, true
 	}
@@ -376,14 +376,14 @@ func resolveDispatcherDownloadCandidates(client *http.Client, rawURL string) ([]
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := doUpdateRequest(client, req)
+	resp, err := doDownloadRequest(client, req)
 	if err != nil {
 		return staticFallback(err, nil)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, downloadDispatcherMaxResponse))
-		return staticFallback(classifyGitHubUpdateHTTPError(resp.StatusCode, body, resp.Header, false), resp)
+		return staticFallback(classifyGitHubHTTPError(resp.StatusCode, body, resp.Header, false), resp)
 	}
 	var value dispatcherDownloadResponse
 	decoder := json.NewDecoder(io.LimitReader(resp.Body, downloadDispatcherMaxResponse))
@@ -472,7 +472,7 @@ func measureValidatedDownloadRange(client *http.Client, rawURL string) (download
 		return downloadCandidateProbe{}, err
 	}
 	started := time.Now()
-	resp, err := doUpdateRequest(client, req)
+	resp, err := doDownloadRequest(client, req)
 	headersAt := time.Now()
 	if err != nil {
 		return downloadCandidateProbe{}, err
@@ -490,7 +490,7 @@ func measureValidatedDownloadRange(client *http.Client, rawURL string) (download
 	}
 	if resp.StatusCode != http.StatusPartialContent {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		return downloadCandidateProbe{}, classifyGitHubUpdateHTTPError(resp.StatusCode, body, resp.Header, false)
+		return downloadCandidateProbe{}, classifyGitHubHTTPError(resp.StatusCode, body, resp.Header, false)
 	}
 	parsed, err := parseValidatedContentRange(resp.Header.Get("Content-Range"))
 	expectedEnd := requestEnd
@@ -708,7 +708,7 @@ func downloadOneValidatedRange(
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			lastErr = wrapUpdateNetworkError(err)
+			lastErr = wrapDownloadNetworkError(err)
 		} else {
 			parsed, rangeErr := parseValidatedContentRange(resp.Header.Get("Content-Range"))
 			if resp.StatusCode != http.StatusPartialContent || rangeErr != nil || parsed.start != start || parsed.end != end || parsed.total != total || resp.ContentLength != wantLength {
@@ -724,11 +724,11 @@ func downloadOneValidatedRange(
 				if gatedDispatcherResponse(rawURL, resp) &&
 					(status == http.StatusBadRequest || status == http.StatusNotFound || status == http.StatusGone) {
 					return downloadCurrentAssetTerminalError{
-						cause: classifyGitHubUpdateHTTPError(status, body, resp.Header, false),
+						cause: classifyGitHubHTTPError(status, body, resp.Header, false),
 					}
 				}
 				if status == http.StatusBadRequest || status == http.StatusNotFound || status == http.StatusGone || status == http.StatusConflict {
-					return classifyGitHubUpdateHTTPError(status, body, resp.Header, false)
+					return classifyGitHubHTTPError(status, body, resp.Header, false)
 				} else {
 					lastErr = fmt.Errorf("range response validation failed: status=%d content-range=%q content-length=%d", status, resp.Header.Get("Content-Range"), resp.ContentLength)
 				}
@@ -751,7 +751,7 @@ func downloadOneValidatedRange(
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(time.Duration(attempt) * updateNetworkRetryDelay):
+			case <-time.After(time.Duration(attempt) * downloadNetworkRetryDelay):
 			}
 		}
 	}
@@ -994,10 +994,10 @@ func downloadFileWithHashSequential(
 		if gatedDispatcherResponse(rawURL, resp) &&
 			(resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone) {
 			return "", downloadCurrentAssetTerminalError{
-				cause: classifyGitHubUpdateHTTPError(resp.StatusCode, body, resp.Header, false),
+				cause: classifyGitHubHTTPError(resp.StatusCode, body, resp.Header, false),
 			}
 		}
-		return "", classifyGitHubUpdateHTTPError(resp.StatusCode, body, resp.Header, false)
+		return "", classifyGitHubHTTPError(resp.StatusCode, body, resp.Header, false)
 	}
 	_ = os.Remove(filePath)
 	var out *os.File
@@ -1011,7 +1011,7 @@ func downloadFileWithHashSequential(
 		}
 	}
 	if err != nil {
-		return "", localizedUpdateError{key: "app.update.backend.error.package_file_busy", params: map[string]any{"detail": err.Error()}}
+		return "", localizedDownloadError{key: "driver_manager.backend.error.package_file_busy", params: map[string]any{"detail": err.Error()}}
 	}
 	hasher := sha256.New()
 	total := resp.ContentLength
@@ -1021,7 +1021,7 @@ func downloadFileWithHashSequential(
 	}
 	if _, err := io.Copy(io.MultiWriter(out, hasher, progressWriter), resp.Body); err != nil {
 		_ = out.Close()
-		return "", wrapUpdateNetworkError(err)
+		return "", wrapDownloadNetworkError(err)
 	}
 	if onProgress != nil {
 		onProgress(progressWriter.written, total)

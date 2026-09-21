@@ -151,22 +151,6 @@ if (
     const mockConnectionSecrets = new Map<string, any>();
     let mockGlobalProxy: any = { enabled: false, type: 'socks5', host: '', port: 1080, user: '', password: '', hasPassword: false };
     let mockDownloadSource: 'cst' | 'bero' | 'github' = 'cst';
-    let mockUpdateChannel: 'latest' | 'dev' = 'latest';
-    const mockReleasePublishedAt = '2026-07-08T11:15:00Z';
-    const buildMockUpdateInfo = () => ({
-        hasUpdate: false,
-        channel: mockUpdateChannel,
-        currentVersion: '0.0.0',
-        latestVersion: mockUpdateChannel === 'dev' ? 'dev-browser-mock' : '0.0.0',
-        releaseName: mockUpdateChannel === 'dev' ? 'Dev Build (dev-browser-mock)' : 'Browser Mock Release',
-        releasePublishedAt: mockReleasePublishedAt,
-        releaseNotesUrl: mockUpdateChannel === 'dev'
-            ? 'https://github.com/Syngnat/GoNavi/releases/tag/dev-latest'
-            : 'https://github.com/Syngnat/GoNavi/releases/latest',
-        releaseNotes: mockUpdateChannel === 'dev'
-            ? '## 🧪 测试版本 (Dev Build)\n\n## ✨ 新功能\n\n- 浏览器 mock：dev 通道更新日志样例\n'
-            : '## ✨ 新功能\n\n- 浏览器 mock：latest 通道更新日志样例\n\n## 🐛 问题修复\n\n- 示例修复项\n',
-    });
     let mockDataRootInfo: any = {
         path: 'C:/mock/.gonavi',
         defaultPath: 'C:/mock/.gonavi',
@@ -408,10 +392,6 @@ if (
     const mockGo = {
         app: {
             App: {
-                CheckUpdate: async () => ({ success: false }),
-                DownloadUpdate: async () => ({ success: false }),
-                StartUpdateDownload: async () => ({ success: false, message: 'Browser mock does not provide an update package' }),
-                GetUpdateDownloadTask: async () => ({ success: true, data: { task: null } }),
                 SetLanguage: async () => null,
                 // The native backend downloads, verifies, and caches these immutable
                 // assets. Browser/Playwright harnesses have no Go backend, so point
@@ -692,16 +672,6 @@ if (
                 },
                 GetAppInfo: async () => ({ success: true, data: { version: '0.0.0', author: 'GoNavi' } }),
                 GetDataRootDirectoryInfo: async () => ({ success: true, data: cloneBrowserMockValue(mockDataRootInfo) }),
-                CheckForUpdates: async () => ({
-                    success: true,
-                    data: buildMockUpdateInfo(),
-                }),
-                CheckForUpdatesSilently: async () => ({
-                    success: true,
-                    data: buildMockUpdateInfo(),
-                }),
-                GetUpdateChannel: async () => ({ success: true, data: { channel: mockUpdateChannel } }),
-                OpenDownloadedUpdateDirectory: async () => ({ success: false }),
                 OpenDriverDownloadDirectory: async (path: string) => ({ success: true, data: { path } }),
                 OpenDataRootDirectory: async () => ({ success: true }),
                 OpenLogDirectory: async () => ({ success: true }),
@@ -748,7 +718,6 @@ if (
                 RenameSQLDirectory: async (directoryPath: string, name: string) => ({ success: true, data: { directoryPath: `${directoryPath.replace(/[\\/][^\\/]*$/, '')}/${name}`, name } }),
                 WriteSQLFile: async (_filePath: string, _content: string) => ({ success: true }),
                 ExportSQLFile: async (_defaultName: string, _content: string) => ({ success: false, message: t('app.browser_mock.export_sql_unsupported') }),
-                InstallUpdateAndRestart: async (_closeAllWindowsInstancesConfirmed: boolean) => ({ success: false }),
                 ImportConfigFile: async () => ({ success: false, message: '已取消' }),
                 ImportConnectionsPayload: async (raw: string, _password?: string) => {
                     try {
@@ -784,10 +753,6 @@ if (
                     const normalized = String(source || '').trim().toLowerCase();
                     mockDownloadSource = normalized === 'bero' || normalized === 'github' ? normalized : 'cst';
                     return { source: mockDownloadSource };
-                },
-                SetUpdateChannel: async (channel: string) => {
-                    mockUpdateChannel = String(channel || '').trim().toLowerCase() === 'dev' ? 'dev' : 'latest';
-                    return { success: true, data: { channel: mockUpdateChannel } };
                 },
                 SaveGlobalProxy: async (input: any) => saveMockGlobalProxy(input),
                 ImportLegacyGlobalProxy: async (input: any) => saveMockGlobalProxy(input),

@@ -18,8 +18,8 @@ type securityUpdateNormalizedPreview struct {
 }
 
 func (a *App) GetSecurityUpdateStatus() (SecurityUpdateStatus, error) {
-	a.updateMu.Lock()
-	defer a.updateMu.Unlock()
+	a.securityUpdateMu.Lock()
+	defer a.securityUpdateMu.Unlock()
 
 	repo := newSecurityUpdateStateRepository(a.configDir)
 	status, err := repo.LoadMarker()
@@ -38,8 +38,8 @@ func (a *App) GetSecurityUpdateStatus() (SecurityUpdateStatus, error) {
 }
 
 func (a *App) StartSecurityUpdate(request StartSecurityUpdateRequest) (SecurityUpdateStatus, error) {
-	a.updateMu.Lock()
-	defer a.updateMu.Unlock()
+	a.securityUpdateMu.Lock()
+	defer a.securityUpdateMu.Unlock()
 
 	repo := newSecurityUpdateStateRepository(a.configDir)
 	status, err := repo.StartRound(request)
@@ -50,8 +50,8 @@ func (a *App) StartSecurityUpdate(request StartSecurityUpdateRequest) (SecurityU
 }
 
 func (a *App) RetrySecurityUpdateCurrentRound(request RetrySecurityUpdateRequest) (SecurityUpdateStatus, error) {
-	a.updateMu.Lock()
-	defer a.updateMu.Unlock()
+	a.securityUpdateMu.Lock()
+	defer a.securityUpdateMu.Unlock()
 
 	repo := newSecurityUpdateStateRepository(a.configDir)
 	status, err := repo.RetryRound(request)
@@ -85,8 +85,8 @@ func (a *App) RetrySecurityUpdateCurrentRound(request RetrySecurityUpdateRequest
 }
 
 func (a *App) RestartSecurityUpdate(request RestartSecurityUpdateRequest) (SecurityUpdateStatus, error) {
-	a.updateMu.Lock()
-	defer a.updateMu.Unlock()
+	a.securityUpdateMu.Lock()
+	defer a.securityUpdateMu.Unlock()
 
 	repo := newSecurityUpdateStateRepository(a.configDir)
 	status, err := repo.RestartRound(request)
@@ -97,8 +97,8 @@ func (a *App) RestartSecurityUpdate(request RestartSecurityUpdateRequest) (Secur
 }
 
 func (a *App) DismissSecurityUpdateReminder() (SecurityUpdateStatus, error) {
-	a.updateMu.Lock()
-	defer a.updateMu.Unlock()
+	a.securityUpdateMu.Lock()
+	defer a.securityUpdateMu.Unlock()
 
 	now := nowRFC3339()
 	repo := newSecurityUpdateStateRepository(a.configDir)

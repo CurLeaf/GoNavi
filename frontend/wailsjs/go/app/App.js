@@ -62,14 +62,6 @@ export function CheckDriverNetworkStatus() {
   return window['go']['app']['App']['CheckDriverNetworkStatus']();
 }
 
-export function CheckForUpdates() {
-  return window['go']['app']['App']['CheckForUpdates']();
-}
-
-export function CheckForUpdatesSilently() {
-  return window['go']['app']['App']['CheckForUpdatesSilently']();
-}
-
 export function ClearSQLAuditEvents(arg1) {
   return window['go']['app']['App']['ClearSQLAuditEvents'](arg1);
 }
@@ -478,10 +470,6 @@ export function DownloadDriverPackage(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DownloadDriverPackage'](arg1, arg2, arg3, arg4);
 }
 
-export function DownloadUpdate() {
-  return window['go']['app']['App']['DownloadUpdate']();
-}
-
 export function DropDatabase(arg1, arg2) {
   return window['go']['app']['App']['DropDatabase'](arg1, arg2);
 }
@@ -706,14 +694,6 @@ export function GetUnboundSavedQueries() {
   return window['go']['app']['App']['GetUnboundSavedQueries']();
 }
 
-export function GetUpdateChannel() {
-  return window['go']['app']['App']['GetUpdateChannel']();
-}
-
-export function GetUpdateDownloadTask() {
-  return window['go']['app']['App']['GetUpdateDownloadTask']();
-}
-
 export function ImportConfigFile() {
   return window['go']['app']['App']['ImportConfigFile']();
 }
@@ -772,10 +752,6 @@ export function InspectSavedConnectionsHealth(arg1) {
 
 export function InstallLocalDriverPackage(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['InstallLocalDriverPackage'](arg1, arg2, arg3, arg4);
-}
-
-export function InstallUpdateAndRestart(arg1) {
-  return window['go']['app']['App']['InstallUpdateAndRestart'](arg1);
 }
 
 export function JVMApplyChange(arg1, arg2) {
@@ -1036,10 +1012,6 @@ export function NacosUpdateService(arg1, arg2) {
 
 export function OpenDataRootDirectory() {
   return window['go']['app']['App']['OpenDataRootDirectory']();
-}
-
-export function OpenDownloadedUpdateDirectory() {
-  return window['go']['app']['App']['OpenDownloadedUpdateDirectory']();
 }
 
 export function OpenDriverDownloadDirectory(arg1) {
@@ -1402,10 +1374,6 @@ export function SetMacNativeWindowControls(arg1) {
   return window['go']['app']['App']['SetMacNativeWindowControls'](arg1);
 }
 
-export function SetUpdateChannel(arg1) {
-  return window['go']['app']['App']['SetUpdateChannel'](arg1);
-}
-
 export function SetWindowTranslucency(arg1, arg2, arg3) {
   return window['go']['app']['App']['SetWindowTranslucency'](arg1, arg2, arg3);
 }
@@ -1424,10 +1392,6 @@ export function StartSavedConnectionsHealthRun(arg1) {
 
 export function StartSecurityUpdate(arg1) {
   return window['go']['app']['App']['StartSecurityUpdate'](arg1);
-}
-
-export function StartUpdateDownload() {
-  return window['go']['app']['App']['StartUpdateDownload']();
 }
 
 export function TestConnection(arg1) {

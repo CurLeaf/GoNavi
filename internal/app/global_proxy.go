@@ -626,14 +626,14 @@ func (a *App) resolveGlobalProxyPasswordForInput(input connection.SaveGlobalProx
 func normalizeGlobalProxyTestURL(rawURL string) (string, error) {
 	trimmed := strings.TrimSpace(rawURL)
 	if trimmed == "" {
-		return "", localizedUpdateError{key: "app.proxy.backend.error.test_url_empty"}
+		return "", localizedDownloadError{key: "app.proxy.backend.error.test_url_empty"}
 	}
 	if !strings.Contains(trimmed, "://") {
 		trimmed = "https://" + trimmed
 	}
 	parsed, err := url.Parse(trimmed)
 	if err != nil {
-		return "", localizedUpdateError{
+		return "", localizedDownloadError{
 			key:    "app.proxy.backend.error.test_url_invalid",
 			params: map[string]any{"detail": err.Error()},
 		}
@@ -641,19 +641,19 @@ func normalizeGlobalProxyTestURL(rawURL string) (string, error) {
 	switch strings.ToLower(parsed.Scheme) {
 	case "http", "https":
 	default:
-		return "", localizedUpdateError{
+		return "", localizedDownloadError{
 			key:    "app.proxy.backend.error.test_scheme_unsupported",
 			params: map[string]any{"scheme": parsed.Scheme},
 		}
 	}
 	if strings.TrimSpace(parsed.Host) == "" {
-		return "", localizedUpdateError{key: "app.proxy.backend.error.test_host_missing"}
+		return "", localizedDownloadError{key: "app.proxy.backend.error.test_host_missing"}
 	}
 	return parsed.String(), nil
 }
 
 func (a *App) localizedGlobalProxyTestError(err error) string {
-	var localized localizedUpdateError
+	var localized localizedDownloadError
 	if errors.As(err, &localized) {
 		return a.appText(localized.key, localized.params)
 	}

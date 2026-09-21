@@ -41,10 +41,6 @@ export function CancelSavedConnectionsHealthRun(arg1:string):Promise<connection.
 
 export function CheckDriverNetworkStatus():Promise<connection.QueryResult>;
 
-export function CheckForUpdates():Promise<connection.QueryResult>;
-
-export function CheckForUpdatesSilently():Promise<connection.QueryResult>;
-
 export function ClearSQLAuditEvents(arg1:number):Promise<connection.QueryResult>;
 
 export function ClearSlowQueries(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
@@ -249,8 +245,6 @@ export function DismissSecurityUpdateReminder():Promise<app.SecurityUpdateStatus
 
 export function DownloadDriverPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
-export function DownloadUpdate():Promise<connection.QueryResult>;
-
 export function DropDatabase(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
 export function DropFunction(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
@@ -363,10 +357,6 @@ export function GetSlowQueries(arg1:connection.ConnectionConfig,arg2:string,arg3
 
 export function GetUnboundSavedQueries():Promise<Array<connection.SavedQuery>>;
 
-export function GetUpdateChannel():Promise<connection.QueryResult>;
-
-export function GetUpdateDownloadTask():Promise<connection.QueryResult>;
-
 export function ImportConfigFile():Promise<connection.QueryResult>;
 
 export function ImportConnectionsExcelFileBase64(arg1:string):Promise<connection.QueryResult>;
@@ -396,8 +386,6 @@ export function InspectSavedConnectionHealth(arg1:string):Promise<connection.Con
 export function InspectSavedConnectionsHealth(arg1:Array<string>):Promise<Array<connection.ConnectionHealthReport>>;
 
 export function InstallLocalDriverPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
-
-export function InstallUpdateAndRestart(arg1:boolean):Promise<connection.QueryResult>;
 
 export function JVMApplyChange(arg1:connection.ConnectionConfig,arg2:jvm.ChangeRequest):Promise<connection.QueryResult>;
 
@@ -528,8 +516,6 @@ export function NacosUpdateNamespace(arg1:connection.ConnectionConfig,arg2:app.N
 export function NacosUpdateService(arg1:connection.ConnectionConfig,arg2:app.NacosServicePayload):Promise<connection.QueryResult>;
 
 export function OpenDataRootDirectory():Promise<connection.QueryResult>;
-
-export function OpenDownloadedUpdateDirectory():Promise<connection.QueryResult>;
 
 export function OpenDriverDownloadDirectory(arg1:string):Promise<connection.QueryResult>;
 
@@ -711,8 +697,6 @@ export function SetLanguage(arg1:string):Promise<void>;
 
 export function SetMacNativeWindowControls(arg1:boolean):Promise<void>;
 
-export function SetUpdateChannel(arg1:string):Promise<connection.QueryResult>;
-
 export function SetWindowTranslucency(arg1:number,arg2:number,arg3:boolean):Promise<void>;
 
 export function Shutdown():Promise<void>;
@@ -722,8 +706,6 @@ export function StartDriverPackageDownload(arg1:string,arg2:string,arg3:string,a
 export function StartSavedConnectionsHealthRun(arg1:Array<string>):Promise<connection.ConnectionHealthRun>;
 
 export function StartSecurityUpdate(arg1:app.StartSecurityUpdateRequest):Promise<app.SecurityUpdateStatus>;
-
-export function StartUpdateDownload():Promise<connection.QueryResult>;
 
 export function TestConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 

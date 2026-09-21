@@ -94,17 +94,6 @@ func main() {
 	}
 
 	executablePath, executableErr := os.Executable()
-	if executableErr == nil {
-		maintenanceActive, err := app.WindowsUpdateMaintenanceActive(runtime.GOOS, executablePath)
-		if err != nil {
-			logger.Errorf("检查 Windows 更新维护状态失败：%v", err)
-			return
-		}
-		if maintenanceActive {
-			logger.Warnf("当前 GoNavi 安装正在更新，已阻止新进程启动：%s", executablePath)
-			return
-		}
-	}
 	handled, err := runSpecialMode(os.Args[1:])
 	if handled {
 		if err != nil && !isNormalSpecialModeExit(err) {

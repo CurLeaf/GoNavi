@@ -229,15 +229,6 @@ const DEFAULT_FONT_SIZE = 14;
 const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 20;
 const DEFAULT_STARTUP_FULLSCREEN = false;
-const DEFAULT_AUTO_CHECK_FOR_UPDATES = true;
-/** 自动检查更新间隔（分钟）；与关于页 Select 选项保持一致 */
-export const AUTO_CHECK_FOR_UPDATES_INTERVAL_OPTIONS = [
-  15, 30, 60, 120, 360, 720, 1440,
-] as const;
-const DEFAULT_AUTO_CHECK_FOR_UPDATES_INTERVAL_MINUTES = 30;
-const AUTO_CHECK_FOR_UPDATES_INTERVAL_OPTIONS_SET = new Set<number>(
-  AUTO_CHECK_FOR_UPDATES_INTERVAL_OPTIONS,
-);
 const LEGACY_DEFAULT_OPACITY = 0.95;
 const OPACITY_EPSILON = 1e-6;
 const MAX_SIDEBAR_PERSISTED_FILTER_LENGTH = 120;
@@ -1979,10 +1970,6 @@ interface AppState {
   fontSize: number;
   /** Legacy persisted name; true means maximise the startup window on every desktop platform. */
   startupFullscreen: boolean;
-  /** 启动后与定时静默检查更新；默认开启 */
-  autoCheckForUpdates: boolean;
-  /** 自动检查更新间隔（分钟），默认 30 */
-  autoCheckForUpdatesIntervalMinutes: number;
   globalProxy: GlobalProxyConfig;
   sqlFormatOptions: { keywordCase: "upper" | "lower" };
   queryOptions: QueryOptions;
@@ -2141,8 +2128,6 @@ interface AppState {
   setUiScale: (scale: number) => void;
   setFontSize: (size: number) => void;
   setStartupFullscreen: (enabled: boolean) => void;
-  setAutoCheckForUpdates: (enabled: boolean) => void;
-  setAutoCheckForUpdatesIntervalMinutes: (minutes: number) => void;
   setGlobalProxy: (proxy: Partial<GlobalProxyConfig>) => void;
   replaceGlobalProxy: (proxy: Partial<GlobalProxyConfig>) => void;
   setSqlFormatOptions: (options: { keywordCase: "upper" | "lower" }) => void;
@@ -3300,23 +3285,6 @@ const sanitizeStartupFullscreen = (value: unknown): boolean => {
   return value === true;
 };
 
-const sanitizeAutoCheckForUpdates = (value: unknown): boolean => {
-  return typeof value === "boolean" ? value : DEFAULT_AUTO_CHECK_FOR_UPDATES;
-};
-
-const sanitizeAutoCheckForUpdatesIntervalMinutes = (
-  value: unknown,
-): number => {
-  const minutes = Math.round(Number(value));
-  if (
-    Number.isFinite(minutes) &&
-    AUTO_CHECK_FOR_UPDATES_INTERVAL_OPTIONS_SET.has(minutes)
-  ) {
-    return minutes;
-  }
-  return DEFAULT_AUTO_CHECK_FOR_UPDATES_INTERVAL_MINUTES;
-};
-
 const sanitizeUiScale = (value: unknown): number => {
   return normalizeFloatInRange(
     value,
@@ -3517,8 +3485,6 @@ const PERSISTED_STATE_DEPENDENCY_KEYS = [
   "uiScale",
   "fontSize",
   "startupFullscreen",
-  "autoCheckForUpdates",
-  "autoCheckForUpdatesIntervalMinutes",
   "globalProxy",
   "sqlFormatOptions",
   "queryOptions",
@@ -3576,9 +3542,6 @@ const buildPersistedStateProjection = (
     uiScale: state.uiScale,
     fontSize: state.fontSize,
     startupFullscreen: state.startupFullscreen,
-    autoCheckForUpdates: state.autoCheckForUpdates,
-    autoCheckForUpdatesIntervalMinutes:
-      state.autoCheckForUpdatesIntervalMinutes,
     globalProxy:
       toTrimmedString(state.globalProxy.password) !== ""
         ? { ...state.globalProxy }
@@ -3710,9 +3673,6 @@ export const useStore = create<AppState>()(
       uiScale: DEFAULT_UI_SCALE,
       fontSize: DEFAULT_FONT_SIZE,
       startupFullscreen: DEFAULT_STARTUP_FULLSCREEN,
-      autoCheckForUpdates: DEFAULT_AUTO_CHECK_FOR_UPDATES,
-      autoCheckForUpdatesIntervalMinutes:
-        DEFAULT_AUTO_CHECK_FOR_UPDATES_INTERVAL_MINUTES,
       globalProxy: { ...DEFAULT_GLOBAL_PROXY },
       sqlFormatOptions: { keywordCase: "upper" },
       queryOptions: {
@@ -5402,15 +5362,6 @@ export const useStore = create<AppState>()(
         set({ startupFullscreen: nextValue });
         writePersistedStatePatch({ startupFullscreen: nextValue });
       },
-      setAutoCheckForUpdates: (enabled) => {
-        set({ autoCheckForUpdates: sanitizeAutoCheckForUpdates(enabled) });
-      },
-      setAutoCheckForUpdatesIntervalMinutes: (minutes) => {
-        set({
-          autoCheckForUpdatesIntervalMinutes:
-            sanitizeAutoCheckForUpdatesIntervalMinutes(minutes),
-        });
-      },
       setGlobalProxy: (proxy) =>
         set((state) => ({
           globalProxy: sanitizeGlobalProxy({ ...state.globalProxy, ...proxy }),
@@ -5829,13 +5780,6 @@ export const useStore = create<AppState>()(
         nextState.startupFullscreen = sanitizeStartupFullscreen(
           state.startupFullscreen,
         );
-        nextState.autoCheckForUpdates = sanitizeAutoCheckForUpdates(
-          state.autoCheckForUpdates,
-        );
-        nextState.autoCheckForUpdatesIntervalMinutes =
-          sanitizeAutoCheckForUpdatesIntervalMinutes(
-            state.autoCheckForUpdatesIntervalMinutes,
-          );
         nextState.globalProxy = sanitizeGlobalProxy(state.globalProxy);
         nextState.sqlFormatOptions = sanitizeSqlFormatOptions(
           state.sqlFormatOptions,
@@ -5960,13 +5904,6 @@ export const useStore = create<AppState>()(
           uiScale: sanitizeUiScale(state.uiScale),
           fontSize: sanitizeFontSize(state.fontSize),
           startupFullscreen: sanitizeStartupFullscreen(state.startupFullscreen),
-          autoCheckForUpdates: sanitizeAutoCheckForUpdates(
-            state.autoCheckForUpdates,
-          ),
-          autoCheckForUpdatesIntervalMinutes:
-            sanitizeAutoCheckForUpdatesIntervalMinutes(
-              state.autoCheckForUpdatesIntervalMinutes,
-            ),
           globalProxy: sanitizeGlobalProxy(state.globalProxy),
           tableSortPreference: sanitizeTableSortPreference(
             state.tableSortPreference,

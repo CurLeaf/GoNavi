@@ -112,12 +112,14 @@ type cloudBackupRestoreConfirmationToken struct {
 	expiresAt   time.Time
 }
 
+// cloudBackupCategoryOrder 是当前可备份的分类，顺序即展示顺序。
+// 应用内更新检查移除后不再产出 update_channel.json，因此该分类不再对外提供；
+// 但保留旧备份的还原映射（见 cloudBackupRestoreCategoryForFile）。
 var cloudBackupCategoryOrder = []string{
 	CloudBackupCategoryConnections,
 	CloudBackupCategorySavedQueries,
 	CloudBackupCategoryProxySettings,
 	CloudBackupCategoryDailySecrets,
-	CloudBackupCategoryUpdateSettings,
 }
 
 func defaultCloudBackupCategories() []string {
@@ -1334,6 +1336,7 @@ func cloudBackupRestoreCategoryForFile(path string) (string, error) {
 	case clean == "daily_secrets.json":
 		return CloudBackupCategoryDailySecrets, nil
 	case clean == "update_channel.json":
+		// 旧备份兼容：应用不再写入该文件，但删除映射会让旧备份整体还原失败。
 		return CloudBackupCategoryUpdateSettings, nil
 	default:
 		return "", fmt.Errorf("unsupported backup file: %s", path)

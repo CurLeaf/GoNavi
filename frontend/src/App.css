@@ -35,10 +35,6 @@ body[data-gonavi-detached='true'] #root {
   background-color: var(--gn-bg-app, transparent) !important;
 }
 
-body, #root {
-  border-radius: var(--gonavi-border-radius); /* Slightly rounded app window corners */
-}
-
 body,
 button,
 input,
@@ -2834,7 +2830,6 @@ body[data-ui-version="v2"] .gn-v2-titlebar .titlebar-web-logout-btn {
     min-height: 100% !important;
 }
 
-
 .titlebar-window-controls .titlebar-window-control-btn .anticon,
 .titlebar-window-controls .titlebar-window-control-btn svg {
     width: 12px;
@@ -2933,54 +2928,11 @@ body[data-ui-version="v2"] .gn-v2-titlebar .titlebar-window-controls > .ant-btn.
 .driver-manager-bulkbar.is-embedded-toolbar .driver-manager-import-directory-dropdown {
     flex-shrink: 0;
 }
-
 /* Mirror-source chip (Driver Manager + About) — accent bar + hover */
-.driver-manager-mirror-chip,
-.gonavi-about-download-source {
+.driver-manager-mirror-chip {
     position: relative;
     overflow: hidden;
     transition: box-shadow 0.15s ease, background-color 0.15s ease;
-}
-
-/* About：按内容确定宽度，字体放大或空间不足时允许换行。 */
-.gonavi-about-download-source {
-    display: inline-flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    width: max-content;
-    min-width: 0;
-    max-width: 100%;
-    margin-top: 10px;
-    padding: 6px 10px 6px 12px;
-    border-radius: 8px;
-    border: 1px solid transparent;
-    box-sizing: border-box;
-}
-
-.gonavi-about-download-source-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    flex-shrink: 0;
-}
-
-.gonavi-about-download-source-label,
-.gonavi-about-download-source-value {
-    font-size: 13px;
-    line-height: 1.2;
-    white-space: nowrap;
-}
-
-.gonavi-about-download-source-value {
-    font-weight: 600;
-}
-
-.gonavi-about-download-source-switch.ant-btn {
-    padding: 0;
-    height: auto;
-    font-weight: 600;
-    flex-shrink: 0;
 }
 
 /* 弹窗内的镜像源条：无描边的浅底色条，仅保留左侧来源色条。 */
@@ -2994,9 +2946,7 @@ body[data-ui-version="v2"] .gn-v2-titlebar .titlebar-window-controls > .ant-btn.
     border-radius: 8px;
     background: rgba(5, 5, 5, 0.03);
 }
-
-.driver-manager-mirror-chip::before,
-.gonavi-about-download-source::before {
+.driver-manager-mirror-chip::before {
     content: '';
     position: absolute;
     left: 0;
@@ -3005,34 +2955,22 @@ body[data-ui-version="v2"] .gn-v2-titlebar .titlebar-window-controls > .ant-btn.
     width: 3px;
     background: #94a3b8;
 }
-
-.driver-manager-mirror-chip[data-download-source='cst']::before,
-.gonavi-about-download-source[data-download-source='cst']::before {
+.driver-manager-mirror-chip[data-download-source='cst']::before {
     background: #f59e0b;
 }
-
-.driver-manager-mirror-chip[data-download-source='bero']::before,
-.gonavi-about-download-source[data-download-source='bero']::before {
+.driver-manager-mirror-chip[data-download-source='bero']::before {
     background: #0ea5e9;
 }
-
-.driver-manager-mirror-chip[data-download-source='github']::before,
-.gonavi-about-download-source[data-download-source='github']::before {
+.driver-manager-mirror-chip[data-download-source='github']::before {
     background: #64748b;
 }
-
-.driver-manager-mirror-chip:hover,
-.gonavi-about-download-source:hover {
+.driver-manager-mirror-chip:hover {
     box-shadow: 0 3px 14px rgba(15, 23, 42, 0.09);
 }
-
-body[data-theme='dark'] .driver-manager-mirror-chip:hover,
-body[data-theme='dark'] .gonavi-about-download-source:hover {
+body[data-theme='dark'] .driver-manager-mirror-chip:hover {
     box-shadow: 0 3px 16px rgba(0, 0, 0, 0.4);
 }
-
-.driver-manager-mirror-chip .ant-btn,
-.gonavi-about-download-source .ant-btn {
+.driver-manager-mirror-chip .ant-btn {
     color: var(--ant-color-primary, #1677ff);
 }
 
@@ -3061,9 +2999,7 @@ body[data-theme='dark'] .gonavi-about-download-source:hover {
 .driver-manager-mirror-chip-switch.ant-btn {
     flex-shrink: 0;
 }
-
-.driver-manager-mirror-chip.is-compact > .ant-btn,
-.gonavi-about-download-source > .ant-btn {
+.driver-manager-mirror-chip.is-compact > .ant-btn {
     margin-left: auto;
 }
 
@@ -3172,12 +3108,10 @@ body[data-theme='dark'] .gonavi-about-download-source:hover {
 
 /* embedded search moved to list head */
 
-
 .driver-manager-list-search-row > .ant-btn,
 .driver-manager-list-search-row > .ant-tooltip-disabled-compatible-wrapper {
     flex: 0 0 auto;
 }
-
 
 .driver-manager-directory-panel {
     min-width: 0;
@@ -3273,7 +3207,6 @@ body[data-theme='dark'] .gonavi-about-download-source:hover {
     background: #1677ff;
     animation: driver-net-pulse 1.1s ease-in-out infinite;
 }
-
 
 .driver-manager-network-check-btn .ant-btn-icon {
     display: inline-flex;
@@ -4142,23 +4075,6 @@ body[data-ui-version='v2'] .gonavi-sidebar-collapse-trigger.ant-btn[data-sidebar
   color: var(--gn-fg-1);
 }
 
-.gonavi-about-project-entry {
-  transition: background-color 160ms ease, color 160ms ease;
-}
-
-.gonavi-about-project-entry:hover:not(:disabled) {
-  background: rgba(15, 23, 42, 0.035) !important;
-}
-
-.gonavi-about-project-entry:focus-visible {
-  outline: 2px solid rgba(22, 163, 74, 0.55);
-  outline-offset: -2px;
-}
-
-body[data-theme='dark'] .gonavi-about-project-entry:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.045) !important;
-}
-
 /* Settings center is a flat control surface: UI copy stays sans-serif and
    machine-readable values opt into the mono stack through code/pre or local classes. */
 .gonavi-settings-center-modal,
@@ -4180,7 +4096,6 @@ body[data-theme='dark'] .gonavi-about-project-entry:hover:not(:disabled) {
   --gn-settings-font-caption: var(--gn-settings-font-secondary);
   font-size: var(--gn-settings-font-body);
 }
-
 
 .gonavi-settings-center-workbench-host,
 .gonavi-settings-center-workbench {
@@ -4604,248 +4519,6 @@ body[data-theme='dark'] .gonavi-language-option:hover {
 body[data-theme='dark'] .gonavi-language-option.is-selected {
   background: rgba(34, 197, 94, 0.12);
   color: #86efac;
-}
-
-body .gonavi-about-pane {
-  --gn-about-update-control-width: 200px;
-  --gn-about-label-width: 14rem;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 2px 2px 4px;
-}
-
-body .gonavi-about-identity {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-body .gonavi-about-identity img {
-  width: 48px;
-  height: 48px;
-  object-fit: contain;
-  flex-shrink: 0;
-}
-
-body .gonavi-about-section {
-  display: grid;
-  grid-template-columns: var(--gn-about-label-width) minmax(0, 1fr);
-  column-gap: 12px;
-  row-gap: 8px;
-  min-width: 0;
-}
-
-body .gonavi-about-section-title {
-  grid-column: 1 / -1;
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1.3;
-}
-
-body .gonavi-about-setting,
-body .gonavi-about-facts,
-body .gonavi-about-link-grid,
-body .gonavi-about-download-source {
-  grid-column: 1 / -1;
-}
-
-body .gonavi-about-setting {
-  display: grid;
-  grid-template-columns: subgrid;
-  row-gap: 2px;
-}
-
-body .gonavi-about-field,
-body .gonavi-about-fact {
-  display: grid;
-  grid-template-columns: subgrid;
-  grid-column: 1 / -1;
-  align-items: center;
-  min-height: 32px;
-}
-
-body .gonavi-about-field > :not(.gonavi-about-field-label) {
-  justify-self: start;
-  width: max-content;
-  max-width: 100%;
-}
-
-body .gonavi-about-field-control {
-  display: inline-flex;
-  justify-self: start;
-  width: max-content;
-  max-width: 100%;
-}
-
-body .gonavi-about-field-control .ant-switch {
-  flex: none;
-  width: 44px !important;
-  min-width: 44px !important;
-}
-
-body .gonavi-about-field-label {
-  box-sizing: border-box;
-  width: var(--gn-about-label-width);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-body .gonavi-about-field-hint {
-  grid-column: 2;
-  margin: 0;
-  padding: 0 0 2px;
-  line-height: 1.4;
-  font-size: var(--gn-font-size-sm, 12px);
-}
-
-body .gonavi-about-facts {
-  display: grid;
-  grid-template-columns: subgrid;
-  row-gap: 4px;
-  padding-top: 8px;
-  margin-top: 2px;
-}
-
-body .gonavi-about-fact {
-  min-height: 24px;
-}
-
-body .gonavi-about-link-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-@media (max-width: 920px) {
-  body .gonavi-about-link-grid {
-    grid-template-columns: 1fr;
-  }
-
-  body .gonavi-about-section,
-  body .gonavi-about-setting,
-  body .gonavi-about-facts,
-  body .gonavi-about-field,
-  body .gonavi-about-fact {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  body .gonavi-about-field-hint {
-    grid-column: 1;
-  }
-}
-
-body .gonavi-about-update-channel.ant-segmented.ant-segmented {
-  width: max-content;
-  max-width: 100%;
-  justify-self: start;
-  height: var(--gn-control-height, 32px) !important;
-  padding: 2px !important;
-  border: 1px solid rgba(15, 23, 42, 0.10) !important;
-  border-radius: 6px !important;
-  background: rgba(15, 23, 42, 0.035) !important;
-  box-shadow: none !important;
-}
-
-body .gonavi-about-auto-check-interval.ant-select {
-  width: var(--gn-about-update-control-width);
-  max-width: 100%;
-  justify-self: start;
-}
-
-body .gonavi-about-update-channel .ant-segmented-group {
-  gap: 3px;
-}
-
-body .gonavi-about-update-channel .ant-segmented-item {
-  flex: 0 0 auto;
-  min-width: 0;
-  border-radius: 4px !important;
-}
-
-body .gonavi-about-update-channel .ant-segmented-item-label {
-  min-height: calc(var(--gn-control-height, 32px) - 6px) !important;
-  overflow: visible !important;
-  padding: 0 12px !important;
-  color: rgba(15, 23, 42, 0.62) !important;
-  font-size: var(--gn-font-size-sm, 12px) !important;
-  font-weight: 600 !important;
-  line-height: calc(var(--gn-control-height, 32px) - 6px) !important;
-  white-space: nowrap;
-}
-
-body .gonavi-about-update-channel .ant-segmented-item-selected,
-body .gonavi-about-update-channel .ant-segmented-thumb {
-  background: rgba(255, 255, 255, 0.98) !important;
-  box-shadow: none !important;
-}
-
-body .gonavi-about-update-channel .ant-segmented-item-selected .ant-segmented-item-label {
-  color: #0f172a !important;
-}
-
-body .gonavi-about-update-channel.ant-segmented-disabled {
-  opacity: 0.58;
-}
-
-body[data-theme='dark'] .gonavi-about-update-channel.ant-segmented.ant-segmented {
-  border-color: rgba(148, 163, 184, 0.22) !important;
-  background: rgba(15, 23, 42, 0.55) !important;
-  box-shadow: none !important;
-}
-
-body[data-theme='dark'] .gonavi-about-update-channel .ant-segmented-item-label {
-  color: rgba(226, 232, 240, 0.62) !important;
-}
-
-body[data-theme='dark'] .gonavi-about-update-channel .ant-segmented-item-selected,
-body[data-theme='dark'] .gonavi-about-update-channel .ant-segmented-thumb {
-  background: rgba(30, 41, 59, 0.98) !important;
-  box-shadow: none !important;
-}
-
-body[data-theme='dark'] .gonavi-about-update-channel .ant-segmented-item-selected .ant-segmented-item-label {
-  color: #f8fafc !important;
-}
-
-/* ── 更新通道：选中项使用主题强调色实心胶囊 ──────────────
-   原先深色下选中态是 rgba(30,41,59,.98)，与容器底 rgba(15,23,42,.55) 对比极低，
-   选中状态几乎看不出来，且完全没有体现主题色。
-   --gn-accent 由当前工作台主题定义，因此这里沿用稳定的 v2 样式作用域。
-   ant-segmented-thumb 是切换时的滑动块，必须与选中项同色，否则动画期间会闪回灰底。
-
-   注意选择器必须带上 .ant-segmented（即 .gonavi-about-update-channel.ant-segmented），
-   把特异性提到 (0,4,1)：v2-theme.css:601 的
-   `body[data-ui-version="v2"] .ant-segmented .ant-segmented-item-selected`
-   特异性同为 (0,3,1) 且该文件在 App.css 之后导入，同分时后加载者胜出，
-   只写 (0,3,1) 会被它按 --gn-bg-panel 覆盖回灰底。 */
-body[data-ui-version='v2'] .gonavi-about-update-channel.ant-segmented .ant-segmented-item-selected,
-body[data-ui-version='v2'] .gonavi-about-update-channel.ant-segmented .ant-segmented-thumb {
-  background: var(--gn-accent) !important;
-  box-shadow: none !important;
-}
-
-body[data-ui-version='v2'] .gonavi-about-update-channel.ant-segmented .ant-segmented-item-selected,
-body[data-ui-version='v2'] .gonavi-about-update-channel.ant-segmented .ant-segmented-item-selected .ant-segmented-item-label {
-  color: #ffffff !important;
-}
-
-/* 未选项：透明底 + hover 时微亮，避免与选中胶囊争夺注意力。 */
-body[data-ui-version='v2'] .gonavi-about-update-channel.ant-segmented .ant-segmented-item:not(.ant-segmented-item-selected) {
-  background: transparent !important;
-}
-
-body[data-ui-version='v2'] .gonavi-about-update-channel.ant-segmented .ant-segmented-item:not(.ant-segmented-item-selected):hover .ant-segmented-item-label {
-  color: var(--gn-fg-1) !important;
-}
-
-/* 键盘可达性：Segmented 的焦点环也跟随主题色。 */
-body[data-ui-version='v2'] .gonavi-about-update-channel.ant-segmented .ant-segmented-item-input:focus-visible + .ant-segmented-item-label {
-  outline: 2px solid var(--gn-accent) !important;
-  outline-offset: -2px;
-  border-radius: 4px;
 }
 
 /* 数据库显示范围弹窗：搜索框与刷新按钮并排、等高 */
@@ -5572,7 +5245,6 @@ body .gonavi-theme-settings .gonavi-settings-row.is-control-only {
 body .gonavi-theme-settings .gonavi-settings-row.is-control-only .gonavi-settings-label {
   display: none;
 }
-
 
 /* Settings center: same 8px thin bar as the connection-tree overlay. */
 .gonavi-settings-center-workbench-host,

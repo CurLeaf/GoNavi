@@ -178,8 +178,7 @@ type App struct {
 	dbShuttingDown                bool
 	dbConnectBeforeForgetHook     func()       // Test seam for release/singleflight ordering.
 	mu                            sync.RWMutex // Mutex for cache access
-	updateMu                      sync.Mutex
-	updateState                   updateState
+	securityUpdateMu              sync.Mutex   // 保护安全更新（凭据迁移）状态
 	i18nMu                        sync.RWMutex
 	localizer                     *i18n.Localizer
 	applicationQuitMu             sync.Mutex

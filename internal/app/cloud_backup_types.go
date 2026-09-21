@@ -9,10 +9,11 @@ const (
 	CloudBackupProviderWebDAV = "webdav"
 	CloudBackupProviderS3     = "s3"
 
-	CloudBackupCategoryConnections    = "connections"
-	CloudBackupCategorySavedQueries   = "saved_queries"
-	CloudBackupCategoryProxySettings  = "proxy_settings"
-	CloudBackupCategoryDailySecrets   = "daily_secrets"
+	CloudBackupCategoryConnections   = "connections"
+	CloudBackupCategorySavedQueries  = "saved_queries"
+	CloudBackupCategoryProxySettings = "proxy_settings"
+	CloudBackupCategoryDailySecrets  = "daily_secrets"
+	// CloudBackupCategoryUpdateSettings 仅用于识别旧备份里的 update_channel.json，不再对外提供备份。
 	CloudBackupCategoryUpdateSettings = "update_settings"
 
 	CloudBackupScheduleManual    = "manual"

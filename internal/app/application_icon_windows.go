@@ -111,8 +111,8 @@ func repairPersistedWindowsApplicationShortcutsOnce(iconPath, configDir string) 
 }
 
 func currentWindowsShortcutIdentityState(iconPath string) (string, bool) {
-	executablePath := strings.TrimSpace(updateResolveInstallTarget())
-	if resolveUpdateInstallModeForExecutable("windows", executablePath) != updateInstallModeMSI {
+	executablePath := strings.TrimSpace(resolveInstallTarget())
+	if resolveInstallModeForExecutable("windows", executablePath) != installModeMSI {
 		return "", false
 	}
 	return strings.Join([]string{
@@ -346,7 +346,7 @@ $ErrorActionPreference = 'Stop'
 		"-NoProfile",
 		"-NonInteractive",
 		"-ExecutionPolicy",
-		windowsUpdatePowerShellExecutionPolicy,
+		windowsEmbeddedPowerShellExecutionPolicy,
 		"-File",
 		scriptPath,
 	)
