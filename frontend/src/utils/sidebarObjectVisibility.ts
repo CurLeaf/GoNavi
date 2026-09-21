@@ -8,6 +8,7 @@ export const SIDEBAR_OBJECT_GROUP_KEYS = [
   'packages',
   'triggers',
   'events',
+  'databaseLinks',
 ] as const;
 
 export type SidebarObjectGroupKey = (typeof SIDEBAR_OBJECT_GROUP_KEYS)[number];
@@ -19,6 +20,7 @@ export const DEFAULT_SIDEBAR_HIDDEN_OBJECT_GROUPS: SidebarObjectGroupKey[] = [
   'packages',
   'triggers',
   'events',
+  'databaseLinks',
 ];
 
 type SidebarObjectVisibilityTreeNode = {

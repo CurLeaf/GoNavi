@@ -62,9 +62,14 @@ func executeManagedSQLTransactionStatementsWithObserver(
 	statements []string,
 	text func(string, map[string]any) string,
 	observer managedSQLStatementObserver,
+	options ...managedTransactionStatementOptions,
 ) ([]connection.ResultSetData, error) {
 	if text == nil {
 		text = defaultDBBackendText
+	}
+	var executionOptions managedTransactionStatementOptions
+	if len(options) > 0 {
+		executionOptions = options[0]
 	}
 	resolvedDBType := resolveDDLDBType(runConfig)
 	buildStatementExecutionFailedError := func(index int, err error) error {
@@ -118,6 +123,7 @@ func executeManagedSQLTransactionStatementsWithObserver(
 			})
 		}
 
+		executableStmt, stmtArgs := resolveManagedTransactionExecution(stmt, statementIndex, executionOptions)
 		isReadStmt := isReadOnlySQLQuery(runConfig.Type, stmt)
 		tryQueryStmtFirst := shouldTryQueryResultFirst(runConfig.Type, stmt)
 		if isReadStmt || tryQueryStmtFirst {
@@ -129,7 +135,9 @@ func executeManagedSQLTransactionStatementsWithObserver(
 				usedMultiResult  bool
 				err              error
 			)
-			if isReadStmt && shouldPreferPlainReadQueryResult(resolvedDBType) {
+			if handledData, handledCols, handledErr, handled := queryManagedSQLTransactionArgs(ctx, session, executableStmt, stmtArgs); handled {
+				data, columns, err = handledData, handledCols, handledErr
+			} else if isReadStmt && shouldPreferPlainReadQueryResult(resolvedDBType) {
 				if sessionQueryMessageTarget != nil {
 					data, columns, messages, err = sessionQueryMessageTarget.QueryContextWithMessages(ctx, stmt)
 				} else if sessionQueryTarget != nil {
@@ -220,7 +228,13 @@ func executeManagedSQLTransactionStatementsWithObserver(
 			return nil, statementErr
 		}
 
-		affected, err := session.ExecContext(ctx, stmt)
+		var affected int64
+		var err error
+		if handledAffected, handledErr, handled := execManagedSQLTransactionArgs(ctx, session, executableStmt, stmtArgs); handled {
+			affected, err = handledAffected, handledErr
+		} else {
+			affected, err = session.ExecContext(ctx, stmt)
+		}
 		if err != nil {
 			statementErr := buildStatementExecutionFailedError(statementIndex, err)
 			emitObservation(0, 0, statementErr)

@@ -50,6 +50,7 @@ import { supportsTableTruncateAction } from '../tableDataDangerActions';
 import { noAutoCapInputProps } from '../../utils/inputAutoCap';
 import { confirmProductionMutation } from '../../utils/productionRiskConfirm';
 import { supportsOracleObjectCompilation } from './oracleObjectCompilation';
+import { buildSidebarCopyObjectNameMenuItem } from './sidebarCopyObjectNameMenu';
 import {
   buildNacosServicesTabData,
   resolveNacosNamespaceDiscoveryModeFromTreeNode,
@@ -1491,12 +1492,7 @@ export const buildSidebarNodeMenuItems = (
                 icon: <CodeOutlined />,
                 onClick: () => openSequenceDefinition(node)
             },
-            {
-                key: 'copy-sequence-name',
-                label: t('sidebar.menu.copy_object_name'),
-                icon: <CopyOutlined />,
-                onClick: () => handleCopyTableName(node)
-            },
+            buildSidebarCopyObjectNameMenuItem(node, handleCopyTableName, 'copy-sequence-name'),
         ];
     } else if (node.type === 'package') {
         return [
@@ -1506,12 +1502,17 @@ export const buildSidebarNodeMenuItems = (
                 icon: <CodeOutlined />,
                 onClick: () => openPackageDefinition(node)
             },
+            buildSidebarCopyObjectNameMenuItem(node, handleCopyTableName, 'copy-package-name'),
+        ];
+    } else if (node.type === 'database-link') {
+        return [
             {
-                key: 'copy-package-name',
-                label: t('sidebar.menu.copy_object_name'),
-                icon: <CopyOutlined />,
-                onClick: () => handleCopyTableName(node)
+                key: 'view-database-link-def',
+                label: t('sidebar.menu.view_object_definition'),
+                icon: <CodeOutlined />,
+                onClick: () => onDoubleClick(null, node),
             },
+            buildSidebarCopyObjectNameMenuItem(node, handleCopyTableName, 'copy-database-link-name'),
         ];
     } else if (node.type === 'db-event') {
         return [

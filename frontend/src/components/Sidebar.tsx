@@ -30,7 +30,10 @@ import {
   useSidebarObjectActions,
   type SidebarMessagePublishTarget,
 } from './sidebar/useSidebarObjectActions';
+import { tryOpenSidebarObjectNode } from './sidebar/sidebarOpenObjectNode';
 import { useSidebarSearchModel } from './sidebar/useSidebarSearchModel';
+import { useV2ExplorerFilterReset } from './sidebar/useV2ExplorerFilterReset';
+import SidebarFilterSlot from './sidebar/SidebarFilterSlot';
 import { useSidebarFilterPersistence } from './sidebar/useSidebarFilterPersistence';
 import { useSidebarV2ActionHandlers } from './sidebar/useSidebarV2ActionHandlers';
 import { useSidebarCommandSearchRunner } from './sidebar/useSidebarCommandSearchRunner';
@@ -39,6 +42,8 @@ import {
   normalizeDriverType,
   useSidebarTreeLoaders,
 } from './sidebar/useSidebarTreeLoaders';
+import * as sidebarTreeDrag from './sidebar/sidebarTreeDragSort';
+import { useSidebarTreeDragSort } from './sidebar/useSidebarTreeDragSort';
 export { formatSidebarDriverAgentUpdateWarning } from './sidebar/useSidebarTreeLoaders';
 import {
   V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID,
@@ -76,15 +81,11 @@ import { Tree, message, MenuProps, Input, Button, Form, Popover, Radio, Select, 
 import { APP_POPUP_Z_INDEX } from '../utils/overlayZIndex';
 import { createSidebarResizeAwareFrameScheduler } from '../utils/sidebarResizeLifecycle';
 	import {
-	  AppstoreOutlined,
 	  CaretDownFilled,
-	  ClockCircleOutlined,
 	  CloudOutlined,
 	  CloudDownloadOutlined,
-	  CodeOutlined,
 	  DatabaseOutlined,
 	  DownloadOutlined,
-	  EyeOutlined,
 	  GlobalOutlined,
 	  TableOutlined,
 	  SwitcherOutlined,
@@ -121,11 +122,7 @@ import { createSidebarResizeAwareFrameScheduler } from '../utils/sidebarResizeLi
   SafetyCertificateOutlined,
   SkinOutlined,
 	} from '@ant-design/icons';
-import {
-    buildSidebarRootConnectionToken,
-    buildSidebarRootTagToken,
-    useStore,
-} from '../store';
+import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import {
     selectRecentSidebarSqlLogs,
@@ -358,55 +355,11 @@ export const shouldKeepSidebarSwitcherCollapsedWhileLoading = (
 const { Search } = Input;
 const SIDEBAR_CACHED_DATABASE_TREE_LIMIT = 12;
 const NACOS_SERVICES_CHANGED_EVENT = 'gonavi:nacos-services-changed';
-const SIDEBAR_GROUP_HOVER_EXPAND_DELAY_MS = 500;
 const SIDEBAR_TREE_SCROLL_IDLE_DELAY_MS = 2000;
 
 const buildOptionalSchemaContext = (value: unknown): { schemaName?: string } => {
   const schemaName = String(value ?? '').trim();
   return schemaName ? { schemaName } : {};
-};
-
-type SidebarTreeDragEventLike = {
-  dataTransfer?: DataTransfer | null;
-  target?: EventTarget | null;
-};
-
-const createSidebarTreeDragPreview = (
-  event: SidebarTreeDragEventLike,
-  node: Pick<TreeNode, 'title' | 'type'>,
-): HTMLElement | null => {
-  if (typeof document === 'undefined' || !document.body || !event.dataTransfer) return null;
-
-  const preview = document.createElement('div');
-  preview.className = 'gn-v2-sidebar-tree-drag-preview';
-  preview.setAttribute('aria-hidden', 'true');
-  preview.setAttribute('data-node-type', String(node.type || ''));
-
-  const sourceRow = event.target && typeof (event.target as Element).closest === 'function'
-    ? (event.target as Element).closest('.ant-tree-treenode')
-    : null;
-  const sourceIcon = sourceRow?.querySelector('.ant-tree-iconEle > *');
-  const icon = document.createElement('span');
-  icon.className = 'gn-v2-sidebar-tree-drag-preview-icon';
-  if (sourceIcon) {
-    icon.appendChild(sourceIcon.cloneNode(true));
-  }
-  preview.appendChild(icon);
-
-  const label = document.createElement('span');
-  label.className = 'gn-v2-sidebar-tree-drag-preview-label';
-  label.textContent = String(node.title || '');
-  preview.appendChild(label);
-  document.body.appendChild(preview);
-
-  try {
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setDragImage(preview, 18, 15);
-  } catch {
-    preview.remove();
-    return null;
-  }
-  return preview;
 };
 
 type NacosServiceRefreshTreeNode = {
@@ -457,26 +410,6 @@ const buildConnectionRootRedisCommandTabTitle = (redisDbLabel = 'db0') =>
 
 const buildConnectionRootRedisMonitorTabTitle = (redisDbLabel = 'db0') =>
   t('sidebar.tab.redis_monitor', { database: redisDbLabel });
-
-const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; labelKey: string }> = [
-  { key: 'all', labelKey: 'sidebar.command_search.object_kind.all' },
-  { key: 'tables', labelKey: 'sidebar.command_search.object_kind.tables' },
-  { key: 'views', labelKey: 'sidebar.command_search.object_kind.views' },
-  { key: 'sequences', labelKey: 'sidebar.command_search.object_kind.sequences' },
-  { key: 'routines', labelKey: 'sidebar.command_search.object_kind.routines' },
-  { key: 'packages', labelKey: 'sidebar.command_search.object_kind.packages' },
-  { key: 'events', labelKey: 'sidebar.command_search.object_kind.events' },
-];
-
-const V2_EXPLORER_FILTER_ICONS: Record<V2ExplorerFilter, React.ReactNode> = {
-  all: <AppstoreOutlined />,
-  tables: <TableOutlined />,
-  views: <EyeOutlined />,
-  sequences: <KeyOutlined />,
-  routines: <CodeOutlined />,
-  packages: <SwitcherOutlined />,
-  events: <ClockCircleOutlined />,
-};
 
 const buildConnectionReloadSignature = (conn?: SavedConnection | null): string => {
   if (!conn) return '';
@@ -931,6 +864,7 @@ const Sidebar: React.FC<{
   const activeContext = useStore(state => state.activeContext);
   const tableAccessCount = useStore(state => state.tableAccessCount);
   const tableSortPreference = useStore(state => state.tableSortPreference);
+  const sidebarTreeOrders = useStore(state => state.sidebarTreeOrders);
   const pinnedSidebarTables = useStore(state => state.pinnedSidebarTables);
   const pinnedSidebarDatabases = useStore(state => state.pinnedSidebarDatabases);
   const recordTableAccess = useStore(state => state.recordTableAccess);
@@ -1117,13 +1051,19 @@ const Sidebar: React.FC<{
       [connectionIdSet, savedQueries],
   );
   const allSavedQueriesNode = useMemo<TreeNode | null>(() => {
-      return buildAllSavedQueriesTreeNode(savedQueries, connections, savedQueryGroups);
-  }, [connections, savedQueries, savedQueryGroups]);
+      return sidebarTreeDrag.applySidebarTreeOrdersToNode(
+          buildAllSavedQueriesTreeNode(savedQueries, connections, savedQueryGroups),
+          sidebarTreeOrders,
+          tableSortPreference,
+      );
+  }, [connections, savedQueries, savedQueryGroups, sidebarTreeOrders, tableSortPreference]);
   const sidebarHiddenObjectGroups = appearance.sidebarHiddenObjectGroups;
   const visibleSidebarTreeData = useMemo(
       () => filterSidebarTreeByHiddenObjectGroups(treeData, sidebarHiddenObjectGroups),
       [sidebarHiddenObjectGroups, treeData],
   );
+  const visibleOrderTreeRef = useRef(visibleSidebarTreeData);
+  visibleOrderTreeRef.current = visibleSidebarTreeData;
   const sidebarObjectVisibilitySignature = sidebarHiddenObjectGroups.join('|') || 'all';
   const snapshotTreeSelectionBeforeDrag = useCallback(() => {
       treeDragSelectionSnapshotRef.current = {
@@ -1206,6 +1146,37 @@ const Sidebar: React.FC<{
   useEffect(() => {
       treeDataRef.current = treeData;
   }, [treeData]);
+
+  const treeDrag = useSidebarTreeDragSort({
+      treeDataRef,
+      visibleOrderTreeRef,
+      connectionTags,
+      expandedKeysRef,
+      setExpandedKeys,
+      setAutoExpandParent,
+      setTreeData,
+      snapshotTreeSelectionBeforeDrag,
+      restoreTreeSelectionAfterDrag,
+      treeDragSelectSuppressUntilRef,
+      moveConnectionTag,
+      moveConnectionToTag,
+  });
+  const {
+      isTreeDragging,
+      sidebarTreeDragNodeRef,
+      sidebarTreeDropPreview,
+      treeShellClassName,
+      allowSidebarTreeDrop,
+      handleDrop,
+      handleDragStart,
+      handleDragEnter,
+      handleDragEnd,
+      handleSidebarTreeDragOverCapture,
+      handleSidebarTreeDropCapture,
+      markSidebarTreeMouseDownHandled,
+      nodeDraggable,
+      clearDropPreview,
+  } = treeDrag;
 
   useEffect(() => {
       if (!sidebarSingleDatabaseExpansion) return;
@@ -1296,24 +1267,6 @@ const Sidebar: React.FC<{
 
   // Connection Status State: key -> 'loading' | 'success' | 'error'
   const [connectionStates, setConnectionStates] = useState<Record<string, SidebarConnectionState>>({});
-
-  const [isTreeDragging, setIsTreeDragging] = useState(false);
-  const [sidebarTreeDragNodeType, setSidebarTreeDragNodeType] = useState<string | null>(null);
-  const [sidebarTreeDropPreview, setSidebarTreeDropPreview] = useState<{
-      nodeKey: string;
-      placement: SidebarTreeDropPlacement;
-  } | null>(null);
-  const sidebarTreeDragNodeRef = useRef<TreeNode | null>(null);
-  const sidebarTreeDropPreviewRef = useRef<typeof sidebarTreeDropPreview>(null);
-  const sidebarTreeDragPreviewElementRef = useRef<HTMLElement | null>(null);
-  const sidebarGroupHoverExpandTimerRef = useRef<number | null>(null);
-
-  useEffect(() => () => {
-      if (sidebarGroupHoverExpandTimerRef.current !== null) {
-          window.clearTimeout(sidebarGroupHoverExpandTimerRef.current);
-      }
-      sidebarTreeDragPreviewElementRef.current?.remove();
-  }, []);
 
   // Create Database Modal
   const [isCreateDbModalOpen, setIsCreateDbModalOpen] = useState(false);
@@ -1698,7 +1651,15 @@ const Sidebar: React.FC<{
     children: TreeNode[] | undefined,
     dataRef?: unknown,
   ): TreeNode[] => {
-      const nextTreeData = replaceSidebarTreeNodeChildren(treeDataRef.current, key, children, dataRef);
+      const orderedChildren = children
+          ? sidebarTreeDrag.applySidebarTreeOrders(
+              String(key),
+              children,
+              sidebarTreeOrders,
+              tableSortPreference,
+          )
+          : undefined;
+      const nextTreeData = replaceSidebarTreeNodeChildren(treeDataRef.current, key, orderedChildren, dataRef);
       treeDataRef.current = nextTreeData;
       setTreeData(nextTreeData);
       return nextTreeData;
@@ -2117,66 +2078,14 @@ const Sidebar: React.FC<{
       });
   };
 
-  const openSidebarObjectNode = (node: any): boolean => {
-      if (node.type === 'view' || node.type === 'materialized-view') {
-          const { viewName, dbName, id, schemaName } = node.dataRef;
-          addTab({
-              id: node.key,
-              title: viewName,
-              type: 'table',
-              connectionId: id,
-              dbName,
-              tableName: viewName,
-              objectType: node.type === 'materialized-view' ? 'materialized-view' : 'view',
-              schemaName,
-              sidebarLocateKey: String(node.key || ''),
-          });
-          return true;
-      }
-      if (node.type === 'db-trigger') {
-          const { triggerName, triggerTableName, schemaName, dbName, id } = node.dataRef;
-          addTab({
-              id: `trigger-${node.key}`,
-              title: t('sidebar.tab.trigger', { name: triggerName }),
-              type: 'trigger',
-              connectionId: id,
-              dbName,
-              triggerName,
-              triggerTableName,
-              schemaName,
-              sidebarLocateKey: String(node.key || ''),
-          });
-          return true;
-      }
-      if (node.type === 'db-event') {
-          openEventDefinition(node);
-          return true;
-      }
-      if (node.type === 'routine') {
-          const { routineName, routineType, dbName, id, schemaName } = node.dataRef;
-          const typeLabel = t(routineType === 'PROCEDURE' ? 'sidebar.object.procedure' : 'sidebar.object.function');
-          addTab({
-              id: `routine-def-${node.key}`,
-              title: t('sidebar.tab.routine_definition', { type: typeLabel, name: routineName }),
-              type: 'routine-def',
-              connectionId: id,
-              dbName,
-              routineName,
-              routineType,
-              ...buildOptionalSchemaContext(schemaName),
-          });
-          return true;
-      }
-      if (node.type === 'sequence') {
-          openSequenceDefinition(node);
-          return true;
-      }
-      if (node.type === 'package') {
-          openPackageDefinition(node);
-          return true;
-      }
-      return false;
-  };
+  const openSidebarObjectNode = (node: any): boolean => tryOpenSidebarObjectNode(node, {
+      addTab,
+      openEventDefinition,
+      openSequenceDefinition,
+      openPackageDefinition,
+      t,
+      buildOptionalSchemaContext,
+  });
 
   const openMessageObjectNode = (node: any): boolean => {
       if (node?.type !== 'message-object') return false;
@@ -2249,17 +2158,7 @@ const Sidebar: React.FC<{
               dbName: dataRef.dbName,
               ...buildOptionalSchemaContext(dataRef.schemaName),
           });
-      } else if (
-          type === 'table'
-          || type === 'message-object'
-          || type === 'view'
-          || type === 'materialized-view'
-          || type === 'sequence'
-          || type === 'package'
-          || type === 'db-trigger'
-          || type === 'db-event'
-          || type === 'routine'
-      ) {
+      } else if (isV2SidebarObjectNode(info.node)) {
           setActiveContext({
               connectionId: nodeConnectionId || dataRef.id,
               dbName: dataRef.dbName,
@@ -2319,7 +2218,7 @@ const Sidebar: React.FC<{
     // unexpectedly open and move the target under the pointer.
     if (
         isTreeDragging
-        && sidebarTreeDragNodeRef.current?.type === 'connection'
+        && sidebarTreeDrag.isSidebarHostTreeNode(sidebarTreeDragNodeRef.current)
     ) {
         return;
     }
@@ -2378,7 +2277,7 @@ const Sidebar: React.FC<{
           });
       } else if (type === 'jvm-mode' || type === 'jvm-resource' || type === 'jvm-diagnostic' || type === 'jvm-monitoring') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: '' });
-      } else if (type === 'table' || type === 'message-object' || type === 'view' || type === 'materialized-view' || type === 'sequence' || type === 'package' || type === 'db-trigger' || type === 'db-event' || type === 'routine') {
+      } else if (isV2SidebarObjectNode(node)) {
           setActiveContext({
               connectionId: nodeConnectionId || dataRef.id,
               dbName: dataRef.dbName,
@@ -2414,6 +2313,8 @@ const Sidebar: React.FC<{
       }
       if (openMessageObjectNode(node)) {
           return;
+      } else if (openSidebarObjectNode(node)) {
+          return;
       } else if (node.type === 'table') {
           const { tableName, dbName, id, schemaName } = node.dataRef;
           // 记录表访问
@@ -2429,20 +2330,6 @@ const Sidebar: React.FC<{
               initialViewMode: tableDoubleClickAction === 'open-design' ? 'fields' : undefined,
               initialViewModeRequestId: tableDoubleClickAction === 'open-design' ? String(Date.now()) : undefined,
               objectType: 'table',
-          });
-          return;
-      } else if (node.type === 'view' || node.type === 'materialized-view') {
-          const { viewName, dbName, id, schemaName } = node.dataRef;
-          addTab({
-              id: node.key,
-              title: viewName,
-              type: 'table',
-              connectionId: id,
-              dbName,
-              tableName: viewName,
-              objectType: node.type === 'materialized-view' ? 'materialized-view' : 'view',
-              schemaName,
-              sidebarLocateKey: String(node.key || ''),
           });
           return;
       } else if (node.type === 'saved-query') {
@@ -2500,43 +2387,6 @@ const Sidebar: React.FC<{
               return;
           }
           // Service explorer entry is a folder: fall through to expand/collapse + lazy load groups.
-      } else if (node.type === 'db-trigger') {
-          const { triggerName, triggerTableName, schemaName, dbName, id } = node.dataRef;
-          addTab({
-              id: `trigger-${node.key}`,
-              title: t('sidebar.tab.trigger', { name: triggerName }),
-              type: 'trigger',
-              connectionId: id,
-              dbName,
-              triggerName,
-              triggerTableName,
-              schemaName,
-              sidebarLocateKey: String(node.key || ''),
-          });
-          return;
-      } else if (node.type === 'db-event') {
-          openEventDefinition(node);
-          return;
-      } else if (node.type === 'routine') {
-          const { routineName, routineType, dbName, id, schemaName } = node.dataRef;
-          const typeLabel = t(routineType === 'PROCEDURE' ? 'sidebar.object.procedure' : 'sidebar.object.function');
-          addTab({
-              id: `routine-def-${node.key}`,
-              title: t('sidebar.tab.routine_definition', { type: typeLabel, name: routineName }),
-              type: 'routine-def',
-              connectionId: id,
-              dbName,
-              routineName,
-              routineType,
-              ...buildOptionalSchemaContext(schemaName),
-          });
-          return;
-      } else if (node.type === 'sequence') {
-          openSequenceDefinition(node);
-          return;
-      } else if (node.type === 'package') {
-          openPackageDefinition(node);
-          return;
       } else if (node.type === 'jvm-mode') {
           const { providerMode, id } = node.dataRef;
           const conn = (connections.find((item) => item.id === id) || node.dataRef) as SavedConnection;
@@ -3434,14 +3284,10 @@ const Sidebar: React.FC<{
   const hasRelationalObjectKindFilterConnection = connections.some(
       (connection) => getDataSourceCapabilities(connection.config).supportsRelationalObjectKindFilter,
   );
-  const showV2ObjectKindFilters = activeConnection
-          ? getDataSourceCapabilities(activeConnection.config).supportsRelationalObjectKindFilter
-          : hasRelationalObjectKindFilterConnection;
-  useEffect(() => {
-      if (!showV2ObjectKindFilters && v2ExplorerFilter !== 'all') {
-          setV2ExplorerFilter('all');
-      }
-  }, [showV2ObjectKindFilters, v2ExplorerFilter]);
+  // Drops a filter belonging to another workbench family, so a stale one cannot
+  // empty the tree. The slot derives the same family from the same connection, so
+  // the two cannot disagree. See the hook for the reasoning.
+  useV2ExplorerFilterReset(activeConnection, v2ExplorerFilter, setV2ExplorerFilter);
 
 
   const {
@@ -3491,20 +3337,12 @@ const Sidebar: React.FC<{
       connectionStatus,
       getV2TreeMetaText: getV2TreeMetaTextRef.current,
       sidebarTableMetadataFields,
-      snapshotTreeSelectionBeforeDrag,
-      restoreTreeSelectionAfterDrag,
-      treeDragSelectSuppressUntilRef,
-      setIsTreeDragging,
       sidebarDropPlacement: sidebarTreeDropPreview?.nodeKey === String(node.key || '')
           ? sidebarTreeDropPreview.placement
           : null,
   }), [
-      restoreTreeSelectionAfterDrag,
-      setIsTreeDragging,
       sidebarTreeDropPreview,
       sidebarTableMetadataFields,
-      snapshotTreeSelectionBeforeDrag,
-      treeDragSelectSuppressUntilRef,
   ]);
 
   const revealCommandSearchNode = useCallback((node: TreeNode) => {
@@ -3722,228 +3560,6 @@ const Sidebar: React.FC<{
       () => buildV2RailConnectionGroups(connections, connectionTags, sidebarRootOrder, rootSortMode, rootConnectionSortMode),
       [connections, connectionTags, sidebarRootOrder, rootSortMode, rootConnectionSortMode],
   );
-  const getTagParentId = (tagId: unknown): string | null => {
-      const tag = connectionTags.find((candidate) => candidate.id === String(tagId || '').trim());
-      const parentTagId = String(tag?.parentTagId || '').trim();
-      return parentTagId || null;
-  };
-
-  const getConnectionParentTagId = (connectionId: unknown): string | null => (
-      connectionTags.find((tag) => tag.connectionIds.includes(String(connectionId || '').trim()))?.id || null
-  );
-
-  const getNodeParentTagId = (node: any): string | null => {
-      if (node?.type === 'tag') return getTagParentId(node?.dataRef?.id);
-      if (node?.type === 'connection') return getConnectionParentTagId(node?.key);
-      return null;
-  };
-
-  const getNodeOrderToken = (node: any): string | null => {
-      if (node?.type === 'tag') {
-          const tagId = String(node?.dataRef?.id || '').trim();
-          return tagId ? buildSidebarRootTagToken(tagId) : null;
-      }
-      if (node?.type === 'connection') {
-          const connectionId = String(node?.key || '').trim();
-          return connectionId ? buildSidebarRootConnectionToken(connectionId) : null;
-      }
-      return null;
-  };
-
-  const clearSidebarGroupHoverExpandTimer = () => {
-      if (sidebarGroupHoverExpandTimerRef.current === null) return;
-      window.clearTimeout(sidebarGroupHoverExpandTimerRef.current);
-      sidebarGroupHoverExpandTimerRef.current = null;
-  };
-
-  const updateSidebarTreeDropPreview = (
-      nextPreview: { nodeKey: string; placement: SidebarTreeDropPlacement } | null,
-  ) => {
-      const previousPreview = sidebarTreeDropPreviewRef.current;
-      if (
-          previousPreview?.nodeKey === nextPreview?.nodeKey
-          && previousPreview?.placement === nextPreview?.placement
-      ) {
-          return;
-      }
-
-      clearSidebarGroupHoverExpandTimer();
-      sidebarTreeDropPreviewRef.current = nextPreview;
-      setSidebarTreeDropPreview(nextPreview);
-      if (!nextPreview || nextPreview.placement !== 'inside') return;
-      if (expandedKeysRef.current.some((key) => String(key) === nextPreview.nodeKey)) return;
-
-      sidebarGroupHoverExpandTimerRef.current = window.setTimeout(() => {
-          sidebarGroupHoverExpandTimerRef.current = null;
-          const activePreview = sidebarTreeDropPreviewRef.current;
-          if (
-              activePreview?.nodeKey !== nextPreview.nodeKey
-              || activePreview.placement !== 'inside'
-          ) {
-              return;
-          }
-          setExpandedKeys((previous) => previous.some((key) => String(key) === nextPreview.nodeKey)
-              ? previous
-              : [...previous, nextPreview.nodeKey]);
-          setAutoExpandParent(false);
-      }, SIDEBAR_GROUP_HOVER_EXPAND_DELAY_MS);
-  };
-
-  const clearSidebarTreeDragVisuals = () => {
-      clearSidebarGroupHoverExpandTimer();
-      sidebarTreeDropPreviewRef.current = null;
-      setSidebarTreeDropPreview(null);
-      sidebarTreeDragNodeRef.current = null;
-      setSidebarTreeDragNodeType(null);
-      sidebarTreeDragPreviewElementRef.current?.remove();
-      sidebarTreeDragPreviewElementRef.current = null;
-      setIsTreeDragging(false);
-  };
-
-  const resolveSidebarHostGroupDropAtEvent = (event: {
-      clientX?: number;
-      clientY?: number;
-      target?: EventTarget | null;
-  }) => {
-
-      const dragNode = sidebarTreeDragNodeRef.current;
-      if (dragNode?.type !== 'connection') return null;
-      const hit = resolveSidebarDropDomHit(event);
-      if (!hit || hit.type !== 'tag') return null;
-      const dropNode = findTreeNodeByKeyRef.current(treeDataRef.current, hit.key);
-      if (!dropNode || dropNode.type !== 'tag') return null;
-      const placement = resolveSidebarTreeDropPlacement({
-          dragNodeType: dragNode.type,
-          dropNodeType: dropNode.type,
-          relativeDropPosition: 0,
-          dropToGap: undefined,
-          fallbackInsertBefore: false,
-          metrics: hit.metrics ? {
-              clientY: event.clientY,
-              top: hit.metrics.top,
-              height: hit.metrics.height,
-          } : null,
-      });
-      return { dragNode, dropNode, hit, placement };
-  };
-
-  const handleSidebarTreeDragOverCapture = (event: React.DragEvent<HTMLDivElement>) => {
-      const resolvedDrop = resolveSidebarHostGroupDropAtEvent(event);
-      if (!resolvedDrop) {
-          updateSidebarTreeDropPreview(null);
-          return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      if (event.dataTransfer) {
-          event.dataTransfer.dropEffect = 'move';
-      }
-      updateSidebarTreeDropPreview({
-          nodeKey: resolvedDrop.hit.key,
-          placement: resolvedDrop.placement,
-      });
-  };
-
-  const handleSidebarTreeDropCapture = (event: React.DragEvent<HTMLDivElement>) => {
-      const resolvedDrop = resolveSidebarHostGroupDropAtEvent(event);
-      if (!resolvedDrop) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      const connectionId = String(resolvedDrop.dragNode.key || '').trim();
-      const tagId = String(resolvedDrop.dropNode?.dataRef?.id || '').trim();
-      if (connectionId && tagId) {
-          const destination = resolveSidebarHostGroupDropDestination({
-              targetTagId: tagId,
-              targetTagParentId: getTagParentId(tagId),
-              targetTagToken: getNodeOrderToken(resolvedDrop.dropNode),
-              placement: resolvedDrop.placement,
-          });
-          moveConnectionToTag(
-              connectionId,
-              destination.targetParentTagId,
-              destination.targetToken,
-              destination.insertBefore,
-          );
-      }
-      restoreTreeSelectionAfterDrag();
-      clearSidebarTreeDragVisuals();
-  };
-
-  const allowSidebarTreeDrop = ({ dragNode, dropNode, dropPosition }: any): boolean => {
-      if (!dragNode || !dropNode) return false;
-      if ((dragNode.type !== 'tag' && dragNode.type !== 'connection') || (dropNode.type !== 'tag' && dropNode.type !== 'connection')) {
-          return false;
-      }
-      // Connections cannot contain tree items. A group can contain a group only
-      // when the pointer lands on its content, not on its before/after gap.
-      const droppingIntoTag = dropNode.type === 'tag' && Number(dropPosition) === 0;
-      if (dropNode.type === 'connection' && Number(dropPosition) === 0) return false;
-      if (dragNode.type !== 'tag') return String(dragNode.key) !== String(dropNode.key);
-
-      const dragTagId = String(dragNode?.dataRef?.id || '').trim();
-      const targetParentTagId = droppingIntoTag
-          ? String(dropNode?.dataRef?.id || '').trim() || null
-          : getNodeParentTagId(dropNode);
-      return !!dragTagId && !isConnectionTagDescendant(dragTagId, targetParentTagId, connectionTags);
-  };
-
-  const handleDrop = (info: any) => {
-      clearSidebarTreeDragVisuals();
-      const dropPosition = normalizeSidebarTreeRelativeDropPosition(
-          Number(info.dropPosition || 0),
-          info?.node?.pos,
-      );
-      const domDropHit = resolveSidebarDropDomHit(info?.event);
-      const domDropNode = domDropHit ? { key: domDropHit.key, type: domDropHit.type } : null;
-      const dropTargetMetrics = domDropHit?.metrics || null;
-      const insertBefore = resolveSidebarDropInsertBefore(dropPosition, dropTargetMetrics ? {
-          clientY: info?.event?.clientY,
-          top: dropTargetMetrics.top,
-          height: dropTargetMetrics.height,
-      } : null);
-      const dragNode = info.dragNode;
-      const dropNode = domDropNode && domDropNode.key === String(info?.node?.key || '')
-          ? info.node
-          : (domDropNode
-              ? findTreeNodeByKeyRef.current(treeDataRef.current, domDropNode.key) || info.node
-              : info.node);
-      if (!dragNode || !dropNode) return;
-
-      const placement: SidebarTreeDropPlacement = resolveSidebarTreeDropPlacement({
-              dragNodeType: dragNode.type,
-              dropNodeType: dropNode.type,
-              relativeDropPosition: dropPosition,
-              dropToGap: info?.dropToGap,
-              fallbackInsertBefore: insertBefore,
-              metrics: dropTargetMetrics ? {
-                  clientY: info?.event?.clientY,
-                  top: dropTargetMetrics.top,
-                  height: dropTargetMetrics.height,
-              } : null,
-          });
-      const droppingIntoTag = dropNode.type === 'tag' && placement === 'inside';
-      const targetParentTagId = droppingIntoTag
-          ? String(dropNode?.dataRef?.id || '').trim() || null
-          : getNodeParentTagId(dropNode);
-      const targetToken = droppingIntoTag ? null : getNodeOrderToken(dropNode);
-      const targetInsertBefore = droppingIntoTag ? false : placement === 'before';
-
-      if (dragNode.type === 'tag') {
-          const dragTagId = String(dragNode?.dataRef?.id || '').trim();
-          if (!dragTagId || isConnectionTagDescendant(dragTagId, targetParentTagId, connectionTags)) return;
-          moveConnectionTag(dragTagId, targetParentTagId, targetToken, targetInsertBefore);
-          return;
-      }
-
-      if (dragNode.type === 'connection') {
-          const connectionId = String(dragNode.key || '').trim();
-          if (!connectionId || connectionId === String(dropNode.key || '')) return;
-          moveConnectionToTag(connectionId, targetParentTagId, targetToken, targetInsertBefore);
-      }
-  };
-
   const onRightClick = ({ event, node }: any) => {
       if (node?.type === 'v2-table-section' || node?.type === 'v2-database-section') {
           event.preventDefault();
@@ -4432,48 +4048,27 @@ const Sidebar: React.FC<{
         </div>
         )}
 
-        {hasRelationalObjectKindFilterConnection && (
-            <div
-                className="gn-v2-explorer-filter-slot"
-                data-object-kind-filter-slot="true"
-                data-object-kind-filter-visible={showV2ObjectKindFilters ? 'true' : 'false'}
-            >
-                {showV2ObjectKindFilters && (
-                    <div className="gn-v2-explorer-filter-tabs" aria-label={t('sidebar.command_search.object_kind.filter_aria')}>
-                        {V2_EXPLORER_FILTER_OPTIONS.map((item) => {
-                            const label = t(item.labelKey);
-                            return (
-                            <Tooltip key={item.key} title={label} mouseEnterDelay={0.25}>
-                            <button
-                                type="button"
-                                className={v2ExplorerFilter === item.key ? 'is-active' : undefined}
-                                aria-label={label}
-                                aria-pressed={v2ExplorerFilter === item.key}
-                                data-object-kind-filter={item.key}
-                                onClick={() => setV2ExplorerFilter(item.key)}
-                            >
-                                {V2_EXPLORER_FILTER_ICONS[item.key]}
-                            </button>
-                            </Tooltip>
-                            );
-                        })}
-                    </div>
-                )}
-            </div>
-        )}
+        <SidebarFilterSlot
+            activeConnection={activeConnection}
+            treeData={displayTreeData}
+            hasRelationalFilterConnection={hasRelationalObjectKindFilterConnection}
+            activeFilter={v2ExplorerFilter}
+            onFilterChange={setV2ExplorerFilter}
+        />
 
         <div
             ref={treeContainerRef}
-            className={`sidebar-tree-scroll-shell gn-v2-explorer-tree-shell${sidebarTreeDragNodeType === 'connection' ? ' is-host-tree-dragging' : ''}${sidebarTreeDropPreview ? ' has-host-group-drop-preview' : ''}`}
+            className={treeShellClassName}
             onWheelCapture={handleTreeWheel}
             onTouchMoveCapture={markTreeScrollActivity}
+            onMouseDownCapture={markSidebarTreeMouseDownHandled}
             onDragEnterCapture={handleSidebarTreeDragOverCapture}
             onDragOverCapture={handleSidebarTreeDragOverCapture}
             onDropCapture={handleSidebarTreeDropCapture}
             onDragLeaveCapture={(event) => {
                 const relatedTarget = event.relatedTarget as Node | null;
                 if (!relatedTarget || !event.currentTarget.contains(relatedTarget)) {
-                    updateSidebarTreeDropPreview(null);
+                    clearDropPreview();
                 }
             }}
             style={{
@@ -4489,27 +4084,12 @@ const Sidebar: React.FC<{
                     showIcon
                     draggable={{
                         icon: false,
-                        nodeDraggable: (node: any) => node.type === 'connection' || node.type === 'tag'
+                        nodeDraggable: (node) => nodeDraggable(node as Pick<TreeNode, 'type'>),
                     }}
                     allowDrop={allowSidebarTreeDrop}
-                    onDragStart={({ event, node }: any) => {
-                        snapshotTreeSelectionBeforeDrag();
-                        treeDragSelectSuppressUntilRef.current = Date.now() + 600;
-                        sidebarTreeDragNodeRef.current = node;
-                        setSidebarTreeDragNodeType(String(node?.type || '') || null);
-                        updateSidebarTreeDropPreview(null);
-                        sidebarTreeDragPreviewElementRef.current?.remove();
-                        sidebarTreeDragPreviewElementRef.current = createSidebarTreeDragPreview(event, node);
-                        setIsTreeDragging(true);
-                    }}
-                    onDragEnter={() => {
-                        treeDragSelectSuppressUntilRef.current = Date.now() + 600;
-                        setIsTreeDragging(true);
-                    }}
-                    onDragEnd={() => {
-                        restoreTreeSelectionAfterDrag();
-                        clearSidebarTreeDragVisuals();
-                    }}
+                    onDragStart={handleDragStart}
+                    onDragEnter={handleDragEnter}
+                    onDragEnd={handleDragEnd}
                     onDrop={handleDrop}
                     loadData={onLoadData}
                     treeData={v2VisibleTreeData}

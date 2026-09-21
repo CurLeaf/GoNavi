@@ -18,7 +18,7 @@ import (
 
 const (
 	savedQueriesFileName      = "saved_queries.json"
-	savedQueriesFormatVersion = 3
+	savedQueriesFormatVersion = 4
 )
 
 const (
@@ -40,17 +40,18 @@ type savedQueriesFile struct {
 // format. LegacySQL is read only so older saved_queries.json files can be
 // migrated without losing content.
 type savedQueryDiskRecord struct {
-	ID                    string `json:"id"`
-	Name                  string `json:"name"`
-	FileName              string `json:"fileName,omitempty"`
-	LegacySQL             string `json:"sql,omitempty"`
-	ConnectionID          string `json:"connectionId"`
-	DBName                string `json:"dbName"`
-	CreatedAt             int64  `json:"createdAt"`
-	ConnectionFingerprint string `json:"connectionFingerprint,omitempty"`
-	FingerprintVersion    string `json:"fingerprintVersion,omitempty"`
-	BindingStatus         string `json:"bindingStatus,omitempty"`
-	OriginalConnectionID  string `json:"originalConnectionId,omitempty"`
+	ID                    string                       `json:"id"`
+	Name                  string                       `json:"name"`
+	FileName              string                       `json:"fileName,omitempty"`
+	LegacySQL             string                       `json:"sql,omitempty"`
+	ConnectionID          string                       `json:"connectionId"`
+	DBName                string                       `json:"dbName"`
+	CreatedAt             int64                        `json:"createdAt"`
+	ConnectionFingerprint string                       `json:"connectionFingerprint,omitempty"`
+	FingerprintVersion    string                       `json:"fingerprintVersion,omitempty"`
+	BindingStatus         string                       `json:"bindingStatus,omitempty"`
+	OriginalConnectionID  string                       `json:"originalConnectionId,omitempty"`
+	Parameters            []connection.SavedQueryParam `json:"parameters,omitempty"`
 }
 
 type savedQueriesDiskFile struct {
@@ -176,6 +177,7 @@ func savedQueryFromDiskRecord(record savedQueryDiskRecord, sqlText string) conne
 		FingerprintVersion:    record.FingerprintVersion,
 		BindingStatus:         record.BindingStatus,
 		OriginalConnectionID:  record.OriginalConnectionID,
+		Parameters:            record.Parameters,
 	}
 }
 
@@ -191,6 +193,7 @@ func savedQueryToDiskRecord(query connection.SavedQuery, fileName string) savedQ
 		FingerprintVersion:    query.FingerprintVersion,
 		BindingStatus:         query.BindingStatus,
 		OriginalConnectionID:  query.OriginalConnectionID,
+		Parameters:            query.Parameters,
 	}
 }
 
@@ -1619,6 +1622,7 @@ func sanitizeSavedQuery(input connection.SavedQuery, index int, allowGeneratedID
 		FingerprintVersion:    strings.TrimSpace(input.FingerprintVersion),
 		BindingStatus:         strings.TrimSpace(input.BindingStatus),
 		OriginalConnectionID:  strings.TrimSpace(input.OriginalConnectionID),
+		Parameters:            normalizeSavedQueryParameters(input.Parameters),
 	}, true
 }
 

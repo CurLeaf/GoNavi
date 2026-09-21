@@ -119,14 +119,7 @@ import {
     type DataGridFindMatch,
     type DataGridFindNavigationDirection,
 } from '../utils/dataGridFind';
-import {
-    filterHiddenLocatorColumns,
-    isWritableResultColumn,
-    resolveWritableColumnName,
-    resolveRowLocatorValues,
-    type EditRowLocator,
-    type RowLocatorMessages,
-} from '../utils/rowLocator';
+import type { EditRowLocator } from '../utils/rowLocator';
 import {
     V2CellContextMenuView,
     V2ColumnHeaderContextMenuView,
@@ -1736,108 +1729,6 @@ const renderGridFieldSelectOption = (option: { label?: React.ReactNode; value?: 
     );
 };
 
-type NormalizeCommitCellValue = (columnName: string, value: any, mode: 'insert' | 'update') => any;
-
-type DataGridCommitChangeSet = {
-    inserts: any[];
-    updates: any[];
-    deletes: any[];
-};
-
-export const buildDataGridCommitChangeSet = ({
-    addedRows,
-    modifiedRows,
-    deletedRowKeys,
-    data,
-    editLocator,
-    visibleColumnNames,
-    rowKeyToString,
-    normalizeCommitCellValue,
-    shouldCommitColumn,
-    rowLocatorMessages,
-}: {
-    addedRows: any[];
-    modifiedRows: Record<string, any>;
-    deletedRowKeys: Set<string>;
-    data: any[];
-    editLocator?: EditRowLocator;
-    visibleColumnNames: string[];
-    rowKeyToString: (key: any) => string;
-    normalizeCommitCellValue: NormalizeCommitCellValue;
-    shouldCommitColumn: (columnName: string) => boolean;
-    rowLocatorMessages?: RowLocatorMessages;
-}): { ok: true; changes: DataGridCommitChangeSet } | { ok: false; error: string } => {
-    if (!editLocator || editLocator.readOnly || editLocator.strategy === 'none') {
-        return { ok: false, error: editLocator?.reason || rowLocatorMessages?.noSafeLocator?.() || 'No safe row locator is available for this result set.' };
-    }
-
-    const normalizeValues = (values: Record<string, any>, mode: 'insert' | 'update') => {
-        const normalizedValues: Record<string, any> = {};
-        Object.entries(values).forEach(([col, val]) => {
-            if (!shouldCommitColumn(col)) return;
-            const commitColumnName = resolveWritableColumnName(col, editLocator);
-            if (!commitColumnName) return;
-            const normalizedVal = normalizeCommitCellValue(col, val, mode);
-            if (normalizedVal !== undefined) {
-                normalizedValues[commitColumnName] = normalizedVal;
-            }
-        });
-        return normalizedValues;
-    };
-
-    const originalRowsByKey = new Map<string, any>();
-    data.forEach((row) => {
-        const key = row?.[GONAVI_ROW_KEY];
-        if (key === undefined || key === null) return;
-        originalRowsByKey.set(rowKeyToString(key), row);
-    });
-
-    const inserts: any[] = [];
-    const updates: any[] = [];
-    const deletes: any[] = [];
-
-    addedRows.forEach(row => {
-        const key = row?.[GONAVI_ROW_KEY];
-        if (key !== undefined && key !== null && deletedRowKeys.has(rowKeyToString(key))) return;
-        inserts.push(normalizeValues(row, 'insert'));
-    });
-
-    for (const keyStr of deletedRowKeys) {
-        const originalRow = originalRowsByKey.get(keyStr);
-        if (!originalRow) continue;
-        const locatorValues = resolveRowLocatorValues(editLocator, originalRow, rowLocatorMessages);
-        if (!locatorValues.ok) return { ok: false, error: locatorValues.error };
-        deletes.push(locatorValues.values);
-    }
-
-    for (const [keyStr, newRow] of Object.entries(modifiedRows)) {
-        if (deletedRowKeys.has(keyStr)) continue;
-        const originalRow = originalRowsByKey.get(keyStr);
-        if (!originalRow) continue;
-
-        const locatorValues = resolveRowLocatorValues(editLocator, originalRow, rowLocatorMessages);
-        if (!locatorValues.ok) return { ok: false, error: locatorValues.error };
-
-        const hasRowKey = Object.prototype.hasOwnProperty.call(newRow as any, GONAVI_ROW_KEY);
-        let values: Record<string, any> = {};
-        if (!hasRowKey) {
-            values = { ...(newRow as any) };
-        } else {
-            visibleColumnNames.forEach((col) => {
-                const nextVal = (newRow as any)?.[col];
-                const prevVal = (originalRow as any)?.[col];
-                if (!isCellValueEqualForDiff(prevVal, nextVal)) values[col] = nextVal;
-            });
-        }
-
-        const normalizedValues = normalizeValues(values, 'update');
-        if (Object.keys(normalizedValues).length === 0) continue;
-        updates.push({ keys: locatorValues.values, values: normalizedValues });
-    }
-
-    return { ok: true, changes: { inserts, updates, deletes } };
-};
-
 // P2 性能优化：提取内联 style 对象为模块级常量，避免每次 render 创建新对象
 const CELL_ELLIPSIS_STYLE: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, width: '100%' };
 const VIRTUAL_CELL_TEXT_STYLE: React.CSSProperties = {
@@ -1957,6 +1848,4 @@ export type {
     ColumnMeta,
     ForeignKeyTarget,
     VirtualTableScrollReference,
-    NormalizeCommitCellValue,
-    DataGridCommitChangeSet,
 };

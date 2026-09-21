@@ -477,11 +477,16 @@ func isReadOnlySQLQuery(dbType string, query string) bool {
 		return false
 	}
 	if keyword == "pragma" {
-		return !pragmaMayWrite(query, dbType)
+		// PRAGMA itself may write (PRAGMA journal_mode=WAL); pragmaMayWrite
+		// covers that. Still scan for a semicolon-less write after it.
+		return !pragmaMayWrite(query, dbType) && !containsEmbeddedWriteStatement(dbType, query)
 	}
+	// A leading read keyword can still bury a write when statements are not
+	// semicolon-separated (issue #1308). Only treat as read-only after a
+	// lexical scan confirms the body has no write.
 	switch keyword {
 	case "select", "with", "show", "describe", "desc", "explain", "values", "consume":
-		return true
+		return !containsEmbeddedWriteStatement(dbType, query)
 	default:
 		return false
 	}
@@ -645,7 +650,13 @@ func isBatchableWriteSQLStatement(dbType string, query string) bool {
 	if keyword == "select" && isSQLSelectIntoStatement(query, dbType) {
 		return true
 	}
-	return isSQLDataWriteKeyword(keyword)
+	if isSQLDataWriteKeyword(keyword) {
+		return true
+	}
+	// A leading read keyword with a buried write (issue #1308) still reports
+	// keyword=select; the embedded-write scan supplies the real keyword so
+	// managed transactions do not send this to autocommit.
+	return isSQLDataWriteKeyword(firstEmbeddedWriteKeyword(dbType, query))
 }
 
 func isSQLDataWriteKeyword(keyword string) bool {

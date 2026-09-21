@@ -1,4 +1,5 @@
 import { getDataSourceCapabilityContract } from './dataSourceCapabilities';
+import { firstEmbeddedWriteKeyword } from './sqlEmbeddedWrite';
 import {
     supportsSqlBracketIdentifier,
     supportsSqlEscapedBracketIdentifier,
@@ -299,6 +300,14 @@ export const hasTopLevelSqlEditorForUpdate = (statement: string, dbType = ''): b
 
 const sqlEditorStatementHasManagedWrite = (statement: string, dbType = ''): boolean => {
     const text = String(statement || '');
+    // A leading read keyword with a buried DML (issue #1308) would otherwise
+    // skip the managed transaction and run under autocommit. Only DML keywords
+    // are managed writes, matching isBatchableWriteSQLStatement on the Go side;
+    // buried DDL is still flagged as mutating by sqlEmbeddedWrite callers.
+    const embedded = firstEmbeddedWriteKeyword(text, dbType);
+    if (SQL_EDITOR_DML_KEYWORDS.has(embedded)) {
+        return true;
+    }
     const leading = readSqlEditorKeyword(text, 0);
     if (leading.keyword === 'with') {
         const analysis = resolveSqlEditorWithAnalysis(text, leading.end, dbType);

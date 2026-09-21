@@ -123,10 +123,16 @@ func classifyHeadlessSQLOperation(dbType, statement string, inspection SQLStatem
 	if inspection.ReadOnly {
 		return SQLOpQuery
 	}
-	if isBatchableWriteSQLStatement(dbType, statement) {
+	// A leading read keyword with a buried write (issue #1308) still makes
+	// sqlDataOperationInfo return select. Use the embedded-write keyword so
+	// DML is not classified as SQLOpOther and rejected as "unauthorized".
+	keyword, _ := sqlDataOperationInfo(statement, dbType)
+	if embedded := firstEmbeddedWriteKeyword(dbType, statement); embedded != "" {
+		keyword = embedded
+	}
+	if isBatchableWriteSQLStatement(dbType, statement) || isSQLDataWriteKeyword(keyword) {
 		return SQLOpDML
 	}
-	keyword, _ := sqlDataOperationInfo(statement, dbType)
 	switch keyword {
 	case "create", "alter", "drop", "truncate", "rename":
 		return SQLOpDDL

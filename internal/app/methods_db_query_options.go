@@ -94,7 +94,7 @@ func (a *App) DBQueryMultiTransactionalWithOptions(
 	queryID string,
 	options connection.QueryRowBudgetOptions,
 ) connection.QueryResult {
-	return a.dbQueryMultiTransactional(nil, config, dbName, query, queryID, options)
+	return a.dbQueryMultiTransactional(nil, config, dbName, query, queryID, options, nil)
 }
 
 func (a *App) dbQueryMultiTransactionalContextWithOptions(
@@ -103,7 +103,7 @@ func (a *App) dbQueryMultiTransactionalContextWithOptions(
 	dbName, query, queryID string,
 	options connection.QueryRowBudgetOptions,
 ) connection.QueryResult {
-	return a.dbQueryMultiTransactional(ctx, config, dbName, query, queryID, options)
+	return a.dbQueryMultiTransactional(ctx, config, dbName, query, queryID, options, nil)
 }
 
 func (a *App) dbQueryMultiTransactional(
@@ -113,6 +113,7 @@ func (a *App) dbQueryMultiTransactional(
 	query string,
 	queryID string,
 	options connection.QueryRowBudgetOptions,
+	bindings []connection.QueryParamBinding,
 ) (result connection.QueryResult) {
 	runConfig := normalizeRunConfig(config, dbName)
 	transactionDBType := resolveDDLDBType(runConfig)
@@ -123,7 +124,7 @@ func (a *App) dbQueryMultiTransactional(
 	}
 	query = sanitizeSQLForPgLike(transactionDBType, query)
 	if !shouldUseManagedSQLTransaction(transactionDBType, query) {
-		return fallbackQueryMultiWithOptions(a, parent, config, dbName, query, queryID, options)
+		return fallbackQueryMultiWithBindings(a, parent, config, dbName, query, queryID, options, bindings)
 	}
 
 	transactionID := "sql-editor-" + uuid.NewString()
@@ -174,7 +175,7 @@ func (a *App) dbQueryMultiTransactional(
 		TransactionID: transactionID, EventType: "transaction_begin", Status: "success",
 		Source: "query_editor", CommitMode: "pending", BoundaryMode: transactionBoundaryMode,
 	})
-	resultSets, err := a.executeManagedTransactionalStatements(ctx, opened.execer, transactionConfig, dbName, transactionDBType, query, queryID, transactionID, transactionBoundaryMode, &queryExecutionDuration)
+	resultSets, err := a.executeManagedTransactionalStatements(ctx, opened.execer, transactionConfig, dbName, transactionDBType, query, queryID, transactionID, transactionBoundaryMode, bindings, &queryExecutionDuration)
 	if err != nil {
 		return a.failManagedSQLTransactionAfterError(opened, transactionConfig, dbName, transactionDBType, query, queryID, transactionID, transactionBoundaryMode, rollbackSQL, err)
 	}
@@ -337,9 +338,13 @@ func (a *App) executeManagedTransactionalStatements(
 	session db.StatementExecer,
 	transactionConfig connection.ConnectionConfig,
 	dbName, dbType, query, queryID, transactionID, boundaryMode string,
+	bindings []connection.QueryParamBinding,
 	duration *time.Duration,
 ) ([]connection.ResultSetData, error) {
-	statements := splitSQLStatementsForDialect(dbType, query)
+	statements, executionOptions, err := prepareManagedTransactionStatements(dbType, query, session, bindings)
+	if err != nil {
+		return nil, fmt.Errorf("%s", a.translateParameterBindingError(err))
+	}
 	startedAt := time.Now()
 	statementAuditEvents := make([]sqlaudit.Event, 0, len(statements))
 	resultSets, err := executeManagedSQLTransactionStatementsWithObserver(
@@ -352,6 +357,7 @@ func (a *App) executeManagedTransactionalStatements(
 			a.sqlAuditTransactionStatementObserver(transactionConfig, dbName, dbType, queryID, transactionID, boundaryMode, &statementAuditEvents),
 			&statementAuditEvents,
 		),
+		executionOptions,
 	)
 	if duration != nil {
 		*duration += time.Since(startedAt)

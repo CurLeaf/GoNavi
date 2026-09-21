@@ -3,6 +3,7 @@ import { Spin } from 'antd';
 import type { TabData } from '../types';
 import { useStore } from '../store';
 import { useWorkbenchTabActivation } from './useWorkbenchTabActivation';
+import { isDefinitionViewerTabType } from './definitionViewerObjectMeta';
 import '../styles/v2-theme-workbench.css';
 
 const DataViewer = React.lazy(() => import('./DataViewer'));
@@ -26,6 +27,7 @@ const JVMDiagnosticConsole = React.lazy(() => import('./JVMDiagnosticConsole'));
 const JVMMonitoringDashboard = React.lazy(() => import('./JVMMonitoringDashboard'));
 const SqlAnalysisWorkbench = React.lazy(() => import('./explain/SqlAnalysisWorkbench'));
 const SqlAuditWorkbench = React.lazy(() => import('./audit/SqlAuditWorkbench'));
+const DMLSnapshotWorkbench = React.lazy(() => import('./dmlSnapshot/DMLSnapshotWorkbench'));
 const DriverManagerWorkbench = React.lazy(() => import('./DriverManagerWorkbench'));
 const SettingsCenterWorkbench = React.lazy(() => import('./settings/SettingsCenterWorkbench'));
 const RequestDiagnosticsWorkbench = React.lazy(() => import('./requestDiagnostics/RequestDiagnosticsWorkbench'));
@@ -142,7 +144,7 @@ export const WorkbenchTabContent: React.FC<WorkbenchTabContentProps> = React.mem
     );
   } else if (tab.type === 'trigger') {
     content = <TriggerViewer tab={tab} />;
-  } else if (tab.type === 'view-def' || tab.type === 'event-def' || tab.type === 'routine-def' || tab.type === 'sequence-def' || tab.type === 'package-def') {
+  } else if (isDefinitionViewerTabType(tab.type)) {
     content = <DefinitionViewer tab={tab} />;
   } else if (tab.type === 'table-overview') {
     content = <TableOverview tab={tab} />;
@@ -156,6 +158,8 @@ export const WorkbenchTabContent: React.FC<WorkbenchTabContentProps> = React.mem
     content = <SqlAnalysisWorkbench tab={tab} />;
   } else if (tab.type === 'sql-audit') {
     content = <SqlAuditWorkbench tab={tab} isActive={isActive} />;
+  } else if (tab.type === 'dml-snapshot') {
+    content = <DMLSnapshotWorkbench isActive={isActive} />;
   } else if (tab.type === 'driver-manager') {
     content = (
       <DriverManagerWorkbench

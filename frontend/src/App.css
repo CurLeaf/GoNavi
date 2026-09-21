@@ -2866,6 +2866,8 @@ body[data-ui-version="v2"] .gn-v2-titlebar .titlebar-window-controls > .ant-btn.
 }
 
 .driver-manager-shell {
+    --driver-manager-font-body: var(--gn-settings-font-body, var(--gn-font-size, 14px));
+    --driver-manager-font-secondary: var(--gn-settings-font-secondary, var(--gn-font-size-sm, 12px));
     display: flex;
     flex-direction: column;
     gap: 14px;
@@ -2876,7 +2878,7 @@ body[data-ui-version="v2"] .gn-v2-titlebar .titlebar-window-controls > .ant-btn.
 
 .driver-manager-page-sub {
     color: var(--ant-color-text-secondary, rgba(5, 5, 5, 0.62));
-    font-size: 12px;
+    font-size: var(--driver-manager-font-secondary);
     line-height: 1.5;
 }
 
@@ -3383,7 +3385,7 @@ body[data-theme='dark'] .driver-manager-mirror-chip:hover {
 }
 
 .driver-manager-detail-path {
-    font-size: 12px;
+    font-size: var(--driver-manager-font-body) !important;
 }
 
 .driver-manager-title-row,
@@ -3446,7 +3448,7 @@ body[data-theme='dark'] .driver-manager-mirror-chip:hover {
 
 .driver-manager-progress-value {
     flex: 0 0 auto;
-    font-size: 12px;
+    font-size: var(--driver-manager-font-secondary);
     font-variant-numeric: tabular-nums;
 }
 
@@ -3459,7 +3461,7 @@ body[data-theme='dark'] .driver-manager-mirror-chip:hover {
 
 .driver-manager-control-label,
 .driver-manager-small-text {
-    font-size: 12px;
+    font-size: var(--driver-manager-font-body);
 }
 
 .driver-manager-version-control {
@@ -3478,6 +3480,14 @@ body[data-theme='dark'] .driver-manager-mirror-chip:hover {
 
 .driver-manager-card-actions .ant-btn {
     min-width: 88px;
+}
+
+body[data-ui-version] .driver-manager-card-actions .ant-btn,
+body[data-ui-version] .gonavi-settings-center-modal .driver-manager-card-actions .ant-btn-sm {
+    min-height: var(--gn-control-height, 32px);
+    height: var(--gn-control-height, 32px) !important;
+    padding-inline: 12px !important;
+    font-size: var(--driver-manager-font-body, var(--gn-font-size, 14px)) !important;
 }
 
 .driver-manager-footer-actions {
@@ -3549,7 +3559,7 @@ body[data-theme='dark'] .driver-manager-mirror-chip:hover {
 }
 
 .driver-manager-progress-error {
-  font-size: 12px;
+  font-size: var(--driver-manager-font-body) !important;
   line-height: 1.4;
 }
 
@@ -3722,7 +3732,7 @@ body[data-theme='dark'] .driver-manager-mirror-chip:hover {
 }
 
 .driver-manager-log-empty {
-    font-size: 12px;
+    font-size: var(--driver-manager-font-body);
 }
 
 .driver-manager-log-list {
@@ -3736,7 +3746,7 @@ body[data-theme='dark'] .driver-manager-mirror-chip:hover {
     background: rgba(5, 5, 5, 0.03);
     border-radius: 8px;
     font-family: var(--gn-font-mono, monospace);
-    font-size: 12px;
+    font-size: var(--driver-manager-font-body);
     line-height: 1.8;
 }
 

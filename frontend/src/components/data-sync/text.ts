@@ -321,6 +321,7 @@ const zhCN = {
   'trigger.run_at': '执行时间',
   'trigger.timezone': '时区',
   'trigger.cron_expression': 'Cron 表达式',
+  'trigger.cron_expression_hint': '5 段格式：分 时 日 月 周，例如 0 3 * * *（每天 03:00），不支持秒。',
   'trigger.overlap': '任务重叠时',
   'trigger.overlap.skip': '跳过本次',
   'trigger.overlap.queue': '排队等待',
@@ -553,6 +554,8 @@ const zhCN = {
   'validation.query_source_column_missing': 'SQL 查询结果中不存在已配置的源字段。请为查询列设置正确别名，或修改字段映射。',
   'validation.watermark_column_required': '水位线模式必须配置水位列。',
   'validation.cron_expression_required': '填写 Cron 表达式。',
+  'validation.cron_expression_field_count': 'Cron 表达式必须是 5 段：分 时 日 月 周，不要包含秒。',
+  'validation.cron_expression_invalid': 'Cron 表达式格式或取值范围不正确，请按“分 时 日 月 周”检查。',
   'validation.timezone_required': '填写调度时区。',
   'validation.interval_invalid': '固定间隔必须不少于 60 秒。',
   'validation.cdc_incremental_required': '持续增量同步必须使用变更日志增量策略。',
@@ -908,6 +911,8 @@ const enUS: Record<DataSyncWorkbenchTextKey, string> = {
   'trigger.run_at': 'Run at',
   'trigger.timezone': 'Timezone',
   'trigger.cron_expression': 'Cron expression',
+  'trigger.cron_expression_hint':
+    'Five fields: minute hour day month weekday, e.g. 0 3 * * * (daily at 03:00). Seconds are not supported.',
   'trigger.overlap': 'When runs overlap',
   'trigger.overlap.skip': 'Skip this run',
   'trigger.overlap.queue': 'Queue this run',
@@ -1140,6 +1145,10 @@ const enUS: Record<DataSyncWorkbenchTextKey, string> = {
   'validation.query_source_column_missing': 'A configured source field is absent from the SQL query result. Add the correct column alias or update the field mapping.',
   'validation.watermark_column_required': 'Watermark mode requires a watermark column.',
   'validation.cron_expression_required': 'Enter a Cron expression.',
+  'validation.cron_expression_field_count':
+    'A Cron expression needs exactly five fields — minute hour day month weekday — with no seconds field.',
+  'validation.cron_expression_invalid':
+    'The Cron expression has an invalid format or out-of-range value. Check it as "minute hour day month weekday".',
   'validation.timezone_required': 'Enter a scheduling timezone.',
   'validation.interval_invalid': 'Fixed intervals must be at least 60 seconds.',
   'validation.cdc_incremental_required': 'CDC tasks must use the CDC incremental policy.',
@@ -1224,9 +1233,21 @@ export const createDataSyncWorkbenchTranslate = (
 };
 
 /**
- * Stable validation codes are the localization contract. Backend messages are
- * retained only as a diagnostic fallback for unknown driver/runtime errors.
+ * Stable validation codes are the localization contract. The codes below are
+ * categories whose actionable cause exists only in the backend message, so the
+ * diagnostic is appended instead of dropped:
+ * - CDC probing is environment-specific (replica-set setup, binlog privileges,
+ *   publication state).
+ * - `definition_invalid` wraps every backend ValidateDefinition failure (Cron
+ *   field count, unsupported enum, batch range), so the localized sentence
+ *   alone leaves the user unable to locate the fault.
  */
+const BACKEND_DIAGNOSTIC_ISSUE_CODES = new Set([
+  'definition_invalid',
+  'cdc_probe_failed',
+  'cdc_adapter_not_ready',
+]);
+
 export const dataSyncValidationIssueText = (
   issue: { code: string; message?: string },
   t: DataSyncWorkbenchTranslate,
@@ -1234,12 +1255,8 @@ export const dataSyncValidationIssueText = (
   const key = `validation.${issue.code}` as DataSyncWorkbenchTextKey;
   const localized = t(key);
   if (localized !== key) {
-    // Adapter probing is environment-specific (replica-set setup, binlog
-    // privileges, publication state, and so on). The stable code gives the
-    // user a translated category; the backend diagnostic tells them what to
-    // repair, so preserve both.
     if (
-      ['cdc_probe_failed', 'cdc_adapter_not_ready'].includes(issue.code) &&
+      BACKEND_DIAGNOSTIC_ISSUE_CODES.has(issue.code) &&
       String(issue.message || '').trim()
     ) {
       return `${localized} ${String(issue.message).trim()}`;

@@ -1,4 +1,4 @@
-import type { SavedConnection, SavedQuery, SavedQueryGroup } from '../types';
+import type { SavedConnection, SavedQuery, SavedQueryGroup, SavedQueryParam } from '../types';
 import { t as translate } from '../i18n';
 import { LEGACY_PERSIST_KEY } from './legacyConnectionStorage';
 import { normalizeSavedQueryGroups } from './savedQueryGroups';
@@ -90,7 +90,30 @@ const sanitizeSavedQuery = (value: unknown, index: number): SavedQuery | null =>
   if (fingerprintVersion) query.fingerprintVersion = fingerprintVersion;
   if (bindingStatus) query.bindingStatus = bindingStatus;
   if (originalConnectionId) query.originalConnectionId = originalConnectionId;
+  const parameters = sanitizeSavedQueryParameters(raw.parameters);
+  if (parameters.length > 0) query.parameters = parameters;
   return query;
+};
+
+const SAVED_QUERY_PARAM_TYPES = new Set(['string', 'number', 'boolean', 'datetime', 'null', 'list']);
+
+const sanitizeSavedQueryParameters = (value: unknown): SavedQueryParam[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const result: SavedQueryParam[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const rawParam = item as Record<string, unknown>;
+    const name = toTrimmedString(rawParam.name);
+    if (!name || seen.has(name)) continue;
+    const type = toTrimmedString(rawParam.type) || 'string';
+    if (!SAVED_QUERY_PARAM_TYPES.has(type)) continue;
+    seen.add(name);
+    result.push({ name, type, label: toTrimmedString(rawParam.label), default: rawParam.default });
+  }
+  return result;
 };
 
 export const sanitizeSavedQueries = (value: unknown): SavedQuery[] => {

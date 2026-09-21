@@ -197,7 +197,8 @@ type App struct {
 	driverDownloadTaskMu          sync.RWMutex
 	driverDownloadTasks           map[string]DriverDownloadTaskStatus
 	driverDownloadActiveTaskID    string
-	driverDownloadTaskRunner      func(string, string, string, string) connection.QueryResult
+	driverDownloadTaskRunner      driverDownloadTaskRunner
+	driverDownloadTaskControls    map[string]driverDownloadTaskControl
 	driverInstallMu               sync.Mutex
 	driverMaintenance             map[string]int
 	dataRootApplyMu               sync.Mutex

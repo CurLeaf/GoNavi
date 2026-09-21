@@ -10,9 +10,17 @@ import Editor from './MonacoEditor';
 import { TabData, ColumnDefinition, IndexDefinition, ForeignKeyDefinition, TriggerDefinition } from '../types';
 import { useStore } from '../store';
 import { DBGetColumns, DBGetIndexes, DBQuery, DBQueryAudited, DBGetForeignKeys, DBGetTriggers, DBShowCreateTable } from '../../wailsjs/go/app/App';
-import { hasIndexFormChanged, normalizeIndexFormFromRow, resolveIndexMetadataResponse, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot } from './tableDesignerIndexUtils';
-import { buildIndexCreateSqlPreview } from './tableDesignerIndexSql';
-import { buildAlterTablePreviewSql, buildCreateTablePreviewSql, hasAlterTableDraftChanges, type StarRocksCreateTableOptions, type StarRocksDistributionType, type StarRocksKeyModel, type StarRocksTableKind, type TDengineCreateTableOptions, type TDengineTableKind, type TDengineTagDefinition } from './tableDesignerSchemaSql';
+import { applyPrimaryIndexToColumnKeys, hasIndexFormChanged, normalizeIndexFormFromRow, removeIndexDefinitionsByNames, replaceIndexDefinitionsFromForm, resolveIndexMetadataResponse, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot, type IndexFormSnapshot } from './tableDesignerIndexUtils';
+import { buildIndexCreateSqlPreview, buildIndexDropSql as buildIndexDropSqlPreview } from './tableDesignerIndexSql';
+import { buildNewTablePreviewSql } from './tableDesignerCreateTableSql';
+import {
+    buildForeignKeyAddSql as buildForeignKeyAddSqlPreview,
+    buildForeignKeyDropSql as buildForeignKeyDropSqlPreview,
+} from './tableDesignerForeignKeySql';
+import { replaceForeignKeyDefinitionsFromForm, removeForeignKeyDefinitionsByName, toForeignKeySqlForms } from './tableDesignerForeignKeyUtils';
+import { buildTableDesignerTriggerTemplate, replaceTriggerDrafts, removeTriggerDraftByName, resolveTriggerDraftCommit } from './tableDesignerTriggerDraft';
+import { buildAlterTableCommentSql, supportsTableDesignerTableComment } from './tableDesignerTableCommentSql';
+import { buildAlterTablePreviewSql, hasAlterTableDraftChanges, type StarRocksCreateTableOptions, type StarRocksDistributionType, type StarRocksKeyModel, type StarRocksTableKind, type TDengineCreateTableOptions, type TDengineTableKind, type TDengineTagDefinition } from './tableDesignerSchemaSql';
 import { summarizeDuckDbPrimaryKeyChange } from './tableDesignerDuckDbPrimaryKey';
 import {
     containsTableDesignerTriggerCreateStatement,
@@ -28,7 +36,9 @@ import { dispatchSidebarDatabaseRefresh } from '../utils/sidebarDatabaseRefresh'
 import { getCurrentLanguage, t } from '../i18n';
 import { useOptionalI18n } from '../i18n/provider';
 import {
+    COMMON_COLUMN_DEFAULT_OPTIONS,
     getColumnDefinitionExtra,
+    isMySQLCharacterColumnType,
     normalizeColumnDefinition,
 } from '../utils/columnDefinition';
 import { resolveDataTableVerticalBorderColor } from '../utils/dataGridDisplay';
@@ -42,10 +52,8 @@ import { confirmProductionRisk } from '../utils/productionRiskConfirm';
 import { findPotentiallyMutatingConnectionStatements } from '../utils/connectionReadOnly';
 import {
     isMysqlFamilyDialect as isMysqlFamilySqlDialect,
-    isOracleLikeDialect as isOracleLikeSqlDialect,
     isPgLikeDialect as isPgLikeSqlDialect,
     isSqlServerDialect as isSqlServerSqlDialect,
-    quoteSqlIdentifierPart,
     quoteSqlIdentifierPath,
     resolveColumnTypeOptions,
     resolveSqlDialect,
@@ -58,11 +66,13 @@ import {
     resolveLoadedTableDesignerSchema,
     resolveTableDesignerEditTarget,
     resolveTableDesignerSchema,
+    resolveTableDesignerTableInfo,
     supportsTableDesignerSchemaSelection as supportsRequestedTableDesignerSchemaSelection,
     TABLE_DESIGNER_CURRENT_SCHEMA_SQL,
 } from './tableDesignerSchemaContext';
 import { buildTDengineStableOptions, buildTDengineStableQueries } from '../utils/tdengineStableMetadata';
 import TableDesignerCopyColumnsModal from './TableDesignerCopyColumnsModal';
+import { buildTableDesignerTypeColumns } from './tableDesignerColumnTypeColumns';
 import { useTableDesignerColumnClipboard } from './useTableDesignerColumnClipboard';
 
 interface EditableColumn extends ColumnDefinition {
@@ -271,18 +281,6 @@ const DB_TYPE_OPTIONS: Record<string, { value: string }[]> = {
         { value: 'XMLTYPE' },
     ],
 };
-
-const COMMON_DEFAULTS = [
-    { value: 'CURRENT_TIMESTAMP' },
-    { value: 'NULL' },
-    { value: '0' },
-    { value: "''" },
-];
-
-const isMySQLCharacterColumnType = (columnType: string): boolean => (
-    /^(?:char|varchar|tinytext|text|mediumtext|longtext|enum|set|nchar|nvarchar)\b/i.test(String(columnType || '').trim())
-);
-
 
 const PGLIKE_INDEX_TYPE_OPTIONS = [
     { label: 'DEFAULT', value: 'DEFAULT' },
@@ -743,9 +741,9 @@ const TableDesigner: React.FC<{ tab: TabData; embedded?: boolean }> = ({ tab, em
       };
   }, [activeKey, columns, focusColumnRow]);
 
-  // Initial Columns Definition
   useEffect(() => {
-      const columnTypeOptions = resolveColumnTypeOptions(getDbType());
+      const dbType = getDbType();
+      const columnTypeOptions = resolveColumnTypeOptions(dbType);
       const initialCols = [
           {
               title: renderDesignerHeaderTitle(t('table_designer.column.name', undefined, i18nLanguage)),
@@ -758,18 +756,13 @@ const TableDesigner: React.FC<{ tab: TabData; embedded?: boolean }> = ({ tab, em
                   )
               )
           },
-          {
-              title: renderDesignerHeaderTitle(t('table_designer.column.type', undefined, i18nLanguage)),
-              dataIndex: 'type',
-              key: 'type',
-              width: 150,
-              render: (text: string, record: EditableColumn) => readOnly ? text : (
-                  renderDesignerCellField(
-                      <AutoComplete options={columnTypeOptions} value={text} onChange={val => handleColumnChange(record._key, 'type', val)} style={{ width: '100%' }} variant="borderless" />,
-                      'is-compact'
-                  )
-              )
-          },
+          ...buildTableDesignerTypeColumns({
+              dbType,
+              readOnly,
+              i18nLanguage,
+              columnTypeOptions,
+              onTypeChange: (columnKey, type) => handleColumnChange(columnKey, 'type', type),
+          }),
           {
               title: renderDesignerHeaderTitle(t('table_designer.column.primary_key', undefined, i18nLanguage)),
               dataIndex: 'key',
@@ -821,7 +814,7 @@ const TableDesigner: React.FC<{ tab: TabData; embedded?: boolean }> = ({ tab, em
                   if (readOnly) return value;
                   return renderDesignerCellField(
                       <AutoComplete
-                          options={COMMON_DEFAULTS}
+                          options={COMMON_COLUMN_DEFAULT_OPTIONS}
                           value={value}
                           onChange={val => {
                               const hasDefault = val.length > 0;
@@ -1334,88 +1327,9 @@ const TableDesigner: React.FC<{ tab: TabData; embedded?: boolean }> = ({ tab, em
       applySchema();
   };
 
-  const generateTriggerTemplate = (): string => {
-    const dbType = getDbType();
-    const tableInfo = resolveTableInfo();
-    const tblName = tableInfo.tableRef || (
-        supportsRequestedTableDesignerSchemaSelection(dbType)
-          ? tableInfo.qualifiedName
-          : (tab.tableName || 'table_name')
-    );
-
-    switch (dbType) {
-      case 'mysql':
-      case 'mariadb':
-      case 'oceanbase':
-      case 'diros':
-      case 'starrocks':
-        {
-          const tableRef = quoteIdentifierPathByDialect(tblName, dbType);
-          return `CREATE TRIGGER trigger_name
-BEFORE INSERT ON ${tableRef}
-FOR EACH ROW
-BEGIN
-    -- Trigger logic
-END;`;
-        }
-      case 'postgres':
-      case 'kingbase':
-      case 'highgo':
-      case 'vastbase':
-      case 'opengauss':
-      case 'gaussdb': {
-        const tableRef = quoteIdentifierPathByDialect(tblName, dbType);
-        return `CREATE OR REPLACE FUNCTION trigger_function_name()
-RETURNS TRIGGER AS $$
-BEGIN
-    -- Trigger logic
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trigger_name
-BEFORE INSERT ON ${tableRef}
-FOR EACH ROW
-EXECUTE FUNCTION trigger_function_name();`;
-      }
-      case 'sqlserver':
-        {
-          const tableRef = quoteIdentifierPathByDialect(tblName, dbType);
-          return `CREATE TRIGGER trigger_name
-ON ${tableRef}
-AFTER INSERT
-AS
-BEGIN
-    SET NOCOUNT ON;
-    -- Trigger logic
-END;`;
-        }
-      case 'oracle':
-      case 'dameng':
-      case 'dm':
-        {
-          const tableRef = quoteIdentifierPathByDialect(tblName, dbType);
-          return `CREATE OR REPLACE TRIGGER trigger_name
-BEFORE INSERT ON ${tableRef}
-FOR EACH ROW
-BEGIN
-    -- Trigger logic
-    NULL;
-END;`;
-        }
-      case 'sqlite':
-        {
-          const tableRef = quoteIdentifierPathByDialect(tblName, dbType);
-          return `CREATE TRIGGER trigger_name
-AFTER INSERT ON ${tableRef}
-BEGIN
-    -- Trigger logic
-END;`;
-        }
-      default:
-        return `-- Enter a CREATE TRIGGER statement`;
-    }
-  };
+  const generateTriggerTemplate = (): string => (
+    buildTableDesignerTriggerTemplate(getDbType(), resolvePreviewTableInfo().tableRef)
+  );
 
   const buildDropTriggerSql = (triggerName: string): string => {
     const dbType = getDbType();
@@ -1437,6 +1351,12 @@ END;`;
 
   const handleEditTrigger = () => {
     if (!selectedTrigger) return;
+    if (isNewTable) {
+      setTriggerEditMode('edit');
+      setTriggerEditSql(selectedTrigger.statement || generateTriggerTemplate());
+      setIsTriggerEditModalOpen(true);
+      return;
+    }
     const dbType = getDbType();
     const tableInfo = resolveTableInfo();
     const tblName = tableInfo.tableRef || (
@@ -1490,6 +1410,12 @@ END;`;
       okType: 'danger',
       cancelText: t('table_designer.action.cancel', undefined, i18nLanguage),
       onOk: async () => {
+        if (isNewTable) {
+          setTriggers((previous) => removeTriggerDraftByName(previous, selectedTrigger.name));
+          setSelectedTrigger(null);
+          message.success(t('table_designer.message.trigger_deleted_draft', undefined, i18nLanguage));
+          return;
+        }
         const conn = connections.find(c => c.id === tab.connectionId);
         if (!conn) {
           message.error(t('table_designer.message.connection_not_found', undefined, i18nLanguage));
@@ -1528,12 +1454,6 @@ END;`;
   };
 
   const handleExecuteTriggerSql = async () => {
-    const conn = connections.find(c => c.id === tab.connectionId);
-    if (!conn) {
-      message.error(t('table_designer.message.connection_not_found', undefined, i18nLanguage));
-      return;
-    }
-
     const dbType = getDbType();
     if (
       !String(triggerEditSql || '').trim()
@@ -1544,6 +1464,38 @@ END;`;
     }
     if (!containsTableDesignerTriggerCreateStatement(triggerEditSql, dbType)) {
       message.error(t('trigger_viewer.edit_sql.empty_definition', undefined, i18nLanguage));
+      return;
+    }
+
+    if (isNewTable) {
+      const result = resolveTriggerDraftCommit(
+        triggerEditSql,
+        triggers,
+        triggerEditMode,
+        selectedTrigger?.name,
+      );
+      if (!result.ok) {
+        message.error(result.reason === 'duplicate'
+          ? t('table_designer.message.trigger_name_exists', { name: result.name }, i18nLanguage)
+          : t('table_designer.message.trigger_name_required', undefined, i18nLanguage));
+        return;
+      }
+      setTriggers((previous) => replaceTriggerDrafts(
+        previous,
+        triggerEditMode === 'edit' ? selectedTrigger?.name : undefined,
+        result.trigger,
+      ));
+      setSelectedTrigger(result.trigger);
+      setIsTriggerEditModalOpen(false);
+      message.success(triggerEditMode === 'create'
+        ? t('table_designer.message.trigger_saved_draft', undefined, i18nLanguage)
+        : t('table_designer.message.trigger_updated_draft', undefined, i18nLanguage));
+      return;
+    }
+
+    const conn = connections.find(c => c.id === tab.connectionId);
+    if (!conn) {
+      message.error(t('table_designer.message.connection_not_found', undefined, i18nLanguage));
       return;
     }
 
@@ -2137,34 +2089,11 @@ END;`;
       }
   }, [groupedForeignKeys, selectedForeignKey]);
 
-  const escapeBacktickIdentifier = (name: string) => String(name || '').replace(/`/g, '``');
-  const escapeBracketIdentifier = (name: string) => String(name || '').replace(/]/g, ']]');
-  const escapeDoubleQuoteIdentifier = (name: string) => String(name || '').replace(/"/g, '""');
-  const escapeSqlString = (value: string) => String(value || '').replace(/'/g, "''");
-
-  const splitQualifiedName = (qualifiedName: string): { schemaName: string; objectName: string } => {
-      const parsed = splitQualifiedNameLast(qualifiedName);
-      return {
-          schemaName: parsed.parentPath,
-          objectName: parsed.objectName,
-      };
-  };
-
   const isPgLikeDialect = (dbType: string): boolean => isPgLikeSqlDialect(dbType);
-  const isOracleLikeDialect = (dbType: string): boolean => isOracleLikeSqlDialect(dbType);
   const isSqlServerDialect = (dbType: string): boolean => isSqlServerSqlDialect(dbType);
   const isMysqlLikeDialect = (dbType: string): boolean => isMysqlFamilySqlDialect(dbType);
   const isNonRelationalDialect = (dbType: string): boolean => dbType === 'redis' || dbType === 'mongodb' || dbType === 'elasticsearch';
   const lacksAlterForeignKeySupport = (dbType: string): boolean => dbType === 'sqlite' || dbType === 'duckdb' || dbType === 'tdengine';
-  const lacksTableCommentSupport = (dbType: string): boolean => dbType === 'sqlite';
-
-  const quoteIdentifierPartByDialect = (part: string, dbType: string): string => {
-      return quoteSqlIdentifierPart(dbType, part);
-  };
-
-  const quoteIdentifierPathByDialect = (path: string, dbType: string): string => {
-      return quoteSqlIdentifierPath(dbType, path);
-  };
 
   const resolveTableInfo = () => {
       const dbType = getDbType();
@@ -2178,8 +2107,20 @@ END;`;
       return {
           dbType,
           ...resolved,
-          tableRef: quoteIdentifierPathByDialect(resolved.qualifiedName, dbType),
+          tableRef: quoteSqlIdentifierPath(dbType, resolved.qualifiedName),
       };
+  };
+
+  const resolvePreviewTableInfo = () => {
+      if (!isNewTable) return resolveTableInfo();
+      const dbType = getDbType();
+      const resolved = resolveTableDesignerTableInfo({
+          dbType,
+          dbName: String(tab.dbName || ''),
+          tableName: qualifyTableDesignerCreateName(String(newTableName || '').trim() || 'new_table', selectedSchema, dbType),
+          selectedSchema,
+      });
+      return { dbType, ...resolved, tableRef: quoteSqlIdentifierPath(dbType, resolved.qualifiedName) };
   };
 
   const hasUnsavedDraftChanges = useMemo(() => {
@@ -2214,7 +2155,7 @@ END;`;
       const dbType = getDbType();
       if (!dbType) return false;
       if (isNonRelationalDialect(dbType)) return false;
-      if (lacksTableCommentSupport(dbType)) return false;
+      if (!supportsTableDesignerTableComment(dbType)) return false;
       return true;
   };
 
@@ -2272,9 +2213,20 @@ END;`;
       return undefined;
   };
 
-  const buildCreateTableSql = (targetTableName: string, targetColumns: EditableColumn[], targetCharset: string, targetCollation: string) => {
+  const buildCreateTableSql = (
+      targetTableName: string,
+      targetColumns: EditableColumn[],
+      targetCharset: string,
+      targetCollation: string,
+      extras?: {
+          comment?: string;
+          indexes?: IndexFormSnapshot[];
+          foreignKeys?: ReturnType<typeof toForeignKeySqlForms>;
+          triggers?: TriggerDefinition[];
+      },
+  ) => {
       const dbType = getDbType();
-      return buildCreateTablePreviewSql({
+      return buildNewTablePreviewSql({
           dbType,
           tableName: qualifyTableDesignerCreateName(targetTableName, selectedSchema, dbType),
           columns: targetColumns,
@@ -2283,6 +2235,10 @@ END;`;
           starRocksOptions: buildStarRocksCreateOptions(),
           tdengineOptions: buildTDengineCreateOptions(),
           translate: (key, params) => t(key, params, i18nLanguage),
+          comment: extras?.comment,
+          indexes: extras?.indexes,
+          foreignKeys: extras?.foreignKeys,
+          triggers: extras?.triggers,
       });
   };
 
@@ -2465,49 +2421,23 @@ END;`;
 
   const buildTableCommentSql = (nextComment: string): string | null => {
       const tableInfo = resolveTableInfo();
-      const dbType = tableInfo.dbType;
-      const escapedComment = escapeSqlString(nextComment);
-      if (isNonRelationalDialect(dbType)) return null;
-      if (isMysqlLikeDialect(dbType)) {
-          return `ALTER TABLE ${tableInfo.tableRef} COMMENT = '${escapedComment}';`;
-      }
-      if (isPgLikeDialect(dbType) || isOracleLikeDialect(dbType)) {
-          return `COMMENT ON TABLE ${tableInfo.tableRef} IS '${escapedComment}';`;
-      }
-      if (isSqlServerDialect(dbType)) {
-          const schemaName = escapeSqlString(tableInfo.schema || 'dbo');
-          const tableName = escapeSqlString(tableInfo.table);
-          return `IF EXISTS (
-    SELECT 1
-    FROM sys.extended_properties ep
-    JOIN sys.tables t ON ep.major_id = t.object_id AND ep.minor_id = 0
-    JOIN sys.schemas s ON t.schema_id = s.schema_id
-    WHERE ep.name = N'MS_Description'
-      AND s.name = N'${schemaName}'
-      AND t.name = N'${tableName}'
-)
-BEGIN
-    EXEC sp_updateextendedproperty
-        @name = N'MS_Description',
-        @value = N'${escapedComment}',
-        @level0type = N'SCHEMA', @level0name = N'${schemaName}',
-        @level1type = N'TABLE', @level1name = N'${tableName}';
-END
-ELSE
-BEGIN
-    EXEC sp_addextendedproperty
-        @name = N'MS_Description',
-        @value = N'${escapedComment}',
-        @level0type = N'SCHEMA', @level0name = N'${schemaName}',
-        @level1type = N'TABLE', @level1name = N'${tableName}';
-END;`;
-      }
-      return `COMMENT ON TABLE ${tableInfo.tableRef} IS '${escapedComment}';`;
+      return buildAlterTableCommentSql({
+          dbType: tableInfo.dbType,
+          tableRef: tableInfo.tableRef,
+          schema: tableInfo.schema,
+          table: tableInfo.table,
+      }, nextComment);
   };
 
   const handleSaveTableComment = async () => {
       if (!supportsTableCommentOps()) {
           message.warning(t('table_designer.message.table_comment_unsupported', undefined, i18nLanguage));
+          return;
+      }
+      if (isNewTable) {
+          setTableComment(tableCommentDraft);
+          setIsTableCommentModalOpen(false);
+          message.success(t('table_designer.message.table_comment_saved_draft', undefined, i18nLanguage));
           return;
       }
       if (!tab.tableName) return;
@@ -2547,7 +2477,7 @@ END;`;
   };
 
   const getIndexCreateSqlResult = (form: IndexFormState) => {
-      const tableInfo = resolveTableInfo();
+      const tableInfo = resolvePreviewTableInfo();
       return buildIndexCreateSqlPreview({
           dbType: tableInfo.dbType,
           tableRef: tableInfo.tableRef,
@@ -2576,51 +2506,38 @@ END;`;
       if (!isIndexModalOpen) return '';
       const result = getIndexCreateSqlResult(indexForm);
       return result.sql || `-- ${result.message || 'Index CREATE SQL placeholder unavailable'}`;
-  }, [connections, i18nLanguage, indexForm, isIndexModalOpen, schemaSelectionOverride, selectedSchema, tab.connectionId, tab.dbName, tab.tableName]);
+  }, [connections, i18nLanguage, indexForm, isIndexModalOpen, isNewTable, newTableName, schemaSelectionOverride, selectedSchema, tab.connectionId, tab.dbName, tab.tableName]);
 
   const selectedIndexCreateSql = useMemo(() => {
       if (!selectedIndex || selectedIndexKeys.length !== 1) return '';
       const result = getIndexCreateSqlResult(buildIndexFormFromRow(selectedIndex));
       return result.sql || `-- ${result.message || 'Index CREATE SQL unavailable'}`;
-  }, [connections, i18nLanguage, schemaSelectionOverride, selectedIndex, selectedIndexKeys.length, selectedSchema, tab.connectionId, tab.dbName, tab.tableName]);
+  }, [connections, i18nLanguage, isNewTable, newTableName, schemaSelectionOverride, selectedIndex, selectedIndexKeys.length, selectedSchema, tab.connectionId, tab.dbName, tab.tableName]);
 
   const indexTableHeight = selectedIndexCreateSql ? Math.max(180, tableHeight - 220) : tableHeight;
 
   const buildIndexDropSql = (indexName: string): string | null => {
-      const tableInfo = resolveTableInfo();
-      const dbType = tableInfo.dbType;
-      const name = String(indexName || '').trim();
-      if (!name) return null;
+      const tableInfo = resolvePreviewTableInfo();
+      return buildIndexDropSqlPreview({
+          dbType: tableInfo.dbType,
+          tableRef: tableInfo.tableRef,
+          schema: tableInfo.schema,
+          indexName,
+      });
+  };
 
-      if (isMysqlLikeDialect(dbType)) {
-          if (name.toUpperCase() === 'PRIMARY') {
-              return `ALTER TABLE ${tableInfo.tableRef}\nDROP PRIMARY KEY;`;
-          }
-          const indexRef = quoteIdentifierPartByDialect(name, dbType);
-          return `DROP INDEX ${indexRef} ON ${tableInfo.tableRef};`;
+  const commitNewTableIndexDraft = (nextForm: IndexFormState, previousName?: string) => {
+      setIndexes((previous) => replaceIndexDefinitionsFromForm(previous, previousName, nextForm));
+      if (nextForm.kind === 'PRIMARY' || String(previousName || '').toUpperCase() === 'PRIMARY') {
+          setColumns((previous) => applyPrimaryIndexToColumnKeys(
+              previous,
+              nextForm.kind === 'PRIMARY' ? nextForm.columnNames : [],
+          ));
       }
-
-      if (isSqlServerDialect(dbType)) {
-          const indexRef = quoteIdentifierPartByDialect(name, dbType);
-          return `DROP INDEX ${indexRef} ON ${tableInfo.tableRef};`;
-      }
-
-      if (isPgLikeDialect(dbType) || isOracleLikeDialect(dbType) || dbType === 'sqlite') {
-          const fullIndexName = name.includes('.') || !tableInfo.schema
-              ? name
-              : `${tableInfo.schema}.${name}`;
-          const indexRef = quoteIdentifierPathByDialect(fullIndexName, dbType);
-          return `DROP INDEX ${indexRef};`;
-      }
-
-      if (isNonRelationalDialect(dbType)) {
-          return null;
-      }
-      const fullIndexName = name.includes('.') || !tableInfo.schema
-          ? name
-          : `${tableInfo.schema}.${name}`;
-      const indexRef = quoteIdentifierPathByDialect(fullIndexName, dbType);
-      return `DROP INDEX ${indexRef};`;
+      setIsIndexModalOpen(false);
+      message.success(indexModalMode === 'create'
+          ? t('table_designer.message.index_saved_draft', undefined, i18nLanguage)
+          : t('table_designer.message.index_updated_draft', undefined, i18nLanguage));
   };
 
   const handleSubmitIndex = async () => {
@@ -2628,7 +2545,7 @@ END;`;
           message.warning(t('table_designer.message.index_maintenance_unsupported', undefined, i18nLanguage));
           return;
       }
-      if (!tab.tableName) return;
+      if (!isNewTable && !tab.tableName) return;
       const supportedKinds = new Set(getIndexKindOptions().map(item => item.value));
       if (!supportedKinds.has(indexForm.kind)) {
           message.warning(t('table_designer.message.index_kind_unsupported', undefined, i18nLanguage));
@@ -2654,6 +2571,35 @@ END;`;
           return;
       }
 
+      const nextForm: IndexFormState = {
+          name: indexForm.kind === 'PRIMARY' ? 'PRIMARY' : nextName,
+          columnNames: [...indexForm.columnNames],
+          kind: indexForm.kind,
+          indexType: indexForm.kind === 'NORMAL' || indexForm.kind === 'UNIQUE'
+              ? (String(indexForm.indexType || '').trim().toUpperCase() || 'DEFAULT')
+              : 'DEFAULT',
+      };
+
+      if (isNewTable) {
+          const preview = getIndexCreateSqlResult({ ...indexForm, name: nextName });
+          if (!preview.sql) {
+              if (preview.severity === 'warning') {
+                  message.warning(preview.message || t('table_designer.message.index_create_sql_unavailable', undefined, i18nLanguage));
+              } else {
+                  message.error(preview.message || t('table_designer.message.index_create_sql_unavailable', undefined, i18nLanguage));
+              }
+              return;
+          }
+          if (indexModalMode === 'edit' && selectedIndex) {
+              if (!hasIndexFormChanged(buildIndexFormFromRow(selectedIndex), nextForm)) {
+                  message.info(t('table_designer.message.no_index_changes', undefined, i18nLanguage));
+                  return;
+              }
+          }
+          commitNewTableIndexDraft(nextForm, indexModalMode === 'edit' && selectedIndex ? selectedIndex.name : undefined);
+          return;
+      }
+
       setIndexSaving(true);
       const addSql = buildIndexCreateSql({ ...indexForm, name: nextName });
       if (!addSql) {
@@ -2664,14 +2610,6 @@ END;`;
 
       if (indexModalMode === 'edit' && selectedIndex) {
           const previousForm = buildIndexFormFromRow(selectedIndex);
-          const nextForm: IndexFormState = {
-              name: indexForm.kind === 'PRIMARY' ? 'PRIMARY' : nextName,
-              columnNames: [...indexForm.columnNames],
-              kind: indexForm.kind,
-              indexType: indexForm.kind === 'NORMAL' || indexForm.kind === 'UNIQUE'
-                  ? (String(indexForm.indexType || '').trim().toUpperCase() || 'DEFAULT')
-                  : 'DEFAULT',
-          };
           if (!hasIndexFormChanged(previousForm, nextForm)) {
               setIndexSaving(false);
               message.info(t('table_designer.message.no_index_changes', undefined, i18nLanguage));
@@ -2729,6 +2667,17 @@ END;`;
           okType: 'danger',
           cancelText: t('table_designer.action.cancel', undefined, i18nLanguage),
           onOk: async () => {
+              if (isNewTable) {
+                  setIndexes((previous) => removeIndexDefinitionsByNames(previous, toDelete.map(idx => idx.name)));
+                  if (toDelete.some(idx => String(idx.name || '').toUpperCase() === 'PRIMARY')) {
+                      setColumns((previous) => applyPrimaryIndexToColumnKeys(previous, []));
+                  }
+                  setSelectedIndexKeys([]);
+                  message.success(toDelete.length === 1
+                      ? t('table_designer.message.index_deleted_draft', undefined, i18nLanguage)
+                      : t('table_designer.message.indexes_deleted_draft', { count: toDelete.length }, i18nLanguage));
+                  return;
+              }
               const sqls: string[] = [];
               for (const idx of toDelete) {
                   const sql = buildIndexDropSql(idx.name);
@@ -2778,35 +2727,24 @@ END;`;
   };
 
   const buildForeignKeyAddSql = (form: ForeignKeyFormState): string | null => {
-      const tableInfo = resolveTableInfo();
-      const dbType = tableInfo.dbType;
+      const tableInfo = resolvePreviewTableInfo();
       if (!supportsForeignKeySchemaOps()) return null;
-
-      const localColsSql = form.columnNames
-          .map(col => quoteIdentifierPartByDialect(col, dbType))
-          .join(', ');
-      const refColsSql = form.refColumnNames
-          .map(col => quoteIdentifierPartByDialect(col, dbType))
-          .join(', ');
-      const refParts = splitQualifiedName(form.refTableName);
-      const refObjectName = refParts.objectName || String(form.refTableName || '').trim();
-      const refTableName = !refParts.schemaName && tableInfo.schema && (isPgLikeDialect(dbType) || isSqlServerDialect(dbType) || isOracleLikeDialect(dbType))
-          ? `${tableInfo.schema}.${refObjectName}`
-          : String(form.refTableName || '').trim();
-      const refTableSql = quoteIdentifierPathByDialect(refTableName, dbType);
-      const constraintSql = quoteIdentifierPartByDialect(form.constraintName, dbType);
-      return `ALTER TABLE ${tableInfo.tableRef}\nADD CONSTRAINT ${constraintSql} FOREIGN KEY (${localColsSql}) REFERENCES ${refTableSql} (${refColsSql});`;
+      return buildForeignKeyAddSqlPreview({
+          dbType: tableInfo.dbType,
+          tableRef: tableInfo.tableRef,
+          schema: tableInfo.schema,
+          form,
+      });
   };
 
   const buildForeignKeyDropSql = (constraintName: string): string | null => {
-      const tableInfo = resolveTableInfo();
-      const dbType = tableInfo.dbType;
+      const tableInfo = resolvePreviewTableInfo();
       if (!supportsForeignKeySchemaOps()) return null;
-      const constraintSql = quoteIdentifierPartByDialect(constraintName, dbType);
-      if (isMysqlLikeDialect(dbType)) {
-          return `ALTER TABLE ${tableInfo.tableRef}\nDROP FOREIGN KEY ${constraintSql};`;
-      }
-      return `ALTER TABLE ${tableInfo.tableRef}\nDROP CONSTRAINT ${constraintSql};`;
+      return buildForeignKeyDropSqlPreview({
+          dbType: tableInfo.dbType,
+          tableRef: tableInfo.tableRef,
+          constraintName,
+      });
   };
 
   const handleSubmitForeignKey = async () => {
@@ -2814,7 +2752,7 @@ END;`;
           message.warning(t('table_designer.message.foreign_key_maintenance_unsupported', undefined, i18nLanguage));
           return;
       }
-      if (!tab.tableName) return;
+      if (!isNewTable && !tab.tableName) return;
       const nextConstraint = String(foreignKeyForm.constraintName || '').trim();
       const refTable = String(foreignKeyForm.refTableName || '').trim();
       const refCols = foreignKeyForm.refColumnNames.map(v => String(v || '').trim()).filter(Boolean);
@@ -2850,19 +2788,32 @@ END;`;
           return;
       }
 
-      setForeignKeySaving(true);
-      const addSql = buildForeignKeyAddSql({
-          ...foreignKeyForm,
+      const nextForm: ForeignKeyFormState = {
           constraintName: nextConstraint,
           columnNames: localCols,
           refTableName: refTable,
           refColumnNames: refCols,
-      });
+      };
+      const addSql = buildForeignKeyAddSql(nextForm);
       if (!addSql) {
-          setForeignKeySaving(false);
           message.warning(t('table_designer.message.foreign_key_maintenance_unsupported', undefined, i18nLanguage));
           return;
       }
+
+      if (isNewTable) {
+          setFks((previous) => replaceForeignKeyDefinitionsFromForm(
+              previous,
+              foreignKeyModalMode === 'edit' && selectedForeignKey ? selectedForeignKey.constraintName : undefined,
+              nextForm,
+          ));
+          setIsForeignKeyModalOpen(false);
+          message.success(foreignKeyModalMode === 'create'
+              ? t('table_designer.message.foreign_key_saved_draft', undefined, i18nLanguage)
+              : t('table_designer.message.foreign_key_updated_draft', undefined, i18nLanguage));
+          return;
+      }
+
+      setForeignKeySaving(true);
       let sql = addSql;
       if (foreignKeyModalMode === 'edit' && selectedForeignKey) {
           const dropSql = buildForeignKeyDropSql(selectedForeignKey.constraintName);
@@ -2903,6 +2854,12 @@ END;`;
           okType: 'danger',
           cancelText: t('table_designer.action.cancel', undefined, i18nLanguage),
           onOk: async () => {
+              if (isNewTable) {
+                  setFks((previous) => removeForeignKeyDefinitionsByName(previous, selectedForeignKey.constraintName));
+                  setSelectedForeignKey(null);
+                  message.success(t('table_designer.message.foreign_key_deleted_draft', undefined, i18nLanguage));
+                  return;
+              }
               const sql = buildForeignKeyDropSql(selectedForeignKey.constraintName);
               if (!sql) {
                   message.warning(t('table_designer.message.foreign_key_delete_unsupported', undefined, i18nLanguage));
@@ -2960,8 +2917,15 @@ END;`;
       }
 
       if (isNewTable) {
-          // CREATE TABLE
-          const sql = buildCreateTableSql(isNewTable ? newTableName : tab.tableName || '', columns, charset, collation);
+          const sql = buildCreateTableSql(newTableName, columns, charset, collation, {
+              comment: tableComment,
+              indexes: groupedIndexes.map((row) => normalizeIndexFormFromRow(
+                  row,
+                  getIndexKindOptions().map((item) => item.value as IndexKind),
+              )),
+              foreignKeys: toForeignKeySqlForms(groupedForeignKeys),
+              triggers,
+          });
           setPreviewSql(sql);
           setIsPreviewOpen(true);
       } else {
@@ -3989,7 +3953,7 @@ END;`;
             )}
             {!readOnly && <Button size="small" icon={<SaveOutlined />} type="primary" disabled={supportsTableDesignerSchemaSelection && !schemaReady} onClick={generateDDL}>{t('table_designer.action.save', undefined, i18nLanguage)}</Button>}
             {!isNewTable && <Button size="small" icon={<ReloadOutlined />} loading={metadataLoading} onClick={handleRefreshDesigner}>{t('table_designer.action.refresh', undefined, i18nLanguage)}</Button>}
-            {!isNewTable && !readOnly && supportsTableCommentOps() && (
+            {!readOnly && supportsTableCommentOps() && (
                 <Button size="small" icon={<EditOutlined />} onClick={openTableCommentModal}>{t('table_designer.action.table_comment', undefined, i18nLanguage)}</Button>
             )}
             {!readOnly && !isTDengineChildNewTable && <Button size="small" icon={<PlusOutlined />} onClick={() => handleAddColumn()}>{t('table_designer.action.add_column', undefined, i18nLanguage)}</Button>}
@@ -4070,7 +4034,7 @@ END;`;
                         children: starRocksAdvancedTabContent,
                     },
                 ] : []),
-                ...(!isNewTable ? [
+                ...(!isTDengineNewTable ? [
                     {
                         key: 'indexes',
                         label: t('table_designer.tab.indexes', undefined, i18nLanguage),
@@ -4095,6 +4059,7 @@ END;`;
                                 )}
                                 <div className={'gn-v2-designer-section-note'} style={{ color: '#888', fontSize: 12 }}>
                                     {t('table_designer.summary.indexes', { count: groupedIndexes.length, fields: groupedIndexFieldCount }, i18nLanguage)}
+                                    {isNewTable ? ` ${t('table_designer.notice.new_table_index_hint', undefined, i18nLanguage)}` : ''}
                                 </div>
                                 <Table
                                     dataSource={groupedIndexes}
@@ -4145,6 +4110,11 @@ END;`;
                                                 {t('table_designer.selection.foreign_key_selected', { name: selectedForeignKey.constraintName }, i18nLanguage)}
                                             </span>
                                         )}
+                                    </div>
+                                )}
+                                {isNewTable && (
+                                    <div className={'gn-v2-designer-section-note'} style={{ color: '#888', fontSize: 12 }}>
+                                        {t('table_designer.notice.new_table_foreign_key_hint', undefined, i18nLanguage)}
                                     </div>
                                 )}
                                 <Table
@@ -4216,6 +4186,11 @@ END;`;
                                             : t('table_designer.selection.trigger_prompt', undefined, i18nLanguage)}
                                     </span>
                                 </div>
+                                {isNewTable && (
+                                    <div className={'gn-v2-designer-section-note'} style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>
+                                        {t('table_designer.notice.new_table_trigger_hint', undefined, i18nLanguage)}
+                                    </div>
+                                )}
                                 <Table
                                     dataSource={triggers}
                                     columns={[
@@ -4307,7 +4282,7 @@ END;`;
                         {t('table_designer.column.enable_default', undefined, i18nLanguage)}
                     </Checkbox>
                     <AutoComplete
-                        options={COMMON_DEFAULTS}
+                        options={COMMON_COLUMN_DEFAULT_OPTIONS}
                         value={columnDefaultValue}
                         onChange={setColumnDefaultValue}
                         disabled={!columnDefaultEnabled}
@@ -4374,13 +4349,17 @@ END;`;
         />
 
         <Modal
-            title={t('table_designer.modal.table_comment_title', undefined, i18nLanguage)}
+            title={isNewTable
+                ? t('table_designer.modal.table_comment_create_title', undefined, i18nLanguage)
+                : t('table_designer.modal.table_comment_title', undefined, i18nLanguage)}
             open={isTableCommentModalOpen}
             onCancel={() => setIsTableCommentModalOpen(false)}
             onOk={handleSaveTableComment}
-            okText={t('table_designer.action.save', undefined, i18nLanguage)}
+            okText={isNewTable
+                ? t('table_designer.action.apply', undefined, i18nLanguage)
+                : t('table_designer.action.save', undefined, i18nLanguage)}
             cancelText={t('table_designer.action.cancel', undefined, i18nLanguage)}
-            confirmLoading={tableCommentSaving}
+            confirmLoading={!isNewTable && tableCommentSaving}
             width={640}
         >
             <Input.TextArea
@@ -4391,9 +4370,11 @@ END;`;
                 maxLength={2048}
             />
             <div style={{ marginTop: 8, color: '#888', fontSize: 12 }}>
-                {t('table_designer.table_comment.current', {
-                    comment: tableComment || t('table_designer.fallback.empty', undefined, i18nLanguage),
-                }, i18nLanguage)}
+                {isNewTable
+                    ? t('table_designer.notice.new_table_comment_hint', undefined, i18nLanguage)
+                    : t('table_designer.table_comment.current', {
+                        comment: tableComment || t('table_designer.fallback.empty', undefined, i18nLanguage),
+                    }, i18nLanguage)}
             </div>
         </Modal>
 
@@ -4466,7 +4447,9 @@ END;`;
                     />
                 </Space>
                 <div style={{ color: '#888', fontSize: 12 }}>
-                    {t('table_designer.notice.index_restore_hint', undefined, i18nLanguage)}
+                    {t(isNewTable
+                        ? 'table_designer.notice.new_table_index_hint'
+                        : 'table_designer.notice.index_restore_hint', undefined, i18nLanguage)}
                 </div>
                 <div style={{ width: '100%' }}>
                     <div style={{ color: '#666', fontSize: 12, marginBottom: 6 }}>{t('table_designer.label.create_statement_plain', undefined, i18nLanguage)}</div>
@@ -4520,7 +4503,9 @@ END;`;
                     style={{ width: '100%' }}
                 />
                 <div style={{ color: '#888', fontSize: 12 }}>
-                    {t('table_designer.notice.foreign_key_replace_hint', undefined, i18nLanguage)}
+                    {t(isNewTable
+                        ? 'table_designer.notice.new_table_foreign_key_hint'
+                        : 'table_designer.notice.foreign_key_replace_hint', undefined, i18nLanguage)}
                 </div>
             </Space>
         </Modal>
@@ -4587,9 +4572,11 @@ END;`;
             onOk={handleExecuteTriggerSql}
         >
             <div style={{ marginBottom: 8, color: '#888', fontSize: 12 }}>
-                {triggerEditMode === 'edit' && selectedTrigger && (
-                    <span>{t('table_designer.notice.trigger_replace_hint', undefined, i18nLanguage)}</span>
-                )}
+                {isNewTable
+                    ? t('table_designer.notice.new_table_trigger_hint', undefined, i18nLanguage)
+                    : (triggerEditMode === 'edit' && selectedTrigger
+                        ? t('table_designer.notice.trigger_replace_hint', undefined, i18nLanguage)
+                        : null)}
             </div>
             <div style={{ border: `1px solid ${panelFrameColor}`, borderRadius: panelRadius, background: panelBodyBg }}>
                 <Editor
@@ -4608,7 +4595,9 @@ END;`;
                     }}
                 />
             </div>
-            <p style={{ marginTop: 10, color: '#faad14' }}>{t('table_designer.notice.sql_statement_irreversible', undefined, i18nLanguage)}</p>
+            {!isNewTable && (
+                <p style={{ marginTop: 10, color: '#faad14' }}>{t('table_designer.notice.sql_statement_irreversible', undefined, i18nLanguage)}</p>
+            )}
         </Modal>
     </div>
   );

@@ -28,10 +28,13 @@ import {
   loadFunctions,
   loadPackages,
   loadSequences,
-  splitQualifiedName,
   supportsDatabaseEvents,
   supportsDatabaseSequences,
 } from './sidebar/sidebarMetadataLoaders';
+import {
+  loadOracleDatabaseLinks,
+  supportsOracleDatabaseLinks,
+} from './sidebar/sidebarOracleDatabaseLinks';
 import {
   DEFAULT_WORKBENCH_INSPECTOR_WIDTH,
   MAX_WORKBENCH_INSPECTOR_WIDTH,
@@ -47,52 +50,21 @@ import {
   groupInspectorIndexes,
   isWorkbenchInspectorHostTab,
   matchesInspectorSearch,
+  resolveInspectorI18nSegment,
   resolveWorkbenchInspectorScope,
+  type InspectorDatabaseEvent,
+  type InspectorDatabaseLink,
+  type InspectorDatabasePackage,
+  type InspectorDatabaseRoutine,
+  type InspectorDatabaseSequence,
+  type InspectorDatabaseTrigger,
   type InspectorForeignKeyRow,
   type InspectorIndexRow,
+  type InspectorTabDef,
   type WorkbenchInspectorTabKey,
 } from '../utils/workbenchInspectorModel';
+import { createWorkbenchInspectorOpeners } from '../utils/workbenchInspectorOpeners';
 import './WorkbenchInspector.css';
-
-type DatabaseRoutine = {
-  displayName: string;
-  routineName: string;
-  routineType: string;
-  objectStatus?: string;
-};
-
-type DatabaseSequence = {
-  displayName: string;
-  sequenceName: string;
-  schemaName: string;
-};
-
-type DatabasePackage = {
-  displayName: string;
-  packageName: string;
-  schemaName: string;
-};
-
-type DatabaseTrigger = {
-  displayName: string;
-  triggerName: string;
-  tableName: string;
-  schemaName?: string;
-  objectStatus?: string;
-};
-
-type DatabaseEvent = {
-  displayName: string;
-  eventName: string;
-  schemaName: string;
-  eventType: string;
-  status: string;
-};
-
-type InspectorTabDef = {
-  key: WorkbenchInspectorTabKey;
-  label: string;
-};
 
 type InspectorListState<T> = {
   loading: boolean;
@@ -108,16 +80,16 @@ const createEmptyListState = <T,>(): InspectorListState<T> => ({
   items: [],
 });
 
-const isStructureOnlyConnection = (connection: SavedConnection | undefined): boolean => {
-  if (!connection) return false;
-  const dbType = resolveDataSourceType(connection.config);
-  return dbType === 'elasticsearch' || dbType === 'mongodb' || dbType === 'redis' || dbType === 'iotdb';
-};
-
 const formatLoadError = (error: unknown): string => {
   if (error instanceof Error && error.message.trim()) return error.message.trim();
   const text = String(error || '').trim();
   return text;
+};
+
+const isStructureOnlyConnection = (connection: SavedConnection | undefined): boolean => {
+  if (!connection) return false;
+  const dbType = resolveDataSourceType(connection.config);
+  return dbType === 'elasticsearch' || dbType === 'mongodb' || dbType === 'redis' || dbType === 'iotdb';
 };
 
 export default function WorkbenchInspector() {
@@ -158,11 +130,12 @@ export default function WorkbenchInspector() {
   const [indexesState, setIndexesState] = useState<InspectorListState<InspectorIndexRow>>(createEmptyListState);
   const [foreignKeysState, setForeignKeysState] = useState<InspectorListState<InspectorForeignKeyRow>>(createEmptyListState);
   const [tableTriggersState, setTableTriggersState] = useState<InspectorListState<TriggerDefinition>>(createEmptyListState);
-  const [sequencesState, setSequencesState] = useState<InspectorListState<DatabaseSequence>>(createEmptyListState);
-  const [routinesState, setRoutinesState] = useState<InspectorListState<DatabaseRoutine>>(createEmptyListState);
-  const [packagesState, setPackagesState] = useState<InspectorListState<DatabasePackage>>(createEmptyListState);
-  const [dbTriggersState, setDbTriggersState] = useState<InspectorListState<DatabaseTrigger>>(createEmptyListState);
-  const [eventsState, setEventsState] = useState<InspectorListState<DatabaseEvent>>(createEmptyListState);
+  const [sequencesState, setSequencesState] = useState<InspectorListState<InspectorDatabaseSequence>>(createEmptyListState);
+  const [routinesState, setRoutinesState] = useState<InspectorListState<InspectorDatabaseRoutine>>(createEmptyListState);
+  const [packagesState, setPackagesState] = useState<InspectorListState<InspectorDatabasePackage>>(createEmptyListState);
+  const [dbTriggersState, setDbTriggersState] = useState<InspectorListState<InspectorDatabaseTrigger>>(createEmptyListState);
+  const [eventsState, setEventsState] = useState<InspectorListState<InspectorDatabaseEvent>>(createEmptyListState);
+  const [databaseLinksState, setDatabaseLinksState] = useState<InspectorListState<InspectorDatabaseLink>>(createEmptyListState);
   const [reloadToken, setReloadToken] = useState(0);
 
   const dbName = String(activeTab?.dbName || '').trim();
@@ -173,6 +146,7 @@ export default function WorkbenchInspector() {
   const includeSequences = supportsDatabaseSequences(connection || undefined);
   const includeEvents = supportsDatabaseEvents(connection || undefined);
   const includePackages = dialect === 'oracle' || dialect === 'dm';
+  const includeDatabaseLinks = supportsOracleDatabaseLinks(connection || undefined);
   const inspectorIdentity = [
     scope || '',
     activeTab?.connectionId || '',
@@ -197,7 +171,8 @@ export default function WorkbenchInspector() {
     { key: 'triggers', label: t('workbench.inspector.tab.triggers') },
     ...(includeEvents ? [{ key: 'events' as const, label: t('workbench.inspector.tab.events') }] : []),
     ...(includePackages ? [{ key: 'packages' as const, label: t('workbench.inspector.tab.packages') }] : []),
-  ]), [includeEvents, includePackages, includeSequences, t]);
+    ...(includeDatabaseLinks ? [{ key: 'databaseLinks' as const, label: t('workbench.inspector.tab.database_links') }] : []),
+  ]), [includeDatabaseLinks, includeEvents, includePackages, includeSequences, t]);
 
   const visibleTabs = scope === 'database' ? databaseTabs : tableTabs;
 
@@ -217,6 +192,7 @@ export default function WorkbenchInspector() {
     setPackagesState(createEmptyListState());
     setDbTriggersState(createEmptyListState());
     setEventsState(createEmptyListState());
+    setDatabaseLinksState(createEmptyListState());
   }, [inspectorIdentity]);
 
   useEffect(() => {
@@ -234,116 +210,26 @@ export default function WorkbenchInspector() {
     });
   }, [activeTab?.connectionId, dbName, schemaName, setActiveContext]);
 
-  const openTableDesigner = useCallback((initialTab: string) => {
-    if (!activeTab?.connectionId || !dbName || !tableName || objectType !== 'table') return;
-    const forceReadOnly = isStructureOnlyConnection(connection || undefined)
-      || isConnectionStructureEditRestricted(connection?.config);
-    applyContext();
-    addTab({
-      id: `design-${activeTab.connectionId}-${dbName}-${schemaName || 'default'}-${tableName}`,
-      title: t(
-        forceReadOnly ? 'sidebar.tab.table_structure' : 'sidebar.tab.design_table',
-        { table: tableName },
-      ),
-      type: 'design',
-      connectionId: activeTab.connectionId,
-      dbName,
-      tableName,
-      schemaName: schemaName || undefined,
-      initialTab,
-      readOnly: forceReadOnly,
-    });
-  }, [activeTab?.connectionId, addTab, applyContext, connection, dbName, objectType, schemaName, t, tableName]);
-
-  const openTableTrigger = useCallback((trigger: TriggerDefinition) => {
-    if (!activeTab?.connectionId || !dbName || !tableName) return;
-    applyContext();
-    addTab({
-      id: `trigger-${activeTab.connectionId}-${dbName}-${schemaName || 'default'}-${tableName}-${trigger.name}`,
-      title: t('sidebar.tab.trigger', { name: trigger.name }),
-      type: 'trigger',
-      connectionId: activeTab.connectionId,
-      dbName,
-      triggerName: trigger.name,
-      triggerTableName: tableName,
-      schemaName: schemaName || undefined,
-    });
-  }, [activeTab?.connectionId, addTab, applyContext, dbName, schemaName, t, tableName]);
-
-  const openDatabaseTrigger = useCallback((trigger: DatabaseTrigger) => {
-    if (!activeTab?.connectionId || !dbName) return;
-    applyContext(trigger.schemaName);
-    addTab({
-      id: `trigger-${activeTab.connectionId}-${dbName}-trigger-${trigger.triggerName}-${trigger.tableName}`,
-      title: t('sidebar.tab.trigger', { name: trigger.triggerName }),
-      type: 'trigger',
-      connectionId: activeTab.connectionId,
-      dbName,
-      triggerName: trigger.triggerName,
-      triggerTableName: trigger.tableName,
-      schemaName: trigger.schemaName,
-    });
-  }, [activeTab?.connectionId, addTab, applyContext, dbName, t]);
-
-  const openRoutine = useCallback((routine: DatabaseRoutine) => {
-    if (!activeTab?.connectionId || !dbName) return;
-    const parsed = splitQualifiedName(routine.routineName);
-    const nextSchemaName = parsed.schemaName || schemaName;
-    const typeLabel = t(routine.routineType === 'PROCEDURE' ? 'sidebar.object.procedure' : 'sidebar.object.function');
-    applyContext(nextSchemaName);
-    addTab({
-      id: `routine-def-${activeTab.connectionId}-${dbName}${nextSchemaName ? `-${nextSchemaName}` : ''}-${routine.routineName}`,
-      title: t('sidebar.tab.routine_definition', { type: typeLabel, name: routine.routineName }),
-      type: 'routine-def',
-      connectionId: activeTab.connectionId,
-      dbName,
-      routineName: routine.routineName,
-      routineType: routine.routineType,
-      schemaName: nextSchemaName || undefined,
-    });
-  }, [activeTab?.connectionId, addTab, applyContext, dbName, schemaName, t]);
-
-  const openSequence = useCallback((sequence: DatabaseSequence) => {
-    if (!activeTab?.connectionId || !dbName) return;
-    applyContext(sequence.schemaName);
-    addTab({
-      id: `sequence-def-${activeTab.connectionId}-${dbName}${sequence.schemaName ? `-${sequence.schemaName}` : ''}-${sequence.sequenceName}`,
-      title: t('sidebar.tab.sequence_definition', { name: sequence.sequenceName }),
-      type: 'sequence-def',
-      connectionId: activeTab.connectionId,
-      dbName,
-      sequenceName: sequence.sequenceName,
-      schemaName: sequence.schemaName || undefined,
-    });
-  }, [activeTab?.connectionId, addTab, applyContext, dbName, t]);
-
-  const openPackage = useCallback((pkg: DatabasePackage) => {
-    if (!activeTab?.connectionId || !dbName) return;
-    applyContext(pkg.schemaName);
-    addTab({
-      id: `package-def-${activeTab.connectionId}-${dbName}${pkg.schemaName ? `-${pkg.schemaName}` : ''}-${pkg.packageName}`,
-      title: t('sidebar.tab.package_definition', { name: pkg.packageName }),
-      type: 'package-def',
-      connectionId: activeTab.connectionId,
-      dbName,
-      packageName: pkg.packageName,
-      schemaName: pkg.schemaName || undefined,
-    });
-  }, [activeTab?.connectionId, addTab, applyContext, dbName, t]);
-
-  const openEvent = useCallback((event: DatabaseEvent) => {
-    if (!activeTab?.connectionId || !dbName) return;
-    applyContext(event.schemaName);
-    addTab({
-      id: `event-def-${activeTab.connectionId}-${dbName}${event.schemaName ? `-${event.schemaName}` : ''}-${event.eventName}`,
-      title: t('sidebar.tab.event', { name: event.eventName }),
-      type: 'event-def',
-      connectionId: activeTab.connectionId,
-      dbName,
-      eventName: event.eventName,
-      schemaName: event.schemaName || undefined,
-    });
-  }, [activeTab?.connectionId, addTab, applyContext, dbName, t]);
+  const {
+    openTableDesigner,
+    openTableTrigger,
+    openDatabaseTrigger,
+    openRoutine,
+    openSequence,
+    openPackage,
+    openEvent,
+    openDatabaseLink,
+  } = useMemo(() => createWorkbenchInspectorOpeners({
+    connection,
+    activeTabConnectionId: activeTab?.connectionId,
+    dbName,
+    schemaName,
+    tableName,
+    objectType,
+    addTab,
+    applyContext,
+    t,
+  }), [activeTab?.connectionId, addTab, applyContext, connection, dbName, objectType, schemaName, t, tableName]);
 
   useEffect(() => {
     if (!scope || collapsed || !connection || !dbName || activeKey === 'overview') return;
@@ -540,6 +426,29 @@ export default function WorkbenchInspector() {
             setEventsState({ loading: false, error: failMessage(error), supported: true, items: [] });
           }
         }
+        return;
+      }
+
+      if (scope === 'database' && activeKey === 'databaseLinks') {
+        setDatabaseLinksState((prev) => ({ ...prev, loading: true, error: '' }));
+        try {
+          const result = await loadOracleDatabaseLinks(loaderConn, dbName);
+          if (cancelled) return;
+          setDatabaseLinksState({
+            loading: false,
+            error: result.failureMessage ? failMessage(result.failureMessage) : '',
+            supported: result.supported !== false,
+            items: (result.databaseLinks || []).map((item) => ({
+              displayName: item.databaseLinkName,
+              databaseLinkName: item.databaseLinkName,
+              schemaName: item.schemaName,
+            })),
+          });
+        } catch (error) {
+          if (!cancelled) {
+            setDatabaseLinksState({ loading: false, error: failMessage(error), supported: true, items: [] });
+          }
+        }
       }
     };
 
@@ -598,6 +507,7 @@ export default function WorkbenchInspector() {
     if (scope === 'database' && activeKey === 'packages') return packagesState;
     if (scope === 'database' && activeKey === 'triggers') return dbTriggersState;
     if (scope === 'database' && activeKey === 'events') return eventsState;
+    if (scope === 'database' && activeKey === 'databaseLinks') return databaseLinksState;
     return null;
   })();
 
@@ -627,6 +537,9 @@ export default function WorkbenchInspector() {
   ));
   const filteredEvents = eventsState.items.filter((item) => (
     matchesInspectorSearch(search, [item.displayName, item.eventName, item.schemaName, item.eventType, item.status])
+  ));
+  const filteredDatabaseLinks = databaseLinksState.items.filter((item) => (
+    matchesInspectorSearch(search, [item.displayName, item.databaseLinkName, item.schemaName])
   ));
 
   const renderStatus = (state: InspectorListState<unknown> | null, emptyText: string, filteredCount: number) => {
@@ -725,7 +638,7 @@ export default function WorkbenchInspector() {
                 >
                   <span className="gn-v2-inspector-module-title">{tab.label}</span>
                   <span className="gn-v2-inspector-module-hint">
-                    {t(`workbench.inspector.module.${tab.key === 'foreignKeys' ? 'foreign_keys' : tab.key}.hint`)}
+                    {t(`workbench.inspector.module.${resolveInspectorI18nSegment(tab.key)}.hint`)}
                   </span>
                 </button>
               ))}
@@ -737,9 +650,7 @@ export default function WorkbenchInspector() {
 
   const renderListBody = () => {
     if (activeKey === 'overview') return renderOverview();
-    const emptyKey = activeKey === 'foreignKeys'
-      ? 'workbench.inspector.empty.foreign_keys'
-      : `workbench.inspector.empty.${activeKey}`;
+    const emptyKey = `workbench.inspector.empty.${resolveInspectorI18nSegment(activeKey)}`;
     const filteredCount = activeKey === 'columns' ? filteredColumns.length
       : activeKey === 'indexes' ? filteredIndexes.length
         : activeKey === 'foreignKeys' ? filteredForeignKeys.length
@@ -748,7 +659,8 @@ export default function WorkbenchInspector() {
               : activeKey === 'routines' ? filteredRoutines.length
                 : activeKey === 'packages' ? filteredPackages.length
                   : activeKey === 'events' ? filteredEvents.length
-                    : filteredDbTriggers.length;
+                    : activeKey === 'databaseLinks' ? filteredDatabaseLinks.length
+                      : filteredDbTriggers.length;
     const status = renderStatus(currentListState, t(emptyKey), filteredCount);
     return (
       <div className="gn-v2-inspector-body">
@@ -909,6 +821,21 @@ export default function WorkbenchInspector() {
                 <div className="gn-v2-inspector-item-meta">
                   <span>{[item.eventType, item.status].filter(Boolean).join(' · ') || item.schemaName}</span>
                 </div>
+              </button>
+            ))}
+            {activeKey === 'databaseLinks' && filteredDatabaseLinks.map((item) => (
+              <button
+                key={`${item.schemaName}-${item.databaseLinkName}`}
+                type="button"
+                className="gn-v2-inspector-item-btn"
+                onClick={() => openDatabaseLink(item)}
+              >
+                <div className="gn-v2-inspector-item-title">{item.displayName}</div>
+                {item.schemaName ? (
+                  <div className="gn-v2-inspector-item-meta">
+                    <span>{item.schemaName}</span>
+                  </div>
+                ) : null}
               </button>
             ))}
           </div>

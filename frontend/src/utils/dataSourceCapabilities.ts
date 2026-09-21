@@ -218,6 +218,7 @@ export type DataSourceUICapabilityFlags = {
   preferManualTotalCount?: boolean;
   supportsApproximateTableCount?: boolean;
   supportsApproximateTotalPages?: boolean;
+  parameterBinding?: boolean;
 };
 
 export type DataSourceCapabilityContract = {
@@ -313,6 +314,7 @@ export type DataSourceCapabilities = {
   preferManualTotalCount: boolean;
   supportsApproximateTableCount: boolean;
   supportsApproximateTotalPages: boolean;
+  supportsParameterBinding: boolean;
   supportsRelationalObjectKindFilter: boolean;
 };
 
@@ -361,6 +363,7 @@ export const getDataSourceCapabilities = (config: ConnectionLike): DataSourceCap
     preferManualTotalCount: ui.preferManualTotalCount === true,
     supportsApproximateTableCount: ui.supportsApproximateTableCount === true,
     supportsApproximateTotalPages: ui.supportsApproximateTotalPages === true,
+    supportsParameterBinding: ui.parameterBinding === true,
     supportsRelationalObjectKindFilter:
       contract.schema.supported && !isMessageQueueDataSource(config),
   };

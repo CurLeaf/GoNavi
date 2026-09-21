@@ -2,16 +2,18 @@ import type { Key, ReactNode } from 'react';
 
 import {
   resolveConnectionTagChildOrder,
-  buildSidebarDatabasePinKey,
   buildSidebarRootConnectionToken,
   buildSidebarRootTagToken,
-  buildSidebarTablePinKey,
   resolveSidebarRootOrderTokens,
 } from '../store';
+import {
+  buildSidebarDatabasePinKey,
+  buildSidebarTablePinKey,
+  type SidebarTableSortPreference,
+} from '../utils/sidebarTreeOrder';
 import type { ConnectionDisplaySortMode, ConnectionTag, SavedConnection, TabData } from '../types';
 import { readTableAccessCount } from '../utils/tableAccessCount';
 import { t } from '../i18n';
-import { t as catalogTranslate } from '../i18n/catalog';
 import {
   matchesSidebarSearchText,
   normalizeSidebarSearchText,
@@ -20,7 +22,6 @@ import {
 type SidebarV2Translate = (key: string) => string;
 
 const translateSidebarV2Current: SidebarV2Translate = (key) => t(key);
-const translateSidebarV2ZhCN: SidebarV2Translate = (key) => catalogTranslate('zh-CN', key);
 
 export type SidebarConnectionState = 'loading' | 'success' | 'error';
 
@@ -38,6 +39,7 @@ export type SidebarTreeNodeType =
   | 'routine'
   | 'sequence'
   | 'package'
+  | 'database-link'
   | 'object-group'
   | 'v2-database-section'
   | 'v2-table-section'
@@ -390,8 +392,6 @@ export const resolveSidebarTableNameForCopy = (
     || '',
   ).trim();
 };
-
-type SidebarTableSortPreference = 'name' | 'frequency';
 
 type SidebarTableEntryForSort = {
   tableName: string;
@@ -952,79 +952,18 @@ export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = t('c
   return trimmed.slice(0, 2);
 };
 
-export type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'sequences' | 'routines' | 'packages' | 'events';
-
-export const buildV2ExplorerFilterOptions = (
-  translate: SidebarV2Translate = translateSidebarV2Current,
-): Array<{ key: V2ExplorerFilter; label: string }> => [
-  { key: 'all', label: translate('sidebar.command_search.object_kind.all') },
-  { key: 'tables', label: translate('sidebar.command_search.object_kind.tables') },
-  { key: 'views', label: translate('sidebar.command_search.object_kind.views') },
-  { key: 'sequences', label: translate('sidebar.command_search.object_kind.sequences') },
-  { key: 'routines', label: translate('sidebar.command_search.object_kind.routines') },
-  { key: 'packages', label: translate('sidebar.command_search.object_kind.packages') },
-  { key: 'events', label: translate('sidebar.command_search.object_kind.events') },
-];
-
-export const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; label: string }> = buildV2ExplorerFilterOptions(translateSidebarV2ZhCN);
-
-const V2_EXPLORER_FILTER_GROUP_KEYS: Record<Exclude<V2ExplorerFilter, 'all'>, string[]> = {
-  tables: ['tables'],
-  views: ['views', 'materializedViews'],
-  sequences: ['sequences'],
-  routines: ['routines'],
-  packages: ['packages'],
-  events: ['events'],
-};
+// The filter dimension, its button ordering and the tree-narrowing rules now live
+// in `./sidebar/sidebarExplorerFilter`, which this file is too large to keep
+// hosting (AGENTS.md §1.1). Re-exported here so existing importers are untouched.
+export type { V2ExplorerFilter } from './sidebar/sidebarExplorerFilter';
+export {
+  buildV2ExplorerFilterOptions,
+  V2_EXPLORER_FILTER_OPTIONS,
+  V2_EXPLORER_FILTER_LABEL_KEYS,
+  filterV2ExplorerTreeByKind,
+} from './sidebar/sidebarExplorerFilter';
 
 export const V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE = 0;
-
-export const filterV2ExplorerTreeByKind = (
-  nodes: SidebarTreeNode[],
-  filter: V2ExplorerFilter,
-): SidebarTreeNode[] => {
-  if (filter === 'all') return nodes;
-  const allowedGroupKeys = new Set(V2_EXPLORER_FILTER_GROUP_KEYS[filter]);
-  const objectTypeMatches = (node: SidebarTreeNode): boolean => {
-    if (filter === 'tables') return node.type === 'table';
-    if (filter === 'views') return node.type === 'view' || node.type === 'materialized-view';
-    if (filter === 'sequences') return node.type === 'sequence';
-    if (filter === 'routines') return node.type === 'routine';
-    if (filter === 'packages') return node.type === 'package';
-    if (filter === 'events') return node.type === 'db-event';
-    return false;
-  };
-
-  const visit = (node: SidebarTreeNode): SidebarTreeNode | null => {
-    // Relational filters have no semantic equivalent for a broker. Keep the
-    // complete MQ namespace visible instead of making the explorer look empty
-    // when the user switches from a database connection with a filter active.
-    if (node.type === 'message-namespace') {
-      return node;
-    }
-    const groupKey = String(node?.dataRef?.groupKey || '');
-    if (node.type === 'object-group') {
-      if (allowedGroupKeys.has(groupKey)) {
-        return node;
-      }
-      if (groupKey === 'schema') {
-        const schemaChildren = (node.children || []).map(visit).filter(Boolean) as SidebarTreeNode[];
-        return schemaChildren.length > 0 ? { ...node, children: schemaChildren, isLeaf: false } : null;
-      }
-      return null;
-    }
-    if (objectTypeMatches(node)) {
-      return node;
-    }
-    if (node.type === 'database') {
-      const filteredChildren = (node.children || []).map(visit).filter(Boolean) as SidebarTreeNode[];
-      return filteredChildren.length > 0 ? { ...node, children: filteredChildren, isLeaf: false } : null;
-    }
-    return null;
-  };
-
-  return nodes.map(visit).filter(Boolean) as SidebarTreeNode[];
-};
 
 export type V2CommandSearchItem =
   | {
@@ -1099,9 +1038,8 @@ const isV2CommandSearchObjectNode = (node: SidebarTreeNode): boolean => {
   return node.type === 'table'
     || node.type === 'view'
     || node.type === 'materialized-view'
-    || node.type === 'sequence'
-    || node.type === 'package'
-    || node.type === 'message-object';
+    || node.type === 'sequence' || node.type === 'package'
+    || node.type === 'database-link' || node.type === 'message-object';
 };
 
 export const V2_COMMAND_SEARCH_INITIAL_TREE_LIMIT = 24;
@@ -1131,7 +1069,7 @@ export const buildV2CommandSearchTreeIndex = (
       || dataRef.tableName
       || dataRef.viewName
       || dataRef.sequenceName
-      || dataRef.packageName
+      || dataRef.packageName || dataRef.databaseLinkName
       || item.title
       || '',
     );
@@ -1149,6 +1087,7 @@ export const buildV2CommandSearchTreeIndex = (
         dataRef.viewName,
         dataRef.sequenceName,
         dataRef.packageName,
+        dataRef.databaseLinkName,
         dataRef.tableComment,
         dataRef.dbName,
         dataRef.name,
@@ -1359,7 +1298,8 @@ export const resolveSidebarTreeDropPlacement = ({
   fallbackInsertBefore,
   metrics,
 }: SidebarTreeDropPlacementOptions): SidebarTreeDropPlacement => {
-  const isHostMovingToGroup = dragNodeType === 'connection' && dropNodeType === 'tag';
+  const isHostMovingToGroup = (dragNodeType === 'connection' || dragNodeType === 'tag')
+    && dropNodeType === 'tag';
   if (isHostMovingToGroup) {
     const clientY = metrics?.clientY;
     const top = metrics?.top;
@@ -1377,8 +1317,9 @@ export const resolveSidebarTreeDropPlacement = ({
       const offset = clientY - top;
       if (offset < edgeSize) return 'before';
       if (offset > height - edgeSize) return 'after';
+      return 'inside';
     }
-    return 'inside';
+    if (dragNodeType === 'connection') return 'inside';
   }
 
   if (

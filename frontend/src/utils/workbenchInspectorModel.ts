@@ -18,7 +18,60 @@ export type WorkbenchInspectorTabKey =
   | 'sequences'
   | 'routines'
   | 'packages'
-  | 'events';
+  | 'events'
+  | 'databaseLinks';
+
+export type InspectorDatabaseRoutine = {
+  displayName: string;
+  routineName: string;
+  routineType: string;
+  objectStatus?: string;
+};
+
+export type InspectorDatabaseSequence = {
+  displayName: string;
+  sequenceName: string;
+  schemaName: string;
+};
+
+export type InspectorDatabasePackage = {
+  displayName: string;
+  packageName: string;
+  schemaName: string;
+};
+
+export type InspectorDatabaseTrigger = {
+  displayName: string;
+  triggerName: string;
+  tableName: string;
+  schemaName?: string;
+  objectStatus?: string;
+};
+
+export type InspectorDatabaseEvent = {
+  displayName: string;
+  eventName: string;
+  schemaName: string;
+  eventType: string;
+  status: string;
+};
+
+export type InspectorDatabaseLink = {
+  displayName: string;
+  databaseLinkName: string;
+  schemaName: string;
+};
+
+export type InspectorTabDef = {
+  key: WorkbenchInspectorTabKey;
+  label: string;
+};
+
+export const resolveInspectorI18nSegment = (key: WorkbenchInspectorTabKey): string => {
+  if (key === 'foreignKeys') return 'foreign_keys';
+  if (key === 'databaseLinks') return 'database_links';
+  return key;
+};
 
 export type InspectorIndexRow = {
   key: string;

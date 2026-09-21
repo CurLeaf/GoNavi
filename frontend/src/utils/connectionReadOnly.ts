@@ -1,6 +1,7 @@
 import type { ConnectionConfig } from "../types";
 import { convertMongoShellToJsonCommand } from "./mongodb";
 import { resolveSqlDialect } from "./sqlDialect";
+import { hasEmbeddedWriteStatement } from "./sqlEmbeddedWrite";
 import { findSqlStatementRanges } from "./sqlStatementSelection";
 
 export type ConnectionProtectionKey =
@@ -273,13 +274,17 @@ const isReadOnlySqlStatement = (statement: string, dbType: string): boolean => {
     return false;
   }
   if (keyword === "select") {
-    return !hasSelectInto(text, dbType);
+    return !hasSelectInto(text, dbType) &&
+      !hasEmbeddedWriteStatement(text, dbType);
   }
   if (keyword === "with") {
     return !hasSelectInto(text, dbType) &&
-      !hasMutatingWithKeyword(text, dbType);
+      !hasMutatingWithKeyword(text, dbType) &&
+      !hasEmbeddedWriteStatement(text, dbType);
   }
-  return true;
+  // Remaining read keywords (show / describe / desc / explain / ...) can
+  // still be followed by a semicolon-less write and must be scanned too.
+  return !hasEmbeddedWriteStatement(text, dbType);
 };
 
 const normalizeMongoCommandText = (statement: string): string => {

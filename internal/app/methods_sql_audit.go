@@ -926,19 +926,6 @@ func (a *App) UpdateSQLAuditSettings(settings sqlaudit.Settings) connection.Quer
 	return a.GetSQLAuditSettings()
 }
 
-func (a *App) VerifySQLAuditIntegrity() connection.QueryResult {
-	var report sqlaudit.IntegrityReport
-	err := a.withSQLAuditStore(false, func(store *sqlaudit.Store) error {
-		var verifyErr error
-		report, verifyErr = store.VerifyIntegrity()
-		return verifyErr
-	})
-	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
-	}
-	return connection.QueryResult{Success: true, Data: report}
-}
-
 func (a *App) ClearSQLAuditEvents(beforeTimestamp int64) connection.QueryResult {
 	a.sqlAuditAppendMu.Lock()
 	defer a.sqlAuditAppendMu.Unlock()

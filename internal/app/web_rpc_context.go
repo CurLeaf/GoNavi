@@ -13,6 +13,7 @@ import (
 var requiredIssue1098WebRPCContextMethods = []string{
 	"DBQuery", "DBQueryApplicationWithCancel", "DBQueryWithCancel", "DBQueryMultiWithOptions",
 	"DBQueryMultiTransactionalWithOptions", "DBQueryMultiInTransactionWithOptions",
+	"DBQueryMultiWithParams", "DBQueryMultiTransactionalWithParams", "DBQueryMultiWithParamsInTransaction",
 	"DBQueryAudited", "DBQueryIsolated", "MySQLQuery",
 	"DBGetDatabases", "DBGetTables", "DBGetViews", "DBGetObjects", "DBGetAllColumns", "DBGetColumns", "DBGetIndexes",
 	"DBGetForeignKeys", "DBGetDatabaseForeignKeys", "DBGetTriggers", "DBShowCreateTable", "DBTableExists",
@@ -21,7 +22,7 @@ var requiredIssue1098WebRPCContextMethods = []string{
 	"DataSyncJobList", "DataSyncJobGet", "DataSyncRunGet", "DataSyncRunList", "DataSyncRunPage", "DataSyncRunEventList",
 	"DataSyncErrorRowList", "DataSyncErrorRowGet", "DataSyncCheckpointGet", "DataSync", "DataSyncAnalyze", "DataSyncPreview",
 	"PreviewImportFile", "PreviewImportFileWithOptions", "ImportDataWithProgress", "ImportDataWithProgressOptions",
-	"ImportDatabaseSQL", "ImportDatabaseSQLWithOptions", "ExecuteSQLFile", "ResumeImportJob", "RetryImportJobFailedRows",
+	"ImportDatabaseSQL", "ImportDatabaseSQLWithOptions", "ExecuteSQLFile", "ResumeImportJob", "RetryImportJobFailedRows", "VerifySQLAuditIntegrity",
 }
 
 // RequiredIssue1098WebRPCContextMethods returns the exact App method set whose
@@ -53,6 +54,15 @@ func WebRPCContextHandlers(a *App) map[string]any {
 		},
 		"DBQueryMultiInTransactionWithOptions": func(ctx context.Context, transactionID, query, queryID string, options connection.QueryRowBudgetOptions) connection.QueryResult {
 			return a.dbQueryMultiInTransactionContextWithOptions(ctx, transactionID, query, queryID, options)
+		},
+		"DBQueryMultiWithParams": func(ctx context.Context, config connection.ConnectionConfig, dbName, sql, queryID string, bindings []connection.QueryParamBinding) connection.QueryResult {
+			return a.dbQueryMultiWithParamsContext(ctx, config, dbName, sql, queryID, bindings)
+		},
+		"DBQueryMultiTransactionalWithParams": func(ctx context.Context, config connection.ConnectionConfig, dbName, query, queryID string, bindings []connection.QueryParamBinding) connection.QueryResult {
+			return a.dbQueryMultiTransactionalWithParamsContext(ctx, config, dbName, query, queryID, bindings)
+		},
+		"DBQueryMultiWithParamsInTransaction": func(ctx context.Context, transactionID, sql, queryID string, bindings []connection.QueryParamBinding) connection.QueryResult {
+			return a.dbQueryMultiWithParamsInTransaction(ctx, transactionID, sql, queryID, bindings)
 		},
 		"DBQueryAudited": func(ctx context.Context, config connection.ConnectionConfig, dbName, query, source string) connection.QueryResult {
 			return a.dbQueryAuditedContext(ctx, config, dbName, query, source)
@@ -204,6 +214,9 @@ func WebRPCContextHandlers(a *App) map[string]any {
 		},
 		"RetryImportJobFailedRows": func(ctx context.Context, jobID string) connection.QueryResult {
 			return a.retryImportJobFailedRowsContext(ctx, jobID)
+		},
+		"VerifySQLAuditIntegrity": func(ctx context.Context) connection.QueryResult {
+			return a.verifySQLAuditIntegrity(ctx)
 		},
 	}
 }

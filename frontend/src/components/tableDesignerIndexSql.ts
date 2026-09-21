@@ -4,6 +4,8 @@ import {
   isPgLikeDialect,
   isSqlServerDialect,
   quoteSqlIdentifierPart,
+  quoteSqlIdentifierPath,
+  resolveSqlDialect,
 } from '../utils/sqlDialect';
 import { t as catalogTranslate } from '../i18n/catalog';
 
@@ -134,4 +136,66 @@ export const buildIndexCreateSqlPreview = (input: BuildIndexCreateSqlInput): Bui
     };
   }
   return { sql: `CREATE ${uniquePrefix}INDEX ${indexRef} ON ${input.tableRef} (${colSql});` };
+};
+
+export interface BuildCreateTableIndexStatementInput {
+  name: string;
+  columnNames: string[];
+  kind: TableDesignerIndexKind;
+  indexType?: string;
+}
+
+export const buildCreateTableIndexStatements = (input: {
+  dbType: string;
+  tableRef: string;
+  indexes?: BuildCreateTableIndexStatementInput[];
+  translate?: TableDesignerIndexTranslate;
+}): string => (
+  (Array.isArray(input.indexes) ? input.indexes : [])
+    .filter((index) => (index.kind || 'NORMAL') !== 'PRIMARY')
+    .map((index) => buildIndexCreateSqlPreview({
+      dbType: input.dbType,
+      tableRef: input.tableRef,
+      name: index.name,
+      columnNames: index.columnNames,
+      kind: index.kind,
+      indexType: index.indexType,
+      translate: input.translate,
+    }).sql)
+    .filter((sql): sql is string => Boolean(sql))
+    .join('\n')
+);
+
+export const buildIndexDropSql = (input: {
+  dbType: string;
+  tableRef: string;
+  schema?: string;
+  indexName: string;
+}): string | null => {
+  const dbType = resolveSqlDialect(input.dbType);
+  const name = String(input.indexName || '').trim();
+  if (!name || !input.tableRef) return null;
+
+  if (isMysqlFamilyDialect(dbType)) {
+    if (name.toUpperCase() === 'PRIMARY') {
+      return `ALTER TABLE ${input.tableRef}\nDROP PRIMARY KEY;`;
+    }
+    const indexRef = quoteSqlIdentifierPart(dbType, name);
+    return `DROP INDEX ${indexRef} ON ${input.tableRef};`;
+  }
+
+  if (isSqlServerDialect(dbType)) {
+    const indexRef = quoteSqlIdentifierPart(dbType, name);
+    return `DROP INDEX ${indexRef} ON ${input.tableRef};`;
+  }
+
+  if (isNonRelationalDialect(dbType)) {
+    return null;
+  }
+
+  const fullIndexName = name.includes('.') || !input.schema
+    ? name
+    : `${input.schema}.${name}`;
+  const indexRef = quoteSqlIdentifierPath(dbType, fullIndexName);
+  return `DROP INDEX ${indexRef};`;
 };

@@ -130,11 +130,8 @@ import {
 } from './dataGridTemporal';
 import {
     buildEffectiveFilterConditions,
-    normalizeQuickWhereCondition,
     resolveWhereConditionSelectedValue,
-    resolveWhereConditionSuggestions,
     shouldApplyQuickWhereOnEnter,
-    validateQuickWhereCondition,
 } from '../utils/dataGridWhereFilter';
 import {
     attachDataGridFindRenderVersion,
@@ -292,7 +289,6 @@ import {
     resolveNextGridFilterOperatorForColumnChange,
     buildGridFieldSelectOptions,
     renderGridFieldSelectOption,
-    buildDataGridCommitChangeSet,
     CELL_ELLIPSIS_STYLE,
     VIRTUAL_CELL_TEXT_STYLE,
     READONLY_CELL_WRAP_STYLE,
@@ -316,9 +312,9 @@ import type {
     ColumnMeta,
     ForeignKeyTarget,
     VirtualTableScrollReference,
-    NormalizeCommitCellValue,
-    DataGridCommitChangeSet,
 } from './DataGridCore';
+import { buildDataGridCommitChangeSet, toApplyChangesPayload } from './dataGridDmlSnapshot';
+export { buildDataGridCommitChangeSet };
 export {
     GONAVI_ROW_KEY,
     GONAVI_ROW_NUMBER_COLUMN_KEY,
@@ -332,7 +328,6 @@ export {
     resolveDefaultGridFilterOperator,
     resolveNextGridFilterOperatorForColumnChange,
     buildGridFieldSelectOptions,
-    buildDataGridCommitChangeSet,
     collectDataGridCellSelectionRowKeys,
     filterDataGridCellSelectionToVisibleRows,
     resolveDataGridCellSelectionAnchor,
@@ -3982,8 +3977,8 @@ const DataGrid: React.FC<DataGridProps> = ({
           return false;
       }
 
-      const { inserts, updates, deletes } = changeSetResult.changes;
-      if (inserts.length === 0 && updates.length === 0 && deletes.length === 0) {
+      const payload = toApplyChangesPayload(changeSetResult.changes);
+      if (payload.inserts.length === 0 && payload.updates.length === 0 && payload.deletes.length === 0) {
           void message.info(translateDataGrid('data_grid.message.no_changes_to_commit'));
           return true;
       }
@@ -4006,7 +4001,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       if (!approved) return false;
 
       const startTime = Date.now();
-      const res = await ApplyChanges(buildRpcConnectionConfig(config) as any, dbName || '', tableName, { inserts, updates, deletes, locatorStrategy: effectiveEditLocator?.strategy } as any);
+      const res = await ApplyChanges(buildRpcConnectionConfig(config) as any, dbName || '', tableName, payload as any);
       const duration = Date.now() - startTime;
       const outcomeUnknown = res?.outcomeUnknown === true;
       const logMessage = outcomeUnknown
@@ -6270,6 +6265,7 @@ const DataGrid: React.FC<DataGridProps> = ({
         showColumnComment,
         showColumnType,
         showFilter,
+        appliedFilterConditions,
         sortInfo,
         stopQuickWhereClipboardPropagation,
         supportsCopyInsert,

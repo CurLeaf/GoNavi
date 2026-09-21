@@ -1,7 +1,7 @@
 import Modal from './components/common/ResizableDraggableModal';
 import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, notification, Spin, Slider, Switch, Input, InputNumber, Select, Segmented, Tooltip, Alert } from 'antd';
-import { UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined, PoweroffOutlined, UserOutlined, MessageOutlined, FileTextOutlined, SyncOutlined, SendOutlined, AuditOutlined, ThunderboltOutlined, ApiOutlined, WechatOutlined, CopyOutlined } from '@ant-design/icons';
+import { UploadOutlined, DownloadOutlined, CloudDownloadOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined, TableOutlined, MenuOutlined, PoweroffOutlined, UserOutlined, MessageOutlined, FileTextOutlined, SyncOutlined, SendOutlined, ThunderboltOutlined, ApiOutlined, WechatOutlined, CopyOutlined } from '@ant-design/icons';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -136,8 +136,8 @@ import {
   SETTINGS_CENTER_WORKBENCH_TAB_ID,
 } from './utils/settingsCenterTab';
 import { SettingsCenterWorkbenchRegistrar } from './components/settings/SettingsCenterWorkbenchBridge';
+import { buildWorkspaceWorkbenchToolItems } from './components/settings/workspaceWorkbenchToolItems';
 import { buildSqlAuditWorkbenchTab } from './utils/sqlAuditTab';
-import { buildRequestDiagnosticsWorkbenchTab } from './utils/requestDiagnosticsTab';
 import {
   getDataSourceCapabilities,
   isMessageQueueDataSource,
@@ -180,6 +180,7 @@ import {
   SIDEBAR_OBJECT_GROUP_KEYS,
   type SidebarObjectGroupKey,
 } from './utils/sidebarObjectVisibility';
+import { buildSidebarObjectVisibilitySettings } from './utils/sidebarObjectVisibilitySettings';
 import {
   getSecurityUpdateStatusMeta,
   resolveSecurityUpdateEntryVisibility,
@@ -6036,17 +6037,7 @@ function App() {
   ]);
   const renderSidebarObjectVisibilitySettingsPane = useCallback(() => {
       const hiddenObjectGroups = new Set(appearance.sidebarHiddenObjectGroups);
-      const objectGroupItems: Array<{ key: SidebarObjectGroupKey; label: string }> = [
-          { key: 'savedQueries', label: t('sidebar.tree.saved_queries') },
-          { key: 'tables', label: t('sidebar.object_group.tables') },
-          { key: 'views', label: t('sidebar.object_group.views') },
-          { key: 'materializedViews', label: t('sidebar.object_group.materialized_views') },
-          { key: 'routines', label: t('sidebar.object_group.routines') },
-          { key: 'triggers', label: t('sidebar.object_group.triggers') },
-          { key: 'events', label: t('sidebar.object_group.events') },
-          { key: 'sequences', label: t('sidebar.object_group.sequences') },
-          { key: 'packages', label: t('sidebar.object_group.packages') },
-      ];
+      const objectGroupItems: Array<{ key: SidebarObjectGroupKey; label: string }> = buildSidebarObjectVisibilitySettings(t);
       const setObjectGroupVisible = (key: SidebarObjectGroupKey, visible: boolean) => {
           const nextHiddenObjectGroups = visible
               ? appearance.sidebarHiddenObjectGroups.filter((item) => item !== key)
@@ -7663,26 +7654,13 @@ function App() {
                       handleOpenToolCenterPane('workspace', 'shortcut-settings');
                     },
                   },
-                  {
-                    key: 'sql-audit',
-                    icon: <AuditOutlined />,
-                    title: t('app.tools.entry.sql_audit.title'),
-                    description: t('app.tools.entry.sql_audit.description'),
-                    onClick: () => {
+                  ...buildWorkspaceWorkbenchToolItems({
+                    t,
+                    openTab: (tab) => {
                       handleCancelSettingsCenterPane();
-                      addTab(buildSqlAuditWorkbenchTab());
+                      addTab(tab);
                     },
-                  },
-                  {
-                    key: 'request-diagnostics',
-                    icon: <BugOutlined />,
-                    title: t('app.tools.entry.request_diagnostics.title'),
-                    description: t('app.tools.entry.request_diagnostics.description'),
-                    onClick: () => {
-                      handleCancelSettingsCenterPane();
-                      addTab(buildRequestDiagnosticsWorkbenchTab());
-                    },
-                  },
+                  }),
                 ],
               },
             ];
