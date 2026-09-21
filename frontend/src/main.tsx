@@ -13,7 +13,6 @@ import { hideBootSplash } from './utils/bootSplash'
 import { signalMainWindowFrontendReady, waitForMainWindowContentPaint } from './utils/mainWindowStartup'
 import { configureAntdStaticOverlayLayer } from './utils/overlayZIndex'
 import { normalizeConnectionEnvironmentType } from './utils/connectionEnvironment'
-import { resolveBrandIconRemoteSrc } from './brand/brandIcons'
 
 configureAntdStaticOverlayLayer();
 
@@ -393,11 +392,6 @@ if (
         app: {
             App: {
                 SetLanguage: async () => null,
-                // The native backend downloads, verifies, and caches these immutable
-                // assets. Browser/Playwright harnesses have no Go backend, so point
-                // image elements at the same origin instead of showing one fallback
-                // glyph for the remotely hosted choices.
-                GetBrandIconDataURL: async (id: string) => resolveBrandIconRemoteSrc(id),
                 GetSavedConnections: async () => cloneBrowserMockValue(mockConnections),
                 BootstrapConnectionSidebarLayout: async (input: any) => {
                     if (
@@ -676,8 +670,6 @@ if (
                 OpenDataRootDirectory: async () => ({ success: true }),
                 OpenLogDirectory: async () => ({ success: true }),
                 OpenSavedQueryDirectory: async () => ({ success: true }),
-                SelectSQLDirectory: async (currentPath: string) => ({ success: false, message: currentPath ? '已取消' : '已取消' }),
-                ListSQLDirectory: async () => ({ success: true, data: [] }),
                 ReadSQLFile: async () => ({ success: false, message: '已取消' }),
                 ReadAppLogTail: async (lineLimit: number, keyword: string) => {
                     const allLines = [
@@ -710,12 +702,6 @@ if (
                         },
                     };
                 },
-                CreateSQLFile: async (_directoryPath: string, _name: string) => ({ success: true, data: { filePath: '', name: _name } }),
-                CreateSQLDirectory: async (directoryPath: string, name: string) => ({ success: true, data: { directoryPath: `${directoryPath}/${name}`, name } }),
-                DeleteSQLFile: async (_filePath: string) => ({ success: true }),
-                DeleteSQLDirectory: async (_directoryPath: string) => ({ success: true }),
-                RenameSQLFile: async (_filePath: string, name: string) => ({ success: true, data: { filePath: _filePath, name } }),
-                RenameSQLDirectory: async (directoryPath: string, name: string) => ({ success: true, data: { directoryPath: `${directoryPath.replace(/[\\/][^\\/]*$/, '')}/${name}`, name } }),
                 WriteSQLFile: async (_filePath: string, _content: string) => ({ success: true }),
                 ExportSQLFile: async (_defaultName: string, _content: string) => ({ success: false, message: t('app.browser_mock.export_sql_unsupported') }),
                 ImportConfigFile: async () => ({ success: false, message: '已取消' }),

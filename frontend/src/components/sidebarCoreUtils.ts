@@ -11,7 +11,6 @@ const SIDEBAR_CONTEXT_MENU_SAFE_GAP = 8;
 export const SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH = 264;
 export const SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT = 420;
 
-export type ExternalSQLFileModalMode = 'create' | 'rename' | 'create-directory' | 'rename-directory';
 export type SearchScope = 'smart' | 'object' | 'database' | 'host' | 'tag';
 
 type SidebarCoreTranslate = (key: string) => string;
@@ -23,9 +22,6 @@ type SidebarObjectNodeLike = {
   type?: string;
   dataRef?: any;
 };
-
-export const isExternalSQLDirectoryModalMode = (mode: ExternalSQLFileModalMode): boolean =>
-  mode === 'create-directory' || mode === 'rename-directory';
 
 export const resolveSidebarContextMenuPosition = (
   x: number,

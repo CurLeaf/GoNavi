@@ -5,7 +5,6 @@ import {
   TableOutlined,
   DatabaseOutlined,
   ImportOutlined,
-  FileAddOutlined,
   AimOutlined,
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
@@ -27,7 +26,6 @@ export interface SidebarConnectionRailProps {
     batchTables: string;
     batchDatabases: string;
     dataImport: string;
-    openExternalSqlFile: string;
     locateCurrentTable: string;
     locateCurrentTableUnavailable: string;
   };
@@ -36,7 +34,6 @@ export interface SidebarConnectionRailProps {
     openBatchTableExport: () => void;
     openBatchDatabaseExport: () => void;
     openDataImport: () => void;
-    openExternalSqlFile: () => void;
     locateActiveTab: () => void;
   };
   canLocateActiveTab: boolean;
@@ -130,17 +127,6 @@ const SidebarConnectionRail: React.FC<SidebarConnectionRailProps> = ({
                 data-sidebar-data-import-action="true"
               >
                 <ImportOutlined />
-              </button>
-            </Tooltip>
-            <Tooltip title={labels.openExternalSqlFile} placement="right">
-              <button
-                type="button"
-                className="gn-v2-rail-tool gn-v2-rail-action"
-                onClick={handlers.openExternalSqlFile}
-                aria-label={labels.openExternalSqlFile}
-                data-sidebar-open-external-sql-file-action="true"
-              >
-                <FileAddOutlined />
               </button>
             </Tooltip>
           </>

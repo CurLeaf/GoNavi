@@ -47,10 +47,6 @@ export type SidebarTreeNodeType =
   | 'saved-query-group'
   | 'saved-query-manual-group'
   | 'unmatched-saved-queries'
-  | 'external-sql-root'
-  | 'external-sql-directory'
-  | 'external-sql-folder'
-  | 'external-sql-file'
   | 'folder-columns'
   | 'folder-indexes'
   | 'folder-fks'
@@ -300,7 +296,6 @@ export const shouldLoadSidebarNodeOnExpand = (
   return node.type === 'connection'
     || node.type === 'database'
     || node.type === 'message-namespace'
-    || node.type === 'external-sql-root'
     || node.type === 'table'
     || node.type === 'jvm-mode'
     || node.type === 'jvm-resource'
@@ -1001,9 +996,6 @@ export const filterV2ExplorerTreeByKind = (
   };
 
   const visit = (node: SidebarTreeNode): SidebarTreeNode | null => {
-    if (node.type === 'external-sql-root') {
-      return null;
-    }
     // Relational filters have no semantic equivalent for a broker. Keep the
     // complete MQ namespace visible instead of making the explorer look empty
     // when the user switches from a database connection with a filter active.

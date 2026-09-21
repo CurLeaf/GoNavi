@@ -19,7 +19,6 @@ const TableOverview = React.lazy(() => import('./TableOverview'));
 const TableExportWorkbench = React.lazy(() => import('./TableExportWorkbench'));
 const DataImportWorkbench = React.lazy(() => import('./DataImportWorkbench'));
 const DataSyncWorkbench = React.lazy(() => import('./DataSyncWorkbench'));
-const SQLFileExecutionWorkbench = React.lazy(() => import('./SQLFileExecutionWorkbench'));
 const JVMOverview = React.lazy(() => import('./JVMOverview'));
 const JVMResourceBrowser = React.lazy(() => import('./JVMResourceBrowser'));
 const JVMAuditViewer = React.lazy(() => import('./JVMAuditViewer'));
@@ -153,8 +152,6 @@ export const WorkbenchTabContent: React.FC<WorkbenchTabContentProps> = React.mem
     content = <DataImportWorkbench tab={tab} />;
   } else if (tab.type === 'data-sync') {
     content = <DataSyncWorkbench tab={tab} />;
-  } else if (tab.type === 'sql-file-execution') {
-    content = <SQLFileExecutionWorkbench tab={tab} />;
   } else if (tab.type === 'sql-analysis') {
     content = <SqlAnalysisWorkbench tab={tab} />;
   } else if (tab.type === 'sql-audit') {

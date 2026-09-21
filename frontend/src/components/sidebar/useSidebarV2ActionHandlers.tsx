@@ -101,7 +101,6 @@ type UseSidebarV2ActionHandlersArgs = {
   openBatchTableWorkbench: (node?: any) => void;
   openBatchDatabaseWorkbench: (node?: any) => void;
   openBatchConnectionWorkbench: (node?: any) => void;
-  handleRunSQLFile: (node: any) => void;
   handleDeleteDatabase: (node: any) => void;
   onCreateConnectionInGroup?: (targetTagId: string) => void;
   onEditConnection?: (conn: SavedConnection) => void;
@@ -175,7 +174,6 @@ export const useSidebarV2ActionHandlers = ({
   openBatchTableWorkbench,
   openBatchDatabaseWorkbench,
   openBatchConnectionWorkbench,
-  handleRunSQLFile,
   handleDeleteDatabase,
   onCreateConnectionInGroup,
   onEditConnection,
@@ -459,9 +457,6 @@ export const useSidebarV2ActionHandlers = ({
       case 'new-query':
         openDatabaseQuery(node);
         return;
-      case 'run-sql':
-        handleRunSQLFile(node);
-        return;
       case 'drop-db':
         handleDeleteDatabase(node);
         return;
@@ -595,9 +590,6 @@ export const useSidebarV2ActionHandlers = ({
         return;
       case 'publish-message':
         openMessagePublishModal(node);
-        return;
-      case 'open-sql-file':
-        handleRunSQLFile(node);
         return;
       case 'new-command':
         addTab({

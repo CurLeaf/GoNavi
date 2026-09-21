@@ -187,7 +187,6 @@ export const renderSidebarV2TreeTitle = ({
   const displayTitle = (() => {
     const queriesFolderTitle = resolveSidebarQueriesFolderTitle(node);
     if (queriesFolderTitle) return queriesFolderTitle;
-    if (node.type === 'external-sql-root') return t('sidebar.external_sql.root');
     if (node.type === 'object-group') {
       const objectGroupTitle = resolveV2ObjectGroupTitle(node);
       if (objectGroupTitle) return objectGroupTitle;
@@ -232,8 +231,7 @@ export const renderSidebarV2TreeTitle = ({
     || node.type === 'db-event'
     || node.type === 'routine'
     || node.type === 'package'
-    || node.type === 'saved-query'
-    || node.type === 'external-sql-file';
+    || node.type === 'saved-query';
   const titleClassName = [
     'gn-v2-tree-title',
     isMono ? 'is-mono' : '',

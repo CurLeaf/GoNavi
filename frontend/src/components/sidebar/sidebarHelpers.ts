@@ -494,7 +494,6 @@ export const shouldLoadSidebarNodeOnExpand = (
   return node.type === 'connection'
       || node.type === 'database'
       || node.type === 'message-namespace'
-      || node.type === 'external-sql-root'
       || node.type === 'table'
       || node.type === 'jvm-mode'
       || node.type === 'jvm-resource'

@@ -3,8 +3,7 @@ package app
 // 当前安装形态识别。
 //
 // Windows 上 GoNavi 有 MSI 与便携包两种安装形态：MSI 会在可执行文件旁放置
-// 标记文件。单实例策略（main.go）与任务栏身份迁移（application_icon_windows.go）
-// 都依赖这里。
+// 标记文件。单实例策略（main.go）依赖这里。
 
 import (
 	"errors"

@@ -14,7 +14,6 @@ import {
   EditOutlined,
   ExportOutlined,
   EyeOutlined,
-  FileAddOutlined,
   FileTextOutlined,
   FolderAddOutlined,
   FolderOpenOutlined,
@@ -339,7 +338,6 @@ export const buildSidebarNodeMenuItems = (
     setTargetConnection,
     setIsCreateDbModalOpen,
     buildConnectionRootQueryTabTitle,
-    handleRunSQLFile,
     openCreateStarRocksExternalCatalog,
     openEditView,
     renameViewForm,
@@ -387,17 +385,6 @@ export const buildSidebarNodeMenuItems = (
     treeDataRef,
     getNacosNamespaceDiscoveryMode,
     setTreeData,
-    handleAddExternalSQLDirectory,
-    openCreateExternalSQLFileModal,
-    openCreateExternalSQLDirectoryModal,
-    openRenameExternalSQLDirectoryModal,
-    handleRefreshExternalSQLDirectory,
-    handleDeleteExternalSQLDirectory,
-    handleRemoveExternalSQLDirectory,
-    openExternalSQLFile,
-    openExternalSQLBindingModal,
-    openRenameExternalSQLFileModal,
-    handleDeleteExternalSQLFile,
     extractObjectName,
   } = context;
     const refreshConnectionResources = refreshConnectionResourcesFromContext || ((targetNode: any) => {
@@ -893,12 +880,6 @@ export const buildSidebarNodeMenuItems = (
                        });
                    }
                  },
-                 {
-                     key: 'open-sql-file',
-                     label: t('sidebar.sql_file_exec.title'),
-                     icon: <FileAddOutlined />,
-                     onClick: () => handleRunSQLFile(node)
-                 },
                  ]),
              ] : []),
              { type: 'divider' },
@@ -1266,12 +1247,6 @@ export const buildSidebarNodeMenuItems = (
                 label: t('sidebar.menu.new_query'),
                 icon: <ConsoleSqlOutlined />,
                 onClick: () => handleV2DatabaseContextMenuAction(node, 'new-query')
-            },
-            {
-                key: 'run-sql',
-                label: t('sidebar.sql_file_exec.title'),
-                icon: <FileAddOutlined />,
-                onClick: () => handleV2DatabaseContextMenuAction(node, 'run-sql')
             },
             { type: 'divider' },
             ...(capabilities.supportsRenameDatabase ? [{
@@ -1917,178 +1892,6 @@ export const buildSidebarNodeMenuItems = (
                             message.success(t('sidebar.message.saved_query_deleted'));
                         }
                     });
-                }
-            }
-        ];
-    }
-
-    if (node.type === 'external-sql-root') {
-        return [
-            {
-                key: 'add-external-sql-directory',
-                label: t('sidebar.menu.add_sql_directory'),
-                icon: <PlusOutlined />,
-                onClick: () => {
-                    void handleAddExternalSQLDirectory(node);
-                }
-            }
-        ];
-    }
-
-    if (node.type === 'external-sql-directory') {
-        return [
-            {
-                key: 'new-external-sql-file',
-                label: t('sidebar.menu.new_sql_file'),
-                icon: <FileAddOutlined />,
-                onClick: () => {
-                    openCreateExternalSQLFileModal(node);
-                }
-            },
-            {
-                key: 'new-external-sql-directory',
-                label: t('sidebar.menu.new_sql_directory'),
-                icon: <FolderAddOutlined />,
-                onClick: () => {
-                    openCreateExternalSQLDirectoryModal(node);
-                }
-            },
-            {
-                key: 'rename-external-sql-directory',
-                label: t('sidebar.menu.rename_sql_directory'),
-                icon: <EditOutlined />,
-                onClick: () => {
-                    openRenameExternalSQLDirectoryModal(node);
-                }
-            },
-            { type: 'divider' },
-            {
-                key: 'refresh-external-sql-directory',
-                label: t('sidebar.menu.refresh_directory'),
-                icon: <ReloadOutlined />,
-                onClick: () => {
-                    void handleRefreshExternalSQLDirectory(node);
-                }
-            },
-            { type: 'divider' },
-            {
-                key: 'remove-external-sql-directory',
-                label: t('sidebar.menu.remove_directory'),
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => {
-                    void handleRemoveExternalSQLDirectory(node);
-                }
-            },
-            {
-                key: 'delete-external-sql-directory',
-                label: t('sidebar.menu.delete_local_directory'),
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => {
-                    handleDeleteExternalSQLDirectory(node);
-                }
-            }
-        ];
-    }
-
-    if (node.type === 'external-sql-folder') {
-        return [
-            {
-                key: 'new-external-sql-file',
-                label: t('sidebar.menu.new_sql_file'),
-                icon: <FileAddOutlined />,
-                onClick: () => {
-                    openCreateExternalSQLFileModal(node);
-                }
-            },
-            {
-                key: 'new-external-sql-directory',
-                label: t('sidebar.menu.new_sql_directory'),
-                icon: <FolderAddOutlined />,
-                onClick: () => {
-                    openCreateExternalSQLDirectoryModal(node);
-                }
-            },
-            {
-                key: 'rename-external-sql-directory',
-                label: t('sidebar.menu.rename_sql_directory'),
-                icon: <EditOutlined />,
-                onClick: () => {
-                    openRenameExternalSQLDirectoryModal(node);
-                }
-            },
-            {
-                key: 'refresh-external-sql-directory',
-                label: t('sidebar.menu.refresh_directory'),
-                icon: <ReloadOutlined />,
-                onClick: () => {
-                    void handleRefreshExternalSQLDirectory(node);
-                }
-            },
-            { type: 'divider' },
-            {
-                key: 'delete-external-sql-directory',
-                label: t('sidebar.menu.delete_sql_directory'),
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => {
-                    handleDeleteExternalSQLDirectory(node);
-                }
-            }
-        ];
-    }
-
-    if (node.type === 'external-sql-file') {
-        return [
-            {
-                key: 'open-external-sql-file',
-                label: t('sidebar.menu.open_sql_file'),
-                icon: <ConsoleSqlOutlined />,
-                onClick: () => {
-                    void openExternalSQLFile(node);
-                }
-            },
-            {
-                key: 'bind-external-sql-file-database',
-                label: t('sidebar.menu.bind_sql_file_database'),
-                icon: <LinkOutlined />,
-                onClick: () => {
-                    openExternalSQLBindingModal(node);
-                }
-            },
-            {
-                key: 'rename-external-sql-file',
-                label: t('sidebar.menu.rename_sql_file'),
-                icon: <EditOutlined />,
-                onClick: () => {
-                    openRenameExternalSQLFileModal(node);
-                }
-            },
-            {
-                key: 'new-external-sql-file-sibling',
-                label: t('sidebar.menu.new_sql_file_in_directory'),
-                icon: <FileAddOutlined />,
-                onClick: () => {
-                    openCreateExternalSQLFileModal(node);
-                }
-            },
-            {
-                key: 'new-external-sql-directory-sibling',
-                label: t('sidebar.menu.new_sql_directory_in_directory'),
-                icon: <FolderAddOutlined />,
-                onClick: () => {
-                    openCreateExternalSQLDirectoryModal(node);
-                }
-            },
-            { type: 'divider' },
-            {
-                key: 'delete-external-sql-file',
-                label: t('sidebar.menu.delete_sql_file'),
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => {
-                    handleDeleteExternalSQLFile(node);
                 }
             }
         ];

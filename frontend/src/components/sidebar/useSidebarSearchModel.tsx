@@ -325,10 +325,6 @@ export const useSidebarSearchModel = ({
     ) {
       return true;
     }
-    if (node.type === 'external-sql-root' || node.type === 'external-sql-directory' || node.type === 'external-sql-folder' || node.type === 'external-sql-file') {
-      const pathText = String(node?.dataRef?.path || '');
-      return matchesSidebarSearchText(title, keyword) || matchesSidebarSearchText(pathText, keyword);
-    }
     return false;
   };
 
@@ -358,10 +354,7 @@ export const useSidebarSearchModel = ({
           || item.type === 'connection'
           || item.type === 'database'
           || item.type === 'message-namespace'
-          || item.type === 'tag'
-          || item.type === 'external-sql-root'
-          || item.type === 'external-sql-directory'
-          || item.type === 'external-sql-folder';
+          || item.type === 'tag';
         if (item.children && shouldKeepFullSubtree) {
           result.push(item);
         } else if (item.children && filteredChildren.length > 0) {
@@ -575,14 +568,12 @@ export const useSidebarSearchModel = ({
     return String(activeTab?.dbName || '').trim();
   }, [activeContext, activeTab?.dbName]);
   const activeConnectionTreeData = useMemo(() => {
-    const externalSQLNodes = displayTreeData.filter((node) => node.type === 'external-sql-root');
     if (!activeConnection) return displayTreeData;
     const activeConnectionNode = displayTreeData.find((node) => node.type === 'connection' && node.key === activeConnection.id);
     if (activeConnectionNode) {
-      return dedupeSidebarTreeNodesByKey([
-        ...(activeConnectionNode.children && activeConnectionNode.children.length > 0 ? activeConnectionNode.children : []),
-        ...externalSQLNodes,
-      ]);
+      return dedupeSidebarTreeNodesByKey(
+        activeConnectionNode.children && activeConnectionNode.children.length > 0 ? activeConnectionNode.children : [],
+      );
     }
     const filterTree = (nodes: TreeNode[]): TreeNode[] => nodes.flatMap((node) => {
       if (node.type === 'tag') {
@@ -596,7 +587,7 @@ export const useSidebarSearchModel = ({
     });
 
     const filtered = filterTree(displayTreeData);
-    return dedupeSidebarTreeNodesByKey([...filtered, ...externalSQLNodes]);
+    return dedupeSidebarTreeNodesByKey(filtered);
   }, [activeConnection, displayTreeData]);
   const v2VisibleTreeData = useMemo(() => {
     if (v2ExplorerFilter === 'all') {

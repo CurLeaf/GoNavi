@@ -150,9 +150,8 @@ func main() {
 		}, windowChrome.Frameless)
 	}
 
-	// Keep the first native window hidden until the selected Windows icon has
-	// been bound. This prevents the taskbar from caching Wails' embedded icon
-	// while the frontend is still hydrating its persisted brand selection.
+	// Keep the first native window hidden until startup work and the frontend
+	// first paint complete, so Windows does not flash Wails' empty client area.
 	startupNativeIconReady := make(chan struct{})
 	var signalStartupNativeIconReadyOnce sync.Once
 	signalStartupNativeIconReady := func() {
@@ -174,9 +173,8 @@ func main() {
 		WindowStartState:   resolveInitialWindowStartState(runtime.GOOS),
 		StartHidden:        isWindowsDesktop,
 		Frameless:          windowChrome.Frameless,
-		// 打开 Wails 原生文件拖放：查询编辑器接收操作系统 .sql 文件拖入
-		// （frontend/src/components/queryEditor/useExternalSqlFileDrop.ts），
-		// 同时由 Wails 运行时拦截拖放默认行为，避免 WebView 导航离开应用。
+		// 打开 Wails 原生文件拖放：由运行时拦截拖放默认行为，
+		// 避免 WebView 将拖入的文件导航成新页面。
 		DragAndDrop: &options.DragAndDrop{
 			EnableFileDrop: true,
 		},
@@ -189,16 +187,13 @@ func main() {
 			defer signalStartupNativeIconReady()
 			runtimeCtx = ctx
 			if isWindowsDesktop {
-				// Subscribe before brand-icon I/O so a fast first paint cannot
+				// Subscribe before later startup work so a fast first paint cannot
 				// emit gonavi:frontend-ready into an empty event bus.
 				wailsRuntime.EventsOn(ctx, windowsFrontendReadyEvent, func(...interface{}) {
 					windowsStartupGate.markFrontendReady()
 				})
-				if err := app.InitializePersistedNativeBrandIcon(application, ctx); err != nil {
-					logger.Warnf("启动时应用已保存的 Windows 品牌图标失败：%v", err)
-				}
 			}
-			// The icon is now ready; the remaining lifecycle services may continue
+			// Native startup is bound; remaining lifecycle services may continue
 			// initializing without delaying the first visible frame. Bind queued
 			// second-instance activations only after this barrier as they may show
 			// the native window immediately.

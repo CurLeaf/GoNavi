@@ -511,7 +511,6 @@ export interface TabData {
     | "table"
     | "design"
     | "data-sync"
-    | "sql-file-execution"
     | "sql-analysis"
     | "sql-audit"
     | "driver-manager"
@@ -589,9 +588,6 @@ export interface TabData {
   dataImportMode?: "table" | "database";
   dataImportLaunchKey?: string;
   dataImportRunning?: boolean;
-  sqlFileExecutionRequestKey?: string;
-  sqlFileExecutionFileName?: string;
-  sqlFileExecutionFileSizeMB?: string;
   sqlAnalysisView?: "diagnose" | "slow-query";
   sqlAnalysisRequestKey?: string;
   sqlAuditView?: "audit" | "query-history";
@@ -651,29 +647,6 @@ export interface SqlSnippet {
   body: string;
   isBuiltin: boolean;
   createdAt: number;
-}
-
-export interface ExternalSQLDirectory {
-  id: string;
-  name: string;
-  path: string;
-  connectionId?: string;
-  dbName?: string;
-  fileBindings?: ExternalSQLFileBinding[];
-  createdAt: number;
-}
-
-export interface ExternalSQLFileBinding {
-  filePath: string;
-  connectionId: string;
-  dbName: string;
-}
-
-export interface ExternalSQLTreeEntry {
-  name: string;
-  path: string;
-  isDir: boolean;
-  children?: ExternalSQLTreeEntry[];
 }
 
 // Redis types

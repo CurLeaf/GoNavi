@@ -41,19 +41,6 @@ import {
 } from './sidebar/useSidebarTreeLoaders';
 export { formatSidebarDriverAgentUpdateWarning } from './sidebar/useSidebarTreeLoaders';
 import {
-  ExternalSQLBindingModal,
-  ExternalSQLFileModal,
-  useSidebarExternalSqlWorkflow,
-} from './sidebar/SidebarExternalSqlWorkflow';
-export {
-  buildSQLFileExecutionFooter,
-  SQLFileExecutionProgressContent,
-} from './sidebar/SidebarExternalSqlWorkflow';
-export type {
-  SQLFileExecutionProgressState,
-  SQLFileExecutionStatus,
-} from './sidebar/SidebarExternalSqlWorkflow';
-import {
   V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID,
   formatSidebarRowCount,
   hasSidebarLazyChildren,
@@ -90,7 +77,6 @@ import { APP_POPUP_Z_INDEX } from '../utils/overlayZIndex';
 import { createSidebarResizeAwareFrameScheduler } from '../utils/sidebarResizeLifecycle';
 	import {
 	  AppstoreOutlined,
-	  AuditOutlined,
 	  CaretDownFilled,
 	  ClockCircleOutlined,
 	  CloudOutlined,
@@ -100,12 +86,10 @@ import { createSidebarResizeAwareFrameScheduler } from '../utils/sidebarResizeLi
 	  DownloadOutlined,
 	  EyeOutlined,
 	  GlobalOutlined,
-	  HistoryOutlined,
 	  TableOutlined,
 	  SwitcherOutlined,
 	  UploadOutlined,
 	  ConsoleSqlOutlined,
-  HddOutlined,
   FolderOutlined,
   FolderOpenOutlined,
   FileTextOutlined,
@@ -120,7 +104,6 @@ import { createSidebarResizeAwareFrameScheduler } from '../utils/sidebarResizeLi
   UnorderedListOutlined,
   FunctionOutlined,
   LinkOutlined,
-  FileAddOutlined,
   ImportOutlined,
   ReloadOutlined,
   SendOutlined,
@@ -148,9 +131,8 @@ import {
     selectRecentSidebarSqlLogs,
     selectSidebarCommandSearchSqlLogs,
 } from './sidebar/sidebarSqlLogSelector';
-		import { SavedConnection, SavedQuery, SavedQueryGroup, ExternalSQLDirectory, ExternalSQLTreeEntry } from '../types';
+		import { SavedConnection, SavedQuery, SavedQueryGroup } from '../types';
 import { getDbIcon } from './DatabaseIcons';
-		import { ListSQLDirectory } from '../../wailsjs/go/app/App';
 import { supportsTableTruncateAction } from './tableDataDangerActions';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
@@ -158,8 +140,6 @@ import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { useWorkbenchTabs } from '../hooks/useWorkbenchTabs';
 import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
-import { buildSqlAnalysisWorkbenchTab } from '../utils/sqlAnalysisTab';
-import { buildSqlAuditWorkbenchTab } from '../utils/sqlAuditTab';
 import {
     normalizeSidebarDatabaseListRefreshRequest,
     normalizeSidebarDatabaseRefreshRequest,
@@ -225,7 +205,6 @@ import {
 } from '../utils/dataImportTab';
 import { useExportProgressDialog } from './ExportProgressModal';
 import { getShortcutPlatform } from '../utils/shortcuts';
-import { buildExternalSQLRootNode, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
 import { resolveSidebarTableMetadataFields } from '../utils/sidebarTableMetadata';
 import { filterSidebarTreeByHiddenObjectGroups } from '../utils/sidebarObjectVisibility';
 import {
@@ -243,7 +222,7 @@ import {
   type SearchScope,
 } from './sidebarCoreUtils';
 export { resolveSidebarContextMenuPosition } from './sidebarCoreUtils';
-export type { ExternalSQLFileModalMode, SearchScope } from './sidebarCoreUtils';
+export type { SearchScope } from './sidebarCoreUtils';
 
 // Keep the titlebar snapshot synchronous in the browser without emitting an
 // SSR warning when the Sidebar is rendered to HTML in tests or web tooling.
@@ -905,7 +884,7 @@ const Sidebar: React.FC<{
   onEditConnection,
   onOpenSettings,
   onOpenSettingsNavigation,
-  isWebRuntime = false,
+  isWebRuntime: _isWebRuntime = false,
   onToggleLogPanel,
   v2ExplorerContext,
   collapsedSidebarActionsTarget,
@@ -922,19 +901,12 @@ const Sidebar: React.FC<{
   const connections = useStore(state => state.connections);
   const savedQueries = useStore(state => state.savedQueries);
   const savedQueryGroups = useStore(state => state.savedQueryGroups);
-  const externalSQLDirectories = useStore(state => state.externalSQLDirectories);
   const saveQuery = useStore(state => state.saveQuery);
   const deleteQuery = useStore(state => state.deleteQuery);
   const saveSavedQueryGroup = useStore(state => state.saveSavedQueryGroup);
   const deleteSavedQueryGroup = useStore(state => state.deleteSavedQueryGroup);
   const moveSavedQueryToGroup = useStore(state => state.moveSavedQueryToGroup);
   const reloadSavedQueryGroups = useStore(state => state.reloadSavedQueryGroups);
-  const saveExternalSQLDirectory = useStore(state => state.saveExternalSQLDirectory);
-  const deleteExternalSQLDirectory = useStore(state => state.deleteExternalSQLDirectory);
-  const updateRecentSQLFilePath = useStore(state => state.updateRecentSQLFilePath);
-  const removeRecentSQLFilesByPath = useStore(state => state.removeRecentSQLFilesByPath);
-  const moveRecentSQLFilesByDirectory = useStore(state => state.moveRecentSQLFilesByDirectory);
-  const removeRecentSQLFilesByDirectory = useStore(state => state.removeRecentSQLFilesByDirectory);
   const addConnection = useStore(state => state.addConnection);
   const updateConnection = useStore(state => state.updateConnection);
   const addTab = useStore(state => state.addTab);
@@ -1214,7 +1186,6 @@ const Sidebar: React.FC<{
   const sidebarTreeScrollRequestIdRef = useRef(0);
   const [sidebarTreeScrollRequest, setSidebarTreeScrollRequest] = useState<SidebarTreeScrollRequest | null>(null);
   const treeDataRef = useRef<TreeNode[]>([]);
-  const externalSQLDirectoryTreesRef = useRef<Record<string, ExternalSQLTreeEntry[]>>({});
   const findTreeNodeByKeyRef = useRef<(nodes: TreeNode[], targetKey: React.Key) => TreeNode | null>(() => null);
   const expandConnectionFromRailRef = useRef<(connectionId: string) => void>(() => {});
   const setExpandedKeys = useCallback<React.Dispatch<React.SetStateAction<React.Key[]>>>((update) => {
@@ -1538,8 +1509,7 @@ const Sidebar: React.FC<{
       if (allSavedQueriesNode) {
         orderedNodes.push(allSavedQueriesNode);
       }
-      const externalSQLRootNode = prev.find((node) => node.type === 'external-sql-root');
-      return externalSQLRootNode ? [...orderedNodes, externalSQLRootNode] : orderedNodes;
+      return orderedNodes;
     });
   }, [connections, connectionTags, sidebarRootOrder, rootSortMode, rootConnectionSortMode, allSavedQueriesNode]);
 
@@ -1818,142 +1788,10 @@ const Sidebar: React.FC<{
       setSidebarTreeScrollRequest({ id, key, scrollBlock });
   }, []);
 
-  const decorateExternalSQLTreeNode = (node: ExternalSQLTreeNode): TreeNode => {
-    const icon = (() => {
-      switch (node.type) {
-        case 'external-sql-root':
-          return (
-            <span className="gn-v2-tree-folder-icon" data-sidebar-tree-folder-icon="true">
-              <FolderOpenOutlined />
-            </span>
-          );
-        case 'external-sql-directory':
-          return node.dataRef.directoryStatus === 'missing' ? <WarningOutlined /> : <HddOutlined />;
-        case 'external-sql-folder':
-          return <FolderOutlined />;
-        default:
-          return <FileTextOutlined />;
-      }
-    })();
-
-    return {
-      ...node,
-      icon,
-      children: node.children?.map((child) => decorateExternalSQLTreeNode(child)),
-    };
-  };
-
-  const buildExternalSQLRootTreeNode = useCallback((
-      directories: ExternalSQLDirectory[] = externalSQLDirectories,
-      directoryTrees: Record<string, ExternalSQLTreeEntry[]> = externalSQLDirectoryTreesRef.current,
-      directoryStatuses: Record<string, 'missing'> = {},
-  ): TreeNode => decorateExternalSQLTreeNode(buildExternalSQLRootNode({
-      directories,
-      directoryTrees,
-      directoryStatuses,
-      labels: {
-          missingDirectory: t('sidebar.message.external_sql_directory_not_found'),
-      },
-  })), [externalSQLDirectories]);
-
-  const refreshGlobalExternalSQLRootNode = useCallback(async (
-      showSuccess = false,
-      directoriesOverride?: ExternalSQLDirectory[],
-  ) => {
-      const targetDirectories = directoriesOverride || externalSQLDirectories;
-      const directoryTrees: Record<string, ExternalSQLTreeEntry[]> = {};
-      const directoryStatuses: Record<string, 'missing'> = {};
-      await Promise.all(targetDirectories.map(async (directory) => {
-          const directoryRes = await ListSQLDirectory(directory.path);
-          if (!directoryRes.success) {
-              const errorCode = String((directoryRes.data as Record<string, unknown> | undefined)?.errorCode || '').trim();
-              if (errorCode === 'directory_not_found') {
-                  directoryStatuses[directory.id] = 'missing';
-              } else {
-                  message.warning({
-                      key: `external-sql-${directory.id}`,
-                      content: t('sidebar.message.external_sql_directory_read_failed', {
-                          name: directory.name,
-                          error: directoryRes.message,
-                      }),
-                  });
-              }
-              directoryTrees[directory.id] = [];
-              return;
-          }
-          directoryTrees[directory.id] = Array.isArray(directoryRes.data)
-              ? directoryRes.data as ExternalSQLTreeEntry[]
-              : [];
-      }));
-      externalSQLDirectoryTreesRef.current = directoryTrees;
-      const rootNode = buildExternalSQLRootTreeNode(targetDirectories, directoryTrees, directoryStatuses);
-      setTreeData((prev) => {
-          const withoutExternalRoot = prev.filter((node) => node.type !== 'external-sql-root');
-          const nextTreeData = [...withoutExternalRoot, rootNode];
-          treeDataRef.current = nextTreeData;
-          return nextTreeData;
-      });
-      if (showSuccess) {
-          message.success(t('sidebar.message.external_sql_directory_refreshed'));
-      }
-  }, [buildExternalSQLRootTreeNode, externalSQLDirectories]);
-
-  useEffect(() => {
-      void refreshGlobalExternalSQLRootNode(false);
-  }, [refreshGlobalExternalSQLRootNode]);
-
   const openDataImportWorkbench = useCallback((input: BuildDataImportWorkbenchTabInput) => {
     const existingImportTab = tabs.find((tab) => tab.id === DATA_IMPORT_WORKBENCH_TAB_ID);
     addTab(resolveDataImportWorkbenchLaunchTab(existingImportTab, input));
   }, [addTab, tabs]);
-
-  const {
-      handleRunSQLFile,
-      handleOpenSQLFileFromToolbar,
-      openExternalSQLFile,
-      openExternalSQLBindingModal,
-      openCreateExternalSQLFileModal,
-      openRenameExternalSQLFileModal,
-      openCreateExternalSQLDirectoryModal,
-      openRenameExternalSQLDirectoryModal,
-      handleDeleteExternalSQLFile,
-      handleDeleteExternalSQLDirectory,
-      handleAddExternalSQLDirectory,
-      handleRemoveExternalSQLDirectory,
-      handleRefreshExternalSQLDirectory,
-      browserSQLFileInputProps,
-      externalSQLFileModalProps,
-      externalSQLBindingModalProps,
-  } = useSidebarExternalSqlWorkflow({
-      connections,
-      externalSQLDirectories,
-      activeTab,
-      connectionIds,
-      selectedNodesRef,
-      addTab,
-      openDataImportWorkbench,
-      saveExternalSQLDirectory,
-      deleteExternalSQLDirectory,
-      updateRecentSQLFilePath,
-      removeRecentSQLFilesByPath,
-      moveRecentSQLFilesByDirectory,
-      removeRecentSQLFilesByDirectory,
-      refreshGlobalExternalSQLRootNode,
-      setExpandedKeys,
-      setAutoExpandParent,
-      getActiveContext: () => useStore.getState().activeContext,
-      isWebRuntime,
-  });
-
-  useEffect(() => {
-    const handleWorkbenchAddExternalSQLDirectory = () => {
-      void handleAddExternalSQLDirectory({ type: 'external-sql-root' });
-    };
-    window.addEventListener('gonavi:add-external-sql-directory', handleWorkbenchAddExternalSQLDirectory);
-    return () => {
-      window.removeEventListener('gonavi:add-external-sql-directory', handleWorkbenchAddExternalSQLDirectory);
-    };
-  }, [handleAddExternalSQLDirectory]);
 
   const getNodeDatabaseContext = (node: any): { connectionId: string; dbName: string; dbNodeKey: string } | null => {
     if (!node) return null;
@@ -1962,19 +1800,6 @@ const Sidebar: React.FC<{
         connectionId: String(node?.dataRef?.id || '').trim(),
         dbName: String(node?.dataRef?.dbName || '').trim(),
         dbNodeKey: String(node.key || '').trim(),
-      };
-    }
-
-    if (
-      node.type === 'external-sql-root'
-      || node.type === 'external-sql-directory'
-      || node.type === 'external-sql-folder'
-      || node.type === 'external-sql-file'
-    ) {
-      return {
-        connectionId: String(node?.dataRef?.connectionId || '').trim(),
-        dbName: String(node?.dataRef?.dbName || '').trim(),
-        dbNodeKey: String(node?.dataRef?.dbNodeKey || '').trim(),
       };
     }
 
@@ -1995,39 +1820,6 @@ const Sidebar: React.FC<{
       }
 
       onEnsureSidebarExpanded?.();
-
-      if (request.objectGroup === 'externalSqlFiles') {
-          await refreshGlobalExternalSQLRootNode(false);
-          const target = resolveSidebarLocateTarget(request, { groupBySchema: false });
-          const path = findSidebarNodePathForLocate(treeDataRef.current as SidebarLocateTreeNodeLike[], target);
-          if (!path) {
-              message.warning(t('sidebar.message.locate_external_sql_file_not_found', { path: request.filePath }));
-              return;
-          }
-          const targetKey = path[path.length - 1];
-          const targetNode = findTreeNodeByKey(treeDataRef.current, targetKey);
-          setSearchValue('');
-          setV2ExplorerFilter('all');
-          mergeExpandedTreeKeys(path.slice(0, -1));
-          setSidebarSelectedKeys([targetKey]);
-          selectedNodesRef.current = targetNode ? [targetNode] : [];
-          const connectionId = String(request.connectionId || activeContext?.connectionId || activeTab?.connectionId || '').trim();
-          const dbName = String(request.dbName || activeContext?.dbName || activeTab?.dbName || '').trim();
-          if (connectionId) {
-              setActiveContext({ connectionId, dbName });
-              publishTitlebarSelection(
-                  resolveSidebarSelectionContext(targetNode)
-                  || {
-                      connectionId,
-                      dbName,
-                      sidebarStateKey: connectionId,
-                  },
-                  targetKey,
-              );
-          }
-          scrollSidebarTreeToKey(targetKey, 'center');
-          return;
-      }
 
       if (request.objectGroup === 'savedQueries') {
           const target = resolveSidebarLocateTarget(request, { groupBySchema: false });
@@ -2234,8 +2026,6 @@ const Sidebar: React.FC<{
         await loadNacosConfigGroups({ key, dataRef });
     } else if (type === 'nacos-services-entry') {
         await loadNacosServiceGroups({ key, dataRef });
-    } else if (type === 'external-sql-root') {
-        await refreshGlobalExternalSQLRootNode(false);
     } else if (type === 'table') {
         // Expand table to show object categories
         const conn = dataRef;
@@ -2666,9 +2456,6 @@ const Sidebar: React.FC<{
               query: q.sql,
               savedQueryId: q.id,
           });
-          return;
-      } else if (node.type === 'external-sql-file') {
-          void openExternalSQLFile(node);
           return;
       } else if (node.type === 'redis-db') {
           const { id, redisDB } = node.dataRef;
@@ -3538,7 +3325,6 @@ const Sidebar: React.FC<{
       openBatchTableWorkbench,
       openBatchDatabaseWorkbench,
       openBatchConnectionWorkbench,
-      handleRunSQLFile,
       handleDeleteDatabase,
       onCreateConnectionInGroup,
       onEditConnection,
@@ -3875,7 +3661,6 @@ const Sidebar: React.FC<{
     setTargetConnection,
     setIsCreateDbModalOpen,
     buildConnectionRootQueryTabTitle,
-    handleRunSQLFile,
     openCreateStarRocksExternalCatalog,
     openEditView,
     renameViewForm,
@@ -3926,24 +3711,12 @@ const Sidebar: React.FC<{
         findTreeNodeByKeyRef.current(treeDataRef.current, connectionId),
       ),
     setTreeData,
-    handleAddExternalSQLDirectory,
-    openCreateExternalSQLFileModal,
-    openCreateExternalSQLDirectoryModal,
-    openRenameExternalSQLDirectoryModal,
-    handleRefreshExternalSQLDirectory,
-    handleDeleteExternalSQLDirectory,
-    handleRemoveExternalSQLDirectory,
-    openExternalSQLFile,
-    openExternalSQLBindingModal,
-    openRenameExternalSQLFileModal,
-    handleDeleteExternalSQLFile,
     extractObjectName,
   });
 
   const titleRender = useSidebarTitleRender({
       connectionStates,
       renderV2TreeTitle,
-      handleAddExternalSQLDirectory,
   });
   const v2RailConnectionGroups = useMemo(
       () => buildV2RailConnectionGroups(connections, connectionTags, sidebarRootOrder, rootSortMode, rootConnectionSortMode),
@@ -4307,10 +4080,6 @@ const Sidebar: React.FC<{
   const v2BatchDatabasesLabel = t('sidebar.action.batch_databases');
   const v2BatchConnectionsLabel = t('sidebar.action.batch_connections');
   const v2DataImportLabel = t('sidebar.action.data_import');
-  const v2SqlToolsLabel = t('sidebar.action.sql_tools');
-  const v2SlowQueryLabel = t('sql_analysis.slow_query.rail.aria_label');
-  const v2SqlAuditLabel = t('sql_audit.rail.aria_label');
-  const v2OpenExternalSqlFileLabel = t('sidebar.sql_file_exec.title');
   const v2LocateCurrentTableLabel = t('sidebar.action.locate_current_table');
   const v2LocateCurrentTableUnavailableLabel = t('sidebar.message.locate_current_table_unavailable');
   const v2ConnectionActionsLabel = t('sidebar.active_connection.actions');
@@ -4365,19 +4134,6 @@ const Sidebar: React.FC<{
     openDataImportWorkbench({ connectionId, dbName, tableName, mode });
   }, [activeContext?.connectionId, activeContext?.dbName, activeTabId, openDataImportWorkbench, tabs]);
 
-  const handleOpenSlowQueryWorkbench = useCallback(() => {
-    if (!activeTabHasConnection || !activeTab?.connectionId) return;
-    addTab(buildSqlAnalysisWorkbenchTab({
-      connectionId: activeTab.connectionId,
-      dbName: activeTab.dbName,
-      view: 'slow-query',
-    }));
-  }, [activeTab?.connectionId, activeTab?.dbName, activeTabHasConnection, addTab]);
-
-  const handleOpenSqlAuditWorkbench = useCallback(() => {
-    addTab(buildSqlAuditWorkbenchTab());
-  }, [addTab]);
-
   const v2TitlebarQuickActions: TitleBarQuickAction[] = [
     {
       key: 'data-workflow',
@@ -4422,31 +4178,12 @@ const Sidebar: React.FC<{
       ],
     },
     {
-      key: 'sql-tools',
-      label: v2SqlToolsLabel,
-      menu: [
-        {
-          key: 'slow-query',
-          label: v2SlowQueryLabel,
-          icon: <HistoryOutlined aria-hidden="true" />,
-          onClick: handleOpenSlowQueryWorkbench,
-          disabled: !activeTabHasConnection,
-        },
-        {
-          key: 'sql-audit',
-          label: v2SqlAuditLabel,
-          icon: <AuditOutlined aria-hidden="true" />,
-          onClick: handleOpenSqlAuditWorkbench,
-        },
-      ],
-    },
-    {
       key: 'drivers',
       label: t('app.tools.entry.drivers.title'),
       onClick: () => onOpenSettingsNavigation?.({ group: 'workspace', action: 'drivers' }),
     },
   ];
-  // 关于 GoNavi 作为标题栏独立按钮，和数据工作流 / SQL 工具并列。
+  // 关于 GoNavi 作为标题栏独立按钮，和数据工作流并列。
   const v2TitlebarAboutActions: TitleBarQuickAction[] = [
     {
       key: 'about-go-navi',
@@ -4595,7 +4332,6 @@ const Sidebar: React.FC<{
       batchTables: v2BatchTablesLabel,
       batchDatabases: v2BatchDatabasesLabel,
       dataImport: v2DataImportLabel,
-      openExternalSqlFile: v2OpenExternalSqlFileLabel,
       locateCurrentTable: v2LocateCurrentTableLabel,
       locateCurrentTableUnavailable: v2LocateCurrentTableUnavailableLabel,
     },
@@ -4604,7 +4340,6 @@ const Sidebar: React.FC<{
       openBatchTableExport: openBatchTableWorkbench,
       openBatchDatabaseExport: openBatchDatabaseWorkbench,
       openDataImport: handleOpenDataImportWorkbench,
-      openExternalSqlFile: handleOpenSQLFileFromToolbar,
       locateActiveTab: handleLocateActiveTabInSidebar,
     },
     canLocateActiveTab,
@@ -4978,15 +4713,6 @@ const Sidebar: React.FC<{
                 />
             );
         })()}
-
-        {isWebRuntime ? (
-          <input
-            {...browserSQLFileInputProps}
-            data-sidebar-browser-sql-file-input="true"
-          />
-        ) : null}
-        <ExternalSQLFileModal {...externalSQLFileModalProps} />
-        <ExternalSQLBindingModal {...externalSQLBindingModalProps} />
 
         <FindInDatabaseModal
             open={findInDbContext.open}

@@ -12,6 +12,15 @@ export const SIDEBAR_OBJECT_GROUP_KEYS = [
 
 export type SidebarObjectGroupKey = (typeof SIDEBAR_OBJECT_GROUP_KEYS)[number];
 
+/** 左侧默认只保留表 / 视图 / 物化视图 / 已保存查询；其余对象改到右侧详情。 */
+export const DEFAULT_SIDEBAR_HIDDEN_OBJECT_GROUPS: SidebarObjectGroupKey[] = [
+  'sequences',
+  'routines',
+  'packages',
+  'triggers',
+  'events',
+];
+
 type SidebarObjectVisibilityTreeNode = {
   type?: string;
   dataRef?: { groupKey?: unknown };

@@ -37,7 +37,7 @@ Go module：`GoNavi-Wails`。默认集成分支：`dev`。
 
 当前债务（禁止继续加行）：`frontend/src/components/QueryEditor.tsx`、`App.tsx`、`store.ts`、`DataGrid.tsx`、`Sidebar.tsx`、`queryEditor/QueryEditorHelpers.ts`、`internal/app/methods_file.go`、`methods_db.go`、`app.go`。
 
-正确范例：`DataGridShell` / `DataGridCore` / `DataGridModals` 拆文件；`components/queryEditor/`、`components/sidebar/` 拆目录；Go 侧 `methods_db_objects.go`、`methods_db_transaction.go`、`application_icon_windows.go`。
+正确范例：`DataGridShell` / `DataGridCore` / `DataGridModals` 拆文件；`components/queryEditor/`、`components/sidebar/` 拆目录；Go 侧 `methods_db_objects.go`、`methods_db_transaction.go`、`application_identity_windows.go`。
 
 ### 1.1 限额
 

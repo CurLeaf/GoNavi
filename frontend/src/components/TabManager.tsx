@@ -1,7 +1,7 @@
 import Modal from './common/ResizableDraggableModal';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button, Dropdown, message, Tabs, Tooltip } from 'antd';
-import { ArrowLeftOutlined, ArrowRightOutlined, CloseCircleOutlined, CloseOutlined, ConsoleSqlOutlined, DatabaseOutlined, EditOutlined, ExportOutlined, FileTextOutlined, FolderOpenOutlined, HistoryOutlined, PlusOutlined, PushpinOutlined, RightOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, ArrowRightOutlined, CloseCircleOutlined, CloseOutlined, ConsoleSqlOutlined, DatabaseOutlined, EditOutlined, ExportOutlined, FileTextOutlined, HistoryOutlined, PlusOutlined, PushpinOutlined, RightOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import type { MenuProps, TabsProps } from 'antd';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import type { DragEndEvent, DragMoveEvent, DragStartEvent } from '@dnd-kit/core';
@@ -13,7 +13,7 @@ import {
   type RecentConnectionTarget,
   type RecentSQLFile,
 } from '../store';
-import type { ExternalSQLDirectory, SavedConnection, SavedQuery, TabData } from '../types';
+import type { SavedConnection, SavedQuery, TabData } from '../types';
 import { t } from '../i18n';
 import {
   buildTabDisplayModel,
@@ -47,12 +47,6 @@ import {
   getDirtyWorkbenchTabCloseGuards,
   REQUEST_CLOSE_WORKBENCH_TABS_EVENT,
 } from '../utils/workbenchTabCloseProtection';
-import {
-  buildExternalSQLTabId,
-  normalizeExternalSQLPath,
-  resolveExternalSQLFileBinding,
-} from '../utils/externalSqlTree';
-import { buildSQLFileExecutionWorkbenchTab } from '../utils/sqlFileExecutionTab';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { CLOSE_ACTIVE_WORKSPACE_TAB_EVENT, resolveDockedActiveTabId } from '../utils/closeTabShortcut';
 import WorkbenchTabContent from './WorkbenchTabContent';
@@ -96,7 +90,6 @@ const getTabKindLabel = (tab: TabData): string => {
         : 'app.tools.entry.sync.title',
     );
   }
-  if (tab.type === 'sql-file-execution') return t('sidebar.sql_file_exec.title');
   if (tab.type === 'sql-analysis') return t('tab_manager.kind_badge.sql_analysis');
   if (tab.type === 'sql-audit') return t('tab_manager.kind_badge.sql_audit');
   if (tab.type === 'driver-manager') return t('tab_manager.kind_badge.driver_manager');
@@ -185,12 +178,6 @@ export type PinnedTableShortcut = {
   dbName: string;
   schemaName?: string;
   tableName: string;
-};
-
-type LinkedExternalSQLDirectoryShortcut = {
-  connection: SavedConnection;
-  dbName?: string;
-  directory: ExternalSQLDirectory;
 };
 
 const RECENT_WORKBENCH_ITEM_LIMIT = 6;
@@ -286,48 +273,21 @@ export const buildPinnedTableShortcuts = (
 
 export const buildRecentSQLFileShortcuts = (
   connections: SavedConnection[],
-  directories: ExternalSQLDirectory[],
   recentFiles: RecentSQLFile[],
 ): RecentSQLFile[] => {
   const connectionIds = new Set(connections.map((connection) => connection.id));
   const seenFilePaths = new Set<string>();
   return [...recentFiles]
-    .map((file) => {
-      const binding = resolveExternalSQLFileBinding(directories, file.filePath, {
-        connectionId: file.connectionId,
-        dbName: file.dbName,
-      });
-      return binding
-        ? { ...file, connectionId: binding.connectionId, dbName: binding.dbName }
-        : file;
-    })
     .filter((file) => connectionIds.has(file.connectionId))
     .sort((left, right) => right.openedAt - left.openedAt)
     .filter((file) => {
-      const normalizedPath = normalizeExternalSQLPath(file.filePath);
+      const normalizedPath = String(file.filePath || '').trim().replace(/\\/g, '/');
       const filePathKey = /^[a-z]:\//iu.test(normalizedPath) || normalizedPath.startsWith('//')
         ? normalizedPath.toLowerCase()
         : normalizedPath;
       if (!filePathKey || seenFilePaths.has(filePathKey)) return false;
       seenFilePaths.add(filePathKey);
       return true;
-    })
-    .slice(0, RECENT_WORKBENCH_ITEM_LIMIT);
-};
-
-const buildLinkedExternalSQLDirectoryShortcuts = (
-  connections: SavedConnection[],
-  directories: ExternalSQLDirectory[],
-): LinkedExternalSQLDirectoryShortcut[] => {
-  const connectionById = new Map(connections.map((connection) => [connection.id, connection]));
-  return [...directories]
-    .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0))
-    .flatMap((directory) => {
-      const connectionId = String(directory.connectionId || '').trim();
-      const connection = connectionById.get(connectionId);
-      if (!connection) return [];
-      const dbName = String(directory.dbName || connection.config.database || '').trim() || undefined;
-      return [{ connection, ...(dbName ? { dbName } : {}), directory }];
     })
     .slice(0, RECENT_WORKBENCH_ITEM_LIMIT);
 };
@@ -351,7 +311,6 @@ const getTabKindTooltipLabel = (tab: TabData): string => {
         : 'app.tools.entry.sync.title',
     );
   }
-  if (tab.type === 'sql-file-execution') return t('sidebar.sql_file_exec.title');
   if (tab.type === 'sql-analysis') return t('tab_manager.hover.kind.sql_analysis');
   if (tab.type === 'sql-audit') return t('tab_manager.hover.kind.sql_audit');
   if (tab.type === 'driver-manager') return t('tab_manager.hover.kind.driver_manager');
@@ -869,7 +828,6 @@ const TabManager: React.FC<TabManagerProps> = React.memo<TabManagerProps>(({ onF
   const connections = useStore(state => state.connections);
   const connectionTags = useStore(state => state.connectionTags);
   const savedQueries = useStore(state => state.savedQueries);
-  const externalSQLDirectories = useStore(state => state.externalSQLDirectories);
   const recentConnectionTargets = useStore(state => state.recentConnectionTargets);
   const recentSQLFiles = useStore(state => state.recentSQLFiles);
   const pinnedSidebarTables = useStore(state => state.pinnedSidebarTables);
@@ -1625,16 +1583,12 @@ const TabManager: React.FC<TabManagerProps> = React.memo<TabManagerProps>(({ onF
     [connectionById, savedQueries],
   );
   const recentSQLFileShortcuts = useMemo(
-    () => buildRecentSQLFileShortcuts(queryCapableConnections, externalSQLDirectories, recentSQLFiles),
-    [externalSQLDirectories, queryCapableConnections, recentSQLFiles],
+    () => buildRecentSQLFileShortcuts(queryCapableConnections, recentSQLFiles),
+    [queryCapableConnections, recentSQLFiles],
   );
   const pinnedTableShortcuts = useMemo(
     () => buildPinnedTableShortcuts(queryCapableConnections, pinnedSidebarTables),
     [pinnedSidebarTables, queryCapableConnections],
-  );
-  const linkedExternalSQLDirectoryShortcuts = useMemo(
-    () => buildLinkedExternalSQLDirectoryShortcuts(queryCapableConnections, externalSQLDirectories),
-    [externalSQLDirectories, queryCapableConnections],
   );
 
   const handleOpenConnectionModal = () => {
@@ -1648,10 +1602,6 @@ const TabManager: React.FC<TabManagerProps> = React.memo<TabManagerProps>(({ onF
       return;
     }
     window.dispatchEvent(new CustomEvent('gonavi:focus-sidebar-search'));
-  };
-
-  const handleAddExternalSQLDirectory = () => {
-    window.dispatchEvent(new CustomEvent('gonavi:add-external-sql-directory'));
   };
 
   const handleOpenRecentConnection = useCallback((shortcut: RecentConnectionShortcut) => {
@@ -1705,16 +1655,8 @@ const TabManager: React.FC<TabManagerProps> = React.memo<TabManagerProps>(({ onF
 
   const handleOpenRecentSQLFile = useCallback(async (file: RecentSQLFile) => {
     const filePath = String(file.filePath || '').trim();
-    const fileBinding = resolveExternalSQLFileBinding(externalSQLDirectories, filePath, {
-      connectionId: file.connectionId,
-      dbName: file.dbName,
-    });
-    const connectionId = String(
-      fileBinding ? fileBinding.connectionId : file.connectionId || '',
-    ).trim();
-    const dbName = String(
-      fileBinding ? fileBinding.dbName : file.dbName || '',
-    ).trim();
+    const connectionId = String(file.connectionId || '').trim();
+    const dbName = String(file.dbName || '').trim();
     if (!connectionId || !connectionById.has(connectionId)) {
       message.error(t('sidebar.message.connection_config_not_found'));
       return;
@@ -1735,20 +1677,13 @@ const TabManager: React.FC<TabManagerProps> = React.memo<TabManagerProps>(({ onF
 
       const data = res.data;
       if (data && typeof data === 'object' && (data as Record<string, unknown>).isLargeFile === true) {
-        const payload = data as Record<string, unknown>;
-        addTab(buildSQLFileExecutionWorkbenchTab({
-          connectionId,
-          dbName: dbName || undefined,
-          filePath: String(payload.filePath || '').trim() || filePath,
-          fileName: file.fileName,
-          fileSizeMB: String(payload.fileSizeMB || '').trim() || undefined,
-          autoStart: false,
-        }));
+        message.error(t('query_editor.message.sql_file_too_large_for_editor', { name: file.fileName }));
         return;
       }
 
+      const normalizedPath = filePath.replace(/\\/g, '/');
       addTab({
-        id: buildExternalSQLTabId(connectionId, dbName, filePath),
+        id: `query-file:${connectionId}:${dbName}:${normalizedPath}`,
         title: file.fileName,
         type: 'query',
         connectionId,
@@ -1763,7 +1698,7 @@ const TabManager: React.FC<TabManagerProps> = React.memo<TabManagerProps>(({ onF
     } finally {
       setOpeningRecentSQLFileKey((current) => current === openKey ? null : current);
     }
-  }, [addTab, connectionById, externalSQLDirectories]);
+  }, [addTab, connectionById]);
 
   const EmptyWorkbench = (
     <div className="gn-v2-empty-workbench">
@@ -1907,37 +1842,6 @@ const TabManager: React.FC<TabManagerProps> = React.memo<TabManagerProps>(({ onF
               <PushpinOutlined />
               <p>{t('tab_manager.empty.resource.pinned_tables.empty')}</p>
               <Button type="link" onClick={handleFocusObjectSearch}>{t('sidebar.command_search.label')}</Button>
-            </div>
-          )}
-        </section>
-        <section className="gn-v2-empty-resource-card">
-          <div className="gn-v2-empty-recent-heading">
-            <span><FolderOpenOutlined />{t('sidebar.external_sql.root')}</span>
-            <em>{linkedExternalSQLDirectoryShortcuts.length}</em>
-          </div>
-          {linkedExternalSQLDirectoryShortcuts.length > 0 ? (
-            <div className="gn-v2-empty-recent-list">
-              {linkedExternalSQLDirectoryShortcuts.map((shortcut) => (
-                <button
-                  key={shortcut.directory.id}
-                  type="button"
-                  className="gn-v2-empty-recent-item"
-                  onClick={() => handleCreateQueryForConnection(shortcut)}
-                >
-                  <FolderOpenOutlined />
-                  <span>
-                    <strong title={shortcut.directory.name}>{shortcut.directory.name}</strong>
-                    <small>{`${shortcut.connection.name} · ${shortcut.dbName || t('tab_manager.empty.recent.connection.default_database')}`}</small>
-                  </span>
-                  <RightOutlined className="gn-v2-empty-recent-arrow" />
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="gn-v2-empty-resource-empty">
-              <FolderOpenOutlined />
-              <p>{t('tab_manager.empty.resource.sql_directory.empty')}</p>
-              <Button type="link" onClick={handleAddExternalSQLDirectory}>{t('sidebar.menu.add_sql_directory')}</Button>
             </div>
           )}
         </section>

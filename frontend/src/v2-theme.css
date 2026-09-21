@@ -3339,7 +3339,6 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-iconEle [data-db
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection) .ant-tree-iconEle,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection-group) .ant-tree-iconEle,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="all-saved-queries"]) .ant-tree-iconEle,
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="external-sql-root"]) .ant-tree-iconEle,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="saved-query-group"]) .ant-tree-iconEle,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-folder-icon) .ant-tree-iconEle {
   width: 20px !important;
@@ -3356,8 +3355,6 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection-group) .ant-tree-iconEle svg,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="all-saved-queries"]) .ant-tree-iconEle > *,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="all-saved-queries"]) .ant-tree-iconEle svg,
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="external-sql-root"]) .ant-tree-iconEle > *,
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="external-sql-root"]) .ant-tree-iconEle svg,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="saved-query-group"]) .ant-tree-iconEle > *,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="saved-query-group"]) .ant-tree-iconEle img,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="saved-query-group"]) .ant-tree-iconEle svg,
@@ -3400,9 +3397,7 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .gn-v2-tree-folder-icon .a
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection-group) .ant-tree-iconEle .anticon-folder,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title.is-connection-group) .ant-tree-iconEle .anticon-folder-open,
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="all-saved-queries"]) .ant-tree-iconEle .anticon-folder,
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="all-saved-queries"]) .ant-tree-iconEle .anticon-folder-open,
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="external-sql-root"]) .ant-tree-iconEle .anticon-folder,
-body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="external-sql-root"]) .ant-tree-iconEle .anticon-folder-open {
+body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:has(.gn-v2-tree-title[data-node-type="all-saved-queries"]) .ant-tree-iconEle .anticon-folder-open {
   color: #d48806;
   font-size: 17px;
   line-height: 1;
@@ -3509,7 +3504,6 @@ body[data-ui-version="v2"] .gn-v2-tree-title.is-connection {
    the existing horizontal scroll so long table names stay readable. */
 /* 可见层长标签按内容撑开（横滚由 estimate 按展开层计算）；短标签自然不溢出 */
 
-
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-treenode:not(.ant-tree-treenode-selected):has(.gn-v2-tree-title:not(.is-mono)):hover {
   background: var(--gn-bg-hover) !important;
   border-radius: 6px;
@@ -3558,8 +3552,7 @@ body[data-ui-version="v2"] .gn-v2-tree-title.is-connection .gn-v2-tree-label,
 body[data-ui-version="v2"] .gn-v2-tree-title.is-connection-group .gn-v2-tree-label,
 body[data-ui-version="v2"] .gn-v2-tree-title.is-group .gn-v2-tree-label,
 body[data-ui-version="v2"] .gn-v2-tree-title[data-node-type="database"] .gn-v2-tree-label,
-body[data-ui-version="v2"] .gn-v2-tree-title[data-node-type="queries-folder"] .gn-v2-tree-label,
-body[data-ui-version="v2"] .gn-v2-tree-title[data-node-type="external-sql-root"] .gn-v2-tree-label {
+body[data-ui-version="v2"] .gn-v2-tree-title[data-node-type="queries-folder"] .gn-v2-tree-label {
   display: block;
   flex: 0 1 auto;
   min-width: 0;
@@ -3983,36 +3976,9 @@ body[data-ui-version="v2"] .gn-v2-tree-title[data-node-type="database"] {
   color: var(--gn-fg-1);
 }
 
-body[data-ui-version="v2"] .gn-v2-tree-title[data-node-type="queries-folder"],
-body[data-ui-version="v2"] .gn-v2-tree-title[data-node-type="external-sql-root"] {
+body[data-ui-version="v2"] .gn-v2-tree-title[data-node-type="queries-folder"] {
   color: var(--gn-fg-3);
   font-weight: 500 !important;
-}
-
-body[data-ui-version="v2"] .gn-v2-tree-external-root {
-  width: 100%;
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-body[data-ui-version="v2"] .gn-v2-tree-external-root .gn-v2-tree-title {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-body[data-ui-version="v2"] .gn-v2-tree-external-root .gn-v2-tree-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-body[data-ui-version="v2"] .gn-v2-tree-external-root-action {
-  flex: 0 0 auto;
-  padding-inline: 4px !important;
-  height: 20px !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-tree-title[data-group-key="triggers"] {

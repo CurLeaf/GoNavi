@@ -15,7 +15,6 @@ import {
   ConnectionDisplaySortMode,
   ConnectionSortMode,
   GlobalProxyConfig,
-  ExternalSQLDirectory,
   JVMDiagnosticCommandDraft,
   JVMDiagnosticEventChunk,
   SqlSnippet,
@@ -33,17 +32,9 @@ import {
   type ShortcutPlatform,
 } from "./utils/shortcuts";
 import {
-  buildExternalSQLDirectoryId,
-  normalizeExternalSQLPath,
-} from "./utils/externalSqlTree";
-import {
   DEFAULT_SQL_SNIPPETS,
   BUILTIN_SNIPPET_MAP,
 } from "./utils/sqlSnippetDefaults";
-import {
-  DEFAULT_BRAND_ICON_ID,
-  sanitizeBrandIconId,
-} from "./brand/brandIcons";
 
 type ActiveContext = {
   connectionId: string;
@@ -52,8 +43,6 @@ type ActiveContext = {
   tableName?: string;
 };
 
-const sanitizeBrandIconIdLocal = (value: unknown): string =>
-  sanitizeBrandIconId(value) || DEFAULT_BRAND_ICON_ID;
 import { toPersistedGlobalProxy } from "./utils/globalProxyDraft";
 import {
   DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
@@ -139,9 +128,14 @@ import {
   type SidebarTableMetadataField,
 } from "./utils/sidebarTableMetadata";
 import {
+  DEFAULT_SIDEBAR_HIDDEN_OBJECT_GROUPS,
   sanitizeSidebarHiddenObjectGroups,
   type SidebarObjectGroupKey,
 } from "./utils/sidebarObjectVisibility";
+import {
+  DEFAULT_WORKBENCH_INSPECTOR_WIDTH,
+  sanitizeWorkbenchInspectorWidth,
+} from "./utils/workbenchInspectorLayout";
 import {
   CONNECTION_TYPE_GROUPS,
   getConnectionTypeDefaultPort,
@@ -181,6 +175,8 @@ export interface AppearanceSettings
   toolbarButtonColorOverrides: ToolbarButtonColorOverrides;
   sidebarSingleDatabaseExpansion: boolean;
   sidebarHiddenObjectGroups: SidebarObjectGroupKey[];
+  workbenchInspectorWidth: number;
+  workbenchInspectorCollapsed: boolean;
   customUIFontFamily: string | null;
   customMonoFontFamily: string | null;
   newQuerySqlTemplate: string | null;
@@ -210,7 +206,9 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   tabEnvironmentAccentThickness: DEFAULT_TAB_ENVIRONMENT_ACCENT_THICKNESS,
   toolbarButtonColorOverrides: { ...DEFAULT_TOOLBAR_BUTTON_COLOR_OVERRIDES },
   sidebarSingleDatabaseExpansion: false,
-  sidebarHiddenObjectGroups: [],
+  sidebarHiddenObjectGroups: [...DEFAULT_SIDEBAR_HIDDEN_OBJECT_GROUPS],
+  workbenchInspectorWidth: DEFAULT_WORKBENCH_INSPECTOR_WIDTH,
+  workbenchInspectorCollapsed: false,
   customUIFontFamily: null,
   customMonoFontFamily: null,
   newQuerySqlTemplate: null,
@@ -300,9 +298,10 @@ const MIN_KEEPALIVE_INTERVAL_MINUTES = 1;
 const MAX_KEEPALIVE_INTERVAL_MINUTES = 1440;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
-const PERSIST_VERSION = 21;
+const PERSIST_VERSION = 22;
 const SQL_EDITOR_FONT_SIZE_SPLIT_VERSION = 19;
 const TAB_DISPLAY_DEFAULT_MIGRATION_VERSION = 20;
+const SIDEBAR_OBJECT_VISIBILITY_DEFAULT_MIGRATION_VERSION = 22;
 const SIDEBAR_SEARCH_SHORTCUT_MIGRATION_VERSION = 18;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
 const PERSIST_WRITE_DEBOUNCE_MS = 160;
@@ -1956,14 +1955,11 @@ interface AppState {
   activeContext: ActiveContext | null;
   savedQueries: SavedQuery[];
   savedQueryGroups: SavedQueryGroup[];
-  externalSQLDirectories: ExternalSQLDirectory[];
   recentConnectionTargets: RecentConnectionTarget[];
   recentSQLFiles: RecentSQLFile[];
   pinnedConnectionTypes: string[];
   theme: ThemeMode;
   themePreference: ThemePreference;
-  /** Built-in brand mascot icon id (01-10), used in title bar / about / favicon. */
-  brandIconId: string;
   languagePreference: LanguagePreference;
   appearance: AppearanceSettings;
   uiScale: number;
@@ -2108,8 +2104,6 @@ interface AppState {
   moveSavedQueryGroup: (groupId: string, parentGroupId?: string | null) => Promise<void>;
   saveQuery: (query: SavedQuery) => Promise<SavedQuery>;
   deleteQuery: (id: string) => Promise<void>;
-  saveExternalSQLDirectory: (directory: ExternalSQLDirectory) => void;
-  deleteExternalSQLDirectory: (id: string) => void;
   updateRecentSQLFilePath: (previousPath: string, nextPath: string) => void;
   removeRecentSQLFilesByPath: (filePath: string) => void;
   moveRecentSQLFilesByDirectory: (previousDirectoryPath: string, nextDirectoryPath: string) => void;
@@ -2117,7 +2111,6 @@ interface AppState {
 
   setTheme: (theme: ThemeMode) => void;
   setThemePreference: (themePreference: ThemePreference) => void;
-  setBrandIconId: (brandIconId: string) => void;
   setLanguagePreference: (languagePreference: LanguagePreference) => void;
   setAppearance: (appearance: Partial<AppearanceSettings>) => void;
   setRedisDbAlias: (
@@ -2259,68 +2252,6 @@ const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
       syntaxHelp: toTrimmedString(raw.syntaxHelp) || undefined,
       body,
       isBuiltin: raw.isBuiltin === true,
-      createdAt: Number.isFinite(Number(raw.createdAt))
-        ? Number(raw.createdAt)
-        : Date.now(),
-    });
-  });
-  return result;
-};
-
-const resolveExternalSQLDirectoryName = (name: unknown, path: string): string => {
-  const explicitName = toTrimmedString(name);
-  if (explicitName) return explicitName;
-  const pathSegment = path.split(/[\\/]/).filter(Boolean).pop();
-  return pathSegment || translate("sidebar.sql_directory.default_name");
-};
-
-const sanitizeExternalSQLFileBindings = (
-  value: unknown,
-): NonNullable<ExternalSQLDirectory["fileBindings"]> => {
-  if (!Array.isArray(value)) return [];
-  const bindings = new Map<string, NonNullable<ExternalSQLDirectory["fileBindings"]>[number]>();
-  value.forEach((entry) => {
-    if (!entry || typeof entry !== "object") return;
-    const raw = entry as Record<string, unknown>;
-    const filePath = normalizeExternalSQLPath(toTrimmedString(raw.filePath));
-    const connectionId = toTrimmedString(raw.connectionId);
-    const dbName = toTrimmedString(raw.dbName);
-    // dbName intentionally stays optional for a file binding: an empty value
-    // means "connect to this host without selecting a default database".
-    if (!filePath || !connectionId) return;
-    bindings.set(filePath, { filePath, connectionId, dbName });
-  });
-  return [...bindings.values()];
-};
-
-const sanitizeExternalSQLDirectories = (
-  value: unknown,
-): ExternalSQLDirectory[] => {
-  if (!Array.isArray(value)) return [];
-  const result: ExternalSQLDirectory[] = [];
-  const seenDirectoryIds = new Set<string>();
-  value.forEach((entry) => {
-    if (!entry || typeof entry !== "object") return;
-    const raw = entry as Record<string, unknown>;
-    const path = toTrimmedString(raw.path);
-    if (!path) return;
-    const connectionId = toTrimmedString(raw.connectionId);
-    const dbName = toTrimmedString(raw.dbName);
-    const fileBindings = sanitizeExternalSQLFileBindings(raw.fileBindings);
-    const id =
-      toTrimmedString(
-        raw.id,
-        buildExternalSQLDirectoryId(connectionId, dbName, path),
-      ) || buildExternalSQLDirectoryId(connectionId, dbName, path);
-    if (seenDirectoryIds.has(id)) return;
-    seenDirectoryIds.add(id);
-    result.push({
-      id,
-      name: resolveExternalSQLDirectoryName(raw.name, path),
-      path,
-      ...(connectionId ? { connectionId } : {}),
-      ...(dbName ? { dbName } : {}),
-      ...(fileBindings.length > 0 ? { fileBindings } : {}),
       createdAt: Number.isFinite(Number(raw.createdAt))
         ? Number(raw.createdAt)
         : Date.now(),
@@ -3241,9 +3172,16 @@ const sanitizeAppearance = (
     ),
     sidebarSingleDatabaseExpansion:
       appearance.sidebarSingleDatabaseExpansion === true,
-    sidebarHiddenObjectGroups: sanitizeSidebarHiddenObjectGroups(
-      appearance.sidebarHiddenObjectGroups,
+    sidebarHiddenObjectGroups:
+      version < SIDEBAR_OBJECT_VISIBILITY_DEFAULT_MIGRATION_VERSION
+      && (!Array.isArray(appearance.sidebarHiddenObjectGroups)
+        || appearance.sidebarHiddenObjectGroups.length === 0)
+        ? [...DEFAULT_SIDEBAR_HIDDEN_OBJECT_GROUPS]
+        : sanitizeSidebarHiddenObjectGroups(appearance.sidebarHiddenObjectGroups),
+    workbenchInspectorWidth: sanitizeWorkbenchInspectorWidth(
+      appearance.workbenchInspectorWidth,
     ),
+    workbenchInspectorCollapsed: appearance.workbenchInspectorCollapsed === true,
     customUIFontFamily: sanitizeFontFamilyInput(appearance.customUIFontFamily),
     customMonoFontFamily: sanitizeFontFamilyInput(appearance.customMonoFontFamily),
     newQuerySqlTemplate: sanitizeNewQuerySqlTemplate(appearance.newQuerySqlTemplate),
@@ -3473,13 +3411,11 @@ const PERSISTED_STATE_DEPENDENCY_KEYS = [
   "sidebarRootOrder",
   "rootSortMode",
   "rootConnectionSortMode",
-  "externalSQLDirectories",
   "recentConnectionTargets",
   "recentSQLFiles",
   "pinnedConnectionTypes",
   "theme",
   "themePreference",
-  "brandIconId",
   "languagePreference",
   "appearance",
   "uiScale",
@@ -3526,7 +3462,6 @@ const buildPersistedStateProjection = (
     sidebarRootOrder: state.sidebarRootOrder,
     rootSortMode: state.rootSortMode,
     rootConnectionSortMode: state.rootConnectionSortMode,
-    externalSQLDirectories: state.externalSQLDirectories,
     recentConnectionTargets: sanitizeRecentConnectionTargets(
       state.recentConnectionTargets,
     ),
@@ -3536,7 +3471,6 @@ const buildPersistedStateProjection = (
     ),
     theme: state.theme,
     themePreference: state.themePreference,
-    brandIconId: sanitizeBrandIconIdLocal(state.brandIconId),
     languagePreference: state.languagePreference,
     appearance: state.appearance,
     uiScale: state.uiScale,
@@ -3661,13 +3595,11 @@ export const useStore = create<AppState>()(
       activeContext: null,
       savedQueries: [],
       savedQueryGroups: [],
-      externalSQLDirectories: [],
       recentConnectionTargets: [],
       recentSQLFiles: [],
       pinnedConnectionTypes: [],
       theme: "light",
       themePreference: "light",
-      brandIconId: "03",
       languagePreference: DEFAULT_LANGUAGE_PREFERENCE,
       appearance: { ...DEFAULT_APPEARANCE },
       uiScale: DEFAULT_UI_SCALE,
@@ -5213,55 +5145,6 @@ export const useStore = create<AppState>()(
         }));
       },
 
-      saveExternalSQLDirectory: (directory) =>
-        set((state) => {
-          const path = toTrimmedString(directory.path);
-          if (!path) {
-            return state;
-          }
-          const connectionId = toTrimmedString(directory.connectionId);
-          const dbName = toTrimmedString(directory.dbName);
-          const fileBindings = sanitizeExternalSQLFileBindings(directory.fileBindings);
-          const nextDirectory: ExternalSQLDirectory = {
-            id:
-              toTrimmedString(
-                directory.id,
-                buildExternalSQLDirectoryId(connectionId, dbName, path),
-              ) || buildExternalSQLDirectoryId(connectionId, dbName, path),
-            name: resolveExternalSQLDirectoryName(directory.name, path),
-            path,
-            ...(connectionId ? { connectionId } : {}),
-            ...(dbName ? { dbName } : {}),
-            ...(fileBindings.length > 0 ? { fileBindings } : {}),
-            createdAt: Number.isFinite(Number(directory.createdAt))
-              ? Number(directory.createdAt)
-              : Date.now(),
-          };
-          const existingIndex = state.externalSQLDirectories.findIndex(
-            (item) => item.id === nextDirectory.id,
-          );
-          if (existingIndex === -1) {
-            return {
-              externalSQLDirectories: [
-                ...state.externalSQLDirectories,
-                nextDirectory,
-              ],
-            };
-          }
-          return {
-            externalSQLDirectories: state.externalSQLDirectories.map(
-              (item, index) => (index === existingIndex ? nextDirectory : item),
-            ),
-          };
-        }),
-
-      deleteExternalSQLDirectory: (id) =>
-        set((state) => ({
-          externalSQLDirectories: state.externalSQLDirectories.filter(
-            (item) => item.id !== id,
-          ),
-        })),
-
       updateRecentSQLFilePath: (previousPath, nextPath) =>
         set((state) => {
           const previousKey = normalizeRecentSQLPath(previousPath);
@@ -5324,10 +5207,6 @@ export const useStore = create<AppState>()(
       setThemePreference: (themePreference) =>
         set({
           themePreference: sanitizeThemePreference(themePreference),
-        }),
-      setBrandIconId: (brandIconId) =>
-        set({
-          brandIconId: sanitizeBrandIconIdLocal(brandIconId),
         }),
       setLanguagePreference: (languagePreference) =>
         set({
@@ -5755,9 +5634,7 @@ export const useStore = create<AppState>()(
             : 'createdAt';
         delete nextState.savedQueries;
         delete nextState.savedQueryGroups;
-        nextState.externalSQLDirectories = sanitizeExternalSQLDirectories(
-          state.externalSQLDirectories,
-        );
+        delete (nextState as Record<string, unknown>).externalSQLDirectories;
         nextState.recentConnectionTargets = sanitizeRecentConnectionTargets(
           state.recentConnectionTargets,
         );
@@ -5770,7 +5647,6 @@ export const useStore = create<AppState>()(
           state.themePreference,
           nextState.theme,
         );
-        nextState.brandIconId = sanitizeBrandIconIdLocal(state.brandIconId);
         nextState.languagePreference = sanitizeLanguagePreference(
           state.languagePreference,
         );
@@ -5881,9 +5757,6 @@ export const useStore = create<AppState>()(
           activeTabId: sanitizeActiveTabId(state.activeTabId, safeTabs),
           savedQueries: currentState.savedQueries,
           savedQueryGroups: currentState.savedQueryGroups,
-          externalSQLDirectories: sanitizeExternalSQLDirectories(
-            state.externalSQLDirectories,
-          ),
           recentConnectionTargets: sanitizeRecentConnectionTargets(
             state.recentConnectionTargets,
           ),
@@ -5896,7 +5769,6 @@ export const useStore = create<AppState>()(
             state.themePreference,
             sanitizeTheme(state.theme),
           ),
-          brandIconId: sanitizeBrandIconIdLocal(state.brandIconId),
           languagePreference: sanitizeLanguagePreference(
             state.languagePreference,
           ),

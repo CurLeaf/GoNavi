@@ -365,7 +365,6 @@ export type V2DatabaseContextMenuActionKey =
   | 'batch-databases'
   | 'disconnect-db'
   | 'new-query'
-  | 'run-sql'
   | 'schema-visibility'
   | 'drop-db';
 
@@ -424,7 +423,6 @@ export const V2DatabaseContextMenuView: React.FC<{
           ...(supportsSchemaActions ? [{ action: 'new-schema', icon: <FolderAddOutlined />, title: t('sidebar.v2_database_menu.new_schema') }] : []),
           ...(supportsSchemaVisibility ? [{ action: 'schema-visibility', icon: <FolderOpenOutlined />, title: t('sidebar.schema_visibility.menu.manage') }] : []),
           { action: 'new-query', icon: <ConsoleSqlOutlined />, title: t('sidebar.menu.new_query') },
-          { action: 'run-sql', icon: <FileAddOutlined />, title: t('sidebar.sql_file_exec.title') },
         ])}
 
         {supportsStarRocksActions && (
@@ -528,7 +526,6 @@ export type V2ConnectionContextMenuActionKey =
   | 'open-message-workbench'
   | 'consume-messages'
   | 'publish-message'
-  | 'open-sql-file'
   | 'new-command'
   | 'open-monitor'
   | 'edit'
@@ -656,7 +653,6 @@ export const V2ConnectionContextMenuView: React.FC<{
           { action: 'refresh', icon: <ReloadOutlined />, title: t('connection.sidebar.menu.refresh'), kbd: primaryShortcut('R', shortcutPlatform) },
           ...(supportsQueryEditor ? [
             { action: 'new-query' as const, icon: <ConsoleSqlOutlined />, title: t('sidebar.menu.new_query') },
-            { action: 'open-sql-file' as const, icon: <FileAddOutlined />, title: t('sidebar.sql_file_exec.title') },
           ] : []),
         ])}
 

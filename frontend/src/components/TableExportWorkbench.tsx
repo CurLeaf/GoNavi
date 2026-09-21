@@ -33,7 +33,6 @@ import { resolveConnectionHostSummary } from '../utils/tabDisplay';
 import { buildExportWorkbenchHistoryKey } from '../utils/tableExportTab';
 import { normalizeTableNamesFromMetadataRows } from '../utils/tableMetadataRows';
 import type { SidebarViewMetadataEntry } from '../utils/sidebarMetadata';
-import { buildSQLFileExecutionWorkbenchTab } from '../utils/sqlFileExecutionTab';
 import {
   formatExportElapsed,
   formatExportProgressRows,
@@ -861,30 +860,6 @@ const TableExportWorkbenchBody: React.FC<{ tab: TabData }> = ({ tab }) => {
     progressState.total,
     progressState.totalRowsKnown,
   );
-  const completedBackupFilePath = String(progressState.filePath || '').trim();
-  const isSingleFileBackup = progressState.status === 'done'
-    && completedBackupFilePath.toLowerCase().endsWith('.sql')
-    && !isBatchDatabasesWorkbench
-    && (
-      (isSingleWorkbench && String(progressState.format || '').toLowerCase() === 'sql')
-      || (isBatchTablesWorkbench && batchTableMode === 'backup')
-      || (isDirectSQLWorkbench && batchDatabaseMode === 'backup')
-    );
-
-  const openBackupRestoreWorkbench = (filePath = completedBackupFilePath) => {
-    const normalizedFilePath = String(filePath || '').trim();
-    if (!normalizedFilePath.toLowerCase().endsWith('.sql') || !effectiveConnectionId) {
-      return;
-    }
-    const pathParts = normalizedFilePath.split(/[\\/]/);
-    addTab(buildSQLFileExecutionWorkbenchTab({
-      connectionId: effectiveConnectionId,
-      dbName: effectiveDbName || undefined,
-      filePath: normalizedFilePath,
-      fileName: pathParts[pathParts.length - 1] || undefined,
-      autoStart: false,
-    }));
-  };
 
   const selectedTableNames = useMemo(() => {
     const selectedNameSet = new Set(selectedObjectNames);
@@ -2508,15 +2483,6 @@ const TableExportWorkbenchBody: React.FC<{ tab: TabData }> = ({ tab }) => {
 
                 {(progressState.status === 'done' || progressState.status === 'error') ? (
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
-                    {isSingleFileBackup ? (
-                      <Button
-                        data-export-restore-backup={true}
-                        icon={<ReloadOutlined />}
-                        onClick={() => openBackupRestoreWorkbench()}
-                      >
-                        {t('data_export.action.restore_backup')}
-                      </Button>
-                    ) : null}
                     <Button icon={<ReloadOutlined />} onClick={reset}>{t('data_export.action.clear_progress')}</Button>
                   </div>
                 ) : null}
@@ -2601,20 +2567,6 @@ const TableExportWorkbenchBody: React.FC<{ tab: TabData }> = ({ tab }) => {
                           {entry.filePath || '-'}
                         </Paragraph>
                       </div>
-                      {entry.status === 'done'
-                        && !isBatchDatabasesWorkbench
-                        && String(entry.filePath || '').trim().toLowerCase().endsWith('.sql') ? (
-                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-                            <Button
-                              size="small"
-                              data-export-history-restore={entry.jobId}
-                              icon={<ReloadOutlined />}
-                              onClick={() => openBackupRestoreWorkbench(entry.filePath)}
-                            >
-                              {t('data_export.action.restore_backup')}
-                            </Button>
-                          </div>
-                        ) : null}
                     </div>
                   </div>
                 ))}
