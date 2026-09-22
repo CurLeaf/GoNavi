@@ -31,6 +31,12 @@ import {
 } from './driverManager/driverDownloadCancellation';
 import { useDriverDownloadCancellation } from './driverManager/useDriverDownloadCancellation';
 import {
+  DriverOptionalUpdateDismissButton,
+  formatDriverCardStatusMessage,
+  isOptionalUpdateVisible,
+  readOptionalUpdateDismissedRevisions,
+} from './driverManager/driverOptionalUpdate';
+import {
   getDriverLocalImportButtonLabel,
   getDriverLocalImportDirectoryHelp,
   getDriverLocalImportSingleFileHelp,
@@ -122,6 +128,7 @@ type DriverStatusRow = {
   agentRevision?: string;
   expectedRevision?: string;
   needsUpdate?: boolean;
+  optionalUpdate?: boolean;
   updateReason?: string;
   affectedConnections?: number;
   activeConnections?: number;
@@ -503,37 +510,6 @@ export const resolveDriverErrorMessageText = (
     detail,
   });
 };
-const containsCjkText = (value: string) => /[\u3400-\u9fff]/.test(value);
-const appendRawNonChineseDetail = (parts: string[], value: unknown) => {
-  const text = String(value || '').trim();
-  if (!text || containsCjkText(text) || parts.includes(text)) {
-    return;
-  }
-  parts.push(text);
-};
-const formatDriverCardStatusMessage = (row: DriverStatusRow): string => {
-  const parts: string[] = [];
-  if (row.builtIn) {
-    parts.push(t('driver.modal.card.status.builtIn'));
-  } else if (row.needsUpdate) {
-    parts.push(t('driver.modal.card.status.needsUpdate'));
-    appendRawNonChineseDetail(parts, row.updateReason);
-    appendRawNonChineseDetail(parts, row.message);
-  } else if (row.connectable || row.runtimeAvailable) {
-    parts.push(t('driver.modal.card.status.runtimeAvailable'));
-    appendRawNonChineseDetail(parts, row.message);
-  } else if (row.packageInstalled) {
-    parts.push(t('driver.modal.card.status.installedPending'));
-    appendRawNonChineseDetail(parts, row.message);
-  } else if (row.pinnedVersion) {
-    parts.push(t('driver.modal.card.status.notEnabled'));
-    appendRawNonChineseDetail(parts, row.message);
-  } else {
-    parts.push(t('driver.modal.card.status.notEnabled'));
-    appendRawNonChineseDetail(parts, row.message);
-  }
-  return parts.join(' ');
-};
 const formatDriverNetworkSummary = (status: DriverNetworkStatus): string => {
   if (status.usingFallback || (status.mirrorReachable === false && status.fallbackReachable === true)) {
     return t('driver_manager.network.summary.mirror_fallback_available');
@@ -702,6 +678,7 @@ const DriverManagerModal: React.FC<{
   const [selectedVersionMap, setSelectedVersionMap] = useState<Record<string, string>>({});
   const [versionLoadingMap, setVersionLoadingMap] = useState<Record<string, boolean>>({});
   const [versionSizeLoadingMap, setVersionSizeLoadingMap] = useState<Record<string, boolean>>({});
+  const [optionalUpdateDismissedRevisions, setOptionalUpdateDismissedRevisions] = useState<string[]>(() => readOptionalUpdateDismissedRevisions());
   const [driverFilter, setDriverFilter] = useState<'all' | 'needsUpdate' | 'enabled' | 'notEnabled'>('all');
   const [driverSortKey, setDriverSortKey] = useState<DriverListSortKey>('name');
   const [selectedDriverType, setSelectedDriverType] = useState('');
@@ -1000,6 +977,7 @@ const DriverManagerModal: React.FC<{
         agentRevision: String(item.agentRevision || '').trim() || undefined,
         expectedRevision: String(item.expectedRevision || '').trim() || undefined,
         needsUpdate: !!item.needsUpdate,
+        optionalUpdate: !!item.optionalUpdate && !item.needsUpdate,
         updateReason: String(item.updateReason || '').trim() || undefined,
         affectedConnections: Number.isFinite(Number(item.affectedConnections))
           ? Number(item.affectedConnections)
@@ -1818,6 +1796,9 @@ const DriverManagerModal: React.FC<{
     if (row.needsUpdate) {
       return <Tag color="warning">{t('driver.modal.stats.needsUpdate')}</Tag>;
     }
+    if (isOptionalUpdateVisible(row, optionalUpdateDismissedRevisions)) {
+      return <Tag color="processing">{t('driver_manager.status.can_update')}</Tag>;
+    }
     if (row.connectable) {
       return <Tag color="success">{t('driver.modal.card.enabled')}</Tag>;
     }
@@ -1936,6 +1917,13 @@ const DriverManagerModal: React.FC<{
     return (
       <Space size={8} wrap className="driver-manager-card-actions">
         {mainAction}
+        <DriverOptionalUpdateDismissButton
+          row={row}
+          dismissedRevisions={optionalUpdateDismissedRevisions}
+          disabled={driverMutationBusy}
+          size={embedded ? 'small' : undefined}
+          onDismissed={setOptionalUpdateDismissedRevisions}
+        />
         {!row.connectable ? (
           <Button size={embedded ? 'small' : undefined} danger ghost icon={<DeleteOutlined />} disabled={driverMutationBusy} onClick={() => confirmRemoveDriver(row)}>
             {t('driver.modal.card.action.remove')}
@@ -1959,7 +1947,7 @@ const DriverManagerModal: React.FC<{
         row.type,
         row.pinnedVersion,
         row.installedVersion,
-        formatDriverCardStatusMessage(row),
+        formatDriverCardStatusMessage(row, optionalUpdateDismissedRevisions),
         row.builtIn ? t('driver.modal.search.builtIn') : t('driver.modal.search.external'),
         row.needsUpdate
           ? t('driver.modal.search.reinstallRecommended')
@@ -1972,7 +1960,7 @@ const DriverManagerModal: React.FC<{
       const searchableText = normalizeDriverSearchText(searchableParts.filter(Boolean).join(' '));
       return searchableText.includes(normalizedSearchKeyword);
     });
-  }, [normalizedSearchKeyword, rows]);
+  }, [normalizedSearchKeyword, optionalUpdateDismissedRevisions, rows]);
   const visibleRows = useMemo(() => {
     let nextRows: DriverStatusRow[];
     switch (driverFilter) {
@@ -2286,7 +2274,7 @@ const DriverManagerModal: React.FC<{
   const renderDriverDetail = (row: DriverStatusRow) => {
     const progressState = progressMap[row.type];
     const progress = resolveDriverProgress(row);
-    const statusMessage = formatDriverCardStatusMessage(row);
+    const statusMessage = formatDriverCardStatusMessage(row, optionalUpdateDismissedRevisions);
     const affectedText = row.affectedConnections && row.affectedConnections > 0
       ? t('driver.modal.card.affectedConnections', { count: row.affectedConnections })
       : '';

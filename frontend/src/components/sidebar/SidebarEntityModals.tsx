@@ -255,7 +255,7 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
             && tag.name.trim().localeCompare(requestedName, undefined, { sensitivity: 'accent' }) === 0
           ));
           if (duplicate) {
-            createTagForm.setFields([{ name: 'name', errors: [t('connection.sidebar.management.nameDuplicate')] }]);
+            createTagForm.setFields([{ name: 'name', errors: [t('connection.sidebar.group.nameDuplicate')] }]);
             return;
           }
           if (renameViewTarget?.type === 'tag') {

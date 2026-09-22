@@ -8,7 +8,7 @@
 - `.cursor/rules/*.mdc` → Cursor（按文件类型自动附加）
 - 本文件 → Codex / Cursor / 通用 Agent
 - [`GO_STYLE.md`](./GO_STYLE.md) → **Go 专属手册**（改 `*.go` 时必读）
-- [`GO_STYLE.md`](./GO_STYLE.md) → **Go 专属手册**（改 `*.go` 时必读）
+- 工作流命令：`/design`、`/execute`、`/purge`（`.cursor/commands/`）。清方案与散落测试：`node scripts/purge.mjs`
 
 标记含义与《阿里巴巴 Java 开发手册》一致：**【强制】** 必须执行，**【推荐】** 默认执行，**【参考】** 有充分理由才可偏离。
 

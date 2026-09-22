@@ -26,8 +26,6 @@ interface TitleBarPrimaryActionsProps {
   newConnectionShortcut?: string;
   onNewQuery: () => void;
   onNewConnection: () => void;
-  connectionGroupLabel?: string;
-  onConnectionGroupManagement?: () => void;
 }
 
 const getActionTitle = (label: string, shortcut?: string): string => (
@@ -41,8 +39,6 @@ const TitleBarPrimaryActions: React.FC<TitleBarPrimaryActionsProps> = ({
   newConnectionShortcut,
   onNewQuery,
   onNewConnection,
-  connectionGroupLabel,
-  onConnectionGroupManagement,
 }) => (
   <div
     className="gonavi-titlebar-primary-actions"
@@ -70,9 +66,6 @@ const TitleBarPrimaryActions: React.FC<TitleBarPrimaryActionsProps> = ({
     >
       {newConnectionLabel}
     </button>
-    {connectionGroupLabel && onConnectionGroupManagement && <button type="button" className="gonavi-titlebar-primary-action" aria-label={connectionGroupLabel} data-gonavi-connection-group-management-action="true" onClick={onConnectionGroupManagement}>
-      {connectionGroupLabel}
-    </button>}
   </div>
 );
 

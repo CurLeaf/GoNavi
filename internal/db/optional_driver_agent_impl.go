@@ -22,31 +22,33 @@ import (
 )
 
 const (
-	optionalAgentMethodConnect              = "connect"
-	optionalAgentMethodClose                = "close"
-	optionalAgentMethodMetadata             = "metadata"
-	optionalAgentMethodPing                 = "ping"
-	optionalAgentMethodOpenSession          = "openSession"
-	optionalAgentMethodCloseSession         = "closeSession"
-	optionalAgentMethodOpenTransaction      = "openTransaction"
-	optionalAgentMethodCommitTransaction    = "commitTransaction"
-	optionalAgentMethodRollbackTransaction  = "rollbackTransaction"
-	optionalAgentMethodQuery                = "query"
-	optionalAgentMethodQueryMulti           = "queryMulti"
-	optionalAgentMethodStreamQuery          = "streamQuery"
-	optionalAgentMethodExec                 = "exec"
-	optionalAgentMethodElasticsearchConsole = "executeElasticsearchConsoleRequest"
-	optionalAgentMethodGetDatabases         = "getDatabases"
-	optionalAgentMethodGetTables            = "getTables"
-	optionalAgentMethodTableExists          = "tableExists"
-	optionalAgentMethodGetCreateStmt        = "getCreateStatement"
-	optionalAgentMethodGetColumns           = "getColumns"
-	optionalAgentMethodGetAllColumns        = "getAllColumns"
-	optionalAgentMethodGetIndexes           = "getIndexes"
-	optionalAgentMethodGetForeignKeys       = "getForeignKeys"
-	optionalAgentMethodGetTriggers          = "getTriggers"
-	optionalAgentMethodApplyChanges         = "applyChanges"
-	optionalAgentDefaultScannerMaxBytes     = 8 << 20
+	optionalAgentMethodConnect                = "connect"
+	optionalAgentMethodClose                  = "close"
+	optionalAgentMethodMetadata               = "metadata"
+	optionalAgentMethodPing                   = "ping"
+	optionalAgentMethodOpenSession            = "openSession"
+	optionalAgentMethodCloseSession           = "closeSession"
+	optionalAgentMethodOpenTransaction        = "openTransaction"
+	optionalAgentMethodCommitTransaction      = "commitTransaction"
+	optionalAgentMethodRollbackTransaction    = "rollbackTransaction"
+	optionalAgentMethodQuery                  = "query"
+	optionalAgentMethodQueryMulti             = "queryMulti"
+	optionalAgentMethodStreamQuery            = "streamQuery"
+	optionalAgentMethodExec                   = "exec"
+	optionalAgentMethodElasticsearchConsole   = "executeElasticsearchConsoleRequest"
+	optionalAgentMethodGetDatabases           = "getDatabases"
+	optionalAgentMethodGetTables              = "getTables"
+	optionalAgentMethodTableExists            = "tableExists"
+	optionalAgentMethodGetCreateStmt          = "getCreateStatement"
+	optionalAgentMethodGetColumns             = "getColumns"
+	optionalAgentMethodGetAllColumns          = "getAllColumns"
+	optionalAgentMethodGetIndexes             = "getIndexes"
+	optionalAgentMethodGetForeignKeys         = "getForeignKeys"
+	optionalAgentMethodGetTriggers            = "getTriggers"
+	optionalAgentMethodApplyChanges           = "applyChanges"
+	optionalAgentMethodAttachExternalDatabase = "attachExternalDatabase"
+	optionalAgentMethodDetachExternalDatabase = "detachExternalDatabase"
+	optionalAgentDefaultScannerMaxBytes       = 8 << 20
 	// Freshly downloaded agents may start slowly while OS security scanning completes.
 	optionalAgentMetadataProbeTimeout = 30 * time.Second
 	// A Windows security scanner can hold the first process start long enough to
@@ -78,6 +80,8 @@ type optionalAgentRequest struct {
 	DBName               string                       `json:"dbName,omitempty"`
 	TableName            string                       `json:"tableName,omitempty"`
 	Changes              *connection.ChangeSet        `json:"changes,omitempty"`
+	AttachSpec           *ExternalAttachSpec          `json:"attachSpec,omitempty"`
+	Alias                string                       `json:"alias,omitempty"`
 	ElasticsearchRequest *ElasticsearchConsoleRequest `json:"elasticsearchRequest,omitempty"`
 	// sshProgressReporter remains in the main process and is never serialized
 	// into the driver-agent request.
@@ -85,17 +89,18 @@ type optionalAgentRequest struct {
 }
 
 type optionalAgentResponse struct {
-	ID              int64                         `json:"id"`
-	Success         bool                          `json:"success"`
-	Error           string                        `json:"error,omitempty"`
-	OutcomeUnknown  bool                          `json:"outcomeUnknown,omitempty"`
-	SSHHostKeyTrust *sshbridge.HostKeyTrustStatus `json:"sshHostKeyTrust,omitempty"`
-	SSHProgress     *connection.SSHProgressEvent  `json:"sshProgress,omitempty"`
-	Data            json.RawMessage               `json:"data,omitempty"`
-	Fields          []string                      `json:"fields,omitempty"`
-	Messages        []string                      `json:"messages,omitempty"`
-	ChunkType       string                        `json:"chunkType,omitempty"`
-	RowsAffected    int64                         `json:"rowsAffected,omitempty"`
+	ID                        int64                         `json:"id"`
+	Success                   bool                          `json:"success"`
+	Error                     string                        `json:"error,omitempty"`
+	OutcomeUnknown            bool                          `json:"outcomeUnknown,omitempty"`
+	ExternalAttachNotAttached bool                          `json:"externalAttachNotAttached,omitempty"`
+	SSHHostKeyTrust           *sshbridge.HostKeyTrustStatus `json:"sshHostKeyTrust,omitempty"`
+	SSHProgress               *connection.SSHProgressEvent  `json:"sshProgress,omitempty"`
+	Data                      json.RawMessage               `json:"data,omitempty"`
+	Fields                    []string                      `json:"fields,omitempty"`
+	Messages                  []string                      `json:"messages,omitempty"`
+	ChunkType                 string                        `json:"chunkType,omitempty"`
+	RowsAffected              int64                         `json:"rowsAffected,omitempty"`
 }
 
 type OptionalDriverAgentMetadata struct {
@@ -304,6 +309,9 @@ func (c *optionalDriverAgentClient) callLocked(req optionalAgentRequest, out int
 			}
 			if resp.SSHHostKeyTrust != nil {
 				return fmt.Errorf("%s: %w", errText, &sshbridge.HostKeyTrustRequiredError{Status: *resp.SSHHostKeyTrust})
+			}
+			if resp.ExternalAttachNotAttached {
+				return fmt.Errorf("%s: %w", errText, ErrExternalAttachNotAttached)
 			}
 			err := errors.New(errText)
 			if resp.OutcomeUnknown {

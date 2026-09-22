@@ -51,10 +51,11 @@ func (a *App) dbQueryMultiWithParams(
 
 	trackSQLAudit := auditOptions.auditAll || (auditOptions.auditWrites && containsSQLAuditWrite(resolvedDBType, query))
 	auditSource := normalizeSQLAuditSource(auditOptions.source)
+	originalQuery := query
 	var statementAuditEvents []sqlaudit.Event
 	auditStartedAt := time.Now()
 	defer a.recordParameterizedQueryAudit(
-		&result, runConfig, dbName, resolvedDBType, query, queryID, trackSQLAudit, auditSource, auditStartedAt, &statementAuditEvents,
+		&result, runConfig, dbName, resolvedDBType, originalQuery, queryID, trackSQLAudit, auditSource, auditStartedAt, &statementAuditEvents,
 	)
 
 	ctx, cancel := newQueryExecutionContextWithParent(auditOptions.executionContext, runConfig)
@@ -71,7 +72,7 @@ func (a *App) dbQueryMultiWithParams(
 		if !result.Success {
 			return
 		}
-		a.recordQueryExecution(config, dbName, resolvedDBType, query, durationMilliseconds(queryExecutionDuration), 0, queryResultRowsReturned(result))
+		a.recordQueryExecution(config, dbName, resolvedDBType, sqlAuditTextForDuckDBQuery(resolvedDBType, originalQuery, query), durationMilliseconds(queryExecutionDuration), 0, queryResultRowsReturned(result))
 	}()
 
 	dbInst, err := a.getConnectionForParams(ctx, runConfig, auditOptions.synchronousConnectionWait)
@@ -83,6 +84,22 @@ func (a *App) dbQueryMultiWithParams(
 			a.markCachedDatabaseHealthy(dbInst, time.Now())
 		}
 	}()
+
+	if strings.EqualFold(resolvedDBType, "duckdb") {
+		rewrittenQuery, directiveErr := a.applyDuckDBSavedConnectionDirectives(ctx, dbInst, query, false)
+		if directiveErr != nil {
+			logger.Error(directiveErr, "DBQueryMultiWithParams DuckDB 附加指令失败：%s", formatConnSummary(runConfig))
+			return connection.QueryResult{Success: false, Message: directiveErr.Error(), QueryID: queryID}
+		}
+		if rewrittenQuery != query {
+			rebound, bindErr := bindParameterizedStatements(splitSQLStatementsForDialect(resolvedDBType, rewrittenQuery), resolvedDBType, values)
+			if bindErr != nil {
+				return connection.QueryResult{Success: false, Message: a.translateParameterBindingError(bindErr), QueryID: queryID}
+			}
+			stmts = overlayDuckDBDirectiveAuditText(resolvedDBType, stmts, rebound)
+			query = rewrittenQuery
+		}
+	}
 
 	resultSets, executedCount, failedIndex, auditEvents, execErr := a.executeParameterizedStatements(
 		ctx, dbInst, nil, runConfig, resolvedDBType, stmts,
@@ -213,6 +230,11 @@ func (a *App) dbQueryMultiWithParamsInTransaction(
 	}
 	resolvedDBType := resolveDDLDBType(runConfig)
 	query := sanitizeSQLForPgLike(tx.dbType, sql)
+	if strings.EqualFold(resolvedDBType, "duckdb") {
+		if _, directiveErr := a.applyDuckDBSavedConnectionDirectives(ctx, nil, query, true); directiveErr != nil {
+			return fail(directiveErr.Error())
+		}
+	}
 	stmts, err := bindParameterizedStatements(splitSQLStatementsForDialect(tx.dbType, query), tx.dbType, values)
 	if err != nil {
 		return fail(a.translateParameterBindingError(err))

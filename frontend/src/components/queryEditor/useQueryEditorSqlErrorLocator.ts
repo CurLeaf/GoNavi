@@ -4,6 +4,7 @@ import { message } from 'antd';
 import { t } from '../../i18n';
 import {
     createQueryEditorExecutionOrigin,
+    resolveEditorSelectionStartOffset,
     resolveExecutionErrorStatementText,
     revealQueryEditorSqlErrorLocation,
     type QueryEditorExecutionOrigin,
@@ -25,11 +26,13 @@ export const useQueryEditorSqlErrorLocator = (
         sentSql?: string,
         statements?: QueryEditorExecutionOriginStatement[],
     ) => {
+        const fragmentStartOffset = resolveEditorSelectionStartOffset(editorRef.current, editorSql);
         originRef.current = createQueryEditorExecutionOrigin(
             editorSql,
             originalSql,
             sentSql,
             statements,
+            fragmentStartOffset,
         );
     }, []);
 

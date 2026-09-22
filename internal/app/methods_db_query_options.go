@@ -126,6 +126,11 @@ func (a *App) dbQueryMultiTransactional(
 	if !shouldUseManagedSQLTransaction(transactionDBType, query) {
 		return fallbackQueryMultiWithBindings(a, parent, config, dbName, query, queryID, options, bindings)
 	}
+	if strings.EqualFold(transactionDBType, "duckdb") {
+		if _, directiveErr := a.applyDuckDBSavedConnectionDirectives(parent, nil, query, true); directiveErr != nil {
+			return connection.QueryResult{Success: false, Message: directiveErr.Error(), QueryID: queryID}
+		}
+	}
 
 	transactionID := "sql-editor-" + uuid.NewString()
 	transactionAuditOpened := false
@@ -517,6 +522,14 @@ func (a *App) dbQueryMultiInTransaction(
 		a.recordQueryExecution(runConfig, "", tx.dbType, query, durationMs, 0, queryResultRowsReturned(result))
 	}()
 	query = sanitizeSQLForPgLike(tx.dbType, query)
+	if strings.EqualFold(tx.dbType, "duckdb") {
+		if _, directiveErr := a.applyDuckDBSavedConnectionDirectives(ctx, nil, query, true); directiveErr != nil {
+			return connection.QueryResult{
+				Success: false, Message: directiveErr.Error(), QueryID: queryID,
+				TransactionID: transactionID, TransactionPending: true,
+			}
+		}
+	}
 	statements := splitSQLStatementsForDialect(tx.dbType, query)
 
 	queryStartedAt := time.Now()

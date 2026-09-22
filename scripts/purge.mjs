@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 
 const TREES = ['.superpowers', 'openspec', 'tests', 'design', '.cursor/plans']
 
@@ -15,6 +15,13 @@ const SKIP_DIR_NAMES = new Set([
 ])
 
 const FIXTURE_DIR_NAMES = new Set(['__test__', '_test_', '__tests__'])
+
+/** 脚本自测，避免 /purge 把自己的回归测试吃掉 */
+const KEEP_STRAY_REL = new Set([
+  'scripts/purge.test.mjs',
+  'scripts/purge.test.ts',
+  'scripts/purge.test.js',
+])
 
 /** Vitest / Go / Pester 散落测试，含与实现成对的文件 */
 const STRAY_TEST_FILE = /\.test\.(?:[cm]?[jt]sx?)$|_test\.go$|\.Tests\.ps1$/
@@ -67,7 +74,10 @@ export function purgeRepo(root) {
   walk(
     root,
     (full, name) => {
-      if (STRAY_TEST_FILE.test(name)) removed += removePath(full)
+      if (!STRAY_TEST_FILE.test(name)) return
+      const rel = toPosix(relative(root, full))
+      if (KEEP_STRAY_REL.has(rel)) return
+      removed += removePath(full)
     },
     (full) => {
       removed += removePath(full)
@@ -77,5 +87,5 @@ export function purgeRepo(root) {
   return removed
 }
 
-const isDirect = process.argv[1] && /purge\.(mjs|js|ts)$/.test(toPosix(process.argv[1]))
+const isDirect = process.argv[1] && /(?:^|\/)purge\.(mjs|js|ts)$/.test(toPosix(process.argv[1]))
 if (isDirect) purgeRepo(process.argv[2] || process.cwd())

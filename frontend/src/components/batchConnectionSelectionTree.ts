@@ -115,7 +115,7 @@ export const buildBatchConnectionSelectionTree = ({
 
   const ungroupedNode = buildGroupNode(
     UNGROUPED_GROUP_ID,
-    t('connection.sidebar.management.ungrouped'),
+    t('connection.sidebar.group.ungrouped'),
     ungroupedConnections.map(buildConnectionNode),
   );
   if (ungroupedNode) nodes.push(ungroupedNode);

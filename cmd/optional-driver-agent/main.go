@@ -36,21 +36,24 @@ type agentRequest struct {
 	DBName               string                          `json:"dbName,omitempty"`
 	TableName            string                          `json:"tableName,omitempty"`
 	Changes              *connection.ChangeSet           `json:"changes,omitempty"`
+	AttachSpec           *db.ExternalAttachSpec          `json:"attachSpec,omitempty"`
+	Alias                string                          `json:"alias,omitempty"`
 	ElasticsearchRequest *db.ElasticsearchConsoleRequest `json:"elasticsearchRequest,omitempty"`
 }
 
 type agentResponse struct {
-	ID              int64                         `json:"id"`
-	Success         bool                          `json:"success"`
-	Error           string                        `json:"error,omitempty"`
-	OutcomeUnknown  bool                          `json:"outcomeUnknown,omitempty"`
-	SSHHostKeyTrust *sshbridge.HostKeyTrustStatus `json:"sshHostKeyTrust,omitempty"`
-	SSHProgress     *connection.SSHProgressEvent  `json:"sshProgress,omitempty"`
-	Data            interface{}                   `json:"data,omitempty"`
-	Fields          []string                      `json:"fields,omitempty"`
-	Messages        []string                      `json:"messages,omitempty"`
-	ChunkType       string                        `json:"chunkType,omitempty"`
-	RowsAffected    int64                         `json:"rowsAffected,omitempty"`
+	ID                        int64                         `json:"id"`
+	Success                   bool                          `json:"success"`
+	Error                     string                        `json:"error,omitempty"`
+	OutcomeUnknown            bool                          `json:"outcomeUnknown,omitempty"`
+	ExternalAttachNotAttached bool                          `json:"externalAttachNotAttached,omitempty"`
+	SSHHostKeyTrust           *sshbridge.HostKeyTrustStatus `json:"sshHostKeyTrust,omitempty"`
+	SSHProgress               *connection.SSHProgressEvent  `json:"sshProgress,omitempty"`
+	Data                      interface{}                   `json:"data,omitempty"`
+	Fields                    []string                      `json:"fields,omitempty"`
+	Messages                  []string                      `json:"messages,omitempty"`
+	ChunkType                 string                        `json:"chunkType,omitempty"`
+	RowsAffected              int64                         `json:"rowsAffected,omitempty"`
 }
 
 type agentConnectionInfo struct {
@@ -59,30 +62,32 @@ type agentConnectionInfo struct {
 }
 
 const (
-	agentMethodConnect              = "connect"
-	agentMethodClose                = "close"
-	agentMethodMetadata             = "metadata"
-	agentMethodPing                 = "ping"
-	agentMethodOpenSession          = "openSession"
-	agentMethodCloseSession         = "closeSession"
-	agentMethodOpenTransaction      = "openTransaction"
-	agentMethodCommitTransaction    = "commitTransaction"
-	agentMethodRollbackTransaction  = "rollbackTransaction"
-	agentMethodQuery                = "query"
-	agentMethodQueryMulti           = "queryMulti"
-	agentMethodStreamQuery          = "streamQuery"
-	agentMethodExec                 = "exec"
-	agentMethodElasticsearchConsole = "executeElasticsearchConsoleRequest"
-	agentMethodGetDatabases         = "getDatabases"
-	agentMethodGetTables            = "getTables"
-	agentMethodTableExists          = "tableExists"
-	agentMethodGetCreateStmt        = "getCreateStatement"
-	agentMethodGetColumns           = "getColumns"
-	agentMethodGetAllColumns        = "getAllColumns"
-	agentMethodGetIndexes           = "getIndexes"
-	agentMethodGetForeignKey        = "getForeignKeys"
-	agentMethodGetTriggers          = "getTriggers"
-	agentMethodApplyChanges         = "applyChanges"
+	agentMethodConnect                = "connect"
+	agentMethodClose                  = "close"
+	agentMethodMetadata               = "metadata"
+	agentMethodPing                   = "ping"
+	agentMethodOpenSession            = "openSession"
+	agentMethodCloseSession           = "closeSession"
+	agentMethodOpenTransaction        = "openTransaction"
+	agentMethodCommitTransaction      = "commitTransaction"
+	agentMethodRollbackTransaction    = "rollbackTransaction"
+	agentMethodQuery                  = "query"
+	agentMethodQueryMulti             = "queryMulti"
+	agentMethodStreamQuery            = "streamQuery"
+	agentMethodExec                   = "exec"
+	agentMethodElasticsearchConsole   = "executeElasticsearchConsoleRequest"
+	agentMethodGetDatabases           = "getDatabases"
+	agentMethodGetTables              = "getTables"
+	agentMethodTableExists            = "tableExists"
+	agentMethodGetCreateStmt          = "getCreateStatement"
+	agentMethodGetColumns             = "getColumns"
+	agentMethodGetAllColumns          = "getAllColumns"
+	agentMethodGetIndexes             = "getIndexes"
+	agentMethodGetForeignKey          = "getForeignKeys"
+	agentMethodGetTriggers            = "getTriggers"
+	agentMethodApplyChanges           = "applyChanges"
+	agentMethodAttachExternalDatabase = "attachExternalDatabase"
+	agentMethodDetachExternalDatabase = "detachExternalDatabase"
 )
 
 const legacyClickHouseDefaultTimeout = 2 * time.Hour
@@ -542,6 +547,8 @@ func handleRequestWithSSHProgressReporter(runtimeState *agentRuntime, req agentR
 			return fail(resp, err.Error())
 		}
 		resp.Data = data
+	case agentMethodAttachExternalDatabase, agentMethodDetachExternalDatabase, agentMethodListExternalAttachments:
+		return handleExternalAttachmentRequest(runtimeState, req, resp)
 	case agentMethodApplyChanges:
 		if req.Changes == nil {
 			return fail(resp, "变更集为空")

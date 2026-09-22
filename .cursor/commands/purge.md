@@ -19,5 +19,6 @@ node scripts/purge.mjs
 - 删除散落 `*.test.{ts,tsx,js,jsx,mjs,cjs,mts,cts}`、`*_test.go`、`*.Tests.ps1`
 - 删除名为 `__test__` / `_test_` / `__tests__` 的目录
 - 不进 `node_modules`、`.git`、`vendor`、`wailsjs`、`third_party`、`dist`、`build`
+- 保留 `scripts/purge.test.mjs`（及 `.ts` / `.js` 同名）
 
 `docs/` 整棵留给人工清理。跑完把命令全文贴回对话。
