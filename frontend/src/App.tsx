@@ -39,7 +39,6 @@ import WebAuthSettingsPanel from './components/WebAuthSettingsPanel';
 import CloudBackupSettings from './components/CloudBackupSettings';
 import CustomThemeManager from './components/settings/CustomThemeManager';
 import ToolbarButtonAppearanceSettings from './components/settings/ToolbarButtonAppearanceSettings';
-import AboutSettingsPanel from './components/settings/AboutSettingsPanel';
 import SettingsCenterTreeNav, {
   findSettingsCenterTreeItem,
 } from './components/settings/SettingsCenterTreeNav';
@@ -262,7 +261,6 @@ import {
   APP_NESTED_MODAL_Z_INDEX,
   APP_OVERLAY_Z_INDEX_BASE,
 } from './utils/overlayZIndex';
-import { useAppInfo, usePrepareAboutSurface } from './hooks/useAppInfo';
 import { useAppLogPanelResize } from './hooks/useAppLogPanelResize';
 import { useAppSidebarResize } from './hooks/useAppSidebarResize';
 import { resolveSidebarResizeHitGeometry } from './utils/sidebarLayout';
@@ -604,7 +602,7 @@ type ToolCenterPaneKey =
   | 'snippet-settings'
   | 'shortcut-settings';
 
-type SettingsCenterGroupKey = 'preferences' | 'services' | ToolCenterGroupKey | 'about';
+type SettingsCenterGroupKey = 'preferences' | 'services' | ToolCenterGroupKey;
 type SettingsCenterPaneKey =
   | 'language'
   | 'theme'
@@ -614,8 +612,7 @@ type SettingsCenterPaneKey =
   | 'download-source'
   | 'web-auth'
   | 'cloud-backup'
-  | ToolCenterPaneKey
-  | 'about-go-navi';
+  | ToolCenterPaneKey;
 type SettingsCenterPaneState = {
   key: SettingsCenterPaneKey;
   group: SettingsCenterGroupKey;
@@ -639,8 +636,6 @@ const resolveSettingsCenterGroupInitialPane = (group: SettingsCenterGroupKey): S
       return { key: 'data-root-application', group };
     case 'workspace':
       return { key: 'snippet-settings', group };
-    case 'about':
-      return { key: 'about-go-navi', group };
     default:
       return null;
   }
@@ -684,23 +679,6 @@ const areGlobalProxyDraftsEqual = (
     normalizedLeft.password === normalizedRight.password &&
     normalizedLeft.hasPassword === normalizedRight.hasPassword
   );
-};
-
-const formatAboutCheckedAt = (value: Date): string => {
-  const pad = (input: number) => String(input).padStart(2, '0');
-  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}`;
-};
-
-const formatAboutReleaseTime = (value: string | undefined): string => {
-  const text = String(value || '').trim();
-  if (!text) {
-    return '-';
-  }
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) {
-    return '-';
-  }
-  return formatAboutCheckedAt(date);
 };
 
 type ConnectionPackageDialogState = {
@@ -2725,10 +2703,6 @@ function App() {
   useEffect(() => {
       return installGlobalImeCompositionTracking(window, document);
   }, []);
-  const { aboutInfo, aboutLoading, aboutDisplayVersion, loadAppInfo } = useAppInfo({
-      runtimeBuildType,
-      t,
-  });
 
   const emitWindowDiagnostic = useCallback(async (stage: string, extra: Record<string, unknown> = {}) => {
       if (!macWindowDiagnosticsEnabled) {
@@ -4023,7 +3997,6 @@ function App() {
       );
       addTab(existingId ? { ...nextTab, id: existingId } : nextTab);
   }, [addTab]);
-  const isSettingsAboutPaneOpen = isSettingsModalOpen && activeSettingsCenterPane?.key === 'about-go-navi';
   const wasSettingsCenterTabOpenRef = useRef(false);
   useEffect(() => {
       const wasOpen = wasSettingsCenterTabOpenRef.current;
@@ -4042,7 +4015,6 @@ function App() {
       setToolCenterBackGroupKey(null);
       setActiveSettingsCenterPane(null);
   }, [closeConnectionPackageDialog, isSettingsModalOpen]);
-  usePrepareAboutSurface(isSettingsAboutPaneOpen, loadAppInfo);
   const handleOpenToolCenterPane = useCallback((group: ToolCenterGroupKey, key: ToolCenterPaneKey) => {
       clearSettingsCenterTransientPaneState();
       setToolCenterBackGroupKey(group);
@@ -4052,7 +4024,7 @@ function App() {
   }, [clearSettingsCenterTransientPaneState]);
   /** Title-bar / explorer settings entries → settings center navigation. */
   const handleTitleBarSettingsNavigation = useCallback((spec: {
-    group: 'preferences' | 'services' | 'config' | 'workflow' | 'workspace' | 'about';
+    group: 'preferences' | 'services' | 'config' | 'workflow' | 'workspace';
     pane?: string;
     action?: 'import-connections' | 'export-connections' | 'schema-compare' | 'data-compare' | 'compare' | 'sync' | 'drivers' | 'sql-audit';
   }) => {
@@ -7081,22 +7053,12 @@ function App() {
               },
           ],
       },
-      {
-          key: 'about' as const,
-          icon: <InfoCircleOutlined />,
-          title: t('app.settings.entry.about.title'),
-          description: t('app.settings.entry.about.description'),
-          items: [],
-      },
   ];
   const isSettingsCenterContainedScrollPane = activeSettingsCenterPane?.key === 'theme';
   const isV2ThemeSettingsPane = activeSettingsCenterPane?.key === 'theme';
-  const isSettingsCenterAboutPane = activeSettingsCenterPane?.key === 'about-go-navi';
   const activeSettingsCenterDetailPanelStyle: React.CSSProperties = {
       ...toolCenterDetailPanelStyle,
-      // 「关于」页左右留白由 .gonavi-about-pane 自己给，这里再叠加 4px 会让
-      // 分隔线与卡片右侧比左侧多缩进一段，看起来没对齐。
-      padding: isSettingsCenterAboutPane ? '0' : '0 4px 0 0',
+      padding: '0 4px 0 0',
       border: 'none',
       borderBottom: 'none',
       borderRadius: 0,
@@ -7161,18 +7123,6 @@ function App() {
       if (activeSettingsCenterPane.key === 'cloud-backup') {
           return (
               <CloudBackupSettings t={t} />
-          );
-      }
-      if (activeSettingsCenterPane.key === 'about-go-navi') {
-          return (
-              <AboutSettingsPanel
-                aboutInfo={aboutInfo}
-                aboutDisplayVersion={aboutDisplayVersion}
-                aboutLoading={aboutLoading}
-                darkMode={darkMode}
-                mutedTextStyle={utilityMutedTextStyle}
-                overlayTheme={overlayTheme}
-              />
           );
       }
       return null;
@@ -7659,9 +7609,8 @@ function App() {
               },
             ];
             const combinedSettingsCenterGroups = [
-              ...settingsCenterGroups.filter((group) => group.key !== 'about'),
+              ...settingsCenterGroups,
               ...toolCenterGroups,
-              ...settingsCenterGroups.filter((group) => group.key === 'about'),
             ];
             const activeSettingsCenterGroup = combinedSettingsCenterGroups.find(
               (group) => group.key === activeSettingsCenterGroupKey,

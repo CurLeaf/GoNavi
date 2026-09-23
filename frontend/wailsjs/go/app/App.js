@@ -450,10 +450,6 @@ export function DeleteConnection(arg1) {
   return window['go']['app']['App']['DeleteConnection'](arg1);
 }
 
-export function DeleteConnectionGroup(arg1) {
-  return window['go']['app']['App']['DeleteConnectionGroup'](arg1);
-}
-
 export function DeleteConnections(arg1) {
   return window['go']['app']['App']['DeleteConnections'](arg1);
 }
@@ -844,6 +840,10 @@ export function ListDatabaseCollations(arg1) {
 
 export function ListDriverDownloadTasks() {
   return window['go']['app']['App']['ListDriverDownloadTasks']();
+}
+
+export function ListDuckDBAttachedDatasources(arg1, arg2) {
+  return window['go']['app']['App']['ListDuckDBAttachedDatasources'](arg1, arg2);
 }
 
 export function ListImportJobs() {

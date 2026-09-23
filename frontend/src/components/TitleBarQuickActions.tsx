@@ -6,6 +6,7 @@ import { renderV2ActionMenuPopup } from './common/V2ActionMenuPopup';
 export interface TitleBarQuickAction {
   key: string;
   label: string;
+  tooltip?: string;
   icon?: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
@@ -16,10 +17,9 @@ export interface TitleBarQuickAction {
 interface TitleBarQuickActionsProps {
   label: string;
   actions: TitleBarQuickAction[];
-  trailingActions?: TitleBarQuickAction[];
 }
 
-const TitleBarQuickActions: React.FC<TitleBarQuickActionsProps> = ({ label, actions, trailingActions }) => {
+const TitleBarQuickActions: React.FC<TitleBarQuickActionsProps> = ({ label, actions }) => {
   // Hide tooltips while a dropdown is open so they don't stack on the menu.
   const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
 
@@ -76,7 +76,7 @@ const TitleBarQuickActions: React.FC<TitleBarQuickActionsProps> = ({ label, acti
         </Dropdown>
       </Tooltip>
     ) : (
-      <Tooltip key={action.key} title={action.label} placement="bottom" mouseEnterDelay={0.75}>
+      <Tooltip key={action.key} title={action.tooltip || action.label} placement="bottom" mouseEnterDelay={0.75}>
         <button
           type="button"
           className="gn-v2-titlebar-quick-action"
@@ -97,11 +97,6 @@ const TitleBarQuickActions: React.FC<TitleBarQuickActionsProps> = ({ label, acti
       <div className="gn-v2-titlebar-quick-primary">
         {primaryActions.map(renderStandaloneAction)}
       </div>
-      {trailingActions && trailingActions.length > 0 && (
-        <div className="gn-v2-titlebar-quick-primary">
-          {trailingActions.map(renderStandaloneAction)}
-        </div>
-      )}
     </div>
   );
 };

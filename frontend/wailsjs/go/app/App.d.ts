@@ -8,6 +8,7 @@ import {sync} from '../models';
 import {syncjob} from '../models';
 import {requesttrace} from '../models';
 import {jvm} from '../models';
+import {db} from '../models';
 import {redis} from '../models';
 import {resultdiff} from '../models';
 
@@ -235,8 +236,6 @@ export function DataSyncSchedulePreview(arg1:syncjob.JobDefinition,arg2:number):
 
 export function DeleteConnection(arg1:string):Promise<void>;
 
-export function DeleteConnectionGroup(arg1:connection.DeleteConnectionGroupInput):Promise<void>;
-
 export function DeleteConnections(arg1:Array<string>):Promise<void>;
 
 export function DeleteImportJob(arg1:string):Promise<connection.QueryResult>;
@@ -432,6 +431,8 @@ export function ListDatabaseCharsets(arg1:connection.ConnectionConfig):Promise<c
 export function ListDatabaseCollations(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
 export function ListDriverDownloadTasks():Promise<connection.QueryResult>;
+
+export function ListDuckDBAttachedDatasources(arg1:connection.ConnectionConfig,arg2:string):Promise<Array<db.ExternalAttachmentInfo>>;
 
 export function ListImportJobs():Promise<connection.QueryResult>;
 

@@ -1,6 +1,7 @@
 import SidebarConnectionRail from './sidebar/SidebarConnectionRail';
 import Modal from './common/ResizableDraggableModal';
-import TitleBarQuickActions, { type TitleBarQuickAction } from './TitleBarQuickActions';
+import TitleBarQuickActions from './TitleBarQuickActions';
+import { buildTitlebarDataActions } from './sidebar/titlebarDataActions';
 import { type DataSyncEntryModeAlias } from './dataSyncEntryMode';
 import type { DatabaseCharsetOption, DatabaseCollationOption } from '../utils/databaseCharset';
 import SidebarSearchPanel, {
@@ -82,14 +83,10 @@ import { APP_POPUP_Z_INDEX } from '../utils/overlayZIndex';
 import { createSidebarResizeAwareFrameScheduler } from '../utils/sidebarResizeLifecycle';
 	import {
 	  CaretDownFilled,
-	  CloudOutlined,
 	  CloudDownloadOutlined,
 	  DatabaseOutlined,
 	  DownloadOutlined,
 	  GlobalOutlined,
-	  TableOutlined,
-	  SwitcherOutlined,
-	  UploadOutlined,
 	  ConsoleSqlOutlined,
   FolderOutlined,
   FolderOpenOutlined,
@@ -105,7 +102,6 @@ import { createSidebarResizeAwareFrameScheduler } from '../utils/sidebarResizeLi
   UnorderedListOutlined,
   FunctionOutlined,
   LinkOutlined,
-  ImportOutlined,
   ReloadOutlined,
   SendOutlined,
   DeleteOutlined,
@@ -791,7 +787,7 @@ const Sidebar: React.FC<{
    * (import/export connections, data-sync, driver manager, sql audit). Mirrors 设置 left-nav groups.
    */
   onOpenSettingsNavigation?: (spec: {
-    group: 'preferences' | 'services' | 'config' | 'workflow' | 'workspace' | 'about';
+    group: 'preferences' | 'services' | 'config' | 'workflow' | 'workspace';
     pane?: string;
     action?: 'import-connections' | 'export-connections' | 'schema-compare' | 'data-compare' | 'compare' | 'sync' | 'drivers' | 'sql-audit';
   }) => void;
@@ -3691,10 +3687,8 @@ const Sidebar: React.FC<{
   const v2RailObjectActionsLabel = t('sidebar.rail.object_actions');
   const v2RailSystemActionsLabel = t('sidebar.rail.system_actions');
   const v2NewGroupLabel = t('sidebar.action.new_group');
-  const v2DataWorkflowLabel = t('app.tools.group.workflow.title');
   const v2BatchTablesLabel = t('sidebar.action.batch_tables');
   const v2BatchDatabasesLabel = t('sidebar.action.batch_databases');
-  const v2BatchConnectionsLabel = t('sidebar.action.batch_connections');
   const v2DataImportLabel = t('sidebar.action.data_import');
   const v2LocateCurrentTableLabel = t('sidebar.action.locate_current_table');
   const v2LocateCurrentTableUnavailableLabel = t('sidebar.message.locate_current_table_unavailable');
@@ -3750,63 +3744,15 @@ const Sidebar: React.FC<{
     openDataImportWorkbench({ connectionId, dbName, tableName, mode });
   }, [activeContext?.connectionId, activeContext?.dbName, activeTabId, openDataImportWorkbench, tabs]);
 
-  const v2TitlebarQuickActions: TitleBarQuickAction[] = [
-    {
-      key: 'data-workflow',
-      label: v2DataWorkflowLabel,
-      menu: [
-        {
-          key: 'batch-connections',
-          label: v2BatchConnectionsLabel,
-          icon: <CloudOutlined aria-hidden="true" />,
-          onClick: openBatchConnectionWorkbench,
-        },
-        {
-          key: 'batch-tables',
-          label: v2BatchTablesLabel,
-          icon: <TableOutlined aria-hidden="true" />,
-          onClick: openBatchTableWorkbench,
-        },
-        {
-          key: 'batch-databases',
-          label: v2BatchDatabasesLabel,
-          icon: <DatabaseOutlined aria-hidden="true" />,
-          onClick: openBatchDatabaseWorkbench,
-        },
-        {
-          key: 'data-import',
-          label: v2DataImportLabel,
-          icon: <ImportOutlined aria-hidden="true" />,
-          onClick: handleOpenDataImportWorkbench,
-        },
-        {
-          key: 'sync',
-          label: t('app.tools.entry.sync.title'),
-          icon: <UploadOutlined rotate={90} aria-hidden="true" />,
-          onClick: () => onOpenSettingsNavigation?.({ group: 'workflow', action: 'sync' }),
-        },
-        {
-          key: 'compare',
-          label: t('app.tools.entry.compare.title'),
-          icon: <SwitcherOutlined aria-hidden="true" />,
-          onClick: () => onOpenSettingsNavigation?.({ group: 'workflow', action: 'compare' }),
-        },
-      ],
-    },
-    {
-      key: 'drivers',
-      label: t('app.tools.entry.drivers.title'),
-      onClick: () => onOpenSettingsNavigation?.({ group: 'workspace', action: 'drivers' }),
-    },
-  ];
-  // 关于 GoNavi 作为标题栏独立按钮，和数据工作流并列。
-  const v2TitlebarAboutActions: TitleBarQuickAction[] = [
-    {
-      key: 'about-go-navi',
-      label: t('app.settings.group.about.title'),
-      onClick: () => onOpenSettingsNavigation?.({ group: 'about', pane: 'about-go-navi' }),
-    },
-  ];
+  const v2TitlebarQuickActions = buildTitlebarDataActions({
+    syncTitle: t('app.tools.entry.sync.title'),
+    syncDescription: t('app.tools.entry.sync.description'),
+    compareTitle: t('app.tools.entry.compare.title'),
+    compareDescription: t('app.tools.entry.compare.description'),
+  }, {
+    onSync: () => onOpenSettingsNavigation?.({ group: 'workflow', action: 'sync' }),
+    onCompare: () => onOpenSettingsNavigation?.({ group: 'workflow', action: 'compare' }),
+  });
   const v2TitlebarQuickActionsTarget = typeof document !== 'undefined'
     ? document.getElementById('gonavi-titlebar-quick-actions')
     : null;
@@ -4145,7 +4091,6 @@ const Sidebar: React.FC<{
           <TitleBarQuickActions
             label={v2RailObjectActionsLabel}
             actions={v2TitlebarQuickActions}
-            trailingActions={v2TitlebarAboutActions}
           />,
           v2TitlebarQuickActionsTarget,
         )}

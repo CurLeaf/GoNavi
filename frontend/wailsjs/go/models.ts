@@ -2133,20 +2133,6 @@ export namespace connection {
 		    return a;
 		}
 	}
-	export class DeleteConnectionGroupInput {
-	    tagId: string;
-	    expectedRevision: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new DeleteConnectionGroupInput(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.tagId = source["tagId"];
-	        this.expectedRevision = source["expectedRevision"];
-	    }
-	}
 	export class GlobalProxyView {
 	    enabled: boolean;
 	    type: string;
@@ -2669,6 +2655,29 @@ export namespace connection {
 		    }
 		    return a;
 		}
+	}
+
+}
+
+export namespace db {
+	
+	export class ExternalAttachmentInfo {
+	    alias: string;
+	    connectionId?: string;
+	    kind: string;
+	    readOnly: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExternalAttachmentInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.alias = source["alias"];
+	        this.connectionId = source["connectionId"];
+	        this.kind = source["kind"];
+	        this.readOnly = source["readOnly"];
+	    }
 	}
 
 }
