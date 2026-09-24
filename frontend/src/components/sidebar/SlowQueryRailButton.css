@@ -1,12 +1,12 @@
 .gn-slow-query-rail-button {
   display: flex;
-  width: 32px;
-  height: 32px;
+  width: var(--gn-control-height);
+  height: var(--gn-control-height);
   align-items: center;
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--gn-control-radius);
   background: transparent;
   color: var(--gn-fg-2, #1f2937);
   cursor: pointer;

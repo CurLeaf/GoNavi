@@ -1,5 +1,5 @@
 .gn-data-sync-connection-tree-select.ant-select-multiple .ant-select-selector {
-  min-height: var(--gn-control-height, 32px) !important;
+  min-height: var(--gn-control-height) !important;
   padding-block: 3px !important;
 }
 

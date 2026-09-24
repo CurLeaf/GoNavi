@@ -102,10 +102,10 @@
 .security-update-settings-embedded .security-update-action-btn.ant-btn-default,
 .security-update-settings-embedded .security-update-action-btn.ant-btn-primary,
 .security-update-settings-embedded .security-update-action-btn.ant-btn-text {
-  min-height: var(--gn-control-height, 32px);
-  height: var(--gn-control-height, 32px);
+  min-height: var(--gn-control-height);
+  height: var(--gn-control-height);
   padding-inline: 12px;
-  border-radius: 6px;
+  border-radius: var(--gn-control-radius);
   font-size: var(--security-update-settings-font-caption);
   font-weight: 600;
   box-shadow: none;

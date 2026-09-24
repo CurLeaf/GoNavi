@@ -12,7 +12,7 @@
 }
 
 .gonavi-settings-center-tree-search .ant-input-affix-wrapper {
-  border-radius: 6px;
+  border-radius: var(--gn-control-radius);
 }
 
 .gonavi-settings-center-tree-search-empty {

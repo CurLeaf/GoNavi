@@ -102,7 +102,7 @@
   height: 63px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--gonavi-preset-text) 12%, transparent);
-  border-radius: 8px;
+  border-radius: var(--gn-surface-radius);
   background: var(--gonavi-preset-app);
 }
 
@@ -267,7 +267,7 @@
   min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--gn-settings-line, var(--gn-br-1, #e2e8f0));
-  border-radius: 10px;
+  border-radius: var(--gn-surface-radius);
   background: color-mix(in srgb, var(--gn-settings-card-bg, var(--gn-bg-panel, #fff)) 94%, var(--gn-settings-accent, var(--gn-accent, #16a34a)) 6%);
 }
 
@@ -306,7 +306,7 @@
 .gonavi-custom-theme-empty {
   padding: 18px 12px 10px;
   border: 1px dashed var(--gn-settings-line, var(--gn-br-2, #cbd5e1));
-  border-radius: 12px;
+  border-radius: var(--gn-surface-radius);
   background: var(--gn-settings-card-bg, var(--gn-bg-panel, #fff));
 }
 
@@ -383,7 +383,7 @@
   padding: 7px;
   overflow: hidden;
   border: 1px solid var(--gn-settings-line, var(--gn-br-1, #e2e8f0));
-  border-radius: 8px;
+  border-radius: var(--gn-surface-radius);
   background: color-mix(in srgb, var(--gonavi-custom-theme-preview-accent, #16a34a) 8%, var(--gn-settings-chip-bg, #f8fafc));
 }
 

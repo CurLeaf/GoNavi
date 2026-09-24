@@ -1,6 +1,6 @@
 .gn-message-workbench {
   --gn-message-sidebar-width: clamp(220px, 24vw, 292px);
-  --gn-message-card-radius: 8px;
+  --gn-message-card-radius: var(--gn-surface-radius);
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
@@ -66,7 +66,7 @@
   place-items: center;
   flex: 0 0 auto;
   border: 1px solid color-mix(in srgb, var(--gn-accent) 35%, var(--gn-br-1));
-  border-radius: 7px;
+  border-radius: var(--gn-control-radius);
   background: color-mix(in srgb, var(--gn-accent) 9%, var(--gn-bg-panel));
 }
 
@@ -231,7 +231,12 @@ button.gn-message-subscription-item,
   opacity: 1;
 }
 
-.gn-message-subscription-actions .ant-btn { width: 25px; padding-inline: 0; }
+.gn-message-subscription-actions .ant-btn {
+  width: 25px;
+  height: 25px;
+  padding-inline: 0;
+  border-radius: var(--gn-control-radius);
+}
 
 .gn-message-subscriptions-empty {
   min-height: 190px;
@@ -342,7 +347,7 @@ button.gn-message-subscription-item,
   margin: 0;
   padding: 10px 12px;
   border: 1px solid var(--gn-br-1);
-  border-radius: 8px;
+  border-radius: var(--gn-surface-radius);
   color: var(--gn-fg-2);
   background: var(--gn-bg-panel-2);
   font-family: var(--gn-font-mono);
@@ -522,7 +527,7 @@ button.gn-message-subscription-item,
 textarea.gn-message-command-editor {
   padding: 11px 12px;
   border-color: color-mix(in srgb, var(--gn-accent) 22%, var(--gn-br-1));
-  border-radius: 7px;
+  border-radius: var(--gn-control-radius);
   background: color-mix(in srgb, var(--gn-bg-app) 78%, var(--gn-bg-panel));
   font-family: var(--gn-font-mono);
   font-size: 12px;
@@ -534,7 +539,7 @@ textarea.gn-message-command-editor {
   min-height: 92px;
   padding: 10px 12px;
   border: 1px solid var(--gn-br-1);
-  border-radius: 7px;
+  border-radius: var(--gn-surface-radius);
   background: var(--gn-bg-panel-2);
 }
 
@@ -607,7 +612,7 @@ textarea.gn-message-command-editor {
 .gn-message-consume-effective-settings {
   padding: 10px 12px 4px;
   border: 1px solid var(--gn-br-1);
-  border-radius: 7px;
+  border-radius: var(--gn-surface-radius);
   background: var(--gn-bg-panel-2);
 }
 

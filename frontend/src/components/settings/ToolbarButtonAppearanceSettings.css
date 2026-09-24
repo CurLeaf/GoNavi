@@ -40,7 +40,7 @@
   min-width: 0;
   padding: 12px 14px;
   border: 1px solid var(--gn-br-1, rgba(127, 127, 127, 0.16));
-  border-radius: 9px;
+  border-radius: var(--gn-surface-radius);
   background:
     linear-gradient(90deg, var(--gn-bg-panel-2, rgba(127, 127, 127, 0.08)), transparent),
     var(--gn-bg-panel, transparent);
@@ -89,7 +89,7 @@
   min-width: 0;
   padding: 10px 11px;
   border: 1px solid var(--gn-br-1, rgba(127, 127, 127, 0.16));
-  border-radius: 8px;
+  border-radius: var(--gn-surface-radius);
   background: var(--gn-bg-panel, transparent);
 }
 

@@ -11,7 +11,7 @@
   gap: 14px;
   padding: 16px 18px 18px;
   border: 1px solid var(--gn-br-2, rgba(15, 23, 42, 0.12));
-  border-radius: 14px;
+  border-radius: var(--gn-surface-radius);
   background: color-mix(in srgb, var(--gn-bg-panel, #fff) 94%, transparent);
   box-shadow: var(--gn-shadow-card, 0 1px 3px rgba(15, 23, 42, 0.06));
 }
@@ -54,7 +54,7 @@
   gap: 12px;
   padding: 14px;
   border: 1px solid color-mix(in srgb, var(--gn-accent, #15803d) 34%, var(--gn-br-2, #d9d9d9));
-  border-radius: 10px;
+  border-radius: var(--gn-surface-radius);
   background: color-mix(in srgb, var(--gn-accent, #15803d) 5%, var(--gn-bg-panel, #fff));
 }
 

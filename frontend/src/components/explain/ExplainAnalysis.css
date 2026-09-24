@@ -9,7 +9,7 @@
 .gn-explain-graph .react-flow__controls {
   overflow: hidden;
   border: 1px solid var(--gn-br-2);
-  border-radius: 8px;
+  border-radius: var(--gn-surface-radius);
   box-shadow: var(--gn-shadow-sm);
 }
 
@@ -43,7 +43,7 @@
   cursor: pointer;
   background: var(--gn-bg-panel);
   border: 2px solid var(--gn-br-3);
-  border-radius: 8px;
+  border-radius: var(--gn-surface-radius);
   box-shadow: var(--gn-shadow-sm);
 }
 
@@ -148,7 +148,7 @@
   padding: 11px;
   background: var(--gn-bg-panel-2);
   border: 1px solid var(--gn-br-2);
-  border-radius: 8px;
+  border-radius: var(--gn-surface-radius);
   box-shadow: var(--gn-shadow-sm);
 }
 
@@ -268,7 +268,7 @@
   overflow-wrap: anywhere;
   background: var(--gn-bg-input);
   border: 1px solid var(--gn-br-1);
-  border-radius: 6px;
+  border-radius: var(--gn-surface-radius);
 }
 
 .gn-explain-suggestions {
@@ -293,7 +293,7 @@
   background: var(--gn-bg-panel);
   border: 1px solid var(--gn-br-1);
   border-left-width: 3px;
-  border-radius: 6px;
+  border-radius: var(--gn-surface-radius);
 }
 
 .gn-explain-suggestion__select {
@@ -360,7 +360,7 @@
   padding: 6px;
   background: var(--gn-bg-input);
   border: 1px solid var(--gn-br-1);
-  border-radius: 5px;
+  border-radius: var(--gn-surface-radius);
 }
 
 .gn-explain-suggestion__index code {

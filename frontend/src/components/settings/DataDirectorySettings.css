@@ -12,7 +12,7 @@
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--gn-br-2, rgba(15, 23, 42, 0.12));
-  border-radius: 14px;
+  border-radius: var(--gn-surface-radius);
   background: color-mix(in srgb, var(--gn-bg-panel, #fff) 94%, transparent);
   box-shadow: var(--gn-shadow-card, 0 1px 3px rgba(15, 23, 42, 0.06));
 }
@@ -71,7 +71,7 @@
   min-height: 52px;
   padding: 8px 10px;
   border: 1px solid var(--gn-br-1, rgba(15, 23, 42, 0.08));
-  border-radius: 10px;
+  border-radius: var(--gn-surface-radius);
   background: var(--gn-bg-input, #fff);
 }
 
@@ -108,8 +108,8 @@
 }
 
 .gn-storage-path-editor .ant-input {
-  min-height: 40px;
-  border-radius: 9px;
+  min-height: var(--gn-control-height);
+  border-radius: var(--gn-control-radius);
   font-family: var(--gn-font-mono, ui-monospace, "SFMono-Regular", Consolas, monospace);
 }
 
@@ -126,7 +126,7 @@
   gap: 1px;
   overflow: hidden;
   border: 1px solid var(--gn-br-1, rgba(15, 23, 42, 0.08));
-  border-radius: 10px;
+  border-radius: var(--gn-surface-radius);
   background: var(--gn-br-1, rgba(15, 23, 42, 0.08));
 }
 
@@ -180,7 +180,7 @@
   min-width: 0;
   padding: 13px 14px;
   border: 1px solid var(--gn-br-2, rgba(15, 23, 42, 0.12));
-  border-radius: 11px;
+  border-radius: var(--gn-surface-radius);
   background: var(--gn-bg-panel-2, rgba(15, 23, 42, 0.025));
 }
 
@@ -223,7 +223,7 @@
   align-items: flex-start;
   gap: 7px;
   padding: 9px 11px;
-  border-radius: 9px;
+  border-radius: var(--gn-surface-radius);
   background: var(--gn-bg-hover, rgba(15, 23, 42, 0.045));
   font-size: 12px;
 }
@@ -247,7 +247,7 @@
   min-width: 0;
   padding: 15px 17px;
   border: 1px solid var(--gn-br-2, rgba(15, 23, 42, 0.12));
-  border-radius: 12px;
+  border-radius: var(--gn-surface-radius);
   background: var(--gn-bg-panel, #fff);
 }
 
@@ -366,7 +366,7 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   overflow: hidden;
   border: 1px solid var(--gn-br-2, rgba(15, 23, 42, 0.12));
-  border-radius: 12px;
+  border-radius: var(--gn-surface-radius);
   background: var(--gn-bg-panel, #fff);
 }
 
@@ -421,7 +421,7 @@
 }
 
 .gn-storage-panel .ant-btn {
-  border-radius: 8px;
+  border-radius: var(--gn-control-radius);
 }
 
 .gn-storage-panel .ant-btn-primary {

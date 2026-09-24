@@ -87,7 +87,7 @@
   gap: 10px;
   padding: 12px;
   border: 1px solid var(--slow-query-border);
-  border-radius: var(--slow-query-radius);
+  border-radius: var(--gn-surface-radius);
   background: var(--slow-query-bg);
   box-shadow: var(--slow-query-shadow);
   transition: border-color 160ms ease, box-shadow 160ms ease;
@@ -166,7 +166,7 @@
   overflow: auto;
   padding: 14px;
   border: 1px solid var(--gn-br-1, #e5e7eb);
-  border-radius: 8px;
+  border-radius: var(--gn-surface-radius);
   background: var(--gn-bg-panel-2, #f8fafc);
   color: var(--gn-fg-1, #111827);
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
