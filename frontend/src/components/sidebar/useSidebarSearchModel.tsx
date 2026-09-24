@@ -28,14 +28,12 @@ import {
   isV2SidebarObjectNode,
   matchesSidebarSearchText,
   parseV2CommandSearchQuery,
-  type V2ExplorerFilter,
 } from './sidebarHelpers';
 import type { SearchScope } from '../sidebarCoreUtils';
 import {
   buildV2CommandSearchTreeIndex,
   dedupeSidebarTreeNodesByKey,
   filterV2CommandSearchTreeItems,
-  filterV2ExplorerTreeByKind,
   resolveSidebarNodeConnectionId,
   resolveSidebarTreeVirtualHeight,
   resolveV2ActiveConnectionId,
@@ -72,7 +70,6 @@ type SidebarSearchModelArgs = {
   deferredV2CommandSearchValue: string;
   v2CommandSearchValue: string;
   setV2CommandActiveIndex: Dispatch<SetStateAction<number>>;
-  v2ExplorerFilter: V2ExplorerFilter;
   treeData: TreeNode[];
   treeHeight: number;
   isV2CommandSearchOpen: boolean;
@@ -106,7 +103,6 @@ export const useSidebarSearchModel = ({
   deferredV2CommandSearchValue,
   v2CommandSearchValue,
   setV2CommandActiveIndex,
-  v2ExplorerFilter,
   treeData,
   treeHeight,
   isV2CommandSearchOpen,
@@ -573,34 +569,7 @@ export const useSidebarSearchModel = ({
     }
     return String(activeTab?.dbName || '').trim();
   }, [activeContext, activeTab?.dbName]);
-  const activeConnectionTreeData = useMemo(() => {
-    if (!activeConnection) return displayTreeData;
-    const activeConnectionNode = displayTreeData.find((node) => node.type === 'connection' && node.key === activeConnection.id);
-    if (activeConnectionNode) {
-      return dedupeSidebarTreeNodesByKey(
-        activeConnectionNode.children && activeConnectionNode.children.length > 0 ? activeConnectionNode.children : [],
-      );
-    }
-    const filterTree = (nodes: TreeNode[]): TreeNode[] => nodes.flatMap((node) => {
-      if (node.type === 'tag') {
-        return filterTree(node.children || []);
-      }
-      if (node.type === 'connection') {
-        if (node.key !== activeConnection.id) return [];
-        return node.children && node.children.length > 0 ? filterTree(node.children) : [];
-      }
-      return [{ ...node, children: node.children ? filterTree(node.children) : undefined }];
-    });
-
-    const filtered = filterTree(displayTreeData);
-    return dedupeSidebarTreeNodesByKey(filtered);
-  }, [activeConnection, displayTreeData]);
-  const v2VisibleTreeData = useMemo(() => {
-    if (v2ExplorerFilter === 'all') {
-      return displayTreeData;
-    }
-    return filterV2ExplorerTreeByKind(activeConnectionTreeData, v2ExplorerFilter);
-  }, [activeConnectionTreeData, displayTreeData, v2ExplorerFilter]);
+  const v2VisibleTreeData = displayTreeData;
   const effectiveTreeHeight = resolveSidebarTreeVirtualHeight(treeHeight);
   const v2TreeMetrics = useMemo(() => {
     const databaseTableCounts = new Map<React.Key, number>();
@@ -665,7 +634,6 @@ export const useSidebarSearchModel = ({
     activeConnection,
     activeConnectionDisplayName,
     activeDatabaseDisplayName,
-    activeConnectionTreeData,
     v2VisibleTreeData,
     effectiveTreeHeight,
     v2TreeMetrics,

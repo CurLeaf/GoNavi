@@ -228,7 +228,6 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
         background: highlighted ? (darkMode ? 'rgba(250, 173, 20, 0.18)' : 'rgba(250, 173, 20, 0.16)') : undefined,
         boxShadow: highlighted ? `inset 0 0 0 1px ${darkMode ? 'rgba(250, 173, 20, 0.5)' : 'rgba(250, 173, 20, 0.55)'}` : undefined,
         padding: highlighted ? '4px 6px' : undefined,
-        transition: 'background 160ms ease, box-shadow 160ms ease',
       }}
     >
       {fieldLabel}

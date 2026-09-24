@@ -27,6 +27,7 @@ import {
   resolveDataSourceType,
 } from '../../utils/dataSourceCapabilities';
 import { filterVisibleDatabaseNames } from '../../utils/databaseVisibility';
+import { dedupeTrimmedDatabaseNames } from './sidebarDatabaseNames';
 import { buildRedisDbNodeLabel, getRedisDbAlias } from '../../utils/redisDbAlias';
 import { buildJVMMonitoringActionDescriptors } from '../../utils/jvmSidebarActions';
 import { getSchemaVisibilityRule, isSchemaVisible } from '../../utils/schemaVisibility';
@@ -451,17 +452,6 @@ type UseSidebarTreeLoadersOptions = {
  */
 export const SIDEBAR_DATABASE_TREE_FIRST_COMMIT_GRACE_MS = 80;
 
-const dedupeTrimmedDatabaseNames = (databaseNames: readonly string[]): string[] => {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  databaseNames.forEach((databaseName) => {
-    const normalizedName = String(databaseName || '').trim();
-    if (!normalizedName || seen.has(normalizedName)) return;
-    seen.add(normalizedName);
-    result.push(normalizedName);
-  });
-  return result;
-};
 
 export const useSidebarTreeLoaders = ({
   savedQueries,

@@ -33,7 +33,7 @@
   min-height: 36px;
   padding: 0 10px 0 12px;
   border-bottom: 0.5px solid var(--gn-br-1);
-  background: var(--gn-bg-panel-2);
+  background: var(--gn-bg-panel);
 }
 
 .gn-v2-inspector-title {
@@ -78,8 +78,10 @@
   display: flex;
   align-items: stretch;
   gap: 2px;
-  min-height: 34px;
-  padding: 4px 8px 0;
+  box-sizing: border-box;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 8px;
   overflow-x: auto;
   overflow-y: hidden;
   border-bottom: 0.5px solid var(--gn-br-1);
@@ -88,14 +90,16 @@
 
 .gn-v2-inspector-tab {
   flex: 0 0 auto;
-  height: 28px;
+  align-self: stretch;
+  box-sizing: border-box;
+  height: auto;
   padding: 0 8px;
   border: none;
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--gn-fg-3);
   font-size: 12px;
-  line-height: 26px;
+  line-height: 34px;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -150,26 +154,32 @@
 
 .gn-v2-inspector-kv {
   display: grid;
-  gap: 10px;
-  padding: 12px 12px 8px;
+  gap: 0;
+  padding: 6px 0 4px;
 }
 
 .gn-v2-inspector-kv-row {
   display: grid;
-  gap: 2px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  box-sizing: border-box;
   min-width: 0;
+  min-height: 32px;
+  padding: 0 12px;
 }
 
 .gn-v2-inspector-kv-label {
+  max-width: 42%;
   color: var(--gn-fg-4, var(--gn-fg-3));
   font-size: 11px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
 }
 
 .gn-v2-inspector-kv-value {
   min-width: 0;
   color: var(--gn-fg-1);
-  font-size: 12.5px;
+  font-size: 12px;
   font-family: var(--gn-font-mono);
   overflow-wrap: anywhere;
 }
@@ -179,42 +189,6 @@
   flex-direction: column;
   gap: 8px;
   padding: 4px 12px 12px;
-}
-
-.gn-v2-inspector-modules {
-  display: grid;
-  gap: 6px;
-  padding: 0 10px 12px;
-}
-
-.gn-v2-inspector-module {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 0.5px solid var(--gn-br-1);
-  border-radius: 8px;
-  background: var(--gn-bg-panel-2);
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.gn-v2-inspector-module:hover {
-  background: var(--gn-bg-hover);
-}
-
-.gn-v2-inspector-module-title {
-  color: var(--gn-fg-1);
-  font-size: 12.5px;
-  font-weight: 650;
-}
-
-.gn-v2-inspector-module-hint {
-  color: var(--gn-fg-3);
-  font-size: 11px;
-  line-height: 1.4;
 }
 
 .gn-v2-inspector-item,

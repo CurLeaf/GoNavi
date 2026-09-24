@@ -33,7 +33,6 @@ import {
 } from './sidebar/useSidebarObjectActions';
 import { tryOpenSidebarObjectNode } from './sidebar/sidebarOpenObjectNode';
 import { useSidebarSearchModel } from './sidebar/useSidebarSearchModel';
-import { useV2ExplorerFilterReset } from './sidebar/useV2ExplorerFilterReset';
 import SidebarFilterSlot from './sidebar/SidebarFilterSlot';
 import { useSidebarFilterPersistence } from './sidebar/useSidebarFilterPersistence';
 import { useSidebarV2ActionHandlers } from './sidebar/useSidebarV2ActionHandlers';
@@ -59,7 +58,6 @@ import {
   isV2SidebarObjectNode,
   clearSidebarHostConnectionState,
   shouldDeferSidebarTitlebarSelection,
-  type V2ExplorerFilter,
 } from './sidebar/sidebarHelpers';
 // 重新导出，保持外部测试文件的 `from './Sidebar'` 兼容
 export {
@@ -969,7 +967,6 @@ const Sidebar: React.FC<{
   );
   const deferredSearchValue = useDeferredValue(searchValue);
   const [searchScopes, setSearchScopes] = useState<SearchScope[]>(['smart']);
-  const [v2ExplorerFilter, setV2ExplorerFilter] = useState<V2ExplorerFilter>('all');
   const [isSearchScopePopoverOpen, setIsSearchScopePopoverOpen] = useState(false);
   const searchInputRef = useRef<any>(null);
   const commandSearchInputRef = useRef<any>(null);
@@ -1790,7 +1787,6 @@ const Sidebar: React.FC<{
           const targetKey = path[path.length - 1];
           const targetNode = findTreeNodeByKey(treeDataRef.current, targetKey);
           setSearchValue('');
-          setV2ExplorerFilter('all');
           mergeExpandedTreeKeys(path.slice(0, -1));
           setSidebarSelectedKeys([targetKey]);
           selectedNodesRef.current = targetNode ? [targetNode] : [];
@@ -1832,7 +1828,6 @@ const Sidebar: React.FC<{
                       : t('sidebar.locate.object.table');
 
       setSearchValue('');
-      setV2ExplorerFilter('all');
       const outcome = await runSidebarLocateDatabaseObject({
           request,
           target,
@@ -3214,7 +3209,6 @@ const Sidebar: React.FC<{
       deferredV2CommandSearchValue,
       v2CommandSearchValue,
       setV2CommandActiveIndex,
-      v2ExplorerFilter,
       treeData: visibleSidebarTreeData,
       treeHeight,
       isV2CommandSearchOpen,
@@ -3276,15 +3270,6 @@ const Sidebar: React.FC<{
           },
       });
   }, [displayTreeData, expandedKeys, true, sidebarTreeScrollRequest, v2VisibleTreeData]);
-
-  const hasRelationalObjectKindFilterConnection = connections.some(
-      (connection) => getDataSourceCapabilities(connection.config).supportsRelationalObjectKindFilter,
-  );
-  // Drops a filter belonging to another workbench family, so a stale one cannot
-  // empty the tree. The slot derives the same family from the same connection, so
-  // the two cannot disagree. See the hook for the reasoning.
-  useV2ExplorerFilterReset(activeConnection, v2ExplorerFilter, setV2ExplorerFilter);
-
 
   const {
       contextMenu,
@@ -3348,7 +3333,6 @@ const Sidebar: React.FC<{
           String(targetKey),
       );
       setSearchValue('');
-      setV2ExplorerFilter('all');
       if (path) mergeExpandedTreeKeys(path.slice(0, -1));
       setSidebarSelectedKeys([targetKey]);
       selectedNodesRef.current = [node];
@@ -3399,7 +3383,6 @@ const Sidebar: React.FC<{
 
       onEnsureSidebarExpanded?.();
       setSearchValue('');
-      setV2ExplorerFilter('all');
       mergeExpandedTreeKeys(collectSidebarLocateExpandKeys(
           treeDataRef.current as SidebarLocateTreeNodeLike[],
           connection.id,
@@ -3439,7 +3422,6 @@ const Sidebar: React.FC<{
       setActiveContext,
       setSearchValue,
       setSidebarSelectedKeys,
-      setV2ExplorerFilter,
       treeDataRef,
   ]);
 
@@ -3997,9 +3979,6 @@ const Sidebar: React.FC<{
         <SidebarFilterSlot
             activeConnection={activeConnection}
             treeData={displayTreeData}
-            hasRelationalFilterConnection={hasRelationalObjectKindFilterConnection}
-            activeFilter={v2ExplorerFilter}
-            onFilterChange={setV2ExplorerFilter}
         />
 
         <div
@@ -4025,7 +4004,7 @@ const Sidebar: React.FC<{
         >
             <div className="sidebar-tree-scroll-content">
                 <Tree
-                    key={`v2-tree-${v2ExplorerFilter}-${sidebarObjectVisibilitySignature}`}
+                    key={`v2-tree-${sidebarObjectVisibilitySignature}`}
                     ref={treeRef}
                     showIcon
                     draggable={{

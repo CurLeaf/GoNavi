@@ -15,12 +15,13 @@ body[data-ui-version="v2"] .gn-v2-query-editor-pane {
 }
 
 body[data-ui-version="v2"] .gn-v2-query-header {
-  min-height: 52px;
-  padding: 10px 14px;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 8px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   border-bottom: 0.5px solid var(--gn-br-1);
   background: var(--gn-bg-panel);
 }
@@ -118,8 +119,9 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar {
   --gn-toolbar-action-primary-disabled-fg: var(--gn-client-query-toolbar-primary-disabled-fg, var(--gn-query-toolbar-primary-disabled-fg, var(--gn-toolbar-primary-disabled-fg)));
   --gn-toolbar-action-primary-disabled-bg: var(--gn-client-query-toolbar-primary-disabled-bg, var(--gn-query-toolbar-primary-disabled-bg, var(--gn-toolbar-primary-disabled-bg)));
   --gn-toolbar-action-primary-disabled-border: var(--gn-client-query-toolbar-primary-disabled-border, var(--gn-query-toolbar-primary-disabled-border, var(--gn-toolbar-primary-disabled-border)));
-  min-height: 48px;
-  padding: 8px 12px !important;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 4px 12px !important;
   gap: 6px 10px !important;
   align-items: center !important;
   flex-wrap: nowrap;
@@ -376,7 +378,7 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-action-pair {
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group > .ant-btn {
   flex: 0 0 auto;
-  border-radius: 9px !important;
+  border-radius: 6px !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group > .ant-btn:not(:first-child) {
@@ -2513,20 +2515,19 @@ body[data-ui-version="v2"] .gn-v2-table-card-grid {
 
 body[data-ui-version="v2"] .gn-v2-table-card,
 body[data-ui-version="v2"] .gn-v2-table-row {
-  border: 0.5px solid var(--gn-br-2) !important;
+  border: 0.5px solid var(--gn-br-1) !important;
   border-radius: 8px !important;
-  /* 底已是 panel-2：卡片用轻微抬升混合色，避免与底/左侧同色糊成一片 */
-  background: color-mix(in srgb, var(--gn-fg-1) 3.5%, var(--gn-bg-panel-2)) !important;
+  background: var(--gn-bg-panel) !important;
   color: var(--gn-fg-1) !important;
-  box-shadow: var(--gn-shadow-card);
-  transition: background 0.08s, border-color 0.08s, box-shadow 0.08s;
+  box-shadow: none;
+  transition: background-color 0.08s, border-color 0.08s;
 }
 
 body[data-ui-version="v2"] .gn-v2-table-card:hover,
 body[data-ui-version="v2"] .gn-v2-table-row:hover {
   background: var(--gn-bg-hover) !important;
-  border-color: color-mix(in srgb, var(--gn-accent) 45%, var(--gn-br-2)) !important;
-  box-shadow: var(--gn-shadow-md);
+  border-color: color-mix(in srgb, var(--gn-accent) 45%, var(--gn-br-1)) !important;
+  box-shadow: none;
 }
 
 /* 列表铺满：去掉卡片间距与圆角容器，整列跟面板色 */

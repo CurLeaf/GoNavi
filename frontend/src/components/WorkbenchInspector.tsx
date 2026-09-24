@@ -626,23 +626,6 @@ export default function WorkbenchInspector() {
               </Button>
             </div>
           ) : null}
-          <div className="gn-v2-inspector-modules">
-            {(scope === 'table' ? tableTabs : databaseTabs)
-              .filter((tab) => tab.key !== 'overview')
-              .map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  className="gn-v2-inspector-module"
-                  onClick={() => setActiveKey(tab.key)}
-                >
-                  <span className="gn-v2-inspector-module-title">{tab.label}</span>
-                  <span className="gn-v2-inspector-module-hint">
-                    {t(`workbench.inspector.module.${resolveInspectorI18nSegment(tab.key)}.hint`)}
-                  </span>
-                </button>
-              ))}
-          </div>
         </>
       )}
     </div>
