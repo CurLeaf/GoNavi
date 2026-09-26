@@ -124,7 +124,7 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar {
   padding: 4px 12px !important;
   gap: 6px 10px !important;
   align-items: center !important;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   overflow-x: auto;
   overflow-y: hidden;
   background: var(--gn-query-workbench-bg) !important;
@@ -132,41 +132,59 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar {
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-main {
-  display: inline-flex;
-  width: max-content;
-  min-width: 100%;
+  display: flex;
+  width: 100%;
+  min-width: 0;
   gap: 6px 10px !important;
   align-items: center !important;
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
+  justify-content: space-between;
+  flex: 1 1 auto !important;
+  flex-wrap: wrap;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-selects,
 body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
   min-width: 0;
   gap: 6px !important;
-  flex: 0 0 auto !important;
+  flex: 1 1 auto !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-selects {
-  flex-wrap: nowrap;
-  max-width: 760px;
+  flex: 1 1 560px !important;
+  flex-shrink: 1 !important;
+  flex-wrap: wrap !important;
+  align-content: center;
+  max-width: 100%;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
-  flex-wrap: nowrap;
-  justify-content: flex-start;
+  flex: 1 1 420px !important;
+  flex-shrink: 1 !important;
+  flex-wrap: wrap !important;
+  justify-content: flex-end;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group,
+body[data-ui-version="v2"] .gn-v2-query-toolbar-action-pair {
+  min-width: 0;
+  flex: 0 1 auto !important;
+  flex-wrap: wrap;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-transaction-toolbar {
   display: inline-flex;
   max-width: 100%;
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-select {
   min-width: 0;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-toolbar-selects > .ant-select,
+body[data-ui-version="v2"] .gn-v2-query-toolbar-selects > .gn-v2-query-transaction-toolbar {
+  max-width: 100%;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-connection-select {
@@ -508,15 +526,18 @@ body[data-custom-theme][data-ui-version="v2"] .gn-v2-query-toolbar .gn-v2-query-
 
 @media (max-width: 900px) {
   body[data-ui-version="v2"] .gn-v2-query-toolbar-main {
-    width: max-content;
-    min-width: 100%;
+    width: 100%;
+    min-width: 0;
+    flex-shrink: 1 !important;
   }
 
   body[data-ui-version="v2"] .gn-v2-query-toolbar-selects {
+    flex-basis: 100% !important;
     max-width: none;
   }
 
   body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
+    flex-basis: 100% !important;
     justify-content: flex-start;
   }
 }

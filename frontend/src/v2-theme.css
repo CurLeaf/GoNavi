@@ -4917,6 +4917,9 @@ body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-toolbar-scroll {
   min-height: 44px;
   padding: 7px 12px !important;
   gap: 4px !important;
+  flex-wrap: wrap !important;
+  overflow-x: hidden !important;
+  overflow-y: visible !important;
   background: var(--gn-query-workbench-bg, var(--gn-bg-panel-2)) !important;
 }
 
@@ -5018,7 +5021,7 @@ body[data-ui-version="v2"] .gn-v2-data-grid-toolbar-title {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-width: 180px;
+  min-width: min(180px, 100%);
   max-width: 460px;
   flex: 0 1 auto;
   overflow: hidden;
